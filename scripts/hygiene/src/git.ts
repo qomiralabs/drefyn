@@ -13,23 +13,37 @@ export interface Commit {
 
 const SUBMODULE_MODE = '160000';
 
-function runGit(cwd: string, args: string[], input?: string): Promise<Buffer> {
+export function runGit(cwd: string, args: string[], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('git', args, {
+      cwd,
+      stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+    let inputError: Error | undefined;
+    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr?.on('data', (chunk: Buffer) => err.push(chunk));
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0) {
+      const name = args[0] ?? '';
+      if (code !== 0) {
+        const stderr = Buffer.concat(err).toString('utf8').trim();
+        reject(new Error(`git ${name} failed (exit ${code ?? 'signal'}): ${stderr}`));
+      } else if (inputError !== undefined) {
+        reject(new Error(`git ${name} closed its input early: ${inputError.message}`));
+      } else {
         resolve(Buffer.concat(out));
-        return;
       }
-      const stderr = Buffer.concat(err).toString('utf8').trim();
-      reject(new Error(`git ${args[0] ?? ''} failed (exit ${code ?? 'signal'}): ${stderr}`));
     });
-    child.stdin.end(input ?? '');
+    if (input !== undefined && child.stdin !== null) {
+      // git can exit before reading all of its input, for example on a bad argument. The
+      // exit code is the real result, so a broken pipe is recorded here, not thrown.
+      child.stdin.on('error', (error) => {
+        inputError = error;
+      });
+      child.stdin.end(input);
+    }
   });
 }
 
