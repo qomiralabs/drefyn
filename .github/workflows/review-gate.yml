@@ -8,7 +8,9 @@
 #   from the default branch for comment and dispatch events, so a PR cannot change the
 #   rules it is judged by.
 # - `report` has `statuses: write` and checks out nothing. It only posts the result that
-#   `evaluate` produced, after validating the SHA and state.
+#   `evaluate` produced, after validating the SHA and state. A failed gate shows up as the
+#   failed `evaluate` job and the `review-gate` status; `report` itself fails only when it
+#   could not post a real result.
 #
 # Comment events always run this file from the default branch with a write token, which
 # is what lets fork PRs get a status: their own pull_request runs have a read-only token.
@@ -139,4 +141,8 @@ jobs:
             -f state="$state" -f context=review-gate \
             -f description="${description:0:140}" -f target_url="$RUN_URL" > /dev/null
           echo "review-gate: ${state} on ${sha}: ${description}"
-          [ "$state" = success ]
+          # The error status is posted so the PR fails closed, but nothing was evaluated.
+          if [ "$state" = error ]; then
+            echo "::error::the gate produced no result"
+            exit 1
+          fi
