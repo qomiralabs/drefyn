@@ -53,7 +53,7 @@ pnpm gate
 ```
 
 It runs a frozen lockfile install, format check, lint with zero warnings, strict
-typecheck, tests with coverage (85 percent lines at least), the dependency licence
+typecheck, tests with coverage (85 percent lines at least), the dependency license
 policy, the hygiene check on tracked files and on commit messages since
 `origin/development` and, when it is installed, gitleaks.
 
@@ -80,16 +80,21 @@ without the fix. Flaky tests count as failures.
 A PR merges when CI is green and the required reviewers have approved the exact
 head commit. Pushing a new commit after approval needs a new review.
 
-Approval is recorded as a marker on the last line of a review or PR comment:
+Approval is recorded as a marker on the last line of a submitted PR review, posted
+with `gh pr review <number> --comment --body-file <file>` or from the review screen:
 
 ```
 <!-- drefyn-review reviewer=<name> sha=<40 hex head SHA> verdict=<approve|changes_requested> -->
 ```
 
-A marker counts only when its author's login is listed for that reviewer in
-`scripts/review-gate/rules.json` on the base branch. GitHub's author association is not
-used, because the Actions token cannot see private org membership. An edited marker
-never approves; post a fresh one instead.
+- Only reviews count. A marker in a plain PR comment is ignored, because comments can
+  be deleted without trace and reviews cannot.
+- A marker counts only when its author's login is listed for that reviewer in
+  `scripts/review-gate/rules.json` on the base branch. GitHub's author association is
+  not used, because the Actions token cannot see private org membership.
+- Editing a review after you submit it blocks every reviewer your login may sign for,
+  whatever the review says now, until you post a fresh review with a valid marker for
+  each of them. To change your mind, post a new review instead of editing.
 
 ## Security
 
