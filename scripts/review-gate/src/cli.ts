@@ -2,7 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { evaluate, formatReport, statusDescription, type Entry, type GateInput } from './gate.ts';
 import { GitHubClient, loadGateInput } from './github.ts';
-import { DEFAULT_RULES_PATH, loadRules } from './rules.ts';
+import { DEFAULT_CONFIG_PATH, loadConfig } from './rules.ts';
 
 export interface Io {
   out: (text: string) => void;
@@ -27,9 +27,27 @@ exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
 
 class InputError extends Error {}
 
+const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'entries']);
+const ENTRY_KEYS = new Set([
+  'author',
+  'authorAssociation',
+  'createdAt',
+  'body',
+  'edited',
+  'dismissed',
+]);
+
+// A misspelled or foreign key (say lastEditedAt instead of edited) would otherwise be
+// ignored and the entry judged as if it were clean.
+function rejectUnknownKeys(value: Record<string, unknown>, known: Set<string>, where: string) {
+  const unknown = Object.keys(value).find((key) => !known.has(key));
+  if (unknown !== undefined) throw new InputError(`${where} has unknown key ${unknown}`);
+}
+
 function parseInput(raw: unknown): GateInput {
   if (typeof raw !== 'object' || raw === null) throw new InputError('input must be an object');
   const value = raw as Record<string, unknown>;
+  rejectUnknownKeys(value, INPUT_KEYS, 'input');
   const { headSha, labels, files, entries } = value;
   if (typeof headSha !== 'string') throw new InputError('headSha must be a string');
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
@@ -42,22 +60,23 @@ function parseInput(raw: unknown): GateInput {
   if (!Array.isArray(entries)) throw new InputError('entries must be a list');
   const parsed = (entries as unknown[]).map((item, i): Entry => {
     const e = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+    rejectUnknownKeys(e, ENTRY_KEYS, `entries[${i}]`);
     const { author, authorAssociation, createdAt, body, edited, dismissed } = e;
     if (
       typeof author !== 'string' ||
-      typeof authorAssociation !== 'string' ||
+      (authorAssociation !== undefined && typeof authorAssociation !== 'string') ||
       typeof createdAt !== 'string' ||
       typeof body !== 'string' ||
       (edited !== undefined && typeof edited !== 'boolean') ||
       (dismissed !== undefined && typeof dismissed !== 'boolean')
     ) {
       throw new InputError(
-        `entries[${i}] needs string author, authorAssociation, createdAt and body, and boolean edited and dismissed if set`,
+        `entries[${i}] needs string author, createdAt and body; authorAssociation must be a string and edited and dismissed booleans if set`,
       );
     }
     return {
       author,
-      authorAssociation,
+      ...(authorAssociation === undefined ? {} : { authorAssociation }),
       createdAt,
       body,
       ...(edited === undefined ? {} : { edited }),
@@ -105,7 +124,7 @@ export async function main(
   }
 
   try {
-    const rules = loadRules(values.rules ?? DEFAULT_RULES_PATH);
+    const config = loadConfig(values.rules ?? DEFAULT_CONFIG_PATH);
     let input: GateInput;
     if (command === 'evaluate') {
       if (values.input === undefined) throw new InputError('--input is required');
@@ -129,7 +148,7 @@ export async function main(
       input = await loadGateInput(client, values.repo, Number(values.pr));
     }
 
-    const result = evaluate(input, rules);
+    const result = evaluate(input, config);
     const report = formatReport(result);
     io.out(report);
     if (values['github-output'] !== undefined) {

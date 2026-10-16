@@ -16,8 +16,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The shipped rules file allows this login for every reviewer.
 const member = (body: string, i: number) => ({
-  author: 'lead',
+  author: 'Divine572',
   authorAssociation: 'MEMBER',
   createdAt: `2026-10-07T10:00:0${i}Z`,
   body,
@@ -75,6 +76,12 @@ describe('review-gate evaluate', () => {
     writeFileSync(
       rules,
       JSON.stringify({
+        reviewers: {
+          'code-reviewer': ['Divine572'],
+          'qa-verifier': ['Divine572'],
+          'hygiene-auditor': ['Divine572'],
+          'design-reviewer': ['Divine572'],
+        },
         rules: [{ reviewer: 'design-reviewer', prefixes: ['apps/web/'], names: [], contains: [] }],
       }),
     );
@@ -111,7 +118,33 @@ describe('review-gate evaluate', () => {
     const entries = passingInput.entries.map((e, i) => (i === 0 ? { ...e, edited: true } : e));
     const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
     expect(res.code).toBe(1);
-    expect(res.out).toContain('1 edited');
+    expect(res.out).toContain('(edited marker; post a fresh one)');
+  });
+
+  it('exits 2 on an unknown entry key, so a hand written lastEditedAt cannot silently do nothing', async () => {
+    const entries = passingInput.entries.map((e) => ({
+      ...e,
+      lastEditedAt: '2026-10-07T12:00:00Z',
+    }));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('entries[0] has unknown key lastEditedAt');
+  });
+
+  it('exits 2 on an unknown top level key', async () => {
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, head: HEAD })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('unknown key head');
+  });
+
+  it('accepts entries without an author association, since it is not used', async () => {
+    const entries = passingInput.entries.map((e) => ({
+      author: e.author,
+      createdAt: e.createdAt,
+      body: e.body,
+    }));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    expect(res.code).toBe(0);
   });
 
   it('exits 2 when edited is not a boolean', async () => {
@@ -200,7 +233,7 @@ describe('review-gate github', () => {
       );
     }
     if (url.pathname === '/repos/o/r/pulls/3') {
-      return Response.json({ head: { sha: HEAD }, labels: [] });
+      return Response.json({ head: { sha: HEAD }, labels: [], changed_files: 1 });
     }
     if (url.pathname === '/repos/o/r/pulls/3/files') {
       return Response.json([{ filename: 'README.md' }]);

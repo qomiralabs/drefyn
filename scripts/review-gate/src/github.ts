@@ -163,6 +163,7 @@ export class GitHubClient {
 }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const MAX_LISTED_FILES = 3000;
 
 // lastEditedAt is only set when the body changes, unlike REST updated_at, and REST has no
 // edit time for review bodies at all.
@@ -206,10 +207,13 @@ function connectionOf(kind: 'comments' | 'reviews') {
   };
 }
 
-function toEntry(raw: unknown, timeField: 'createdAt' | 'submittedAt'): Entry | undefined {
-  if (!isRecord(raw)) return undefined;
-  const createdAt = str(raw[timeField]);
-  if (createdAt === undefined) return undefined;
+// A node the gate cannot place in time could be a block, so it fails the run instead of
+// being dropped.
+function toEntry(raw: unknown, timeField: 'createdAt' | 'submittedAt'): Entry {
+  const createdAt = isRecord(raw) ? str(raw[timeField]) : undefined;
+  if (!isRecord(raw) || createdAt === undefined) {
+    throw new Error(`GraphQL returned a comment or review with no timestamp`);
+  }
   const author = isRecord(raw['author']) ? raw['author'] : undefined;
   return {
     // Deleted accounts come back as null authors; GitHub shows them as "ghost".
@@ -243,9 +247,21 @@ export async function loadGateInput(
     const labelName = isRecord(label) ? str(label['name']) : undefined;
     return labelName === undefined ? [] : [labelName];
   });
+  const changedCount = isRecord(pr) ? pr['changed_files'] : undefined;
+  if (typeof changedCount !== 'number')
+    throw new Error(`PR ${prNumber} payload has no changed_files`);
+  // The files endpoint silently stops at 3000, which would hide guarded paths past that.
+  if (changedCount >= MAX_LISTED_FILES) {
+    throw new Error(
+      `PR ${prNumber} has ${changedCount} changed files; GitHub lists at most ${MAX_LISTED_FILES}, so the path rules cannot be checked`,
+    );
+  }
 
   // A rename counts under both names, so moving a file out of a guarded path still needs review.
   const changed = await client.getAll(`/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
+  if (changed.length !== changedCount) {
+    throw new Error(`listed ${changed.length} changed files, the PR has ${changedCount}`);
+  }
   const files = changed.flatMap((file) => {
     if (!isRecord(file)) return [];
     return [str(file['filename']), str(file['previous_filename'])].filter(
@@ -262,15 +278,11 @@ export async function loadGateInput(
   const reviews = await client.graphqlConnection(REVIEWS_QUERY, variables, connectionOf('reviews'));
 
   const entries: Entry[] = [];
-  for (const comment of comments) {
-    const entry = toEntry(comment, 'createdAt');
-    if (entry) entries.push(entry);
-  }
+  for (const comment of comments) entries.push(toEntry(comment, 'createdAt'));
   for (const review of reviews) {
     // A pending review was never posted. Dismissed ones stay, so a block survives dismissal.
     if (isRecord(review) && review['state'] === 'PENDING') continue;
-    const entry = toEntry(review, 'submittedAt');
-    if (entry) entries.push(entry);
+    entries.push(toEntry(review, 'submittedAt'));
   }
   return { headSha: head, labels, files, entries };
 }

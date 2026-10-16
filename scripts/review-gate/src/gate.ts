@@ -9,7 +9,9 @@ export interface Marker {
 // One PR issue comment or submitted review body.
 export interface Entry {
   author: string;
-  authorAssociation: string;
+  // Kept for the report only. The Actions token cannot see private org membership, so
+  // this says CONTRIBUTOR for members and is no signal of trust.
+  authorAssociation?: string;
   createdAt: string;
   body: string;
   // Anyone with write access can edit someone else's comment, and the author stays the
@@ -33,12 +35,18 @@ export interface PathRule {
   contains: string[];
 }
 
+// Which logins may sign for each reviewer name, plus the path rules.
+export interface GateConfig {
+  paths: PathRule[];
+  reviewers: Record<string, string[]>;
+}
+
 export interface Requirement {
   reviewer: string;
   reason: string;
 }
 
-export type ReviewerState = 'approved' | 'changes_requested' | 'missing';
+export type ReviewerState = 'approved' | 'changes_requested' | 'missing' | 'no-signers';
 
 export interface ReviewerResult {
   reviewer: string;
@@ -46,20 +54,34 @@ export interface ReviewerResult {
   reason: string;
   by?: string;
   at?: string;
+  edited?: boolean;
+}
+
+export type IgnoreReason =
+  'not-last-line' | 'unknown-reviewer' | 'not-allowed' | 'wrong-sha' | 'dismissed-approve';
+
+export interface IgnoredEntry {
+  author: string;
+  association: string;
+  createdAt: string;
+  reviewer?: string;
+  reason: IgnoreReason;
 }
 
 export interface GateResult {
   pass: boolean;
   headSha: string;
   reviewers: ReviewerResult[];
-  ignored: {
-    otherSha: number;
-    notMember: number;
-    unknownReviewer: number;
-    edited: number;
-    dismissedApproval: number;
-  };
+  ignored: IgnoredEntry[];
 }
+
+const IGNORE_TEXT: Record<IgnoreReason, string> = {
+  'not-last-line': 'no valid marker on the last line',
+  'unknown-reviewer': 'unknown reviewer name',
+  'not-allowed': 'login not allowed to sign for this reviewer',
+  'wrong-sha': 'marker for another SHA',
+  'dismissed-approve': 'approval on a dismissed review',
+};
 
 const BASE_REVIEWERS = ['code-reviewer', 'qa-verifier', 'hygiene-auditor'];
 const LABELLED_REVIEWERS: readonly (readonly [label: string, reviewer: string])[] = [
@@ -71,9 +93,6 @@ export const KNOWN_REVIEWERS = new Set([
   ...BASE_REVIEWERS,
   ...LABELLED_REVIEWERS.map(([, r]) => r),
 ]);
-
-// Collaborators can be outside contributors with write access; only the org decides.
-const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER']);
 
 const MARKER =
   /^<!-- drefyn-review reviewer=([a-z][a-z-]*) sha=([0-9a-f]{40}) verdict=(approve|changes_requested) -->$/;
@@ -124,7 +143,8 @@ export function requiredReviewers(
 }
 
 interface Counted {
-  marker: Marker;
+  reviewer: string;
+  verdict: Verdict;
   entry: Entry;
   time: number;
 }
@@ -137,52 +157,72 @@ function timeOf(entry: Entry): number {
   return time;
 }
 
-export function evaluate(input: GateInput, rules: PathRule[] = []): GateResult {
+function maySign(config: GateConfig, reviewer: string, login: string): boolean {
+  const allowed = config.reviewers[reviewer] ?? [];
+  // GitHub logins are case insensitive.
+  return allowed.some((name) => name.toLowerCase() === login.toLowerCase());
+}
+
+export function evaluate(input: GateInput, config: GateConfig): GateResult {
   const headSha = input.headSha.toLowerCase();
   if (!SHA.test(headSha)) throw new Error(`head SHA must be 40 hex characters: ${input.headSha}`);
 
-  const ignored = {
-    otherSha: 0,
-    notMember: 0,
-    unknownReviewer: 0,
-    edited: 0,
-    dismissedApproval: 0,
-  };
+  const ignored: IgnoredEntry[] = [];
   const counted: Counted[] = [];
   for (const entry of input.entries) {
     const marker = parseMarker(entry.body);
-    if (!marker) continue;
+    const skip = (reason: IgnoreReason) => {
+      ignored.push({
+        author: entry.author,
+        association: entry.authorAssociation ?? 'unknown',
+        createdAt: entry.createdAt,
+        ...(marker === undefined ? {} : { reviewer: marker.reviewer }),
+        reason,
+      });
+    };
+    if (!marker) {
+      if (entry.body.includes('drefyn-review')) skip('not-last-line');
+      continue;
+    }
     const time = timeOf(entry);
-    if (!TRUSTED_ASSOCIATIONS.has(entry.authorAssociation)) ignored.notMember += 1;
-    else if (marker.sha !== headSha) ignored.otherSha += 1;
-    else if (!KNOWN_REVIEWERS.has(marker.reviewer)) ignored.unknownReviewer += 1;
-    else if (entry.edited === true) ignored.edited += 1;
+    if (!KNOWN_REVIEWERS.has(marker.reviewer)) skip('unknown-reviewer');
+    else if (!maySign(config, marker.reviewer, entry.author)) skip('not-allowed');
+    else if (marker.sha !== headSha) skip('wrong-sha');
     // Dismissing a review must not erase a block, but it does withdraw an approval.
-    else if (entry.dismissed === true && marker.verdict === 'approve')
-      ignored.dismissedApproval += 1;
-    else counted.push({ marker, entry, time });
+    else if (entry.dismissed === true && entry.edited !== true && marker.verdict === 'approve')
+      skip('dismissed-approve');
+    else {
+      // An edited marker never approves. Counting it as a block, rather than skipping it,
+      // also stops an edit from bringing back an older approval from the same reviewer.
+      const verdict = entry.edited === true ? 'changes_requested' : marker.verdict;
+      counted.push({ reviewer: marker.reviewer, verdict, entry, time });
+    }
   }
 
   // On a timestamp tie, changes_requested sorts last so it wins: the gate fails closed.
   counted.sort(
     (a, b) =>
       a.time - b.time ||
-      Number(a.marker.verdict === 'changes_requested') -
-        Number(b.marker.verdict === 'changes_requested'),
+      Number(a.verdict === 'changes_requested') - Number(b.verdict === 'changes_requested'),
   );
   const latest = new Map<string, Counted>();
-  for (const item of counted) latest.set(item.marker.reviewer, item);
+  for (const item of counted) latest.set(item.reviewer, item);
 
-  const required = requiredReviewers(input.labels, input.files, rules);
+  const required = requiredReviewers(input.labels, input.files, config.paths);
   const reviewers = required.map(({ reviewer, reason }): ReviewerResult => {
+    // Nobody can sign for a reviewer with no allowed logins, so it can never pass.
+    if ((config.reviewers[reviewer] ?? []).length === 0) {
+      return { reviewer, state: 'no-signers', reason };
+    }
     const item = latest.get(reviewer);
     if (!item) return { reviewer, state: 'missing', reason };
     return {
       reviewer,
-      state: item.marker.verdict === 'approve' ? 'approved' : 'changes_requested',
+      state: item.verdict === 'approve' ? 'approved' : 'changes_requested',
       reason,
       by: item.entry.author,
       at: item.entry.createdAt,
+      edited: item.entry.edited === true,
     };
   });
 
@@ -202,10 +242,16 @@ export function formatReport(result: GateResult): string {
     ...result.reviewers.map((r) => {
       const name = r.reviewer.padEnd(width);
       if (r.state === 'missing') return `  ${name}missing (${r.reason})`;
+      if (r.state === 'no-signers') return `  ${name}no logins allowed to sign (${r.reason})`;
       const what = r.state === 'approved' ? 'approved' : 'changes requested';
-      return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}`;
+      const note = r.edited === true ? ' (edited marker; post a fresh one)' : '';
+      return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}${note}`;
     }),
-    `ignored: ${result.ignored.otherSha} for another SHA, ${result.ignored.notMember} from non members, ${result.ignored.unknownReviewer} unknown reviewers, ${result.ignored.edited} edited, ${result.ignored.dismissedApproval} approvals on dismissed reviews`,
+    result.ignored.length === 0 ? 'ignored markers: none' : 'ignored markers:',
+    ...result.ignored.map((i) => {
+      const target = i.reviewer === undefined ? '' : ` for ${i.reviewer}`;
+      return `  ${i.author} (${i.association}) at ${i.createdAt}${target}: ${IGNORE_TEXT[i.reason]}`;
+    }),
   ];
   return lines.join('\n') + '\n';
 }
@@ -220,8 +266,10 @@ export function statusDescription(result: GateResult): string {
   const parts: string[] = [];
   const blocking = names('changes_requested');
   const missing = names('missing');
+  const unsigned = names('no-signers');
   if (blocking.length > 0) parts.push(`changes requested: ${blocking.join(', ')}`);
   if (missing.length > 0) parts.push(`missing: ${missing.join(', ')}`);
+  if (unsigned.length > 0) parts.push(`no signers: ${unsigned.join(', ')}`);
   const text = parts.join('; ');
   return text.length <= STATUS_DESCRIPTION_LIMIT
     ? text

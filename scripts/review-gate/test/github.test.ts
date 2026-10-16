@@ -51,7 +51,11 @@ function graphqlBody(init: RequestInit): GraphQLBody {
   return JSON.parse(typeof init.body === 'string' ? init.body : '{}') as GraphQLBody;
 }
 
-const pr = { head: { sha: HEAD }, labels: [{ name: 'needs-security' }, { name: 'p0' }] };
+const pr = {
+  head: { sha: HEAD },
+  labels: [{ name: 'needs-security' }, { name: 'p0' }],
+  changed_files: 0,
+};
 
 function connection(nodes: unknown[], endCursor: string | null = null) {
   return { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes };
@@ -97,6 +101,7 @@ describe('loadGateInput', () => {
   it('collects head SHA, labels, files, comments and reviews with edit and dismiss flags', async () => {
     const { client: gh, calls } = client(
       routes({
+        pr: () => json({ ...pr, changed_files: 2 }),
         files: () =>
           json([
             { filename: 'src/a.ts' },
@@ -208,6 +213,7 @@ describe('loadGateInput', () => {
   it('follows REST pagination links for changed files', async () => {
     const { client: gh } = client(
       routes({
+        pr: () => json({ ...pr, changed_files: 2 }),
         files: (url) =>
           url.searchParams.get('page') === '2'
             ? json([{ filename: 'b.ts' }])
@@ -219,6 +225,63 @@ describe('loadGateInput', () => {
       }),
     );
     expect((await loadGateInput(gh, 'o/r', 7)).files).toEqual(['a.ts', 'b.ts']);
+  });
+
+  it('fails closed when the file list does not add up to changed_files', async () => {
+    const { client: gh } = client(
+      routes({
+        pr: () => json({ ...pr, changed_files: 2 }),
+        files: () => json([{ filename: 'a.ts' }]),
+      }),
+    );
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(
+      /listed 1 changed files, the PR has 2/,
+    );
+  });
+
+  it('fails closed at 3000 changed files, where GitHub stops listing them', async () => {
+    const { client: gh, calls } = client(
+      routes({ pr: () => json({ ...pr, changed_files: 3000 }) }),
+    );
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/3000 changed files/);
+    expect(calls.some((c) => c.url.includes('/files'))).toBe(false);
+  });
+
+  it('fails when the PR payload has no changed_files count', async () => {
+    const { client: gh } = client(routes({ pr: () => json({ head: { sha: HEAD }, labels: [] }) }));
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/changed_files/);
+  });
+
+  it('fails on a comment without a timestamp instead of dropping it', async () => {
+    const { client: gh } = client(
+      routes({
+        comments: () =>
+          graphqlPage('comments', connection([comment('a', 'blocking', { createdAt: null })])),
+      }),
+    );
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no timestamp/);
+  });
+
+  it('fails on a submitted review without a timestamp', async () => {
+    const { client: gh } = client(
+      routes({
+        reviews: () =>
+          graphqlPage(
+            'reviews',
+            connection([
+              {
+                author: { login: 'a' },
+                authorAssociation: 'MEMBER',
+                submittedAt: null,
+                lastEditedAt: null,
+                state: 'CHANGES_REQUESTED',
+                body: 'x',
+              },
+            ]),
+          ),
+      }),
+    );
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no timestamp/);
   });
 
   it('follows GraphQL cursors for comments', async () => {

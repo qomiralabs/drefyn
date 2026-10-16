@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { requiredReviewers } from '../src/gate.ts';
-import { DEFAULT_RULES_PATH, loadRules, parseRules } from '../src/rules.ts';
+import { DEFAULT_CONFIG_PATH, loadConfig, parseConfig } from '../src/rules.ts';
 
 const rule = {
   reviewer: 'security-reviewer',
@@ -8,34 +8,64 @@ const rule = {
   names: ['package.json'],
   contains: ['auth'],
 };
+const reviewers = { 'code-reviewer': ['alice'], 'qa-verifier': ['alice', 'qa-bot'] };
 
-describe('parseRules', () => {
-  it('reads a valid rules file', () => {
-    expect(parseRules({ rules: [rule] })).toEqual([rule]);
+describe('parseConfig', () => {
+  it('reads path rules and the reviewer allow list', () => {
+    expect(parseConfig({ reviewers, rules: [rule] })).toEqual({ paths: [rule], reviewers });
+  });
+
+  it('accepts an empty login list, which then fails closed if that reviewer is required', () => {
+    expect(parseConfig({ reviewers: { 'design-reviewer': [] }, rules: [] }).reviewers).toEqual({
+      'design-reviewer': [],
+    });
   });
 
   it.each([
     ['not an object', 'nope'],
-    ['rules missing', {}],
-    ['rules not a list', { rules: {} }],
-    ['unknown reviewer', { rules: [{ ...rule, reviewer: 'friend' }] }],
-    ['prefixes not a list', { rules: [{ ...rule, prefixes: '.github/' }] }],
-    ['empty pattern', { rules: [{ ...rule, contains: [''] }] }],
-    ['names missing', { rules: [{ reviewer: rule.reviewer, prefixes: [], contains: [] }] }],
+    ['rules missing', { reviewers }],
+    ['rules not a list', { reviewers, rules: {} }],
+    ['unknown reviewer in a rule', { reviewers, rules: [{ ...rule, reviewer: 'friend' }] }],
+    ['prefixes not a list', { reviewers, rules: [{ ...rule, prefixes: '.github/' }] }],
+    ['empty pattern', { reviewers, rules: [{ ...rule, contains: [''] }] }],
+    [
+      'names missing',
+      { reviewers, rules: [{ reviewer: rule.reviewer, prefixes: [], contains: [] }] },
+    ],
+    ['reviewers missing', { rules: [] }],
+    ['reviewers not a map', { reviewers: ['alice'], rules: [] }],
+    ['unknown reviewer name in the allow list', { reviewers: { friend: ['alice'] }, rules: [] }],
+    ['logins not a list', { reviewers: { 'code-reviewer': 'alice' }, rules: [] }],
+    ['an empty login', { reviewers: { 'code-reviewer': [''] }, rules: [] }],
+    ['a login with a space', { reviewers: { 'code-reviewer': ['a b'] }, rules: [] }],
   ])('rejects %s', (_name, raw) => {
-    expect(() => parseRules(raw)).toThrow(/invalid rules/);
+    expect(() => parseConfig(raw)).toThrow(/invalid rules/);
   });
 });
 
 describe('the shipped rules file', () => {
-  const rules = loadRules(DEFAULT_RULES_PATH);
+  const config = loadConfig(DEFAULT_CONFIG_PATH);
   const needsSecurity = (file: string) =>
-    requiredReviewers([], [file], rules).some((r) => r.reviewer === 'security-reviewer');
+    requiredReviewers([], [file], config.paths).some((r) => r.reviewer === 'security-reviewer');
+
+  it('names an allowed login for every reviewer', () => {
+    for (const reviewer of [
+      'code-reviewer',
+      'qa-verifier',
+      'hygiene-auditor',
+      'security-reviewer',
+      'performance-reviewer',
+      'design-reviewer',
+    ]) {
+      expect(config.reviewers[reviewer]).toEqual(['Divine572']);
+    }
+  });
 
   it.each([
     '.github/workflows/ci.yml',
     '.github/CODEOWNERS',
     'scripts/gate.sh',
+    'scripts/precommit.sh',
     'scripts/review-gate/rules.json',
     'deploy/compose.yaml',
     'renovate.json',
@@ -44,6 +74,17 @@ describe('the shipped rules file', () => {
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
     'SECURITY.md',
+    '.npmrc',
+    '.nvmrc',
+    '.pnpmfile.cjs',
+    'turbo.json',
+    'tsconfig.json',
+    'tsconfig.base.json',
+    'packages/core/tsconfig.build.json',
+    'eslint.config.js',
+    'vitest.shared.ts',
+    '.prettierrc.json',
+    '.prettierignore',
     'packages/auth/src/session.ts',
     'apps/cloud/src/tenancy/rls.sql',
     'packages/billing/src/invoice.ts',
