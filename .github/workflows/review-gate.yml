@@ -10,7 +10,11 @@
 # - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
 #   re-reads the PR head from the API and posts only for that SHA.
 # - Fork PRs cannot set the status from their own runs, since their token is read only.
-#   Marker comments run this file from the default branch and post for them.
+#   Markers usually arrive as reviews, which run with that same read-only token, so on a
+#   fork PR the status only refreshes from a marker posted as a comment or a dispatch.
+# - A marker counts only when its author's login is listed for that reviewer in
+#   scripts/review-gate/rules.json. Author association is not used: the Actions token
+#   cannot see private org membership and reports members as CONTRIBUTOR.
 #
 # What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
 # GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
@@ -40,18 +44,20 @@ permissions: {}
 # Comments without a marker get a group of their own, so a stream of ordinary comments
 # cannot cancel or replace a pending gate run.
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}${{ (github.event_name == 'issue_comment' && github.event.action != 'deleted' && !contains(github.event.comment.body, 'drefyn-review')) && format('-unrelated-{0}', github.run_id) || '' }}
+  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}${{ (github.event_name == 'issue_comment' && github.event.action != 'deleted' && !contains(github.event.comment.body, 'drefyn-review') && !contains(github.event.changes.body.from, 'drefyn-review')) && format('-unrelated-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   evaluate:
     name: evaluate
-    # Plain issue comments have nothing to gate, and PR comments only matter when they
-    # carry a marker or a deletion may have removed one.
+    # Plain issue comments have nothing to gate. PR comments matter when they carry a
+    # marker, or carried one before an edit or deletion took it away.
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request &&
-      (github.event.action == 'deleted' || contains(github.event.comment.body, 'drefyn-review')))
+      (github.event.action == 'deleted' ||
+      contains(github.event.comment.body, 'drefyn-review') ||
+      contains(github.event.changes.body.from, 'drefyn-review')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -71,8 +77,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      # Comment and dispatch events run this file from the default branch, so the script
-      # comes from there too. Named literally so the ref can never come from event data.
+      # Comment events run this file from the default branch; a dispatch runs it from the
+      # ref the caller picked. Either way the script comes from the default branch, named
+      # literally so the ref can never come from event data.
       - name: Check out the default branch
         if: github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,7 +117,8 @@ jobs:
   report:
     name: report
     needs: evaluate
-    # Fork PR runs have a read-only token; the next marker comment posts for them.
+    # Fork PR runs have a read-only token and cannot post. Reviews on a fork PR run the
+    # same way, so its status only refreshes from a marker comment or a dispatch.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
       needs.evaluate.outputs.present != 'false' &&
