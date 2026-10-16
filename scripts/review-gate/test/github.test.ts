@@ -61,12 +61,12 @@ function connection(nodes: unknown[], endCursor: string | null = null) {
   return { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes };
 }
 
-function graphqlPage(kind: 'reviews', conn: unknown) {
-  return json({ data: { repository: { pullRequest: { [kind]: conn } } } });
+function graphqlPage(conn: unknown) {
+  return json({ data: { repository: { pullRequest: { reviews: conn } } } });
 }
 
 const node = (login: string | null, body: string, extra: Record<string, unknown> = {}) => ({
-  author: login === null ? null : { login },
+  author: login === null ? null : { __typename: 'User', login },
   authorAssociation: 'MEMBER',
   submittedAt: '2026-10-07T10:00:00Z',
   lastEditedAt: null,
@@ -86,7 +86,7 @@ function routes(overrides: {
       const body = graphqlBody(init);
       // Issue comments are not a marker source; asking for them is a bug.
       if (body.query.includes('comments(')) return json({ message: 'unexpected' }, { status: 400 });
-      return overrides.reviews?.(body.variables.after) ?? graphqlPage('reviews', connection([]));
+      return overrides.reviews?.(body.variables.after) ?? graphqlPage(connection([]));
     }
     if (url.pathname === '/repos/o/r/pulls/7') return overrides.pr?.() ?? json(pr);
     if (url.pathname === '/repos/o/r/pulls/7/files') return overrides.files?.(url) ?? json([]);
@@ -106,7 +106,6 @@ describe('loadGateInput', () => {
           ]),
         reviews: () =>
           graphqlPage(
-            'reviews',
             connection([
               node('bob', 'r1', {
                 authorAssociation: 'OWNER',
@@ -115,6 +114,8 @@ describe('loadGateInput', () => {
               node(null, 'r2', { authorAssociation: 'NONE' }),
               node('erin', 'r3', { lastEditedAt: '2026-10-07T12:00:00Z' }),
               node('carol', 'r4', { state: 'DISMISSED', submittedAt: '2026-10-07T11:01:00Z' }),
+              node('renovate', 'r5', { author: { __typename: 'Bot', login: 'renovate' } }),
+              node('frank', 'r6', { author: { login: 'frank' } }),
               node('dan', 'draft', { state: 'PENDING', submittedAt: null }),
             ]),
           ),
@@ -129,6 +130,7 @@ describe('loadGateInput', () => {
       reviews: [
         {
           author: 'bob',
+          authorType: 'User',
           authorAssociation: 'OWNER',
           submittedAt: '2026-10-07T11:00:00Z',
           body: 'r1',
@@ -137,6 +139,7 @@ describe('loadGateInput', () => {
         },
         {
           author: 'ghost',
+          authorType: 'unknown',
           authorAssociation: 'NONE',
           submittedAt: '2026-10-07T10:00:00Z',
           body: 'r2',
@@ -145,6 +148,7 @@ describe('loadGateInput', () => {
         },
         {
           author: 'erin',
+          authorType: 'User',
           authorAssociation: 'MEMBER',
           submittedAt: '2026-10-07T10:00:00Z',
           body: 'r3',
@@ -153,11 +157,30 @@ describe('loadGateInput', () => {
         },
         {
           author: 'carol',
+          authorType: 'User',
           authorAssociation: 'MEMBER',
           submittedAt: '2026-10-07T11:01:00Z',
           body: 'r4',
           edited: false,
           dismissed: true,
+        },
+        {
+          author: 'renovate',
+          authorType: 'Bot',
+          authorAssociation: 'MEMBER',
+          submittedAt: '2026-10-07T10:00:00Z',
+          body: 'r5',
+          edited: false,
+          dismissed: false,
+        },
+        {
+          author: 'frank',
+          authorType: 'unknown',
+          authorAssociation: 'MEMBER',
+          submittedAt: '2026-10-07T10:00:00Z',
+          body: 'r6',
+          edited: false,
+          dismissed: false,
         },
       ],
     });
@@ -173,7 +196,10 @@ describe('loadGateInput', () => {
     expect(graphqlBody(gql[0]?.init ?? {})).toMatchObject({
       variables: { owner: 'o', name: 'r', number: 7 },
     });
-    expect(graphqlBody(gql[0]?.init ?? {}).query).not.toContain('comments(');
+    const query = graphqlBody(gql[0]?.init ?? {}).query;
+    expect(query).not.toContain('comments(');
+    // The type is what tells a bot from a user, since bot logins come back without [bot].
+    expect(query).toContain('author { __typename login }');
   });
 
   it('follows REST pagination links for changed files', async () => {
@@ -223,7 +249,6 @@ describe('loadGateInput', () => {
       routes({
         reviews: () =>
           graphqlPage(
-            'reviews',
             connection([
               {
                 author: { login: 'a' },
@@ -245,8 +270,8 @@ describe('loadGateInput', () => {
       routes({
         reviews: (after) =>
           after === null
-            ? graphqlPage('reviews', connection([node('a', '1')], 'CUR1'))
-            : graphqlPage('reviews', connection([node('b', '2')])),
+            ? graphqlPage(connection([node('a', '1')], 'CUR1'))
+            : graphqlPage(connection([node('b', '2')])),
       }),
     );
     expect((await loadGateInput(gh, 'o/r', 7)).reviews.map((e) => e.body)).toEqual(['1', '2']);
@@ -263,7 +288,7 @@ describe('loadGateInput', () => {
 
   it('fails closed when GraphQL pagination runs past the page cap', async () => {
     const { client: gh } = client(
-      routes({ reviews: () => graphqlPage('reviews', connection([node('a', '1')], 'SAME')) }),
+      routes({ reviews: () => graphqlPage(connection([node('a', '1')], 'SAME')) }),
       { maxPages: 2 },
     );
     await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/more than 2 pages/);

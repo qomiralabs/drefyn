@@ -10,12 +10,15 @@ export interface Marker {
 // without trace, and a submitted review cannot.
 export interface Review {
   author: string;
+  // The GraphQL __typename of the author. Bot logins come back without the [bot] suffix,
+  // so a bot could otherwise match a listed user's login.
+  authorType: string;
   // Kept for the report only. The Actions token cannot see private org membership, so
   // this says CONTRIBUTOR for members and is no signal of trust.
   authorAssociation?: string;
   submittedAt: string;
   body: string;
-  // Anyone with write access can edit someone else's comment, and the author stays the
+  // Anyone with write access can edit someone else's review, and the author stays the
   // same, so an edited body is not evidence of what its author decided.
   edited?: boolean;
   dismissed?: boolean;
@@ -56,12 +59,19 @@ export interface ReviewerResult {
   by?: string;
   at?: string;
   edited?: boolean;
+  // Set when a block was requested on another commit than the head.
+  sha?: string;
 }
 
 export type IgnoreReason =
-  'not-last-line' | 'unknown-reviewer' | 'not-allowed' | 'wrong-sha' | 'dismissed-approve';
+  | 'not-last-line'
+  | 'unknown-reviewer'
+  | 'not-a-user'
+  | 'not-allowed'
+  | 'wrong-sha'
+  | 'dismissed-approve';
 
-export interface IgnoredEntry {
+export interface IgnoredReview {
   author: string;
   association: string;
   submittedAt: string;
@@ -73,14 +83,15 @@ export interface GateResult {
   pass: boolean;
   headSha: string;
   reviewers: ReviewerResult[];
-  ignored: IgnoredEntry[];
+  ignored: IgnoredReview[];
 }
 
 const IGNORE_TEXT: Record<IgnoreReason, string> = {
   'not-last-line': 'no valid marker on the last line',
   'unknown-reviewer': 'unknown reviewer name',
+  'not-a-user': 'author is not a user account',
   'not-allowed': 'login not allowed to sign for this reviewer',
-  'wrong-sha': 'marker for another SHA',
+  'wrong-sha': 'approval for another SHA',
   'dismissed-approve': 'approval on a dismissed review',
 };
 
@@ -148,6 +159,7 @@ interface Counted {
   verdict: Verdict;
   review: Review;
   time: number;
+  sha?: string;
 }
 
 function timeOf(review: Review): number {
@@ -170,7 +182,7 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
   const headSha = input.headSha.toLowerCase();
   if (!SHA.test(headSha)) throw new Error(`head SHA must be 40 hex characters: ${input.headSha}`);
 
-  const ignored: IgnoredEntry[] = [];
+  const ignored: IgnoredReview[] = [];
   const counted: Counted[] = [];
   for (const review of input.reviews) {
     const marker = parseMarker(review.body);
@@ -186,7 +198,8 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
     // An edit can change or remove a marker without trace, so an edited review from a
     // signer blocks every reviewer that login may sign for, whatever its body says now,
     // until the same reviewer gets a newer review with a valid marker.
-    if (review.edited === true) {
+    const isUser = review.authorType === 'User';
+    if (review.edited === true && isUser) {
       const signable = [...KNOWN_REVIEWERS].filter((r) => maySign(config, r, review.author));
       if (signable.length > 0) {
         const time = timeOf(review);
@@ -201,12 +214,24 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
       continue;
     }
     const time = timeOf(review);
+    const approve = marker.verdict === 'approve';
     if (!KNOWN_REVIEWERS.has(marker.reviewer)) skip('unknown-reviewer');
+    else if (!isUser) skip('not-a-user');
     else if (!maySign(config, marker.reviewer, review.author)) skip('not-allowed');
-    else if (marker.sha !== headSha) skip('wrong-sha');
+    // Only an approval is tied to a commit. A block on an older SHA still counts when it is
+    // the reviewer's newest review: the head needs a newer approval either way.
+    else if (approve && marker.sha !== headSha) skip('wrong-sha');
     // Dismissing a review must not erase a block, but it does withdraw an approval.
-    else if (review.dismissed === true && marker.verdict === 'approve') skip('dismissed-approve');
-    else counted.push({ reviewer: marker.reviewer, verdict: marker.verdict, review, time });
+    else if (review.dismissed === true && approve) skip('dismissed-approve');
+    else {
+      counted.push({
+        reviewer: marker.reviewer,
+        verdict: marker.verdict,
+        review,
+        time,
+        ...(marker.sha === headSha ? {} : { sha: marker.sha }),
+      });
+    }
   }
 
   // On a timestamp tie, changes_requested sorts last so it wins: the gate fails closed.
@@ -233,6 +258,7 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
       by: item.review.author,
       at: item.review.submittedAt,
       edited: item.review.edited === true,
+      ...(item.sha === undefined ? {} : { sha: item.sha }),
     };
   });
 
@@ -254,7 +280,12 @@ export function formatReport(result: GateResult): string {
       if (r.state === 'missing') return `  ${name}missing (${r.reason})`;
       if (r.state === 'no-signers') return `  ${name}no logins allowed to sign (${r.reason})`;
       const what = r.state === 'approved' ? 'approved' : 'changes requested';
-      const note = r.edited === true ? ' (edited review; post a fresh one)' : '';
+      const note =
+        r.edited === true
+          ? ' (edited review; post a fresh one)'
+          : r.sha === undefined
+            ? ''
+            : ` (on ${r.sha})`;
       return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}${note}`;
     }),
     result.ignored.length === 0 ? 'ignored markers: none' : 'ignored markers:',
