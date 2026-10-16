@@ -1,0 +1,11 @@
+# Changes to the gates, the supply chain and the security policy need a maintainer's
+# review, since a PR can otherwise rewrite the checks that judge it.
+/.github/                  @Divine572
+/scripts/review-gate/      @Divine572
+/scripts/license-policy/   @Divine572
+/scripts/hygiene/          @Divine572
+/renovate.json             @Divine572
+/SECURITY.md               @Divine572
+/package.json              @Divine572
+/pnpm-lock.yaml            @Divine572
+/pnpm-workspace.yaml       @Divine572
