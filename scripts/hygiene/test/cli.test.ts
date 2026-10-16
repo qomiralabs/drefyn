@@ -1,14 +1,47 @@
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { main } from '../src/cli.ts';
 import { CO_AUTHOR, EM_DASH, makeRepo, type TempRepo } from './helpers.ts';
 
-let repo: TempRepo | undefined;
+// Fixture repos are built once before the tests, since spawning git is slow under load.
+const repos = {} as Record<'clean' | 'dirty' | 'trailer' | 'cleanRange', TempRepo>;
+const bases: Record<string, string> = {};
+let textDir = '';
 
-afterEach(() => {
-  repo?.cleanup();
-  repo = undefined;
+beforeAll(() => {
+  const withReadme = () => {
+    const r = makeRepo();
+    r.write('README.md', '# Clean\n');
+    return r;
+  };
+  repos.clean = withReadme();
+  repos.clean.stage();
+
+  repos.dirty = withReadme();
+  repos.dirty.write('CLAUDE.md', 'x\n');
+  repos.dirty.write('a.md', `x ${EM_DASH}\n`);
+  repos.dirty.stage();
+
+  repos.trailer = withReadme();
+  bases['trailer'] = repos.trailer.commit('chore: start\n');
+  repos.trailer.write('b.md', 'b\n');
+  repos.trailer.commit(`feat: b\n\n${CO_AUTHOR}: x <x@y.z>\n`);
+
+  repos.cleanRange = withReadme();
+  bases['cleanRange'] = repos.cleanRange.commit('chore: start\n');
+  repos.cleanRange.write('b.md', 'b\n');
+  repos.cleanRange.commit('feat: b\n');
+
+  textDir = mkdtempSync(join(tmpdir(), 'hygiene-cli-text-'));
+  writeFileSync(join(textDir, 'title.txt'), 'ci: fine');
+  writeFileSync(join(textDir, 'body.txt'), `Body\nGenerated with Tool\n`);
+});
+
+afterAll(() => {
+  for (const r of Object.values(repos)) r.cleanup();
+  rmSync(textDir, { recursive: true, force: true });
 });
 
 async function run(args: string[], env: NodeJS.ProcessEnv = {}) {
@@ -21,28 +54,16 @@ async function run(args: string[], env: NodeJS.ProcessEnv = {}) {
   return { code, out, err };
 }
 
-function cleanRepo(): TempRepo {
-  repo = makeRepo();
-  repo.write('README.md', '# Clean\n');
-  return repo;
-}
-
 describe('hygiene cli', () => {
   it('checks tracked files by default and exits 0 when clean', async () => {
-    const r = cleanRepo();
-    r.stage();
-    const res = await run(['--cwd', r.dir]);
+    const res = await run(['--cwd', repos.clean.dir]);
     expect(res.code).toBe(0);
     expect(res.out).toContain('hygiene: clean');
     expect(res.out).toContain('1 tracked files');
   });
 
   it('exits 1 and lists findings when tracked files are dirty', async () => {
-    const r = cleanRepo();
-    r.write('CLAUDE.md', 'x\n');
-    r.write('a.md', `x ${EM_DASH}\n`);
-    r.stage();
-    const res = await run(['--files', '--cwd', r.dir]);
+    const res = await run(['--files', '--cwd', repos.dirty.dir]);
     expect(res.code).toBe(1);
     expect(res.err).toContain('CLAUDE.md: internal-path');
     expect(res.err).toContain('a.md:1:3: dash: U+2014 em dash');
@@ -50,21 +71,23 @@ describe('hygiene cli', () => {
   });
 
   it('checks a commit range', async () => {
-    const r = cleanRepo();
-    const base = r.commit('chore: start\n');
-    r.write('b.md', 'b\n');
-    r.commit(`feat: b\n\n${CO_AUTHOR}: x <x@y.z>\n`);
-    const res = await run(['--commits', `${base}..HEAD`, '--cwd', r.dir]);
+    const res = await run([
+      '--commits',
+      `${bases['trailer'] ?? ''}..HEAD`,
+      '--cwd',
+      repos.trailer.dir,
+    ]);
     expect(res.code).toBe(1);
     expect(res.err).toContain('co-author');
   });
 
   it('reports the commit count when the range is clean', async () => {
-    const r = cleanRepo();
-    const base = r.commit('chore: start\n');
-    r.write('b.md', 'b\n');
-    r.commit('feat: b\n');
-    const res = await run(['--commits', `${base}..HEAD`, '--cwd', r.dir]);
+    const res = await run([
+      '--commits',
+      `${bases['cleanRange'] ?? ''}..HEAD`,
+      '--cwd',
+      repos.cleanRange.dir,
+    ]);
     expect(res.code).toBe(0);
     expect(res.out).toContain('1 commits');
   });
@@ -85,14 +108,11 @@ describe('hygiene cli', () => {
   });
 
   it('reads the PR title and body from files', async () => {
-    const r = cleanRepo();
-    writeFileSync(join(r.dir, 'title.txt'), 'ci: fine');
-    writeFileSync(join(r.dir, 'body.txt'), `Body\nGenerated with Tool\n`);
     const res = await run([
       '--pr-title-file',
-      join(r.dir, 'title.txt'),
+      join(textDir, 'title.txt'),
       '--pr-body-file',
-      join(r.dir, 'body.txt'),
+      join(textDir, 'body.txt'),
     ]);
     expect(res.code).toBe(1);
     expect(res.err).toContain('pr body:2: generated-with');
@@ -117,8 +137,7 @@ describe('hygiene cli', () => {
   });
 
   it('exits 2 when git fails', async () => {
-    const r = cleanRepo();
-    const res = await run(['--commits', 'missing..HEAD', '--cwd', r.dir]);
+    const res = await run(['--commits', 'missing..HEAD', '--cwd', repos.clean.dir]);
     expect(res.code).toBe(2);
     expect(res.err).toContain('hygiene: error');
   });
