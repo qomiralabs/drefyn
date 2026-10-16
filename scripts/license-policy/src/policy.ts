@@ -1,7 +1,15 @@
+// A package accepted despite its license, but only under the license it was reviewed
+// with. Matching is by exact name, or by an anchored pattern for platform binaries.
+export interface Exception {
+  name?: string;
+  pattern?: string;
+  license: string;
+  reason: string;
+}
+
 export interface Policy {
   allow: string[];
-  // Package name (or "prefix-*") to the reason it was accepted despite its license.
-  exceptions: Record<string, string>;
+  exceptions: Exception[];
 }
 
 export interface PackageLicense {
@@ -17,10 +25,13 @@ export interface Violation {
   name: string;
   versions: string[];
   license: string;
+  // Set when an exception names the package but was reviewed under another license.
+  expected?: string;
 }
 
 export interface CheckResult {
   violations: Violation[];
+  unusedExceptions: string[];
   checked: number;
   excepted: string[];
 }
@@ -93,16 +104,20 @@ export function satisfies(expression: string, allowed: Set<string>): boolean {
   }
 }
 
-function isExcepted(name: string, exceptions: Record<string, string>): boolean {
-  return Object.keys(exceptions).some((pattern) =>
-    pattern.endsWith('-*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern,
-  );
+export function exceptionLabel(exception: Exception): string {
+  return exception.name ?? exception.pattern ?? '';
+}
+
+function matches(exception: Exception, name: string): boolean {
+  if (exception.name !== undefined) return exception.name === name;
+  return exception.pattern !== undefined && new RegExp(exception.pattern).test(name);
 }
 
 export function checkLicenses(report: LicenseReport, policy: Policy): CheckResult {
   const allowed = new Set(policy.allow);
   const violations: Violation[] = [];
   const excepted: string[] = [];
+  const used = new Set<Exception>();
   let checked = 0;
   for (const [group, packages] of Object.entries(report)) {
     if (!Array.isArray(packages)) throw new Error(`license report group ${group} is not a list`);
@@ -110,13 +125,27 @@ export function checkLicenses(report: LicenseReport, policy: Policy): CheckResul
       checked += 1;
       const license = pkg.license ?? group;
       if (satisfies(license, allowed)) continue;
-      if (isExcepted(pkg.name, policy.exceptions)) {
-        excepted.push(pkg.name);
+      const exception = policy.exceptions.find((e) => matches(e, pkg.name));
+      if (exception === undefined) {
+        violations.push({ name: pkg.name, versions: pkg.versions, license });
         continue;
       }
-      violations.push({ name: pkg.name, versions: pkg.versions, license });
+      used.add(exception);
+      if (exception.license === license) {
+        excepted.push(pkg.name);
+      } else {
+        violations.push({
+          name: pkg.name,
+          versions: pkg.versions,
+          license,
+          expected: exception.license,
+        });
+      }
     }
   }
+  // An empty listing means pnpm failed or ran in the wrong place, not that all is well.
+  if (checked === 0) throw new Error('the license report lists no packages');
   excepted.sort();
-  return { violations, checked, excepted };
+  const unusedExceptions = policy.exceptions.filter((e) => !used.has(e)).map(exceptionLabel);
+  return { violations, unusedExceptions, checked, excepted };
 }

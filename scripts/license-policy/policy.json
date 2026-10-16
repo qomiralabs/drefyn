@@ -10,8 +10,16 @@
     "BlueOak-1.0.0",
     "Python-2.0"
   ],
-  "exceptions": {
-    "lightningcss": "MPL-2.0, pulled in by vite under vitest. Dev tooling only, never shipped or modified.",
-    "lightningcss-*": "Platform binaries of lightningcss, same reason."
-  }
+  "exceptions": [
+    {
+      "name": "lightningcss",
+      "license": "MPL-2.0",
+      "reason": "Pulled in by vite under vitest. Dev tooling only, never shipped or modified."
+    },
+    {
+      "pattern": "^lightningcss-(darwin|linux|win32|freebsd|android)-(x64|arm64|arm|ia32)(-gnu|-musl|-msvc|-gnueabihf)?$",
+      "license": "MPL-2.0",
+      "reason": "Platform binaries of lightningcss, same reason."
+    }
+  ]
 }
