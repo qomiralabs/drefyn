@@ -8,10 +8,12 @@ export TURBO_TELEMETRY_DISABLED=1
 in_ci=false
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then in_ci=true; fi
 
+group_open=false
 step() {
   if [ "$in_ci" = true ]; then
-    echo "::endgroup::"
+    if [ "$group_open" = true ]; then echo "::endgroup::"; fi
     echo "::group::$1"
+    group_open=true
   else
     printf '\n==> %s\n' "$1"
   fi
@@ -22,6 +24,9 @@ if [ "$node_major" != "24" ]; then
   echo "gate: Node 24 is required, found $(node -v). Run 'nvm use' first." >&2
   exit 1
 fi
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
 
 step "install (frozen lockfile)"
 pnpm install --frozen-lockfile
@@ -38,8 +43,18 @@ pnpm exec turbo run typecheck typecheck:root
 step "test with coverage"
 pnpm exec turbo run test
 
+step "licenses"
+pnpm licenses list --json > "$scratch/licenses.json"
+node scripts/license-policy/src/cli.ts --input "$scratch/licenses.json"
+
 step "hygiene"
-node scripts/hygiene/src/cli.ts --files
+# Commit messages are checked against development when it is known locally; CI checks
+# the exact PR range in the hygiene workflow.
+if git rev-parse --verify --quiet origin/development >/dev/null; then
+  node scripts/hygiene/src/cli.ts --files --commits origin/development..HEAD
+else
+  node scripts/hygiene/src/cli.ts --files
+fi
 
 step "secrets"
 if command -v gitleaks >/dev/null 2>&1; then
@@ -51,5 +66,5 @@ else
   echo "gitleaks is not installed; skipped here, CI still runs it"
 fi
 
-if [ "$in_ci" = true ]; then echo "::endgroup::"; fi
+if [ "$group_open" = true ]; then echo "::endgroup::"; fi
 echo "gate: passed"

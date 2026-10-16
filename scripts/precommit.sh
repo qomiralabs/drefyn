@@ -14,14 +14,18 @@ if [ ! -x node_modules/.bin/prettier ]; then
   exit 1
 fi
 
-staged=()
+# Formatting is checked on the staged blob, not the working tree, so a partly staged
+# file is judged by what will actually be committed.
+status=0
 while IFS= read -r -d '' path; do
-  staged+=("$path")
+  if ! errors="$(git show ":$path" |
+    node_modules/.bin/prettier --check --ignore-unknown --stdin-filepath "$path" 2>&1 >/dev/null)"; then
+    [ -n "$errors" ] && printf '%s\n' "$errors" >&2
+    echo "precommit: $path is not formatted as staged. Run 'pnpm format' and stage it again." >&2
+    status=1
+  fi
 done < <(git diff --cached --name-only --diff-filter=ACMR -z)
-
-if [ "${#staged[@]}" -gt 0 ]; then
-  node_modules/.bin/prettier --check --ignore-unknown -- "${staged[@]}"
-fi
+if [ "$status" -ne 0 ]; then exit "$status"; fi
 
 # Reads the index, so it checks exactly what is about to be committed.
 node scripts/hygiene/src/cli.ts --files
