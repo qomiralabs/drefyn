@@ -2,3 +2,7 @@ packages:
   - packages/*
   - apps/*
   - scripts/*
+
+# Minutes. A version must be three days old before pnpm resolves it, which covers hand
+# added packages and lockfile maintenance, not only Renovate PRs.
+minimumReleaseAge: 4320
