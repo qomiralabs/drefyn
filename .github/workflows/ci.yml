@@ -9,7 +9,8 @@ permissions: {}
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only PR runs go stale; branch pushes and schedules must each finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TURBO_TELEMETRY_DISABLED: '1'
@@ -43,6 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         flags: ['on', 'off']
+    # No code reads this yet; the wiring exists so the first release flag is tested both ways.
     env:
       DREFYN_RELEASE_FLAGS: ${{ matrix.flags }}
     steps:

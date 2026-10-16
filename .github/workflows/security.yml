@@ -12,7 +12,8 @@ permissions: {}
 
 concurrency:
   group: security-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only PR runs go stale; branch pushes and schedules must each finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   dependencies:
@@ -77,8 +78,6 @@ jobs:
           persist-credentials: false
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          languages: javascript-typescript
+          languages: javascript-typescript, actions
           build-mode: none
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        with:
-          category: /language:javascript-typescript

@@ -8,7 +8,8 @@ permissions: {}
 
 concurrency:
   group: hygiene-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Only PR runs go stale; branch pushes and schedules must each finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   hygiene:
