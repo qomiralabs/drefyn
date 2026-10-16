@@ -1,4 +1,4 @@
-export type Rule = 'dash' | 'co-author' | 'generated-with' | 'internal-path';
+export type Rule = 'dash' | 'co-author' | 'generated-with' | 'internal-path' | 'encoding';
 
 export interface Finding {
   rule: Rule;
@@ -21,11 +21,21 @@ const DASH_NAMES = { 'U+2013': 'en dash', 'U+2014': 'em dash' } as const;
 // Git's own binary heuristic: a NUL in the first 8000 bytes.
 const BINARY_SNIFF_BYTES = 8000;
 
-// Hyphen lookalikes (U+2010, U+2011) are folded to "-" so a trailer cannot slip past
-// by swapping the hyphen for a character that renders the same.
-const HYPHEN_LOOKALIKES = new RegExp(`[${String.fromCodePoint(0x2010, 0x2011)}]`, 'g');
+// Characters that render like the hyphen in a trailer key, folded to "-", and invisible
+// characters that could split the key, removed, so neither trick hides a trailer.
+const HYPHEN_LOOKALIKES = /[\u{2010}\u{2011}\u{2012}\u{2212}\u{FE63}\u{FF0D}]/gu;
+const ZERO_WIDTH = /[\u{200B}-\u{200D}\u{2060}\u{FEFF}]/gu;
 const CO_AUTHOR_TRAILER = /^\s*co-authored-by\s*:/i;
-const GENERATED_WITH = /generated\s+with/i;
+// The tool attribution form only: the phrase opens the line, after nothing but emoji,
+// markup or punctuation. "Types generated with openapi-typescript" stays legal.
+const GENERATED_WITH =
+  /^[\s\p{P}\p{S}\p{Extended_Pictographic}\u{FE0F}\u{200D}]*generated\s+with\b/iu;
+
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
+const CP1252_DASHES = new Map([
+  [0x96, 'byte 0x96 (Windows-1252 en dash)'],
+  [0x97, 'byte 0x97 (Windows-1252 em dash)'],
+]);
 
 export function findDashes(text: string): DashHit[] {
   const hits: DashHit[] = [];
@@ -88,9 +98,42 @@ function dashFindings(source: string, text: string): Finding[] {
   }));
 }
 
+function legacyDashFindings(path: string, bytes: Uint8Array): Finding[] {
+  const findings: Finding[] = [];
+  let line = 1;
+  for (const byte of bytes) {
+    if (byte === 0x0a) line += 1;
+    const name = CP1252_DASHES.get(byte);
+    if (name !== undefined) {
+      findings.push({
+        rule: 'dash',
+        source: path,
+        line,
+        detail: `${name} in text that is not UTF-8`,
+      });
+    }
+  }
+  return findings;
+}
+
 export function checkFileContent(path: string, bytes: Uint8Array): Finding[] {
   if (isBinary(bytes)) return [];
-  return dashFindings(path, new TextDecoder().decode(bytes));
+  let text: string;
+  try {
+    text = STRICT_UTF8.decode(bytes);
+  } catch {
+    // Decoding loosely would turn these bytes into U+FFFD and hide what they were.
+    const legacy = legacyDashFindings(path, bytes);
+    if (legacy.length > 0) return legacy;
+    return [
+      {
+        rule: 'encoding',
+        source: path,
+        detail: 'not valid UTF-8, so it cannot be checked for dashes',
+      },
+    ];
+  }
+  return dashFindings(path, text);
 }
 
 // Used for commit messages and PR text, where attribution lines matter as much as dashes.
@@ -110,7 +153,7 @@ export function checkMessage(source: string, text: string): Finding[] {
         detail: 'attribution line ("Generated with")',
       });
     }
-    if (CO_AUTHOR_TRAILER.test(content.replace(HYPHEN_LOOKALIKES, '-'))) {
+    if (CO_AUTHOR_TRAILER.test(content.replace(ZERO_WIDTH, '').replace(HYPHEN_LOOKALIKES, '-'))) {
       findings.push({ rule: 'co-author', source, line, detail: 'co-author trailer' });
     }
   });

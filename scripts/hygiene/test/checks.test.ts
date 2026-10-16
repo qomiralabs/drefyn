@@ -90,6 +90,41 @@ describe('checkFileContent', () => {
   });
 });
 
+describe('checkFileContent with text that is not UTF-8', () => {
+  it('reports Windows-1252 en and em dash bytes with their line', () => {
+    const bytes = new Uint8Array([0x61, 0x20, 0x96, 0x0a, 0x62, 0x97, 0x0a]);
+    expect(checkFileContent('legacy.txt', bytes)).toEqual([
+      {
+        rule: 'dash',
+        source: 'legacy.txt',
+        line: 1,
+        detail: 'byte 0x96 (Windows-1252 en dash) in text that is not UTF-8',
+      },
+      {
+        rule: 'dash',
+        source: 'legacy.txt',
+        line: 2,
+        detail: 'byte 0x97 (Windows-1252 em dash) in text that is not UTF-8',
+      },
+    ]);
+  });
+
+  it('reports other invalid UTF-8 as undecodable instead of skipping it', () => {
+    const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+    expect(checkFileContent('latin1.txt', latin1)).toEqual([
+      {
+        rule: 'encoding',
+        source: 'latin1.txt',
+        detail: 'not valid UTF-8, so it cannot be checked for dashes',
+      },
+    ]);
+  });
+
+  it('accepts UTF-8 with a byte order mark', () => {
+    expect(checkFileContent('bom.md', new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0a]))).toEqual([]);
+  });
+});
+
 describe('isInternalPath', () => {
   it.each([
     '.internal/notes.md',
@@ -165,6 +200,15 @@ describe('checkMessage', () => {
     `  ${CO_AUTHOR}: indented <s@example.com>`,
     `${CO_AUTHOR} : spaced colon <s@example.com>`,
     `${CO_AUTHOR.replace('-', String.fromCodePoint(0x2011))}: odd hyphen <s@example.com>`,
+    `${CO_AUTHOR.replace('-', '\u{2012}')}: figure dash <s@example.com>`,
+    `${CO_AUTHOR.replace('-', '\u{2212}')}: minus sign <s@example.com>`,
+    `${CO_AUTHOR.replace('-', '\u{FE63}')}: small hyphen <s@example.com>`,
+    `${CO_AUTHOR.replace('-', '\u{FF0D}')}: fullwidth hyphen <s@example.com>`,
+    `${CO_AUTHOR.slice(0, 2)}\u{200B}${CO_AUTHOR.slice(2)}: zero width space <s@example.com>`,
+    `${CO_AUTHOR.slice(0, 4)}\u{200C}${CO_AUTHOR.slice(4)}: zwnj <s@example.com>`,
+    `${CO_AUTHOR.slice(0, 6)}\u{200D}${CO_AUTHOR.slice(6)}: zwj <s@example.com>`,
+    `${CO_AUTHOR.slice(0, 8)}\u{2060}${CO_AUTHOR.slice(8)}: word joiner <s@example.com>`,
+    `\u{FEFF}${CO_AUTHOR}: bom <s@example.com>`,
   ])('flags the trailer variant %j', (trailer) => {
     const findings = checkMessage('commit abc', `fix: thing\n\nWhy.\n\n${trailer}\n`);
     expect(findings.map((f) => f.rule)).toContain('co-author');
@@ -175,20 +219,33 @@ describe('checkMessage', () => {
     expect(checkMessage('pr body', 'We thank all co-authors of the spec.')).toEqual([]);
   });
 
-  it.each(['Generated with SomeTool', '  generated   with a bot', 'Docs GENERATED WITH x'])(
-    'flags the generated line %j',
-    (line) => {
-      const findings = checkMessage('commit abc', `chore: x\n\n${line}\n`);
-      expect(findings).toEqual([
-        {
-          rule: 'generated-with',
-          source: 'commit abc',
-          line: 3,
-          detail: 'attribution line ("Generated with")',
-        },
-      ]);
-    },
-  );
+  it.each([
+    'Generated with SomeTool',
+    '  generated   with a bot',
+    '\u{1F916} Generated with [Tool](https://example.com)',
+    '- Generated with Tool',
+    '> Generated with Tool',
+    '**Generated with Tool**',
+  ])('flags the attribution line %j', (line) => {
+    const findings = checkMessage('commit abc', `chore: x\n\n${line}\n`);
+    expect(findings).toEqual([
+      {
+        rule: 'generated-with',
+        source: 'commit abc',
+        line: 3,
+        detail: 'attribution line ("Generated with")',
+      },
+    ]);
+  });
+
+  it.each([
+    'Docs GENERATED WITH x',
+    'Types are generated with openapi-typescript.',
+    'feat(api): client generated with the OpenAPI generator',
+    'Fixtures (generated with faker) live in test/',
+  ])('does not flag a code generator mentioned in prose: %j', (line) => {
+    expect(checkMessage('commit abc', `chore: x\n\n${line}\n`)).toEqual([]);
+  });
 
   it('flags dashes in a message with positions', () => {
     expect(checkMessage('pr title', `fix: a ${EM_DASH} b`)).toEqual([
