@@ -3,9 +3,11 @@
 # Until development holds scripts/review-gate, review-gate.yml has no trusted copy of the
 # gate to run and steps aside. For same repo PRs into development this workflow runs the
 # PR head's copy instead. It only listens to pull_request and pull_request_review, so it
-# never runs with a privileged token for a comment or dispatch, and the job that runs PR
-# code has read-only scopes. `report` re-reads the head from the API before posting the
-# same `review-gate` status context that review-gate.yml uses.
+# never runs in a privileged context, and the job that runs PR code has read-only scopes.
+# Markers come only from submitted reviews, and an edited review blocks, exactly as in
+# review-gate.yml. `report` re-reads the head from the API before posting the same
+# `review-gate` status context. Fork PRs are skipped here; a dispatch of review-gate.yml
+# refreshes them once the script is on development.
 #
 # It exists only until the gate script is on development and is deleted by #3. The report
 # step is a copy of the one in review-gate.yml rather than a shared action, because a
@@ -36,7 +38,6 @@ jobs:
     permissions:
       contents: read # check out the base and the PR head
       pull-requests: read # PR head, labels, files and reviews
-      issues: read # PR conversation comments
     outputs:
       needed: ${{ steps.script.outputs.needed }}
       state: ${{ steps.gate.outputs.state }}

@@ -2,19 +2,23 @@
 #
 # What this workflow protects:
 #
-# - The gate script and its path rules come from the PR base commit for PR and review
-#   events, and from the default branch for comment and dispatch events, so editing
-#   scripts/review-gate in a PR does not change how that PR is judged. This workflow never
-#   checks out PR code. While development lacks the script, review-gate-bootstrap.yml
-#   covers same repo PRs into it.
-# - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
-#   re-reads the PR head from the API and posts only for that SHA.
-# - Fork PRs cannot set the status from their own runs, since their token is read only.
-#   Markers usually arrive as reviews, which run with that same read-only token, so on a
-#   fork PR the status only refreshes from a marker posted as a comment or a dispatch.
+# - Markers come only from submitted PR reviews. A submitted review cannot be deleted,
+#   and a review edited after submission blocks every reviewer its author may sign for
+#   until fresh reviews follow, so neither a deletion nor an edit can lift a block.
+#   Issue comments are not read at all.
 # - A marker counts only when its author's login is listed for that reviewer in
 #   scripts/review-gate/rules.json. Author association is not used: the Actions token
 #   cannot see private org membership and reports members as CONTRIBUTOR.
+# - The gate script, its path rules and the allow list come from the PR base commit for
+#   PR and review events, and from the default branch for a dispatch, so editing them in
+#   a PR does not change how that PR is judged. This workflow never checks out PR code.
+#   While development lacks the script, review-gate-bootstrap.yml covers same repo PRs
+#   into it.
+# - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
+#   re-reads the PR head from the API and posts only for that SHA.
+# - Fork PRs cannot set the status from their own runs, since their pull_request and
+#   pull_request_review runs get a read-only token. A maintainer refreshes their status
+#   with a dispatch.
 #
 # What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
 # GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
@@ -28,8 +32,6 @@ name: Review gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-  issue_comment:
-    types: [created, edited, deleted]
   pull_request_review:
     types: [submitted, edited, dismissed]
   workflow_dispatch:
@@ -41,29 +43,18 @@ on:
 
 permissions: {}
 
-# Comments without a marker get a group of their own, so a stream of ordinary comments
-# cannot cancel or replace a pending gate run.
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}${{ (github.event_name == 'issue_comment' && github.event.action != 'deleted' && !contains(github.event.comment.body, 'drefyn-review') && !contains(github.event.changes.body.from, 'drefyn-review')) && format('-unrelated-{0}', github.run_id) || '' }}
+  group: review-gate-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   evaluate:
     name: evaluate
-    # Plain issue comments have nothing to gate. PR comments matter when they carry a
-    # marker, or carried one before an edit or deletion took it away.
-    if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.pull_request &&
-      (github.event.action == 'deleted' ||
-      contains(github.event.comment.body, 'drefyn-review') ||
-      contains(github.event.changes.body.from, 'drefyn-review')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read # check out the gate script
       pull-requests: read # PR head, labels, files and reviews
-      issues: read # PR conversation comments
     outputs:
       present: ${{ steps.script.outputs.present }}
       state: ${{ steps.gate.outputs.state }}
@@ -77,11 +68,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      # Comment events run this file from the default branch; a dispatch runs it from the
-      # ref the caller picked. Either way the script comes from the default branch, named
-      # literally so the ref can never come from event data.
+      # A dispatch runs this file from the ref the caller picked, but the script always
+      # comes from the default branch, named literally so the ref never comes from input.
       - name: Check out the default branch
-        if: github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: development
@@ -108,7 +98,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         run: >-
           node scripts/review-gate/src/cli.ts github
           --repo "$REPO" --pr "$PR_NUMBER"
@@ -117,8 +107,8 @@ jobs:
   report:
     name: report
     needs: evaluate
-    # Fork PR runs have a read-only token and cannot post. Reviews on a fork PR run the
-    # same way, so its status only refreshes from a marker comment or a dispatch.
+    # Fork PR runs, reviews included, have a read-only token and cannot post. A dispatch
+    # refreshes a fork PR's status.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
       needs.evaluate.outputs.present != 'false' &&
@@ -134,7 +124,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           GATE_STATE: ${{ needs.evaluate.outputs.state }}
           GATE_SHA: ${{ needs.evaluate.outputs.sha }}
           GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
