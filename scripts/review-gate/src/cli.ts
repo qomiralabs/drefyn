@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { evaluate, formatReport, statusDescription, type Entry, type GateInput } from './gate.ts';
 import { GitHubClient, loadGateInput } from './github.ts';
+import { DEFAULT_RULES_PATH, loadRules } from './rules.ts';
 
 export interface Io {
   out: (text: string) => void;
@@ -13,11 +14,13 @@ export interface Deps {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const USAGE = `usage: review-gate evaluate --input <file.json> [--github-output <file>] [--summary <file>]
+const USAGE = `usage: review-gate evaluate --input <file.json> [--rules <file>] [--github-output <file>] [--summary <file>]
        review-gate github --repo <owner/name> --pr <number> [--github-output <file>] [--summary <file>]
 
-  evaluate  read head SHA, labels and comments from a JSON file
-  github    read them from the GitHub API using GITHUB_TOKEN (and GITHUB_API_URL if set)
+  evaluate  read head SHA, labels, changed files and comments from a JSON file
+  github    read them from the GitHub API using GITHUB_TOKEN
+            (and GITHUB_API_URL and GITHUB_GRAPHQL_URL if set)
+  --rules   path rules file, defaults to rules.json next to this package
 
 exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
 `;
@@ -27,28 +30,41 @@ class InputError extends Error {}
 function parseInput(raw: unknown): GateInput {
   if (typeof raw !== 'object' || raw === null) throw new InputError('input must be an object');
   const value = raw as Record<string, unknown>;
-  const { headSha, labels, entries } = value;
+  const { headSha, labels, files, entries } = value;
   if (typeof headSha !== 'string') throw new InputError('headSha must be a string');
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
     throw new InputError('labels must be a list of strings');
   }
+  // Without the changed files the path rules cannot run, and guessing would fail open.
+  if (!Array.isArray(files) || !files.every((f) => typeof f === 'string')) {
+    throw new InputError('files must be a list of changed paths');
+  }
   if (!Array.isArray(entries)) throw new InputError('entries must be a list');
   const parsed = (entries as unknown[]).map((item, i): Entry => {
     const e = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
-    const { author, authorAssociation, createdAt, body } = e;
+    const { author, authorAssociation, createdAt, body, edited, dismissed } = e;
     if (
       typeof author !== 'string' ||
       typeof authorAssociation !== 'string' ||
       typeof createdAt !== 'string' ||
-      typeof body !== 'string'
+      typeof body !== 'string' ||
+      (edited !== undefined && typeof edited !== 'boolean') ||
+      (dismissed !== undefined && typeof dismissed !== 'boolean')
     ) {
       throw new InputError(
-        `entries[${i}] needs string author, authorAssociation, createdAt and body`,
+        `entries[${i}] needs string author, authorAssociation, createdAt and body, and boolean edited and dismissed if set`,
       );
     }
-    return { author, authorAssociation, createdAt, body };
+    return {
+      author,
+      authorAssociation,
+      createdAt,
+      body,
+      ...(edited === undefined ? {} : { edited }),
+      ...(dismissed === undefined ? {} : { dismissed }),
+    };
   });
-  return { headSha, labels, entries: parsed };
+  return { headSha, labels, files, entries: parsed };
 }
 
 export async function main(
@@ -67,6 +83,7 @@ export async function main(
         input: { type: 'string' },
         repo: { type: 'string' },
         pr: { type: 'string' },
+        rules: { type: 'string' },
         'github-output': { type: 'string' },
         summary: { type: 'string' },
         help: { type: 'boolean' },
@@ -88,6 +105,7 @@ export async function main(
   }
 
   try {
+    const rules = loadRules(values.rules ?? DEFAULT_RULES_PATH);
     let input: GateInput;
     if (command === 'evaluate') {
       if (values.input === undefined) throw new InputError('--input is required');
@@ -102,13 +120,16 @@ export async function main(
       const client = new GitHubClient({
         token,
         ...(env['GITHUB_API_URL'] === undefined ? {} : { apiUrl: env['GITHUB_API_URL'] }),
+        ...(env['GITHUB_GRAPHQL_URL'] === undefined
+          ? {}
+          : { graphqlUrl: env['GITHUB_GRAPHQL_URL'] }),
         ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
         ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
       });
       input = await loadGateInput(client, values.repo, Number(values.pr));
     }
 
-    const result = evaluate(input);
+    const result = evaluate(input, rules);
     const report = formatReport(result);
     io.out(report);
     if (values['github-output'] !== undefined) {

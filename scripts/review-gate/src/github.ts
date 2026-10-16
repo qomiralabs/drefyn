@@ -3,16 +3,19 @@ import type { Entry, GateInput } from './gate.ts';
 export interface GitHubClientOptions {
   token: string;
   apiUrl?: string;
+  graphqlUrl?: string;
   fetch?: typeof fetch;
   retries?: number;
   timeoutMs?: number;
   baseDelayMs?: number;
+  maxPages?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
-interface Page {
-  data: unknown;
-  next: string | undefined;
+interface Connection {
+  nodes: unknown[];
+  hasNextPage: boolean;
+  endCursor: string | null;
 }
 
 const defaultSleep = (ms: number) =>
@@ -40,45 +43,94 @@ function nextLink(header: string | null): string | undefined {
 export class GitHubClient {
   readonly #token: string;
   readonly #apiUrl: URL;
+  readonly #graphqlUrl: URL;
   readonly #fetch: typeof fetch;
   readonly #retries: number;
   readonly #timeoutMs: number;
   readonly #baseDelayMs: number;
+  readonly #maxPages: number;
   readonly #sleep: (ms: number) => Promise<void>;
 
   constructor(options: GitHubClientOptions) {
     if (options.token === '') throw new Error('a GitHub token is required');
     this.#token = options.token;
     this.#apiUrl = new URL(options.apiUrl ?? 'https://api.github.com');
+    this.#graphqlUrl = new URL(options.graphqlUrl ?? '/graphql', this.#apiUrl);
+    if (this.#graphqlUrl.origin !== this.#apiUrl.origin) {
+      throw new Error('the GraphQL endpoint must be on the same host as the API');
+    }
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#retries = options.retries ?? 3;
     this.#timeoutMs = options.timeoutMs ?? 10_000;
     this.#baseDelayMs = options.baseDelayMs ?? 500;
+    this.#maxPages = options.maxPages ?? 50;
     this.#sleep = options.sleep ?? defaultSleep;
   }
 
   async getJson(path: string): Promise<unknown> {
-    return (await this.#getPage(path)).data;
+    const response = await this.#send('GET', new URL(path, this.#apiUrl));
+    return response.json();
   }
 
+  // A partial list could hide a blocking review, so running out of pages fails the gate.
   async getAll(path: string): Promise<unknown[]> {
     const items: unknown[] = [];
     let next: string | undefined = path;
-    while (next !== undefined) {
-      const page = await this.#getPage(next);
-      if (!Array.isArray(page.data)) throw new Error(`expected a list from ${path}`);
-      items.push(...(page.data as unknown[]));
-      next = page.next;
+    for (let page = 0; next !== undefined; page += 1) {
+      if (page === this.#maxPages) this.#tooManyPages(path);
+      const response = await this.#send('GET', new URL(next, this.#apiUrl));
+      const data: unknown = await response.json();
+      if (!Array.isArray(data)) throw new Error(`expected a list from ${path}`);
+      items.push(...(data as unknown[]));
+      next = nextLink(response.headers.get('link'));
     }
     return items;
   }
 
-  // Reads are idempotent, so transient failures are retried with jittered backoff.
-  async #getPage(pathOrUrl: string): Promise<Page> {
-    const url = new URL(pathOrUrl, this.#apiUrl);
+  async graphqlConnection(
+    query: string,
+    variables: Record<string, unknown>,
+    pick: (data: unknown) => Connection,
+  ): Promise<unknown[]> {
+    const nodes: unknown[] = [];
+    let after: string | null = null;
+    for (let page = 0; ; page += 1) {
+      if (page === this.#maxPages) this.#tooManyPages('graphql');
+      const connection = pick(await this.#graphql(query, { ...variables, after }));
+      nodes.push(...connection.nodes);
+      if (!connection.hasNextPage) return nodes;
+      after = connection.endCursor;
+    }
+  }
+
+  #tooManyPages(what: string): never {
+    throw new Error(
+      `more than ${this.#maxPages} pages from ${what}; refusing to evaluate a partial list`,
+    );
+  }
+
+  async #graphql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+    const response = await this.#send(
+      'POST',
+      this.#graphqlUrl,
+      JSON.stringify({ query, variables }),
+    );
+    const payload: unknown = await response.json();
+    if (!isRecord(payload)) throw new Error('GraphQL returned no object');
+    const errors = payload['errors'];
+    if (Array.isArray(errors) && errors.length > 0) {
+      const messages = errors.map((e) => (isRecord(e) ? str(e['message']) : undefined) ?? '?');
+      throw new Error(`GraphQL error: ${messages.join('; ')}`);
+    }
+    return payload['data'];
+  }
+
+  // Both REST reads and GraphQL queries are idempotent, so transient failures are retried
+  // with jittered backoff.
+  async #send(method: 'GET' | 'POST', url: URL, body?: string): Promise<Response> {
     // The token must only ever go to the API host, even if a Link header says otherwise.
     if (url.origin !== this.#apiUrl.origin) throw new Error(`unexpected host in ${url.origin}`);
-    let lastError: Error = new Error(`GET ${url.pathname} was not attempted`);
+    let lastError: Error = new Error(`${method} ${url.pathname} was not attempted`);
     for (let attempt = 0; attempt <= this.#retries; attempt += 1) {
       if (attempt > 0) {
         const backoff = this.#baseDelayMs * 2 ** (attempt - 1);
@@ -87,22 +139,23 @@ export class GitHubClient {
       let response: Response;
       try {
         response = await this.#fetch(url, {
+          method,
           headers: {
             authorization: `Bearer ${this.#token}`,
             accept: 'application/vnd.github+json',
             'x-github-api-version': '2022-11-28',
             'user-agent': 'drefyn-review-gate',
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           },
+          ...(body === undefined ? {} : { body }),
           signal: AbortSignal.timeout(this.#timeoutMs),
         });
       } catch (error) {
-        lastError = new Error(`GET ${url.pathname} failed: ${String(error)}`);
+        lastError = new Error(`${method} ${url.pathname} failed: ${String(error)}`);
         continue;
       }
-      if (response.ok) {
-        return { data: await response.json(), next: nextLink(response.headers.get('link')) };
-      }
-      lastError = new Error(`GET ${url.pathname} failed with ${response.status}`);
+      if (response.ok) return response;
+      lastError = new Error(`${method} ${url.pathname} failed with ${response.status}`);
       if (response.status < 500 && response.status !== 429) break;
     }
     throw lastError;
@@ -111,17 +164,61 @@ export class GitHubClient {
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
-function toEntry(raw: unknown, timeField: 'created_at' | 'submitted_at'): Entry | undefined {
+// lastEditedAt is only set when the body changes, unlike REST updated_at, and REST has no
+// edit time for review bodies at all.
+const COMMENTS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { author { login } authorAssociation createdAt lastEditedAt body }
+      }
+    }
+  }
+}`;
+
+const REVIEWS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviews(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { author { login } authorAssociation submittedAt lastEditedAt state body }
+      }
+    }
+  }
+}`;
+
+function connectionOf(kind: 'comments' | 'reviews') {
+  return (data: unknown): Connection => {
+    const repository = isRecord(data) ? data['repository'] : undefined;
+    const pr = isRecord(repository) ? repository['pullRequest'] : undefined;
+    const conn = isRecord(pr) ? pr[kind] : undefined;
+    const pageInfo = isRecord(conn) ? conn['pageInfo'] : undefined;
+    const nodes = isRecord(conn) ? conn['nodes'] : undefined;
+    if (!isRecord(pageInfo) || !Array.isArray(nodes)) {
+      throw new Error(`GraphQL returned no ${kind} connection for the PR`);
+    }
+    return {
+      nodes: nodes as unknown[],
+      hasNextPage: pageInfo['hasNextPage'] === true,
+      endCursor: str(pageInfo['endCursor']) ?? null,
+    };
+  };
+}
+
+function toEntry(raw: unknown, timeField: 'createdAt' | 'submittedAt'): Entry | undefined {
   if (!isRecord(raw)) return undefined;
   const createdAt = str(raw[timeField]);
   if (createdAt === undefined) return undefined;
-  const user = isRecord(raw['user']) ? raw['user'] : undefined;
+  const author = isRecord(raw['author']) ? raw['author'] : undefined;
   return {
-    // Deleted accounts come back as null users; GitHub shows them as "ghost".
-    author: str(user?.['login']) ?? 'ghost',
-    authorAssociation: str(raw['author_association']) ?? 'NONE',
+    // Deleted accounts come back as null authors; GitHub shows them as "ghost".
+    author: str(author?.['login']) ?? 'ghost',
+    authorAssociation: str(raw['authorAssociation']) ?? 'NONE',
     createdAt,
     body: str(raw['body']) ?? '',
+    edited: raw['lastEditedAt'] !== null && raw['lastEditedAt'] !== undefined,
+    dismissed: raw['state'] === 'DISMISSED',
   };
 }
 
@@ -136,30 +233,44 @@ export async function loadGateInput(
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
     throw new Error(`invalid PR number: ${prNumber}`);
   }
+  const [owner = '', name = ''] = repo.split('/');
 
   const pr = await client.getJson(`/repos/${repo}/pulls/${prNumber}`);
   const head = isRecord(pr) && isRecord(pr['head']) ? str(pr['head']['sha']) : undefined;
   if (head === undefined) throw new Error(`PR ${prNumber} payload has no head SHA`);
   const rawLabels = isRecord(pr) && Array.isArray(pr['labels']) ? (pr['labels'] as unknown[]) : [];
   const labels = rawLabels.flatMap((label) => {
-    const name = isRecord(label) ? str(label['name']) : undefined;
-    return name === undefined ? [] : [name];
+    const labelName = isRecord(label) ? str(label['name']) : undefined;
+    return labelName === undefined ? [] : [labelName];
   });
 
-  const comments = await client.getAll(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`);
-  const reviews = await client.getAll(`/repos/${repo}/pulls/${prNumber}/reviews?per_page=100`);
+  // A rename counts under both names, so moving a file out of a guarded path still needs review.
+  const changed = await client.getAll(`/repos/${repo}/pulls/${prNumber}/files?per_page=100`);
+  const files = changed.flatMap((file) => {
+    if (!isRecord(file)) return [];
+    return [str(file['filename']), str(file['previous_filename'])].filter(
+      (path): path is string => path !== undefined,
+    );
+  });
+
+  const variables = { owner, name, number: prNumber };
+  const comments = await client.graphqlConnection(
+    COMMENTS_QUERY,
+    variables,
+    connectionOf('comments'),
+  );
+  const reviews = await client.graphqlConnection(REVIEWS_QUERY, variables, connectionOf('reviews'));
 
   const entries: Entry[] = [];
   for (const comment of comments) {
-    const entry = toEntry(comment, 'created_at');
+    const entry = toEntry(comment, 'createdAt');
     if (entry) entries.push(entry);
   }
   for (const review of reviews) {
-    // A dismissed review was withdrawn on purpose; a pending one was never posted.
-    const state = isRecord(review) ? str(review['state']) : undefined;
-    if (state === 'DISMISSED' || state === 'PENDING') continue;
-    const entry = toEntry(review, 'submitted_at');
+    // A pending review was never posted. Dismissed ones stay, so a block survives dismissal.
+    if (isRecord(review) && review['state'] === 'PENDING') continue;
+    const entry = toEntry(review, 'submittedAt');
     if (entry) entries.push(entry);
   }
-  return { headSha: head, labels, entries };
+  return { headSha: head, labels, files, entries };
 }

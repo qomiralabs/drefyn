@@ -26,6 +26,7 @@ const member = (body: string, i: number) => ({
 const passingInput = {
   headSha: HEAD,
   labels: [],
+  files: ['README.md'],
   entries: ['code-reviewer', 'qa-verifier', 'hygiene-auditor'].map((r, i) => member(marker(r), i)),
 };
 
@@ -57,6 +58,67 @@ describe('review-gate evaluate', () => {
     ]);
     expect(res.code).toBe(1);
     expect(res.out).toMatch(/design-reviewer\s+missing/);
+  });
+
+  it('needs the security reviewer when a changed path requires it', async () => {
+    const res = await run([
+      'evaluate',
+      '--input',
+      writeInput({ ...passingInput, files: ['.github/workflows/ci.yml'] }),
+    ]);
+    expect(res.code).toBe(1);
+    expect(res.out).toMatch(/security-reviewer\s+missing \(path \.github\/workflows\/ci\.yml\)/);
+  });
+
+  it('reads path rules from --rules', async () => {
+    const rules = join(dir, 'rules.json');
+    writeFileSync(
+      rules,
+      JSON.stringify({
+        rules: [{ reviewer: 'design-reviewer', prefixes: ['apps/web/'], names: [], contains: [] }],
+      }),
+    );
+    const res = await run([
+      'evaluate',
+      '--input',
+      writeInput({ ...passingInput, files: ['apps/web/page.tsx'] }),
+      '--rules',
+      rules,
+    ]);
+    expect(res.code).toBe(1);
+    expect(res.out).toMatch(/design-reviewer\s+missing \(path apps\/web\/page\.tsx\)/);
+  });
+
+  it('exits 2 on a broken rules file', async () => {
+    const rules = join(dir, 'rules.json');
+    writeFileSync(rules, '{"rules": "nope"}');
+    const res = await run(['evaluate', '--input', writeInput(passingInput), '--rules', rules]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('invalid rules');
+  });
+
+  it('exits 2 when the input has no files list, since path rules cannot be applied', async () => {
+    const res = await run([
+      'evaluate',
+      '--input',
+      writeInput({ headSha: HEAD, labels: [], entries: passingInput.entries }),
+    ]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('files');
+  });
+
+  it('honours edited and dismissed flags in the input', async () => {
+    const entries = passingInput.entries.map((e, i) => (i === 0 ? { ...e, edited: true } : e));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('1 edited');
+  });
+
+  it('exits 2 when edited is not a boolean', async () => {
+    const entries = passingInput.entries.map((e) => ({ ...e, edited: 'yes' }));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('entries[0]');
   });
 
   it('writes step outputs and a summary for the workflow', async () => {
@@ -97,7 +159,7 @@ describe('review-gate evaluate', () => {
     const res = await run([
       'evaluate',
       '--input',
-      writeInput({ headSha: HEAD, labels: [], entries: [{ author: 'x' }] }),
+      writeInput({ headSha: HEAD, labels: [], files: [], entries: [{ author: 'x' }] }),
     ]);
     expect(res.code).toBe(2);
     expect(res.err).toContain('entries');
@@ -111,30 +173,52 @@ describe('review-gate evaluate', () => {
 });
 
 describe('review-gate github', () => {
-  function respond(url: URL): Response {
+  async function respond(url: URL, init: RequestInit | undefined): Promise<Response> {
+    if (url.pathname === '/graphql') {
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        query: string;
+      };
+      const kind = body.query.includes('comments(') ? 'comments' : 'reviews';
+      const nodes =
+        kind === 'comments'
+          ? passingInput.entries.map((e) => ({
+              author: { login: e.author },
+              authorAssociation: e.authorAssociation,
+              createdAt: e.createdAt,
+              lastEditedAt: null,
+              body: e.body,
+            }))
+          : [];
+      return Promise.resolve(
+        Response.json({
+          data: {
+            repository: {
+              pullRequest: { [kind]: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+            },
+          },
+        }),
+      );
+    }
     if (url.pathname === '/repos/o/r/pulls/3') {
       return Response.json({ head: { sha: HEAD }, labels: [] });
     }
-    if (url.pathname === '/repos/o/r/issues/3/comments') {
-      return Response.json(
-        passingInput.entries.map((e) => ({
-          user: { login: e.author },
-          author_association: e.authorAssociation,
-          created_at: e.createdAt,
-          body: e.body,
-        })),
-      );
+    if (url.pathname === '/repos/o/r/pulls/3/files') {
+      return Response.json([{ filename: 'README.md' }]);
     }
-    return Response.json([]);
+    return Response.json({ message: 'Not Found' }, { status: 404 });
   }
-  const fakeFetch: typeof fetch = (input) =>
-    Promise.resolve(respond(new URL(input instanceof Request ? input.url : input)));
+  const fakeFetch: typeof fetch = (input, init) =>
+    respond(new URL(input instanceof Request ? input.url : input), init);
 
   it('loads the PR from the API and evaluates it', async () => {
     const output = join(dir, 'out.txt');
     const res = await run(
       ['github', '--repo', 'o/r', '--pr', '3', '--github-output', output],
-      { GITHUB_TOKEN: 't', GITHUB_API_URL: 'https://api.example.test' },
+      {
+        GITHUB_TOKEN: 't',
+        GITHUB_API_URL: 'https://api.example.test',
+        GITHUB_GRAPHQL_URL: 'https://api.example.test/graphql',
+      },
       { fetch: fakeFetch, sleep: () => Promise.resolve() },
     );
     expect(res.code).toBe(0);

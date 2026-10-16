@@ -12,12 +12,30 @@ export interface Entry {
   authorAssociation: string;
   createdAt: string;
   body: string;
+  // Anyone with write access can edit someone else's comment, and the author stays the
+  // same, so an edited body is not evidence of what its author decided.
+  edited?: boolean;
+  dismissed?: boolean;
 }
 
 export interface GateInput {
   headSha: string;
   labels: string[];
+  files: string[];
   entries: Entry[];
+}
+
+// Paths that require a reviewer whatever the labels say, since labels can be removed.
+export interface PathRule {
+  reviewer: string;
+  prefixes: string[];
+  names: string[];
+  contains: string[];
+}
+
+export interface Requirement {
+  reviewer: string;
+  reason: string;
 }
 
 export type ReviewerState = 'approved' | 'changes_requested' | 'missing';
@@ -25,6 +43,7 @@ export type ReviewerState = 'approved' | 'changes_requested' | 'missing';
 export interface ReviewerResult {
   reviewer: string;
   state: ReviewerState;
+  reason: string;
   by?: string;
   at?: string;
 }
@@ -33,7 +52,13 @@ export interface GateResult {
   pass: boolean;
   headSha: string;
   reviewers: ReviewerResult[];
-  ignored: { otherSha: number; notMember: number; unknownReviewer: number };
+  ignored: {
+    otherSha: number;
+    notMember: number;
+    unknownReviewer: number;
+    edited: number;
+    dismissedApproval: number;
+  };
 }
 
 const BASE_REVIEWERS = ['code-reviewer', 'qa-verifier', 'hygiene-auditor'];
@@ -42,7 +67,10 @@ const LABELLED_REVIEWERS: readonly (readonly [label: string, reviewer: string])[
   ['needs-perf', 'performance-reviewer'],
   ['needs-design', 'design-reviewer'],
 ];
-const KNOWN_REVIEWERS = new Set([...BASE_REVIEWERS, ...LABELLED_REVIEWERS.map(([, r]) => r)]);
+export const KNOWN_REVIEWERS = new Set([
+  ...BASE_REVIEWERS,
+  ...LABELLED_REVIEWERS.map(([, r]) => r),
+]);
 
 // Collaborators can be outside contributors with write access; only the org decides.
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER']);
@@ -62,12 +90,37 @@ export function parseMarker(body: string): Marker | undefined {
   return { reviewer, sha, verdict: verdict === 'approve' ? 'approve' : 'changes_requested' };
 }
 
-export function requiredReviewers(labels: string[]): string[] {
-  const set = new Set(labels);
-  return [
-    ...BASE_REVIEWERS,
-    ...LABELLED_REVIEWERS.filter(([label]) => set.has(label)).map(([, reviewer]) => reviewer),
-  ];
+function ruleMatches(rule: PathRule, path: string): boolean {
+  const lower = path.toLowerCase();
+  const name = lower.split('/').at(-1) ?? '';
+  return (
+    rule.prefixes.some((prefix) => lower.startsWith(prefix.toLowerCase())) ||
+    rule.names.some((n) => n.toLowerCase() === name) ||
+    rule.contains.some((part) => lower.includes(part.toLowerCase()))
+  );
+}
+
+export function requiredReviewers(
+  labels: string[],
+  files: string[],
+  rules: PathRule[],
+): Requirement[] {
+  // GitHub treats label names case insensitively, so the gate does too.
+  const set = new Set(labels.map((label) => label.toLowerCase()));
+  const required = new Map<string, string>(BASE_REVIEWERS.map((r) => [r, 'always']));
+  for (const [label, reviewer] of LABELLED_REVIEWERS) {
+    if (set.has(label)) required.set(reviewer, `label ${label}`);
+  }
+  for (const rule of rules) {
+    if (required.has(rule.reviewer)) continue;
+    const hit = files.find((file) => ruleMatches(rule, file));
+    if (hit !== undefined) required.set(rule.reviewer, `path ${hit}`);
+  }
+  const order = [...BASE_REVIEWERS, ...LABELLED_REVIEWERS.map(([, r]) => r)];
+  return order.flatMap((reviewer) => {
+    const reason = required.get(reviewer);
+    return reason === undefined ? [] : [{ reviewer, reason }];
+  });
 }
 
 interface Counted {
@@ -84,11 +137,17 @@ function timeOf(entry: Entry): number {
   return time;
 }
 
-export function evaluate(input: GateInput): GateResult {
+export function evaluate(input: GateInput, rules: PathRule[] = []): GateResult {
   const headSha = input.headSha.toLowerCase();
   if (!SHA.test(headSha)) throw new Error(`head SHA must be 40 hex characters: ${input.headSha}`);
 
-  const ignored = { otherSha: 0, notMember: 0, unknownReviewer: 0 };
+  const ignored = {
+    otherSha: 0,
+    notMember: 0,
+    unknownReviewer: 0,
+    edited: 0,
+    dismissedApproval: 0,
+  };
   const counted: Counted[] = [];
   for (const entry of input.entries) {
     const marker = parseMarker(entry.body);
@@ -97,6 +156,10 @@ export function evaluate(input: GateInput): GateResult {
     if (!TRUSTED_ASSOCIATIONS.has(entry.authorAssociation)) ignored.notMember += 1;
     else if (marker.sha !== headSha) ignored.otherSha += 1;
     else if (!KNOWN_REVIEWERS.has(marker.reviewer)) ignored.unknownReviewer += 1;
+    else if (entry.edited === true) ignored.edited += 1;
+    // Dismissing a review must not erase a block, but it does withdraw an approval.
+    else if (entry.dismissed === true && marker.verdict === 'approve')
+      ignored.dismissedApproval += 1;
     else counted.push({ marker, entry, time });
   }
 
@@ -110,12 +173,14 @@ export function evaluate(input: GateInput): GateResult {
   const latest = new Map<string, Counted>();
   for (const item of counted) latest.set(item.marker.reviewer, item);
 
-  const reviewers = requiredReviewers(input.labels).map((reviewer): ReviewerResult => {
+  const required = requiredReviewers(input.labels, input.files, rules);
+  const reviewers = required.map(({ reviewer, reason }): ReviewerResult => {
     const item = latest.get(reviewer);
-    if (!item) return { reviewer, state: 'missing' };
+    if (!item) return { reviewer, state: 'missing', reason };
     return {
       reviewer,
       state: item.marker.verdict === 'approve' ? 'approved' : 'changes_requested',
+      reason,
       by: item.entry.author,
       at: item.entry.createdAt,
     };
@@ -136,11 +201,11 @@ export function formatReport(result: GateResult): string {
     'required reviewers:',
     ...result.reviewers.map((r) => {
       const name = r.reviewer.padEnd(width);
-      if (r.state === 'missing') return `  ${name}missing`;
+      if (r.state === 'missing') return `  ${name}missing (${r.reason})`;
       const what = r.state === 'approved' ? 'approved' : 'changes requested';
       return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}`;
     }),
-    `ignored: ${result.ignored.otherSha} for another SHA, ${result.ignored.notMember} from non members, ${result.ignored.unknownReviewer} unknown reviewers`,
+    `ignored: ${result.ignored.otherSha} for another SHA, ${result.ignored.notMember} from non members, ${result.ignored.unknownReviewer} unknown reviewers, ${result.ignored.edited} edited, ${result.ignored.dismissedApproval} approvals on dismissed reviews`,
   ];
   return lines.join('\n') + '\n';
 }

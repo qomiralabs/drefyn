@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "reviewer": "security-reviewer",
+      "prefixes": [".github/", "scripts/", "deploy/"],
+      "names": [
+        "renovate.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "SECURITY.md"
+      ],
+      "contains": ["auth", "tenancy", "billing", "credits", "entitlements"]
+    }
+  ]
+}
