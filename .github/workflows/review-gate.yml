@@ -1,19 +1,22 @@
 # Trust model
 #
-# The gate reads reviewer markers from PR comments and reviews through the API and sets
-# the `review-gate` commit status on the PR head SHA. PR code is never checked out in a
-# job that can write anything:
+# What this workflow protects:
 #
-# - `evaluate` has read-only scopes. It runs the gate script from the PR base commit, or
-#   from the default branch for comment and dispatch events, so a PR cannot change the
-#   rules it is judged by.
-# - `report` has `statuses: write` and checks out nothing. It only posts the result that
-#   `evaluate` produced, after validating the SHA and state. A failed gate shows up as the
-#   failed `evaluate` job and the `review-gate` status; `report` itself fails only when it
-#   could not post a real result.
+# - The gate script and its path rules come from the PR base commit for PR and review
+#   events, and from the default branch for comment and dispatch events, so editing
+#   scripts/review-gate in a PR does not change how that PR is judged. The one exception
+#   is the bootstrap step below.
+# - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
+#   re-reads the PR head from the API and posts only for that SHA.
+# - Fork PRs cannot set the status from their own runs, since their token is read only.
+#   Marker comments run this file from the default branch and post for them.
 #
-# Comment events always run this file from the default branch with a write token, which
-# is what lets fork PRs get a status: their own pull_request runs have a read-only token.
+# What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
+# GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
+# can edit this file, or add another workflow, and post its own `review-gate` status.
+# The controls for that live outside the workflow: branch protection with code owner
+# review on .github/ and scripts/, and later an org required workflow or a status from a
+# GitHub App that PR branches cannot change.
 
 name: Review gate
 
@@ -33,21 +36,27 @@ on:
 
 permissions: {}
 
+# Comments without a marker get a group of their own, so a stream of ordinary comments
+# cannot cancel or replace a pending gate run.
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
-  cancel-in-progress: true
+  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}${{ (github.event_name == 'issue_comment' && github.event.action != 'deleted' && !contains(github.event.comment.body, 'drefyn-review')) && format('-unrelated-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   evaluate:
     name: evaluate
-    # Comments on plain issues have nothing to gate.
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    # Plain issue comments have nothing to gate, and PR comments only matter when they
+    # carry a marker or a deletion may have removed one.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+      (github.event.action == 'deleted' || contains(github.event.comment.body, 'drefyn-review')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: read # check out the gate script
+      pull-requests: read # PR head, labels, files and reviews
+      issues: read # PR conversation comments
     outputs:
       state: ${{ steps.gate.outputs.state }}
       sha: ${{ steps.gate.outputs.sha }}
@@ -69,20 +78,22 @@ jobs:
         with:
           ref: ${{ steps.ref.outputs.ref }}
           persist-credentials: false
-      # The commit that adds this gate cannot find it on its own base. Only in that case,
-      # and only for same-repo PRs, the script comes from the PR head. This job is read
-      # only, so the PR code it runs cannot set a status or write anywhere.
+      # Until development holds the gate script, a PR into it cannot find the script on its
+      # base. Only then, and only for same repo PRs into development, the script comes
+      # from the PR head. This job is read only, and `report` does not trust its SHA.
       - name: Check for the gate script on the trusted ref
         id: bootstrap
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPO: ${{ github.repository }}
         run: |
           if [ -f scripts/review-gate/src/cli.ts ]; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT_NAME" = pull_request ] && [ "$HEAD_REPO" = "$REPO" ]; then
-            echo "::warning::gate script missing on the base ref; using the PR head copy once"
+          elif { [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = pull_request_review ]; } &&
+            [ "$HEAD_REPO" = "$REPO" ] && [ "$BASE_REF" = development ]; then
+            echo "::warning::gate script missing on the base ref; using the PR head copy"
             echo "needed=true" >> "$GITHUB_OUTPUT"
           else
             echo "::error::gate script missing on the trusted ref"
@@ -111,37 +122,65 @@ jobs:
   report:
     name: report
     needs: evaluate
-    if: ${{ !cancelled() && needs.evaluate.result != 'skipped' }}
+    # Fork PR runs have a read-only token; the next marker comment posts for them.
+    if: >-
+      !cancelled() && needs.evaluate.result != 'skipped' &&
+      !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      statuses: write
+      pull-requests: read # re-read the PR head
+      statuses: write # post the review-gate status
     steps:
       - name: Set the review-gate status
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
           GATE_STATE: ${{ needs.evaluate.outputs.state }}
           GATE_SHA: ${{ needs.evaluate.outputs.sha }}
           GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          sha="${GATE_SHA:-$EVENT_HEAD_SHA}"
-          state="${GATE_STATE:-error}"
-          description="${GATE_DESCRIPTION:-the gate could not evaluate this PR}"
-          case "$state" in success|failure) ;; *) state=error ;; esac
-          # If the evaluation broke before it learned the head SHA, there is nothing safe
-          # to mark; the failed job is the signal.
-          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
-            echo "::error::no head SHA to report on"
+          is_sha() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to report on"
             exit 1
           fi
-          gh api --method POST "repos/${REPO}/statuses/${sha}" \
+          # The current head comes from the API, not from evaluate, which may have run PR code.
+          head="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          if ! is_sha "$head"; then
+            echo "::error::could not read the PR head"
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = pull_request ] && [ "$EVENT_HEAD_SHA" != "$head" ]; then
+            echo "::error::the PR moved on to ${head}; that push runs its own gate"
+            exit 1
+          fi
+
+          state="$GATE_STATE"
+          description="$GATE_DESCRIPTION"
+          case "$state" in
+            success|failure)
+              if [ "$GATE_SHA" != "$head" ]; then
+                echo "::error::evaluate reported ${GATE_SHA:-no SHA}, but the PR head is ${head}"
+                exit 1
+              fi
+              ;;
+            *)
+              # No usable result. An error status cannot help anyone pass, so it is posted
+              # on the head read above to fail closed.
+              state=error
+              description="the gate could not evaluate this PR"
+              ;;
+          esac
+
+          gh api --method POST "repos/${REPO}/statuses/${head}" \
             -f state="$state" -f context=review-gate \
             -f description="${description:0:140}" -f target_url="$RUN_URL" > /dev/null
-          echo "review-gate: ${state} on ${sha}: ${description}"
-          # The error status is posted so the PR fails closed, but nothing was evaluated.
+          echo "review-gate: ${state} on ${head}: ${description}"
           if [ "$state" = error ]; then
             echo "::error::the gate produced no result"
             exit 1
