@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":semanticCommits"],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "automerge": false,
+  "rangeStrategy": "pin",
+  "minimumReleaseAge": "3 days",
+  "labels": ["type:chore", "area:platform"],
+  "postUpdateOptions": ["pnpmDedupe"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "One weekly PR for everything that should not break anything.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "weekly non-major updates"
+    },
+    {
+      "description": "Actions move together so the pinned SHAs stay reviewable in one place.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "Majors stay separate; each needs its own look at the changelog.",
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    }
+  ]
+}

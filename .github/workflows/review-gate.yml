@@ -1,0 +1,174 @@
+# Trust model
+#
+# What this workflow protects:
+#
+# - Markers come only from submitted PR reviews. A submitted review cannot be deleted,
+#   and a review edited after submission blocks every reviewer its author may sign for
+#   until fresh reviews follow, so neither a deletion nor an edit can lift a block.
+#   Issue comments are not read at all.
+# - A marker counts only when its author's login is listed for that reviewer in
+#   scripts/review-gate/rules.json. Author association is not used: the Actions token
+#   cannot see private org membership and reports members as CONTRIBUTOR.
+# - The gate script, its path rules and the allow list come from the PR base commit for
+#   PR and review events, and from the default branch for a dispatch, so editing them in
+#   a PR does not change how that PR is judged. This workflow never checks out PR code.
+#   While development lacks the script, review-gate-bootstrap.yml covers same repo PRs
+#   into it.
+# - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
+#   re-reads the PR head from the API and posts only for that SHA.
+# - Fork PRs cannot set the status from their own runs, since their pull_request and
+#   pull_request_review runs get a read-only token. A maintainer refreshes their status
+#   with a dispatch.
+#
+# What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
+# GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
+# can edit this file, or add another workflow, and post its own `review-gate` status.
+# The controls for that live outside the workflow: branch protection with code owner
+# review on .github/ and scripts/, and later an org required workflow or a status from a
+# GitHub App that PR branches cannot change.
+
+name: Review gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  evaluate:
+    name: evaluate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out the gate script
+      pull-requests: read # PR head, labels, files and reviews
+    outputs:
+      present: ${{ steps.script.outputs.present }}
+      state: ${{ steps.gate.outputs.state }}
+      sha: ${{ steps.gate.outputs.sha }}
+      description: ${{ steps.gate.outputs.description }}
+    steps:
+      # PR and review events judge the PR with the code on its base commit.
+      - name: Check out the PR base
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      # A dispatch runs this file from the ref the caller picked, but the script always
+      # comes from the default branch, named literally so the ref never comes from input.
+      - name: Check out the default branch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: development
+          persist-credentials: false
+      # Before the gate script reaches development there is nothing trusted to run; the
+      # bootstrap workflow owns that case, so this run steps aside without a status.
+      - name: Check for the gate script on the trusted ref
+        id: script
+        run: |
+          if [ -f scripts/review-gate/src/cli.ts ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::gate script not on the trusted ref yet; review-gate-bootstrap.yml reports instead"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.script.outputs.present == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Evaluate
+        if: steps.script.outputs.present == 'true'
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: >-
+          node scripts/review-gate/src/cli.ts github
+          --repo "$REPO" --pr "$PR_NUMBER"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  report:
+    name: report
+    needs: evaluate
+    # Fork PR runs, reviews included, have a read-only token and cannot post. A dispatch
+    # refreshes a fork PR's status.
+    if: >-
+      !cancelled() && needs.evaluate.result != 'skipped' &&
+      needs.evaluate.outputs.present != 'false' &&
+      !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # re-read the PR head
+      statuses: write # post the review-gate status
+    steps:
+      - name: Set the review-gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          GATE_STATE: ${{ needs.evaluate.outputs.state }}
+          GATE_SHA: ${{ needs.evaluate.outputs.sha }}
+          GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          is_sha() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to report on"
+            exit 1
+          fi
+          # The current head comes from the API, not from evaluate, which may have run PR code.
+          head="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          if ! is_sha "$head"; then
+            echo "::error::could not read the PR head"
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = pull_request ] && [ "$EVENT_HEAD_SHA" != "$head" ]; then
+            echo "::error::the PR moved on to ${head}; that push runs its own gate"
+            exit 1
+          fi
+
+          state="$GATE_STATE"
+          description="$GATE_DESCRIPTION"
+          case "$state" in
+            success|failure)
+              if [ "$GATE_SHA" != "$head" ]; then
+                echo "::error::evaluate reported ${GATE_SHA:-no SHA}, but the PR head is ${head}"
+                exit 1
+              fi
+              ;;
+            *)
+              # No usable result. An error status cannot help anyone pass, so it is posted
+              # on the head read above to fail closed.
+              state=error
+              description="the gate could not evaluate this PR"
+              ;;
+          esac
+
+          gh api --method POST "repos/${REPO}/statuses/${head}" \
+            -f state="$state" -f context=review-gate \
+            -f description="${description:0:140}" -f target_url="$RUN_URL" > /dev/null
+          echo "review-gate: ${state} on ${head}: ${description}"
+          if [ "$state" = error ]; then
+            echo "::error::the gate produced no result"
+            exit 1
+          fi

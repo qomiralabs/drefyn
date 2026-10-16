@@ -1,0 +1,32 @@
+{
+  "reviewers": {
+    "code-reviewer": ["Divine572"],
+    "qa-verifier": ["Divine572"],
+    "hygiene-auditor": ["Divine572"],
+    "security-reviewer": ["Divine572"],
+    "performance-reviewer": ["Divine572"],
+    "design-reviewer": ["Divine572"]
+  },
+  "rules": [
+    {
+      "reviewer": "security-reviewer",
+      "prefixes": [".github/", "scripts/", "deploy/"],
+      "names": [
+        "renovate.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "SECURITY.md",
+        ".npmrc",
+        ".nvmrc",
+        ".pnpmfile.cjs",
+        "turbo.json",
+        "eslint.config.js",
+        "vitest.shared.ts",
+        ".prettierrc.json",
+        ".prettierignore"
+      ],
+      "contains": ["auth", "tenancy", "billing", "credits", "entitlements", "tsconfig"]
+    }
+  ]
+}

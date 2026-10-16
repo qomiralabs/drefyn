@@ -9,3 +9,10 @@ docs/internal/
 .env
 .env.*
 !.env.example
+
+# Build and tool output
+node_modules/
+coverage/
+dist/
+.turbo/
+*.tsbuildinfo
