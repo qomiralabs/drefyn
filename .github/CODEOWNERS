@@ -1,11 +1,19 @@
-# Changes to the gates, the supply chain and the security policy need a maintainer's
-# review, since a PR can otherwise rewrite the checks that judge it.
+# Changes to the gates, the build and install config, the supply chain and the security
+# policy need a maintainer's review, since a PR can otherwise rewrite the checks that
+# judge it.
 /.github/                  @Divine572
-/scripts/review-gate/      @Divine572
-/scripts/license-policy/   @Divine572
-/scripts/hygiene/          @Divine572
+/scripts/                  @Divine572
 /renovate.json             @Divine572
 /SECURITY.md               @Divine572
 /package.json              @Divine572
 /pnpm-lock.yaml            @Divine572
 /pnpm-workspace.yaml       @Divine572
+/.npmrc                    @Divine572
+/.nvmrc                    @Divine572
+/.pnpmfile.cjs             @Divine572
+/turbo.json                @Divine572
+/tsconfig*.json            @Divine572
+/eslint.config.js          @Divine572
+/vitest.shared.ts          @Divine572
+/.prettierrc.json          @Divine572
+/.prettierignore           @Divine572
