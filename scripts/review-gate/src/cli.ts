@@ -1,6 +1,6 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { evaluate, formatReport, statusDescription, type Entry, type GateInput } from './gate.ts';
+import { evaluate, formatReport, statusDescription, type Review, type GateInput } from './gate.ts';
 import { GitHubClient, loadGateInput } from './github.ts';
 import { DEFAULT_CONFIG_PATH, loadConfig } from './rules.ts';
 
@@ -27,18 +27,18 @@ exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
 
 class InputError extends Error {}
 
-const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'entries']);
+const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'reviews']);
 const ENTRY_KEYS = new Set([
   'author',
   'authorAssociation',
-  'createdAt',
+  'submittedAt',
   'body',
   'edited',
   'dismissed',
 ]);
 
 // A misspelled or foreign key (say lastEditedAt instead of edited) would otherwise be
-// ignored and the entry judged as if it were clean.
+// ignored and the review judged as if it were clean.
 function rejectUnknownKeys(value: Record<string, unknown>, known: Set<string>, where: string) {
   const unknown = Object.keys(value).find((key) => !known.has(key));
   if (unknown !== undefined) throw new InputError(`${where} has unknown key ${unknown}`);
@@ -48,7 +48,7 @@ function parseInput(raw: unknown): GateInput {
   if (typeof raw !== 'object' || raw === null) throw new InputError('input must be an object');
   const value = raw as Record<string, unknown>;
   rejectUnknownKeys(value, INPUT_KEYS, 'input');
-  const { headSha, labels, files, entries } = value;
+  const { headSha, labels, files, reviews } = value;
   if (typeof headSha !== 'string') throw new InputError('headSha must be a string');
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
     throw new InputError('labels must be a list of strings');
@@ -57,33 +57,33 @@ function parseInput(raw: unknown): GateInput {
   if (!Array.isArray(files) || !files.every((f) => typeof f === 'string')) {
     throw new InputError('files must be a list of changed paths');
   }
-  if (!Array.isArray(entries)) throw new InputError('entries must be a list');
-  const parsed = (entries as unknown[]).map((item, i): Entry => {
+  if (!Array.isArray(reviews)) throw new InputError('reviews must be a list');
+  const parsed = (reviews as unknown[]).map((item, i): Review => {
     const e = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
-    rejectUnknownKeys(e, ENTRY_KEYS, `entries[${i}]`);
-    const { author, authorAssociation, createdAt, body, edited, dismissed } = e;
+    rejectUnknownKeys(e, ENTRY_KEYS, `reviews[${i}]`);
+    const { author, authorAssociation, submittedAt, body, edited, dismissed } = e;
     if (
       typeof author !== 'string' ||
       (authorAssociation !== undefined && typeof authorAssociation !== 'string') ||
-      typeof createdAt !== 'string' ||
+      typeof submittedAt !== 'string' ||
       typeof body !== 'string' ||
       (edited !== undefined && typeof edited !== 'boolean') ||
       (dismissed !== undefined && typeof dismissed !== 'boolean')
     ) {
       throw new InputError(
-        `entries[${i}] needs string author, createdAt and body; authorAssociation must be a string and edited and dismissed booleans if set`,
+        `reviews[${i}] needs string author, submittedAt and body; authorAssociation must be a string and edited and dismissed booleans if set`,
       );
     }
     return {
       author,
       ...(authorAssociation === undefined ? {} : { authorAssociation }),
-      createdAt,
+      submittedAt,
       body,
       ...(edited === undefined ? {} : { edited }),
       ...(dismissed === undefined ? {} : { dismissed }),
     };
   });
-  return { headSha, labels, files, entries: parsed };
+  return { headSha, labels, files, reviews: parsed };
 }
 
 export async function main(

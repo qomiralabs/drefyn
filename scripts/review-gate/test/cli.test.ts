@@ -20,7 +20,7 @@ afterEach(() => {
 const member = (body: string, i: number) => ({
   author: 'Divine572',
   authorAssociation: 'MEMBER',
-  createdAt: `2026-10-07T10:00:0${i}Z`,
+  submittedAt: `2026-10-07T10:00:0${i}Z`,
   body,
 });
 
@@ -28,7 +28,7 @@ const passingInput = {
   headSha: HEAD,
   labels: [],
   files: ['README.md'],
-  entries: ['code-reviewer', 'qa-verifier', 'hygiene-auditor'].map((r, i) => member(marker(r), i)),
+  reviews: ['code-reviewer', 'qa-verifier', 'hygiene-auditor'].map((r, i) => member(marker(r), i)),
 };
 
 async function run(args: string[], env: NodeJS.ProcessEnv = {}, deps: Deps = {}) {
@@ -108,27 +108,34 @@ describe('review-gate evaluate', () => {
     const res = await run([
       'evaluate',
       '--input',
-      writeInput({ headSha: HEAD, labels: [], entries: passingInput.entries }),
+      writeInput({ headSha: HEAD, labels: [], reviews: passingInput.reviews }),
     ]);
     expect(res.code).toBe(2);
     expect(res.err).toContain('files');
   });
 
   it('honours edited and dismissed flags in the input', async () => {
-    const entries = passingInput.entries.map((e, i) => (i === 0 ? { ...e, edited: true } : e));
-    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    const reviews = passingInput.reviews.map((e, i) => (i === 0 ? { ...e, edited: true } : e));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
     expect(res.code).toBe(1);
-    expect(res.out).toContain('(edited marker; post a fresh one)');
+    expect(res.out).toContain('(edited review; post a fresh one)');
   });
 
-  it('exits 2 on an unknown entry key, so a hand written lastEditedAt cannot silently do nothing', async () => {
-    const entries = passingInput.entries.map((e) => ({
+  it('exits 2 on an unknown review key, so a hand written lastEditedAt cannot silently do nothing', async () => {
+    const reviews = passingInput.reviews.map((e) => ({
       ...e,
       lastEditedAt: '2026-10-07T12:00:00Z',
     }));
-    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
     expect(res.code).toBe(2);
-    expect(res.err).toContain('entries[0] has unknown key lastEditedAt');
+    expect(res.err).toContain('reviews[0] has unknown key lastEditedAt');
+  });
+
+  it('rejects the old entries key, since issue comments no longer carry markers', async () => {
+    const { reviews, ...rest } = passingInput;
+    const res = await run(['evaluate', '--input', writeInput({ ...rest, entries: reviews })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('unknown key entries');
   });
 
   it('exits 2 on an unknown top level key', async () => {
@@ -137,21 +144,21 @@ describe('review-gate evaluate', () => {
     expect(res.err).toContain('unknown key head');
   });
 
-  it('accepts entries without an author association, since it is not used', async () => {
-    const entries = passingInput.entries.map((e) => ({
+  it('accepts reviews without an author association, since it is not used', async () => {
+    const reviews = passingInput.reviews.map((e) => ({
       author: e.author,
-      createdAt: e.createdAt,
+      submittedAt: e.submittedAt,
       body: e.body,
     }));
-    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
     expect(res.code).toBe(0);
   });
 
   it('exits 2 when edited is not a boolean', async () => {
-    const entries = passingInput.entries.map((e) => ({ ...e, edited: 'yes' }));
-    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, entries })]);
+    const reviews = passingInput.reviews.map((e) => ({ ...e, edited: 'yes' }));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
     expect(res.code).toBe(2);
-    expect(res.err).toContain('entries[0]');
+    expect(res.err).toContain('reviews[0]');
   });
 
   it('writes step outputs and a summary for the workflow', async () => {
@@ -188,14 +195,14 @@ describe('review-gate evaluate', () => {
     expect(res.err).toContain('labels');
   });
 
-  it('exits 2 on entries with the wrong shape', async () => {
+  it('exits 2 on reviews with the wrong shape', async () => {
     const res = await run([
       'evaluate',
       '--input',
-      writeInput({ headSha: HEAD, labels: [], files: [], entries: [{ author: 'x' }] }),
+      writeInput({ headSha: HEAD, labels: [], files: [], reviews: [{ author: 'x' }] }),
     ]);
     expect(res.code).toBe(2);
-    expect(res.err).toContain('entries');
+    expect(res.err).toContain('reviews');
   });
 
   it('exits 2 without --input', async () => {
@@ -211,22 +218,24 @@ describe('review-gate github', () => {
       const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
         query: string;
       };
-      const kind = body.query.includes('comments(') ? 'comments' : 'reviews';
-      const nodes =
-        kind === 'comments'
-          ? passingInput.entries.map((e) => ({
-              author: { login: e.author },
-              authorAssociation: e.authorAssociation,
-              createdAt: e.createdAt,
-              lastEditedAt: null,
-              body: e.body,
-            }))
-          : [];
+      if (body.query.includes('comments(')) {
+        return Response.json({ message: 'comments are not a marker source' }, { status: 400 });
+      }
+      const nodes = passingInput.reviews.map((e) => ({
+        author: { login: e.author },
+        authorAssociation: e.authorAssociation,
+        submittedAt: e.submittedAt,
+        lastEditedAt: null,
+        state: 'COMMENTED',
+        body: e.body,
+      }));
       return Promise.resolve(
         Response.json({
           data: {
             repository: {
-              pullRequest: { [kind]: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+              pullRequest: {
+                reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+              },
             },
           },
         }),

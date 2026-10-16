@@ -6,13 +6,14 @@ export interface Marker {
   verdict: Verdict;
 }
 
-// One PR issue comment or submitted review body.
-export interface Entry {
+// One submitted PR review. Issue comments are not a marker source: they can be deleted
+// without trace, and a submitted review cannot.
+export interface Review {
   author: string;
   // Kept for the report only. The Actions token cannot see private org membership, so
   // this says CONTRIBUTOR for members and is no signal of trust.
   authorAssociation?: string;
-  createdAt: string;
+  submittedAt: string;
   body: string;
   // Anyone with write access can edit someone else's comment, and the author stays the
   // same, so an edited body is not evidence of what its author decided.
@@ -24,7 +25,7 @@ export interface GateInput {
   headSha: string;
   labels: string[];
   files: string[];
-  entries: Entry[];
+  reviews: Review[];
 }
 
 // Paths that require a reviewer whatever the labels say, since labels can be removed.
@@ -63,7 +64,7 @@ export type IgnoreReason =
 export interface IgnoredEntry {
   author: string;
   association: string;
-  createdAt: string;
+  submittedAt: string;
   reviewer?: string;
   reason: IgnoreReason;
 }
@@ -145,14 +146,16 @@ export function requiredReviewers(
 interface Counted {
   reviewer: string;
   verdict: Verdict;
-  entry: Entry;
+  review: Review;
   time: number;
 }
 
-function timeOf(entry: Entry): number {
-  const time = Date.parse(entry.createdAt);
+function timeOf(review: Review): number {
+  const time = Date.parse(review.submittedAt);
   if (Number.isNaN(time)) {
-    throw new Error(`unreadable timestamp ${JSON.stringify(entry.createdAt)} from ${entry.author}`);
+    throw new Error(
+      `unreadable timestamp ${JSON.stringify(review.submittedAt)} from ${review.author}`,
+    );
   }
   return time;
 }
@@ -169,34 +172,41 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
 
   const ignored: IgnoredEntry[] = [];
   const counted: Counted[] = [];
-  for (const entry of input.entries) {
-    const marker = parseMarker(entry.body);
+  for (const review of input.reviews) {
+    const marker = parseMarker(review.body);
     const skip = (reason: IgnoreReason) => {
       ignored.push({
-        author: entry.author,
-        association: entry.authorAssociation ?? 'unknown',
-        createdAt: entry.createdAt,
+        author: review.author,
+        association: review.authorAssociation ?? 'unknown',
+        submittedAt: review.submittedAt,
         ...(marker === undefined ? {} : { reviewer: marker.reviewer }),
         reason,
       });
     };
+    // An edit can change or remove a marker without trace, so an edited review from a
+    // signer blocks every reviewer that login may sign for, whatever its body says now,
+    // until the same reviewer gets a newer review with a valid marker.
+    if (review.edited === true) {
+      const signable = [...KNOWN_REVIEWERS].filter((r) => maySign(config, r, review.author));
+      if (signable.length > 0) {
+        const time = timeOf(review);
+        for (const reviewer of signable) {
+          counted.push({ reviewer, verdict: 'changes_requested', review, time });
+        }
+        continue;
+      }
+    }
     if (!marker) {
-      if (entry.body.includes('drefyn-review')) skip('not-last-line');
+      if (review.body.includes('drefyn-review')) skip('not-last-line');
       continue;
     }
-    const time = timeOf(entry);
+    const time = timeOf(review);
     if (!KNOWN_REVIEWERS.has(marker.reviewer)) skip('unknown-reviewer');
-    else if (!maySign(config, marker.reviewer, entry.author)) skip('not-allowed');
+    else if (!maySign(config, marker.reviewer, review.author)) skip('not-allowed');
     else if (marker.sha !== headSha) skip('wrong-sha');
     // Dismissing a review must not erase a block, but it does withdraw an approval.
-    else if (entry.dismissed === true && entry.edited !== true && marker.verdict === 'approve')
-      skip('dismissed-approve');
-    else {
-      // An edited marker never approves. Counting it as a block, rather than skipping it,
-      // also stops an edit from bringing back an older approval from the same reviewer.
-      const verdict = entry.edited === true ? 'changes_requested' : marker.verdict;
-      counted.push({ reviewer: marker.reviewer, verdict, entry, time });
-    }
+    else if (review.dismissed === true && marker.verdict === 'approve') skip('dismissed-approve');
+    else counted.push({ reviewer: marker.reviewer, verdict: marker.verdict, review, time });
   }
 
   // On a timestamp tie, changes_requested sorts last so it wins: the gate fails closed.
@@ -220,9 +230,9 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
       reviewer,
       state: item.verdict === 'approve' ? 'approved' : 'changes_requested',
       reason,
-      by: item.entry.author,
-      at: item.entry.createdAt,
-      edited: item.entry.edited === true,
+      by: item.review.author,
+      at: item.review.submittedAt,
+      edited: item.review.edited === true,
     };
   });
 
@@ -244,13 +254,13 @@ export function formatReport(result: GateResult): string {
       if (r.state === 'missing') return `  ${name}missing (${r.reason})`;
       if (r.state === 'no-signers') return `  ${name}no logins allowed to sign (${r.reason})`;
       const what = r.state === 'approved' ? 'approved' : 'changes requested';
-      const note = r.edited === true ? ' (edited marker; post a fresh one)' : '';
+      const note = r.edited === true ? ' (edited review; post a fresh one)' : '';
       return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}${note}`;
     }),
     result.ignored.length === 0 ? 'ignored markers: none' : 'ignored markers:',
     ...result.ignored.map((i) => {
       const target = i.reviewer === undefined ? '' : ` for ${i.reviewer}`;
-      return `  ${i.author} (${i.association}) at ${i.createdAt}${target}: ${IGNORE_TEXT[i.reason]}`;
+      return `  ${i.author} (${i.association}) at ${i.submittedAt}${target}: ${IGNORE_TEXT[i.reason]}`;
     }),
   ];
   return lines.join('\n') + '\n';

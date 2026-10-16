@@ -1,4 +1,4 @@
-import type { Entry, GateInput } from './gate.ts';
+import type { GateInput, Review } from './gate.ts';
 
 export interface GitHubClientOptions {
   token: string;
@@ -165,19 +165,9 @@ export class GitHubClient {
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const MAX_LISTED_FILES = 3000;
 
-// lastEditedAt is only set when the body changes, unlike REST updated_at, and REST has no
-// edit time for review bodies at all.
-const COMMENTS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      comments(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes { author { login } authorAssociation createdAt lastEditedAt body }
-      }
-    }
-  }
-}`;
-
+// Markers come only from submitted reviews: a review cannot be deleted, while an issue
+// comment can vanish and take a block with it. lastEditedAt is set only when the body
+// changes, unlike REST updated_at, and REST has no edit time for review bodies at all.
 const REVIEWS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -189,7 +179,8 @@ const REVIEWS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $af
   }
 }`;
 
-function connectionOf(kind: 'comments' | 'reviews') {
+function reviewsConnection() {
+  const kind = 'reviews';
   return (data: unknown): Connection => {
     const repository = isRecord(data) ? data['repository'] : undefined;
     const pr = isRecord(repository) ? repository['pullRequest'] : undefined;
@@ -209,17 +200,17 @@ function connectionOf(kind: 'comments' | 'reviews') {
 
 // A node the gate cannot place in time could be a block, so it fails the run instead of
 // being dropped.
-function toEntry(raw: unknown, timeField: 'createdAt' | 'submittedAt'): Entry {
-  const createdAt = isRecord(raw) ? str(raw[timeField]) : undefined;
-  if (!isRecord(raw) || createdAt === undefined) {
-    throw new Error(`GraphQL returned a comment or review with no timestamp`);
+function toReview(raw: unknown): Review {
+  const submittedAt = isRecord(raw) ? str(raw['submittedAt']) : undefined;
+  if (!isRecord(raw) || submittedAt === undefined) {
+    throw new Error('GraphQL returned a submitted review with no timestamp');
   }
   const author = isRecord(raw['author']) ? raw['author'] : undefined;
   return {
     // Deleted accounts come back as null authors; GitHub shows them as "ghost".
     author: str(author?.['login']) ?? 'ghost',
     authorAssociation: str(raw['authorAssociation']) ?? 'NONE',
-    createdAt,
+    submittedAt,
     body: str(raw['body']) ?? '',
     edited: raw['lastEditedAt'] !== null && raw['lastEditedAt'] !== undefined,
     dismissed: raw['state'] === 'DISMISSED',
@@ -270,19 +261,12 @@ export async function loadGateInput(
   });
 
   const variables = { owner, name, number: prNumber };
-  const comments = await client.graphqlConnection(
-    COMMENTS_QUERY,
-    variables,
-    connectionOf('comments'),
-  );
-  const reviews = await client.graphqlConnection(REVIEWS_QUERY, variables, connectionOf('reviews'));
-
-  const entries: Entry[] = [];
-  for (const comment of comments) entries.push(toEntry(comment, 'createdAt'));
-  for (const review of reviews) {
+  const nodes = await client.graphqlConnection(REVIEWS_QUERY, variables, reviewsConnection());
+  const reviews: Review[] = [];
+  for (const node of nodes) {
     // A pending review was never posted. Dismissed ones stay, so a block survives dismissal.
-    if (isRecord(review) && review['state'] === 'PENDING') continue;
-    entries.push(toEntry(review, 'submittedAt'));
+    if (isRecord(node) && node['state'] === 'PENDING') continue;
+    reviews.push(toReview(node));
   }
-  return { headSha: head, labels, files, entries };
+  return { headSha: head, labels, files, reviews };
 }

@@ -5,7 +5,7 @@ import { KNOWN_REVIEWERS, type GateConfig, type PathRule } from './gate.ts';
 // itself to the list of people allowed to sign.
 export const DEFAULT_CONFIG_PATH = new URL('../rules.json', import.meta.url);
 
-const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$/;
+const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 
 function fail(detail: string): never {
   throw new Error(`invalid rules: ${detail}`);

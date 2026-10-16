@@ -38,6 +38,11 @@ describe('parseConfig', () => {
     ['logins not a list', { reviewers: { 'code-reviewer': 'alice' }, rules: [] }],
     ['an empty login', { reviewers: { 'code-reviewer': [''] }, rules: [] }],
     ['a login with a space', { reviewers: { 'code-reviewer': ['a b'] }, rules: [] }],
+    // GraphQL reports app logins without the suffix, so such an entry could never match.
+    [
+      'a login with a [bot] suffix',
+      { reviewers: { 'code-reviewer': ['renovate[bot]'] }, rules: [] },
+    ],
   ])('rejects %s', (_name, raw) => {
     expect(() => parseConfig(raw)).toThrow(/invalid rules/);
   });

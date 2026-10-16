@@ -5,7 +5,7 @@ import {
   parseMarker,
   requiredReviewers,
   statusDescription,
-  type Entry,
+  type Review,
   type GateConfig,
   type PathRule,
 } from '../src/gate.ts';
@@ -19,27 +19,27 @@ const marker = (reviewer: string, verdict = 'approve', sha = HEAD) =>
   `<!-- drefyn-review reviewer=${reviewer} sha=${sha} verdict=${verdict} -->`;
 
 let clock = 0;
-function entry(body: string, overrides: Partial<Entry> = {}): Entry {
+function review(body: string, overrides: Partial<Review> = {}): Review {
   clock += 1;
   return {
     author: 'lead',
     authorAssociation: 'CONTRIBUTOR',
-    createdAt: new Date(Date.UTC(2026, 9, 7, 10, 0, clock)).toISOString(),
+    submittedAt: new Date(Date.UTC(2026, 9, 7, 10, 0, clock)).toISOString(),
     body,
     ...overrides,
   };
 }
 
 const approveAll = (...reviewers: string[]) =>
-  reviewers.map((r) => entry(`Looks good.\n\n${marker(r)}`));
+  reviewers.map((r) => review(`Looks good.\n\n${marker(r)}`));
 
 const CONFIG: GateConfig = {
   paths: [],
   reviewers: Object.fromEntries(ALL.map((r) => [r, ['lead']])),
 };
 
-const gate = (entries: Entry[], labels: string[] = [], files: string[] = [], config = CONFIG) =>
-  evaluate({ headSha: HEAD, labels, files, entries }, config);
+const gate = (reviews: Review[], labels: string[] = [], files: string[] = [], config = CONFIG) =>
+  evaluate({ headSha: HEAD, labels, files, reviews }, config);
 
 describe('parseMarker', () => {
   it('parses a marker on the last line', () => {
@@ -161,22 +161,22 @@ describe('evaluate: who may sign', () => {
   it.each(['CONTRIBUTOR', 'NONE', 'MEMBER', 'OWNER', 'COLLABORATOR'])(
     'ignores author association %s entirely: an allowed login counts',
     (association) => {
-      const entries = BASE.map((r) => entry(marker(r), { authorAssociation: association }));
-      expect(gate(entries).pass).toBe(true);
+      const reviews = BASE.map((r) => review(marker(r), { authorAssociation: association }));
+      expect(gate(reviews).pass).toBe(true);
     },
   );
 
   it.each(['MEMBER', 'OWNER'])(
     'does not count a %s whose login is not on the list for that reviewer',
     (association) => {
-      const entries = [
+      const reviews = [
         ...approveAll('code-reviewer', 'qa-verifier'),
-        entry(marker('hygiene-auditor'), {
+        review(marker('hygiene-auditor'), {
           author: 'someone-else',
           authorAssociation: association,
         }),
       ];
-      const result = gate(entries);
+      const result = gate(reviews);
       expect(result.pass).toBe(false);
       expect(result.ignored).toEqual([
         expect.objectContaining({
@@ -201,16 +201,16 @@ describe('evaluate: who may sign', () => {
   });
 
   it('matches logins without regard to case, as GitHub does', () => {
-    const entries = BASE.map((r) => entry(marker(r), { author: 'LEAD' }));
-    expect(gate(entries).pass).toBe(true);
+    const reviews = BASE.map((r) => review(marker(r), { author: 'LEAD' }));
+    expect(gate(reviews).pass).toBe(true);
   });
 
   it('does not let a login outside the list block with changes_requested', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(marker('qa-verifier', 'changes_requested'), { author: 'drive-by' }),
+      review(marker('qa-verifier', 'changes_requested'), { author: 'drive-by' }),
     ];
-    expect(gate(entries).pass).toBe(true);
+    expect(gate(reviews).pass).toBe(true);
   });
 
   it('fails closed for a required reviewer with no allowed logins', () => {
@@ -276,62 +276,62 @@ describe('evaluate: which markers count', () => {
   });
 
   it('ignores markers for an older SHA and says so', () => {
-    const entries = [
+    const reviews = [
       ...approveAll('code-reviewer', 'qa-verifier'),
-      entry(marker('hygiene-auditor', 'approve', OLD)),
+      review(marker('hygiene-auditor', 'approve', OLD)),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(false);
     expect(result.ignored.map((i) => i.reason)).toEqual(['wrong-sha']);
   });
 
   it('accepts the head SHA given in uppercase', () => {
     const result = evaluate(
-      { headSha: HEAD.toUpperCase(), labels: [], files: [], entries: approveAll(...BASE) },
+      { headSha: HEAD.toUpperCase(), labels: [], files: [], reviews: approveAll(...BASE) },
       CONFIG,
     );
     expect(result.pass).toBe(true);
   });
 
   it('reports a body that mentions a marker but has none on the last line', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(`${marker('qa-verifier', 'changes_requested')}\nthanks`),
+      review(`${marker('qa-verifier', 'changes_requested')}\nthanks`),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(true);
     expect(result.ignored.map((i) => i.reason)).toEqual(['not-last-line']);
   });
 
   it('does not list ordinary comments as ignored', () => {
-    expect(gate([...approveAll(...BASE), entry('Nice work.')]).ignored).toEqual([]);
+    expect(gate([...approveAll(...BASE), review('Nice work.')]).ignored).toEqual([]);
   });
 
   it('ignores unknown reviewer names', () => {
     const result = gate([
       ...approveAll(...BASE),
-      entry(marker('random-reviewer', 'changes_requested')),
+      review(marker('random-reviewer', 'changes_requested')),
     ]);
     expect(result.pass).toBe(true);
     expect(result.ignored.map((i) => i.reason)).toEqual(['unknown-reviewer']);
   });
 
   it('ignores an optional reviewer that is not required by labels', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(marker('security-reviewer', 'changes_requested')),
+      review(marker('security-reviewer', 'changes_requested')),
     ];
-    expect(gate(entries).pass).toBe(true);
+    expect(gate(reviews).pass).toBe(true);
   });
 
   it('records who approved, when, and why the reviewer was required', () => {
-    const entries = approveAll(...BASE);
-    expect(gate(entries).reviewers[0]).toEqual({
+    const reviews = approveAll(...BASE);
+    expect(gate(reviews).reviewers[0]).toEqual({
       reviewer: 'code-reviewer',
       state: 'approved',
       reason: 'always',
       by: 'lead',
-      at: entries[0]?.createdAt,
+      at: reviews[0]?.submittedAt,
       edited: false,
     });
   });
@@ -339,11 +339,11 @@ describe('evaluate: which markers count', () => {
 
 describe('evaluate: ordering, edits and dismissals', () => {
   it('blocks when changes_requested comes after approve for the same SHA', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(`Found a bug.\n${marker('qa-verifier', 'changes_requested')}`),
+      review(`Found a bug.\n${marker('qa-verifier', 'changes_requested')}`),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(false);
     expect(result.reviewers.find((r) => r.reviewer === 'qa-verifier')?.state).toBe(
       'changes_requested',
@@ -352,39 +352,39 @@ describe('evaluate: ordering, edits and dismissals', () => {
 
   it('passes when approve comes after changes_requested', () => {
     expect(
-      gate([entry(marker('qa-verifier', 'changes_requested')), ...approveAll(...BASE)]).pass,
+      gate([review(marker('qa-verifier', 'changes_requested')), ...approveAll(...BASE)]).pass,
     ).toBe(true);
   });
 
   it('orders by created time, not by input order', () => {
-    const late = entry(marker('qa-verifier', 'changes_requested'), {
-      createdAt: '2030-01-01T00:00:00Z',
+    const late = review(marker('qa-verifier', 'changes_requested'), {
+      submittedAt: '2030-01-01T00:00:00Z',
     });
     expect(gate([late, ...approveAll(...BASE)]).pass).toBe(false);
   });
 
   it('fails closed when approve and changes_requested share a timestamp', () => {
     const at = '2026-10-07T12:00:00Z';
-    const entries = [
+    const reviews = [
       ...approveAll('code-reviewer', 'hygiene-auditor'),
-      entry(marker('qa-verifier', 'changes_requested'), { createdAt: at }),
-      entry(marker('qa-verifier'), { createdAt: at }),
+      review(marker('qa-verifier', 'changes_requested'), { submittedAt: at }),
+      review(marker('qa-verifier'), { submittedAt: at }),
     ];
-    expect(gate(entries).pass).toBe(false);
+    expect(gate(reviews).pass).toBe(false);
   });
 
   it('does not let a changes_requested for an old SHA block the new head', () => {
     expect(
-      gate([...approveAll(...BASE), entry(marker('qa-verifier', 'changes_requested', OLD))]).pass,
+      gate([...approveAll(...BASE), review(marker('qa-verifier', 'changes_requested', OLD))]).pass,
     ).toBe(true);
   });
 
   it('keeps blocking when a later changes_requested is edited after an earlier approve', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(marker('qa-verifier', 'changes_requested'), { edited: true }),
+      review(marker('qa-verifier', 'changes_requested'), { edited: true }),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(false);
     expect(result.reviewers.find((r) => r.reviewer === 'qa-verifier')).toMatchObject({
       state: 'changes_requested',
@@ -395,7 +395,7 @@ describe('evaluate: ordering, edits and dismissals', () => {
   it('never lets an edited marker approve, even one that now says approve', () => {
     const result = gate([
       ...approveAll('code-reviewer', 'qa-verifier'),
-      entry(marker('hygiene-auditor'), { edited: true }),
+      review(marker('hygiene-auditor'), { edited: true }),
     ]);
     expect(result.pass).toBe(false);
     expect(result.reviewers.find((r) => r.reviewer === 'hygiene-auditor')?.state).toBe(
@@ -404,29 +404,110 @@ describe('evaluate: ordering, edits and dismissals', () => {
   });
 
   it('does not let a block edited into an approve bring an older approve back', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
       // Was changes_requested, someone edited the body to approve.
-      entry(marker('qa-verifier'), { edited: true }),
+      review(marker('qa-verifier'), { edited: true }),
     ];
-    expect(gate(entries).pass).toBe(false);
+    expect(gate(reviews).pass).toBe(false);
   });
 
-  it('lets a fresh marker after an edited one decide again', () => {
-    const entries = [
+  it('lets fresh reviews after an edited one decide again, one per reviewer', () => {
+    const reviews = [
       ...approveAll(...BASE),
-      entry(marker('qa-verifier', 'changes_requested'), { edited: true }),
-      entry(marker('qa-verifier')),
+      review(marker('qa-verifier', 'changes_requested'), { edited: true }),
+      ...approveAll(...BASE),
     ];
-    expect(gate(entries).pass).toBe(true);
+    expect(gate(reviews).pass).toBe(true);
+  });
+
+  it('keeps every reviewer the login may sign for blocked until each gets a fresh review', () => {
+    const reviews = [
+      ...approveAll(...BASE),
+      review(marker('qa-verifier', 'changes_requested'), { edited: true }),
+      review(marker('qa-verifier')),
+    ];
+    const result = gate(reviews);
+    expect(result.pass).toBe(false);
+    expect(result.reviewers.map((r) => [r.reviewer, r.state])).toEqual([
+      ['code-reviewer', 'changes_requested'],
+      ['qa-verifier', 'approved'],
+      ['hygiene-auditor', 'changes_requested'],
+    ]);
+  });
+
+  // Each of these started as a later changes_requested review and was then edited.
+  it.each([
+    ['the SHA changed', marker('qa-verifier', 'changes_requested', OLD)],
+    ['the reviewer renamed', marker('design-reviewer', 'changes_requested')],
+    [
+      'a line appended after the marker',
+      `${marker('qa-verifier', 'changes_requested')}\nnever mind`,
+    ],
+    ['the marker removed', 'Removed my review.'],
+    ['the body replaced with "withdrawn"', 'withdrawn'],
+    ['the verdict flipped to approve', marker('qa-verifier')],
+  ])('keeps blocking when an edited review has %s', (_name, body) => {
+    const result = gate([...approveAll(...BASE), review(body, { edited: true })]);
+    expect(result.pass).toBe(false);
+    expect(result.reviewers.find((r) => r.reviewer === 'qa-verifier')).toMatchObject({
+      state: 'changes_requested',
+      edited: true,
+    });
+  });
+
+  it('passes again once fresh valid reviews follow such an edit', () => {
+    const reviews = [
+      ...approveAll(...BASE),
+      review('withdrawn', { edited: true }),
+      ...approveAll(...BASE),
+    ];
+    expect(gate(reviews).pass).toBe(true);
+  });
+
+  it('ignores edited reviews from logins that may not sign', () => {
+    const reviews = [
+      ...approveAll(...BASE),
+      review('withdrawn', { author: 'drive-by', edited: true }),
+      review(marker('qa-verifier', 'changes_requested'), { author: 'drive-by', edited: true }),
+    ];
+    const result = gate(reviews);
+    expect(result.pass).toBe(true);
+    expect(result.ignored.map((i) => [i.author, i.reason])).toEqual([['drive-by', 'not-allowed']]);
+  });
+
+  it('lets an edited review block only the reviewers its author may sign for', () => {
+    const config: GateConfig = {
+      paths: [],
+      reviewers: { ...CONFIG.reviewers, 'qa-verifier': ['qa-bot'] },
+    };
+    const reviews = [
+      ...approveAll('code-reviewer', 'hygiene-auditor'),
+      review(marker('qa-verifier'), { author: 'qa-bot' }),
+      review('withdrawn', { edited: true }),
+    ];
+    const result = gate(reviews, [], [], config);
+    expect(result.reviewers.map((r) => [r.reviewer, r.state])).toEqual([
+      ['code-reviewer', 'changes_requested'],
+      ['qa-verifier', 'approved'],
+      ['hygiene-auditor', 'changes_requested'],
+    ]);
+  });
+
+  it('treats an edited dismissed review as a block too', () => {
+    const reviews = [
+      ...approveAll(...BASE),
+      review(marker('qa-verifier'), { edited: true, dismissed: true }),
+    ];
+    expect(gate(reviews).pass).toBe(false);
   });
 
   it('keeps changes_requested from a dismissed review blocking', () => {
-    const entries = [
+    const reviews = [
       ...approveAll(...BASE),
-      entry(marker('qa-verifier', 'changes_requested'), { dismissed: true }),
+      review(marker('qa-verifier', 'changes_requested'), { dismissed: true }),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(false);
     expect(result.reviewers.find((r) => r.reviewer === 'qa-verifier')?.state).toBe(
       'changes_requested',
@@ -434,23 +515,23 @@ describe('evaluate: ordering, edits and dismissals', () => {
   });
 
   it('does not count an approval from a dismissed review', () => {
-    const entries = [
+    const reviews = [
       ...approveAll('code-reviewer', 'qa-verifier'),
-      entry(marker('hygiene-auditor'), { dismissed: true }),
+      review(marker('hygiene-auditor'), { dismissed: true }),
     ];
-    const result = gate(entries);
+    const result = gate(reviews);
     expect(result.pass).toBe(false);
     expect(result.ignored.map((i) => i.reason)).toEqual(['dismissed-approve']);
   });
 
   it('rejects a head SHA that is not 40 hex characters', () => {
-    expect(() => evaluate({ headSha: 'abc', labels: [], files: [], entries: [] }, CONFIG)).toThrow(
+    expect(() => evaluate({ headSha: 'abc', labels: [], files: [], reviews: [] }, CONFIG)).toThrow(
       /head SHA/,
     );
   });
 
-  it('rejects an entry with an unreadable timestamp instead of guessing its order', () => {
-    expect(() => gate([entry(marker('qa-verifier'), { createdAt: 'yesterday' })])).toThrow(
+  it('rejects an review with an unreadable timestamp instead of guessing its order', () => {
+    expect(() => gate([review(marker('qa-verifier'), { submittedAt: 'yesterday' })])).toThrow(
       /timestamp/,
     );
   });
@@ -465,29 +546,31 @@ describe('formatReport', () => {
   });
 
   it('shows what is missing, blocking or unsigned, and every ignored marker with its reason', () => {
-    const entries = [
-      entry(marker('code-reviewer', 'changes_requested'), {
-        createdAt: '2026-10-07T10:00:00.000Z',
+    const reviews = [
+      review(marker('code-reviewer', 'changes_requested'), {
+        submittedAt: '2026-10-07T10:00:00.000Z',
       }),
-      entry(marker('qa-verifier', 'approve', OLD), { createdAt: '2026-10-07T10:01:00.000Z' }),
-      entry(marker('hygiene-auditor'), {
+      review(marker('qa-verifier', 'approve', OLD), { submittedAt: '2026-10-07T10:01:00.000Z' }),
+      review(marker('hygiene-auditor'), {
         author: 'drive-by',
         authorAssociation: 'NONE',
-        createdAt: '2026-10-07T10:02:00.000Z',
+        submittedAt: '2026-10-07T10:02:00.000Z',
       }),
-      entry(marker('qa-verifier'), { edited: true, createdAt: '2026-10-07T10:03:00.000Z' }),
+      review(marker('qa-verifier'), { edited: true, submittedAt: '2026-10-07T10:03:00.000Z' }),
     ];
     const config: GateConfig = {
       paths: [],
       reviewers: { ...CONFIG.reviewers, 'performance-reviewer': [] },
     };
-    const report = formatReport(gate(entries, ['needs-perf'], [], config));
+    const report = formatReport(gate(reviews, ['needs-perf'], [], config));
     expect(report).toContain('review-gate: FAIL');
     expect(report).toMatch(/code-reviewer\s+changes requested by lead/);
     expect(report).toMatch(
-      /qa-verifier\s+changes requested by lead at .* \(edited marker; post a fresh one\)/,
+      /qa-verifier\s+changes requested by lead at .* \(edited review; post a fresh one\)/,
     );
-    expect(report).toMatch(/hygiene-auditor\s+missing \(always\)/);
+    expect(report).toMatch(
+      /hygiene-auditor\s+changes requested by lead at .* \(edited review; post a fresh one\)/,
+    );
     expect(report).toMatch(/performance-reviewer\s+no logins allowed to sign \(label needs-perf\)/);
     expect(report).toContain('ignored markers:');
     expect(report).toContain(
@@ -498,8 +581,8 @@ describe('formatReport', () => {
     );
   });
 
-  it('labels an ignored entry without a reviewer name', () => {
-    const report = formatReport(gate([entry(`drefyn-review sha=${HEAD}`, { author: 'x' })]));
+  it('labels an ignored review without a reviewer name', () => {
+    const report = formatReport(gate([review(`drefyn-review sha=${HEAD}`, { author: 'x' })]));
     expect(report).toMatch(/x \(CONTRIBUTOR\) at .*: no valid marker on the last line/);
   });
 });
@@ -516,7 +599,7 @@ describe('statusDescription', () => {
       paths: [],
       reviewers: { ...CONFIG.reviewers, 'hygiene-auditor': [] },
     };
-    const result = gate([entry(marker('code-reviewer', 'changes_requested'))], [], [], config);
+    const result = gate([review(marker('code-reviewer', 'changes_requested'))], [], [], config);
     expect(statusDescription(result)).toBe(
       'changes requested: code-reviewer; missing: qa-verifier; no signers: hygiene-auditor',
     );

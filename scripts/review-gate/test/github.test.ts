@@ -61,15 +61,16 @@ function connection(nodes: unknown[], endCursor: string | null = null) {
   return { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes };
 }
 
-function graphqlPage(kind: 'comments' | 'reviews', conn: unknown) {
+function graphqlPage(kind: 'reviews', conn: unknown) {
   return json({ data: { repository: { pullRequest: { [kind]: conn } } } });
 }
 
-const comment = (login: string | null, body: string, extra: Record<string, unknown> = {}) => ({
+const node = (login: string | null, body: string, extra: Record<string, unknown> = {}) => ({
   author: login === null ? null : { login },
   authorAssociation: 'MEMBER',
-  createdAt: '2026-10-07T10:00:00Z',
+  submittedAt: '2026-10-07T10:00:00Z',
   lastEditedAt: null,
+  state: 'COMMENTED',
   body,
   ...extra,
 });
@@ -78,17 +79,13 @@ const comment = (login: string | null, body: string, extra: Record<string, unkno
 function routes(overrides: {
   pr?: () => Response;
   files?: (url: URL) => Response;
-  comments?: (after: string | null) => Response;
   reviews?: (after: string | null) => Response;
 }): Route {
   return (url, init) => {
     if (url.pathname === '/graphql') {
       const body = graphqlBody(init);
-      if (body.query.includes('comments(')) {
-        return (
-          overrides.comments?.(body.variables.after) ?? graphqlPage('comments', connection([]))
-        );
-      }
+      // Issue comments are not a marker source; asking for them is a bug.
+      if (body.query.includes('comments(')) return json({ message: 'unexpected' }, { status: 400 });
       return overrides.reviews?.(body.variables.after) ?? graphqlPage('reviews', connection([]));
     }
     if (url.pathname === '/repos/o/r/pulls/7') return overrides.pr?.() ?? json(pr);
@@ -98,7 +95,7 @@ function routes(overrides: {
 }
 
 describe('loadGateInput', () => {
-  it('collects head SHA, labels, files, comments and reviews with edit and dismiss flags', async () => {
+  it('collects head SHA, labels, files and reviews with edit and dismiss flags', async () => {
     const { client: gh, calls } = client(
       routes({
         pr: () => json({ ...pr, changed_files: 2 }),
@@ -107,43 +104,18 @@ describe('loadGateInput', () => {
             { filename: 'src/a.ts' },
             { filename: 'docs/new.md', previous_filename: 'scripts/old.md' },
           ]),
-        comments: () =>
-          graphqlPage(
-            'comments',
-            connection([
-              comment('alice', 'c1'),
-              comment(null, 'c2', { authorAssociation: 'NONE' }),
-              comment('erin', 'c3', { lastEditedAt: '2026-10-07T12:00:00Z' }),
-            ]),
-          ),
         reviews: () =>
           graphqlPage(
             'reviews',
             connection([
-              {
-                author: { login: 'bob' },
+              node('bob', 'r1', {
                 authorAssociation: 'OWNER',
                 submittedAt: '2026-10-07T11:00:00Z',
-                lastEditedAt: null,
-                state: 'COMMENTED',
-                body: 'r1',
-              },
-              {
-                author: { login: 'carol' },
-                authorAssociation: 'MEMBER',
-                submittedAt: '2026-10-07T11:01:00Z',
-                lastEditedAt: null,
-                state: 'DISMISSED',
-                body: 'r2',
-              },
-              {
-                author: { login: 'dan' },
-                authorAssociation: 'MEMBER',
-                submittedAt: null,
-                lastEditedAt: null,
-                state: 'PENDING',
-                body: 'draft',
-              },
+              }),
+              node(null, 'r2', { authorAssociation: 'NONE' }),
+              node('erin', 'r3', { lastEditedAt: '2026-10-07T12:00:00Z' }),
+              node('carol', 'r4', { state: 'DISMISSED', submittedAt: '2026-10-07T11:01:00Z' }),
+              node('dan', 'draft', { state: 'PENDING', submittedAt: null }),
             ]),
           ),
       }),
@@ -154,44 +126,36 @@ describe('loadGateInput', () => {
       headSha: HEAD,
       labels: ['needs-security', 'p0'],
       files: ['src/a.ts', 'docs/new.md', 'scripts/old.md'],
-      entries: [
+      reviews: [
         {
-          author: 'alice',
-          authorAssociation: 'MEMBER',
-          createdAt: '2026-10-07T10:00:00Z',
-          body: 'c1',
+          author: 'bob',
+          authorAssociation: 'OWNER',
+          submittedAt: '2026-10-07T11:00:00Z',
+          body: 'r1',
           edited: false,
           dismissed: false,
         },
         {
           author: 'ghost',
           authorAssociation: 'NONE',
-          createdAt: '2026-10-07T10:00:00Z',
-          body: 'c2',
+          submittedAt: '2026-10-07T10:00:00Z',
+          body: 'r2',
           edited: false,
           dismissed: false,
         },
         {
           author: 'erin',
           authorAssociation: 'MEMBER',
-          createdAt: '2026-10-07T10:00:00Z',
-          body: 'c3',
+          submittedAt: '2026-10-07T10:00:00Z',
+          body: 'r3',
           edited: true,
-          dismissed: false,
-        },
-        {
-          author: 'bob',
-          authorAssociation: 'OWNER',
-          createdAt: '2026-10-07T11:00:00Z',
-          body: 'r1',
-          edited: false,
           dismissed: false,
         },
         {
           author: 'carol',
           authorAssociation: 'MEMBER',
-          createdAt: '2026-10-07T11:01:00Z',
-          body: 'r2',
+          submittedAt: '2026-10-07T11:01:00Z',
+          body: 'r4',
           edited: false,
           dismissed: true,
         },
@@ -203,11 +167,13 @@ describe('loadGateInput', () => {
       accept: 'application/vnd.github+json',
     });
     expect(first?.init.signal).toBeInstanceOf(AbortSignal);
-    const gql = calls.find((c) => c.url.endsWith('/graphql'));
-    expect(gql?.init.method).toBe('POST');
-    expect(graphqlBody(gql?.init ?? {})).toMatchObject({
+    const gql = calls.filter((c) => c.url.endsWith('/graphql'));
+    expect(gql).toHaveLength(1);
+    expect(gql[0]?.init.method).toBe('POST');
+    expect(graphqlBody(gql[0]?.init ?? {})).toMatchObject({
       variables: { owner: 'o', name: 'r', number: 7 },
     });
+    expect(graphqlBody(gql[0]?.init ?? {}).query).not.toContain('comments(');
   });
 
   it('follows REST pagination links for changed files', async () => {
@@ -252,16 +218,6 @@ describe('loadGateInput', () => {
     await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/changed_files/);
   });
 
-  it('fails on a comment without a timestamp instead of dropping it', async () => {
-    const { client: gh } = client(
-      routes({
-        comments: () =>
-          graphqlPage('comments', connection([comment('a', 'blocking', { createdAt: null })])),
-      }),
-    );
-    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no timestamp/);
-  });
-
   it('fails on a submitted review without a timestamp', async () => {
     const { client: gh } = client(
       routes({
@@ -284,16 +240,16 @@ describe('loadGateInput', () => {
     await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no timestamp/);
   });
 
-  it('follows GraphQL cursors for comments', async () => {
+  it('follows GraphQL cursors for reviews', async () => {
     const { client: gh } = client(
       routes({
-        comments: (after) =>
+        reviews: (after) =>
           after === null
-            ? graphqlPage('comments', connection([comment('a', '1')], 'CUR1'))
-            : graphqlPage('comments', connection([comment('b', '2')])),
+            ? graphqlPage('reviews', connection([node('a', '1')], 'CUR1'))
+            : graphqlPage('reviews', connection([node('b', '2')])),
       }),
     );
-    expect((await loadGateInput(gh, 'o/r', 7)).entries.map((e) => e.body)).toEqual(['1', '2']);
+    expect((await loadGateInput(gh, 'o/r', 7)).reviews.map((e) => e.body)).toEqual(['1', '2']);
   });
 
   it('fails closed when REST pagination runs past the page cap', async () => {
@@ -307,7 +263,7 @@ describe('loadGateInput', () => {
 
   it('fails closed when GraphQL pagination runs past the page cap', async () => {
     const { client: gh } = client(
-      routes({ comments: () => graphqlPage('comments', connection([comment('a', '1')], 'SAME')) }),
+      routes({ reviews: () => graphqlPage('reviews', connection([node('a', '1')], 'SAME')) }),
       { maxPages: 2 },
     );
     await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/more than 2 pages/);
@@ -324,16 +280,16 @@ describe('loadGateInput', () => {
 
   it('fails on GraphQL errors instead of reading partial data', async () => {
     const { client: gh } = client(
-      routes({ comments: () => json({ data: null, errors: [{ message: 'Something broke' }] }) }),
+      routes({ reviews: () => json({ data: null, errors: [{ message: 'Something broke' }] }) }),
     );
     await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/Something broke/);
   });
 
   it('fails when GraphQL returns no pull request', async () => {
     const { client: gh } = client(
-      routes({ comments: () => json({ data: { repository: { pullRequest: null } } }) }),
+      routes({ reviews: () => json({ data: { repository: { pullRequest: null } } }) }),
     );
-    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no comments connection/);
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/no reviews connection/);
   });
 
   it('retries server errors with backoff and then succeeds', async () => {
