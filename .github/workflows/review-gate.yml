@@ -4,8 +4,9 @@
 #
 # - The gate script and its path rules come from the PR base commit for PR and review
 #   events, and from the default branch for comment and dispatch events, so editing
-#   scripts/review-gate in a PR does not change how that PR is judged. The one exception
-#   is the bootstrap step below.
+#   scripts/review-gate in a PR does not change how that PR is judged. This workflow never
+#   checks out PR code. While development lacks the script, review-gate-bootstrap.yml
+#   covers same repo PRs into it.
 # - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
 #   re-reads the PR head from the API and posts only for that SHA.
 # - Fork PRs cannot set the status from their own runs, since their token is read only.
@@ -58,6 +59,7 @@ jobs:
       pull-requests: read # PR head, labels, files and reviews
       issues: read # PR conversation comments
     outputs:
+      present: ${{ steps.script.outputs.present }}
       state: ${{ steps.gate.outputs.state }}
       sha: ${{ steps.gate.outputs.sha }}
       description: ${{ steps.gate.outputs.description }}
@@ -77,44 +79,24 @@ jobs:
         with:
           ref: development
           persist-credentials: false
-      # Until development holds the gate script, a PR into it cannot find the script on its
-      # base. Only then, and only for same repo PRs into development, the script comes
-      # from the PR head. This job is read only, and `report` does not trust its SHA.
+      # Before the gate script reaches development there is nothing trusted to run; the
+      # bootstrap workflow owns that case, so this run steps aside without a status.
       - name: Check for the gate script on the trusted ref
-        id: bootstrap
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          REPO: ${{ github.repository }}
+        id: script
         run: |
           if [ -f scripts/review-gate/src/cli.ts ]; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          elif { [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = pull_request_review ]; } &&
-            [ "$HEAD_REPO" = "$REPO" ] && [ "$BASE_REF" = development ]; then
-            echo "::warning::gate script missing on the base ref; using the PR head copy"
-            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::gate script missing on the trusted ref"
-            exit 1
+            echo "::notice::gate script not on the trusted ref yet; review-gate-bootstrap.yml reports instead"
+            echo "present=false" >> "$GITHUB_OUTPUT"
           fi
-      # Every condition is repeated here, not only in the shell step above, so the guard is
-      # visible to anyone (or any scanner) reading this step on its own.
-      - name: Check out the PR head for the bootstrap
-        if: >-
-          steps.bootstrap.outputs.needed == 'true' &&
-          (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.base.ref == 'development'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - if: steps.script.outputs.present == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           package-manager-cache: false
       - name: Evaluate
+        if: steps.script.outputs.present == 'true'
         id: gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -131,6 +113,7 @@ jobs:
     # Fork PR runs have a read-only token; the next marker comment posts for them.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
+      needs.evaluate.outputs.present != 'false' &&
       !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
