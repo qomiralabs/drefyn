@@ -4,9 +4,8 @@
 # proves nothing is left behind.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-compose_file="$root/deploy/compose.yaml"
-compose=(docker compose -f "$compose_file")
+# shellcheck source=scripts/selfhost-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/selfhost-lib.sh"
 
 teardown=false
 for arg in "$@"; do
@@ -46,6 +45,10 @@ for tool in docker jq; do
     finish
   fi
 done
+
+# The checks exec into the project's postgres container and --teardown deletes volumes, so
+# make sure that container is ours first.
+guard_project
 
 config="$("${compose[@]}" config --format json)"
 project="$(jq -r '.name' <<<"$config")"
@@ -151,17 +154,43 @@ expect_rows "app and public reader roles have no rights on schema public" \
   "drefyn_app|f|f
 drefyn_public_reader|f|f" "$public_schema"
 
-# CREATE EXTENSION is transactional, so the check leaves the database as it found it.
+# The extension is created once by the bootstrap, in its own schema, so migrations never need
+# a superuser.
 vector="$(superuser_sql <<'SQL'
-begin;
-create extension vector;
-select extversion from pg_extension where extname = 'vector';
-select '[1,0]'::vector <=> '[0,1]'::vector, '[1,2]'::vector <=> '[2,4]'::vector;
-rollback;
+select n.nspname, e.extversion, pg_get_userbyid(n.nspowner)
+from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+where e.extname = 'vector';
 SQL
 )"
-expect_rows "pgvector 0.8.2 loads and cosine distance is correct" "0.8.2
-1|0" "$vector"
+expect_rows "pgvector 0.8.2 is installed in schema extensions, which drefyn_owner owns" \
+  "extensions|0.8.2|drefyn_owner" "$vector"
+
+search_paths="$(superuser_sql <<'SQL'
+select rolname, array_to_string(rolconfig, ';')
+from pg_roles
+where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
+order by rolname;
+SQL
+)"
+expect_rows "each role searches app, then extensions" \
+  "drefyn_app|search_path=app, extensions
+drefyn_owner|search_path=app, extensions
+drefyn_public_reader|search_path=app, extensions" "$search_paths"
+
+# PUBLIC gets nothing on the database: no CONNECT for roles created later, no TEMP for anyone.
+# The database owner's own entry is left out; it is the bootstrap superuser.
+database_acl="$(superuser_sql <<'SQL'
+select coalesce(string_agg(entry, ',' order by entry), '')
+from (
+  select case a.grantee when 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end
+    || ':' || a.privilege_type as entry
+  from pg_database d, aclexplode(d.datacl) a
+  where d.datname = current_database() and a.grantee <> d.datdba
+) entries;
+SQL
+)"
+expect_rows "only the three roles may connect, and PUBLIC has no rights on the database" \
+  "drefyn_app:CONNECT,drefyn_owner:CONNECT,drefyn_public_reader:CONNECT" "$database_acl"
 
 whoami="$(role_sql drefyn_app drefyn_app_password <<<'select current_user;' 2>&1 || true)"
 expect_rows "drefyn_app logs in over TCP with its password" "drefyn_app" "$whoami"
@@ -191,7 +220,20 @@ for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public
   read -r role secret <<<"$pair"
   expect_denied "$role" "$secret" "create table app.smoke (id int);" "permission denied for schema app"
   expect_denied "$role" "$secret" "create table public.smoke (id int);" "permission denied for schema public"
+  expect_denied "$role" "$secret" "create table extensions.smoke (id int);" \
+    "permission denied for schema extensions"
+  expect_denied "$role" "$secret" "create temp table smoke (id int);" \
+    'permission denied to create temporary tables in database "drefyn"'
   expect_denied "$role" "$secret" "create schema smoke;" "permission denied for database drefyn"
+done
+
+# Unqualified, so this also proves each role finds the type through its search_path.
+for pair in "drefyn_owner drefyn_owner_password" "drefyn_app drefyn_app_password" \
+  "drefyn_public_reader drefyn_public_reader_password"; do
+  read -r role secret <<<"$pair"
+  distance="$(role_sql "$role" "$secret" 2>&1 \
+    <<<"select '[1,0]'::vector <=> '[0,1]'::vector, '[1,2]'::vector <=> '[2,4]'::vector;" || true)"
+  expect_rows "$role computes cosine distance with pgvector" "1|0" "$distance"
 done
 
 if [ "$teardown" = true ]; then

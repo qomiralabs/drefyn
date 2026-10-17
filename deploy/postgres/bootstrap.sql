@@ -1,7 +1,7 @@
 -- One time database bootstrap, run by a superuser against the drefyn database: the compose
 -- init script does it on first start, and on a managed database the master user runs it
--- with psql. It is the only step that needs a superuser. Grants and policies come from
--- migrations, which run as drefyn_owner.
+-- with psql. It is the only step that needs a superuser, so it also installs pgvector.
+-- Grants on app and policies come from migrations, which run as drefyn_owner.
 --
 -- Passwords are read from the environment so they never live in a SQL file or in psql's
 -- command line:
@@ -41,8 +41,26 @@ create role drefyn_public_reader login nosuperuser nobypassrls nocreaterole nocr
 
 create schema app authorization drefyn_owner;
 
+-- pgvector is not a trusted extension, so only a superuser can create it, and this is the
+-- only step that runs as one. Its own schema keeps it out of public and out of app, where
+-- catalog checks look at every object.
+create schema extensions authorization drefyn_owner;
+create extension if not exists vector schema extensions;
+grant usage on schema extensions to drefyn_app, drefyn_public_reader;
+
+alter role drefyn_owner set search_path = app, extensions;
+alter role drefyn_app set search_path = app, extensions;
+alter role drefyn_public_reader set search_path = app, extensions;
+
 -- Product tables live in app. Nothing should land in public by accident.
 revoke all on schema public from public;
+
+-- PUBLIC gets CONNECT and TEMP on a new database. A role made later should not be able to
+-- connect without a grant, and temp tables are a place to stage data outside row level
+-- security.
+select current_database() as dbname \gset
+revoke all on database :"dbname" from public;
+grant connect on database :"dbname" to drefyn_owner, drefyn_app, drefyn_public_reader;
 
 commit;
 

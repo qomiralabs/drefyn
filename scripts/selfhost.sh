@@ -6,9 +6,9 @@
 #   reset    remove the containers and the data volume (needs --yes)
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-deploy="$root/deploy"
-compose=(docker compose -f "$deploy/compose.yaml")
+# shellcheck source=scripts/selfhost-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/selfhost-lib.sh"
+deploy="$selfhost_root/deploy"
 # Generous enough for a cold first init on a slow laptop; a clean CI runner is far faster.
 wait_seconds="${DREFYN_SELFHOST_WAIT_SECONDS:-90}"
 
@@ -49,6 +49,11 @@ wait_healthy() {
 }
 
 case "${1:-}" in
+  up | down | restart | reset) guard_project ;;
+  *) usage ;;
+esac
+
+case "$1" in
   up)
     ensure_env
     # Pull first so the healthy time measures startup, not the network.
@@ -69,5 +74,4 @@ case "${1:-}" in
     fi
     "${compose[@]}" down --volumes
     ;;
-  *) usage ;;
 esac

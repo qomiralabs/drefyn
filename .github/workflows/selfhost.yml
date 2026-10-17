@@ -31,6 +31,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Scripts refuse a project created by another compose file
+        run: bash scripts/selfhost-guard-test.sh
       # The same commands a self hoster runs, from a clean runner with no volume.
       - name: Start
         run: bash scripts/selfhost.sh up
