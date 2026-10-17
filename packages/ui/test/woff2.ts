@@ -1,7 +1,7 @@
 import { brotliDecompressSync } from 'node:zlib';
 
-// Reads the character map and family name out of a WOFF2 file, enough to prove what a
-// subset covers without a font toolkit. Only the cmap and name tables are decoded; both are
+// Reads the character map, family name and version string out of a WOFF2 file, enough to
+// prove what a subset covers and which release it came from without a font toolkit. Only the cmap and name tables are decoded; both are
 // stored untransformed in WOFF2, so their bytes sit as is in the decompressed stream.
 
 const KNOWN_TAGS = [
@@ -72,6 +72,7 @@ const KNOWN_TAGS = [
 
 export interface FontInfo {
   family: string;
+  version: string;
   codePoints: number[];
 }
 
@@ -114,17 +115,22 @@ export function readWoff2(bytes: Buffer): FontInfo {
     if (t === undefined) throw new Error(`no ${tag} table`);
     return data.subarray(t.offset, t.offset + t.length);
   };
-  return { family: readFamily(table('name')), codePoints: readCmap(table('cmap')) };
+  const names = table('name');
+  return {
+    family: readName(names, 1),
+    version: readName(names, 5),
+    codePoints: readCmap(table('cmap')),
+  };
 }
 
-function readFamily(name: Buffer): string {
+function readName(name: Buffer, id: number): string {
   const count = name.readUInt16BE(2);
   const strings = name.readUInt16BE(4);
   for (let i = 0; i < count; i++) {
     const r = 6 + i * 12;
     const platform = name.readUInt16BE(r);
     const nameId = name.readUInt16BE(r + 6);
-    if (platform !== 3 || nameId !== 1) continue;
+    if (platform !== 3 || nameId !== id) continue;
     const length = name.readUInt16BE(r + 8);
     const start = strings + name.readUInt16BE(r + 10);
     return name
@@ -132,7 +138,7 @@ function readFamily(name: Buffer): string {
       .swap16()
       .toString('utf16le');
   }
-  throw new Error('no family name');
+  throw new Error(`no name ${id}`);
 }
 
 function readCmap(cmap: Buffer): number[] {

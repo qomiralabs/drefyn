@@ -37,7 +37,8 @@ The tests fail if they drift.
   `border.control`. The pairs that fail are must fail pairs; the rest are in `ruledOutPairs`.
 - Under reduced motion nothing travels and no fade runs past 120 ms.
 - `tokens.css` stays under 2.5 KB gzipped.
-- Fonts are Latin subsets with their OFL licences beside them in `src/fonts`.
+- Fonts are Latin subsets with their full OFL licences beside them in `src/fonts`. Each file has
+  its source tarball, version and SHA-256 in `ASSETS.md`, and the tests check all three.
 
 Arbitrary Tailwind values (`p-[13px]`), bare durations, delays, line widths and opacity, and colour
 opacity modifiers are rejected by `drefyn/no-arbitrary-values` from `scripts/lint-rules`.

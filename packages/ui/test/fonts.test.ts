@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -38,6 +39,39 @@ const isLatin = (c: number) =>
 
 const woff2Files = readdirSync(fontsDir).filter((f) => f.endsWith('.woff2'));
 
+interface AssetRow {
+  source: string;
+  version: string;
+  licence: string;
+  sha256: string;
+}
+
+// The font table in ASSETS.md is the record of where each file came from. Reading it here
+// means a swapped file fails until the record is updated too, in the same review.
+function readAssetRows(): Map<string, AssetRow> {
+  const markdown = readFileSync(join(here, '../../../ASSETS.md'), 'utf8');
+  const section = markdown.split(/^## /m).find((s) => s.startsWith('Fonts'));
+  if (section === undefined) throw new Error('ASSETS.md has no Fonts section');
+  const rows = new Map<string, AssetRow>();
+  const code = (cell: string) => /^`([^`]*)`$/.exec(cell.trim())?.[1] ?? cell.trim();
+  for (const line of section.split('\n')) {
+    const cells = line.split('|').slice(1, -1);
+    if (cells.length !== 5) continue;
+    const [file, source, version, licence, sha256] = cells.map(code) as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+    if (!/\.(woff2|txt)$/.test(file)) continue;
+    rows.set(file, { source, version, licence, sha256 });
+  }
+  return rows;
+}
+
+const assetRows = readAssetRows();
+
 describe('self hosted fonts', () => {
   it('ships exactly the faces the stylesheet declares', () => {
     expect(woff2Files.sort()).toEqual(fontFaces.map((f) => f.file).sort());
@@ -58,12 +92,53 @@ describe('self hosted fonts', () => {
     expect(family.startsWith(file.startsWith('inter') ? 'Inter' : 'JetBrains Mono')).toBe(true);
   });
 
-  it('keeps each family licence beside the files', () => {
-    for (const licence of ['Inter-OFL.txt', 'JetBrainsMono-OFL.txt']) {
-      const path = join(fontsDir, licence);
-      expect(existsSync(path), licence).toBe(true);
-      expect(readFileSync(path, 'utf8')).toContain('SIL Open Font License, Version 1.1');
+  it.each(woff2Files)('%s is the release ASSETS.md records', (file) => {
+    const row = assetRows.get(file);
+    expect(row, file).toBeDefined();
+    if (row === undefined) return;
+    expect(readWoff2(readFileSync(join(fontsDir, file))).version).toBe(row.version);
+    // An exact, immutable tarball, so anyone can fetch the same bytes and compare.
+    const pkg = file.startsWith('inter') ? 'inter' : 'jetbrains-mono';
+    expect(row.source).toMatch(
+      new RegExp(
+        `^https://registry\\.npmjs\\.org/@fontsource/${pkg}/-/${pkg}-\\d+\\.\\d+\\.\\d+\\.tgz$`,
+      ),
+    );
+    expect(row.licence).toBe(file.startsWith('inter') ? 'Inter-OFL.txt' : 'JetBrainsMono-OFL.txt');
+  });
+
+  it('records every file in the fonts folder with a matching SHA-256', () => {
+    expect([...assetRows.keys()].sort()).toEqual(readdirSync(fontsDir).sort());
+    for (const [file, row] of assetRows) {
+      const digest = createHash('sha256')
+        .update(readFileSync(join(fontsDir, file)))
+        .digest('hex');
+      expect(digest, file).toBe(row.sha256);
     }
+  });
+
+  it.each(['Inter-OFL.txt', 'JetBrainsMono-OFL.txt'])('%s is the full OFL 1.1 text', (licence) => {
+    const text = readFileSync(join(fontsDir, licence), 'utf8');
+    for (const part of [
+      'SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007',
+      'PREAMBLE',
+      'DEFINITIONS',
+      'PERMISSION & CONDITIONS',
+      '5) The Font Software, modified or unmodified, in part or in whole,',
+      'TERMINATION',
+      'DISCLAIMER',
+    ]) {
+      expect(text, part).toContain(part);
+    }
+    const project = licence.startsWith('Inter')
+      ? 'The Inter Project Authors'
+      : 'The JetBrains Mono Project Authors';
+    expect(text.split('\n')[0]).toContain(
+      `Copyright ${licence.startsWith('Inter') ? 2016 : 2020} ${project}`,
+    );
+    // A subset is a Modified Version under the OFL, and it may keep the family name only
+    // because neither project reserves one.
+    expect(text).not.toMatch(/with Reserved Font Name/i);
   });
 
   it('has not grown past the measured 115,388 bytes', () => {
