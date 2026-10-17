@@ -67,7 +67,7 @@ warn_env_mode() {
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
 wait_healthy() {
-  local start end container status
+  local start end container status first
   start="$(date +%s)"
   if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
     end="$(date +%s)"
@@ -81,6 +81,8 @@ wait_healthy() {
     # say compose failed rather than blame health.
     if [ -n "$status" ] && [ "$status" != created ]; then
       say <<<"selfhost: postgres is not healthy after $((end - start))s: $(health_output "$container")"
+      first="$(first_start_failure "$container")"
+      if [ -n "$first" ]; then say <<<"selfhost: $first"; fi
     else
       say <<<"selfhost: compose could not start postgres ($((end - start))s); its error is above."
     fi

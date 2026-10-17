@@ -151,6 +151,22 @@ EOF
   fi
 }
 
+# first_start_failure <container>: prints advice when the server log shows the first start
+# failed, and nothing otherwise. Compose can give up before the healthcheck ever runs, so this
+# reads the log itself: init that began but never completed, or the image refusing to init.
+# Containers are recreated on every up, so a later failure never sees an old init's lines.
+first_start_failure() {
+  local logs reason
+  logs="$(docker logs "$1" 2>&1 | tail -n 300 || true)"
+  if [[ "$logs" == *"Database is uninitialized"* ]] ||
+    { [[ "$logs" == *"/docker-entrypoint-initdb.d/"* ]] &&
+      [[ "$logs" != *"init process complete"* ]]; }; then
+    reason="$(grep -E 'bootstrap:|ERROR:|Error:' <<<"$logs" | tail -n 1 || true)"
+    printf 'the first start failed%s; fix deploy/.env first, then run %s reset --yes and up again' \
+      "${reason:+ ($reason)}" "scripts/selfhost.sh"
+  fi
+}
+
 # The newest healthcheck output, which names the check that failed. When the healthcheck has
 # not run, as while the container restarts, fall back to the container's own state.
 health_output() {
