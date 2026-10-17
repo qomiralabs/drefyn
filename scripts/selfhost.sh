@@ -32,7 +32,7 @@ ensure_env() {
   env_tmp="$(mktemp "$deploy/.env.XXXXXX")"
   chmod 600 "$env_tmp"
   while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD)=$ ]]; then
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID)=$ ]]; then
       key="${BASH_REMATCH[1]}"
       printf '%s=%s\n' "$key" "$(random_secret)" >>"$env_tmp"
     else
@@ -41,7 +41,7 @@ ensure_env() {
   done <"$deploy/.env.example"
   mv "$env_tmp" "$env_file"
   env_tmp=""
-  echo "selfhost: wrote $env_file with generated passwords"
+  echo "selfhost: wrote $env_file with generated passwords and a stack ID"
 }
 
 # A hand written .env gets the umask default, which is usually readable by everyone.
@@ -56,14 +56,24 @@ warn_env_mode() {
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
 wait_healthy() {
-  local start end container
+  local start end container health
   start="$(date +%s)"
   if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
+    end="$(date +%s)"
     container="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
-    say <<EOF
-selfhost: postgres is not healthy after ${wait_seconds}s${container:+: $(health_output "$container")}
-The server log has the reason: docker compose -p $selfhost_project -f $compose_file logs postgres
-EOF
+    health=""
+    if [ -n "$container" ]; then
+      health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "$container" 2>/dev/null || true)"
+    fi
+    # A port clash or a name conflict fails at once, before the healthcheck ever ran, so say
+    # so rather than blame health.
+    if [ "$health" = starting ] || [ "$health" = unhealthy ]; then
+      say <<<"selfhost: postgres is not healthy after $((end - start))s: $(health_output "$container")"
+    else
+      say <<<"selfhost: compose could not start postgres ($((end - start))s); its error is above."
+    fi
+    say <<<"The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
     exit 1
   fi
   end="$(date +%s)"
@@ -71,13 +81,14 @@ EOF
 }
 
 case "${1:-}" in
-  up | down | restart | reset) guard_project ;;
+  # up writes deploy/.env first, because the stack ID the guard compares lives there.
+  up) ensure_env && guard_project up ;;
+  down | restart | reset) guard_project "$1" ;;
   *) usage ;;
 esac
 
 case "$1" in
   up)
-    ensure_env
     warn_env_mode
     # Pull first so the healthy time measures startup, not the network.
     "${compose[@]}" pull --quiet

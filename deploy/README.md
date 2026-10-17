@@ -23,16 +23,19 @@ bash scripts/selfhost.sh reset --yes   # deletes the data volume
 
 `up` pulls the image first (about 150 MB), then waits until Postgres is healthy and prints
 how long that took: 2 to 6 seconds from an empty volume on an Apple silicon laptop, 1 to 2
-seconds on a restart.
+seconds on a restart. Like `restart`, `up` recreates the container when the stack is already
+running, so Postgres is down for a few seconds.
 
-To write `deploy/.env` yourself, copy `deploy/.env.example` and fill every password,
-including the superuser's, with at least 16 random characters. Empty or short passwords stop
-the first start on purpose. `deploy/.env` is gitignored; make it readable only by you
+To write `deploy/.env` yourself, copy `deploy/.env.example`, set `DREFYN_STACK_ID` to any
+random value, and fill every password, including the superuser's, with at least 16 random
+characters. Empty or short passwords stop the first start on purpose, and the superuser
+stays closed to TCP even then. `deploy/.env` is gitignored; make it readable only by you
 (`chmod 600 deploy/.env`, which `up` warns about if you forget) and keep it out of backups
 that others can read.
 
-If `up` fails, it prints the last healthcheck message and the command that shows the server
-log, which has the reason.
+If `up` fails, it says whether compose could not start the container or the healthcheck
+failed, with the last healthcheck message, and prints the command that shows the server log.
+A first start that was interrupted leaves nothing in the log; `reset --yes` and `up` again.
 
 ## Postgres
 
@@ -136,16 +139,20 @@ It stops before changing anything if the roles or schemas already exist. On `pos
 `template1` it only revokes `PUBLIC` rights where the master user owns the database, and
 prints a notice for any it skips.
 
-The file turns off statement logging for its own session before it reads a password, but a
-master user that is not a real superuser may not be allowed to, and it then prints a
-warning. Check two things before you run it:
+The file turns off statement logging for its own session before it reads a password. A
+master user that is not a real superuser may not be allowed to, and then the file stops
+before it reads any password unless the server already logs nothing. These record a
+`create role ... password` in plain text, even when it succeeds:
 
-- `log_statement` set to `ddl`, `mod` or `all` logs every `create role ... password` in plain
-  text, even when it succeeds.
-- `pgaudit` logs the same statements whatever the session sets.
+- `log_statement` set to `ddl`, `mod` or `all`
+- `log_min_duration_statement` or `log_min_duration_sample` at 0 or more
+- `log_transaction_sample_rate` above 0
+- `pgaudit` in `shared_preload_libraries`, whatever the session sets
 
-If either is on, turn it off for the run, or change each password afterwards with
-`\password`, as above.
+Turn them off for the run. If you have checked that nothing logs these statements, or you
+will change each password afterwards with `\password` as above, run the file with
+`DREFYN_BOOTSTRAP_LOG_CHECKED=yes` set. A master user that cannot read
+`shared_preload_libraries` also needs it.
 
 The master user owns schema `extensions` and the extension. After an engine upgrade, or when
 the provider adds a newer pgvector, it runs `alter extension vector update to '<version>'`,
@@ -160,9 +167,11 @@ recreate those containers or mount that volume, and `reset` would delete it. The
 when Docker cannot list the project's containers or volumes. Nothing is changed when they
 refuse.
 
-The data volume carries a label with the path of the compose file that created it. A volume
-without that label, made by plain `docker compose`, is accepted only while this file's
-containers are running in the project.
+The data volume carries a label with `DREFYN_STACK_ID` from `deploy/.env`, so plain
+`docker compose` and the scripts label it the same way and Compose never asks to recreate
+it. A volume with another stack ID, or none, is refused. A volume from an earlier build of
+this stack, labelled with the compose file path, can only be removed: `reset --yes` deletes
+it.
 
 Set `COMPOSE_PROJECT_NAME` (in the shell or in `deploy/.env`) and a different
 `DREFYN_POSTGRES_PORT` to run this stack beside another one, for example from another

@@ -11,19 +11,44 @@
 
 \set ON_ERROR_STOP on
 
--- Keep passwords out of the server log. Statement logging would record the statements below
--- that carry one, and an error would record the statement that failed. This has to come
--- before any of them. A managed database's master user may not be allowed to change these,
--- and then the operator has to check the log settings before running the file.
+-- Keep passwords out of the server log. Statement logging, duration logging and sampling
+-- would record the statements below that carry one, and an error would record the statement
+-- that failed. This has to come before any of them.
 select has_parameter_privilege('log_statement', 'SET')
   and has_parameter_privilege('log_min_error_statement', 'SET')
-  and has_parameter_privilege('log_min_duration_statement', 'SET') as can_quiet_log \gset
+  and has_parameter_privilege('log_min_duration_statement', 'SET')
+  and has_parameter_privilege('log_min_duration_sample', 'SET')
+  and has_parameter_privilege('log_transaction_sample_rate', 'SET') as can_quiet_log \gset
 \if :can_quiet_log
   set log_statement = 'none';
   set log_min_error_statement = 'panic';
   set log_min_duration_statement = -1;
+  set log_min_duration_sample = -1;
+  set log_transaction_sample_rate = 0;
+\endif
+
+-- A managed database's master user may not be allowed to change these, and pgaudit logs
+-- whatever the session says. Stop unless this session really logs no statements, or the
+-- operator has checked and says so. A preload list this role cannot read counts as unsafe.
+select current_setting('log_statement') = 'none'
+  and current_setting('log_min_duration_statement') = '-1'
+  and current_setting('log_min_duration_sample') = '-1'
+  and current_setting('log_transaction_sample_rate') = '0'
+  and coalesce((select setting !~ '(^|[ ,])pgaudit([ ,]|$)'
+    from pg_settings where name = 'shared_preload_libraries'), false) as log_is_quiet \gset
+\if :log_is_quiet
 \else
-  \echo 'bootstrap: this role cannot turn off statement logging; statements with passwords may be logged'
+  \getenv log_checked DREFYN_BOOTSTRAP_LOG_CHECKED
+  \if :{?log_checked}
+    select :'log_checked' = 'yes' as log_checked_yes \gset
+  \else
+    \set log_checked_yes false
+  \endif
+  \if :log_checked_yes
+    \echo 'bootstrap: DREFYN_BOOTSTRAP_LOG_CHECKED=yes, so running with the server log settings as they are'
+  \else
+    do $$ begin raise exception 'bootstrap: statement logging, sampling or pgaudit may record the passwords this file sets, and this role cannot turn them off. Check them, then set DREFYN_BOOTSTRAP_LOG_CHECKED=yes to run anyway'; end $$;
+  \endif
 \endif
 
 \getenv owner_password DREFYN_OWNER_PASSWORD

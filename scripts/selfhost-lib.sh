@@ -5,9 +5,6 @@ selfhost_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="$selfhost_root/deploy/compose.yaml"
 compose=(docker compose -f "$compose_file")
 selfhost_project=""
-# compose.yaml writes this into a label on the data volume. Volumes record no compose file
-# of their own, and without it a volume an older stack left behind looks like ours.
-export DREFYN_COMPOSE_FILE="$compose_file"
 
 # Messages go out in one write by an external cat. Under load bash 3.2's printf and echo give
 # up on an interrupted write, and a refusal cut short hides its reason.
@@ -35,15 +32,20 @@ is_ours() {
 # checkout or an older stack already used the same name, up would recreate its containers or
 # mount its volume, and reset would delete it. Refuse unless everything in the project came
 # from this file. Any docker failure refuses too: an empty answer must not read as all clear.
+# guard_project <command>: only down and reset may touch a volume from an earlier build.
 guard_project() {
-  local config listing volumes id name files volume file containers=0 foreign=""
+  local command="$1" config stack_id listing volumes id name files volume label old_file
+  local containers=0 foreign="" earlier=""
   if ! config="$("${compose[@]}" config 2>&1)"; then
     say <<EOF
-selfhost: could not read the project name from $compose_file; nothing was changed.
+selfhost: could not read the compose configuration in $compose_file; nothing was changed.
 $config
 EOF
     exit 1
   fi
+  # Volumes record no compose file of their own, so the data volume carries the stack ID from
+  # deploy/.env. Read it as compose resolves it, so a value set in the shell counts too.
+  stack_id="$(sed -n 's/^ *com\.drefyn\.selfhost\.stack-id: *//p' <<<"$config" | head -n 1 | tr -d "\"'")"
   selfhost_project="$(sed -n 's/^name: *//p' <<<"$config" | head -n 1)"
   if [ -z "$selfhost_project" ]; then
     say <<<"selfhost: could not read the project name from $compose_file; nothing was changed."
@@ -64,18 +66,35 @@ EOF
   done <<<"$listing"
 
   if ! volumes="$(docker volume ls --filter "label=com.docker.compose.project=$selfhost_project" \
-    --format '{{.Name}} {{.Label "com.drefyn.selfhost.compose-file"}}')"; then
+    --format '{{.Name}}|{{.Label "com.drefyn.selfhost.stack-id"}}|{{.Label "com.drefyn.selfhost.compose-file"}}')"; then
     say <<<"selfhost: could not list volumes in project '$selfhost_project'; nothing was changed."
     exit 1
   fi
-  while read -r volume file; do
+  while IFS='|' read -r volume label old_file; do
     [ -n "$volume" ] || continue
-    if [ -n "$file" ] && [ "$file" -ef "$compose_file" ]; then continue; fi
-    # Plain docker compose leaves the label empty. Such a volume is ours only while this file's
-    # containers are the ones using the project.
-    if [ -z "$file" ] && [ "$containers" -gt 0 ] && [ -z "$foreign" ]; then continue; fi
-    foreign+="  volume $volume (from ${file:-an unknown compose file})"$'\n'
+    if [ -n "$label" ] && [ "$label" = "$stack_id" ]; then continue; fi
+    # Earlier builds of this stack labelled the volume with the compose file path instead.
+    # Compose would want to recreate it, so only stopping and removing it are safe.
+    if [ -z "$label" ] && [ -n "$old_file" ] && [ "$old_file" -ef "$compose_file" ]; then
+      case "$command" in
+        down | reset) ;;
+        *) earlier+="  volume $volume"$'\n' ;;
+      esac
+      continue
+    fi
+    foreign+="  volume $volume (stack ID ${label:-missing})"$'\n'
   done <<<"$volumes"
+
+  if [ -n "$earlier" ] && [ -z "$foreign" ]; then
+    say <<EOF
+selfhost: project '$selfhost_project' has a data volume from an earlier build of this stack,
+labelled in a way newer Compose would want to recreate:
+${earlier}Nothing was changed. If it holds nothing you need, delete it with
+'bash scripts/selfhost.sh reset --yes' and run up again. Otherwise set COMPOSE_PROJECT_NAME
+to another name, in the shell or in deploy/.env.
+EOF
+    exit 1
+  fi
 
   if [ -n "$foreign" ]; then
     say <<EOF

@@ -64,7 +64,9 @@ secrets:
 
 volumes:
   pgdata:
-    # Lets the self host scripts tell this volume from one another compose file left under
-    # the same project name. Plain docker compose leaves it empty.
+    # Lets the self host scripts tell this volume from one another checkout or an older stack
+    # left under the same project name. It comes from deploy/.env, so plain docker compose and
+    # the scripts always write the same label; newer Compose offers to recreate a volume whose
+    # labels changed, which would delete the data.
     labels:
-      com.drefyn.selfhost.compose-file: ${DREFYN_COMPOSE_FILE:-}
+      com.drefyn.selfhost.stack-id: ${DREFYN_STACK_ID:?add DREFYN_STACK_ID with any random value to deploy/.env; scripts/selfhost.sh up writes it in a new file}
