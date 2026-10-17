@@ -95,7 +95,8 @@ expect_superuser_closed() {
 }
 
 # bad_start <case name> <expected log line> <expected text in up's output> [listens]
-# up must fail, say why, and leave the superuser closed. Pass "silent" as the last argument
+# up must fail, say why, and leave the superuser closed. The advice comes from the server log,
+# not the healthcheck, because compose may give up before the healthcheck ever runs. Pass "silent" as the last argument
 # when the server never starts listening, so there is nothing to probe.
 bad_start() {
   local case_name="$1" expected="$2" advice="$3" listens="${4:-listens}" out logs
@@ -133,21 +134,22 @@ DREFYN_APP_PASSWORD="$(secret)"
 DREFYN_PUBLIC_READER_PASSWORD="$(secret)"
 
 DREFYN_POSTGRES_PASSWORD=""
-bad_start "an empty superuser password" "superuser password is not specified" "container is" silent
+bad_start "an empty superuser password" "superuser password is not specified" \
+  "fix deploy/.env first" silent
 
 DREFYN_POSTGRES_PASSWORD=short-superuser
 bad_start "a 15 character superuser password" "postgres_password must be at least 16 characters" \
-  "fix deploy/.env"
+  "fix deploy/.env first"
 
 DREFYN_POSTGRES_PASSWORD="$good_superuser"
 DREFYN_OWNER_PASSWORD=""
 bad_start "an empty owner password" "secret drefyn_owner_password is missing or empty" \
-  "fix deploy/.env"
+  "fix deploy/.env first"
 
 DREFYN_OWNER_PASSWORD="$(secret)"
 DREFYN_APP_PASSWORD=short-app
 bad_start "a short app password" "each role password must be at least 16 characters" \
-  "fix deploy/.env"
+  "fix deploy/.env first"
 DREFYN_APP_PASSWORD="$(secret)"
 
 # Init can also stop before the bootstrap script runs at all: a crash, an out of memory kill, or
