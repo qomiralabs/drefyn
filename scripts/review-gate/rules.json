@@ -28,6 +28,8 @@
         "eslint.config.mts",
         "eslint.config.cts",
         "guard.config.js",
+        ".gitmodules",
+        ".gitattributes",
         "vitest.shared.ts",
         ".prettierrc.json",
         ".prettierignore"

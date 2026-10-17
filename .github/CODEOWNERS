@@ -22,3 +22,6 @@
 /vitest.shared.ts          @Divine572
 /.prettierrc.json          @Divine572
 /.prettierignore           @Divine572
+# Submodules and attributes change what git lists, and so what the guard lints.
+**/.gitmodules             @Divine572
+**/.gitattributes          @Divine572
