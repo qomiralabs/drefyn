@@ -12,6 +12,10 @@ services:
     user: postgres
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    # A runaway query or connection storm should hit these before it takes the host down.
+    # Postgres needs a process per connection plus about ten of its own, so 512 leaves room.
+    pids_limit: 512
+    mem_limit: ${DREFYN_POSTGRES_MEMORY_LIMIT:-1g}
     environment:
       POSTGRES_DB: drefyn
       POSTGRES_USER: postgres
@@ -32,18 +36,13 @@ services:
       - pgdata:/var/lib/postgresql
       - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
       - ./postgres/bootstrap.sql:/etc/drefyn/bootstrap.sql:ro
+      - ./postgres/healthcheck.sh:/etc/drefyn/healthcheck.sh:ro
     ports:
       - 127.0.0.1:${DREFYN_POSTGRES_PORT:-55432}:5432
-    # TCP only opens once the init scripts have finished, and the role count proves the
-    # bootstrap ran. A socket only check would pass during init.
+    # Logs in as every role with its secret, so a failed bootstrap or a password that no
+    # longer matches the database never reports healthy.
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          pg_isready --quiet --host 127.0.0.1 --username postgres --dbname drefyn &&
-          [ "$$(psql --no-psqlrc -qtA --username postgres --dbname drefyn -c
-          "select count(*) from pg_roles where rolname in
-          ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')")" = 3 ]
+      test: [CMD, sh, /etc/drefyn/healthcheck.sh]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -65,3 +64,7 @@ secrets:
 
 volumes:
   pgdata:
+    # Lets the self host scripts tell this volume from one another compose file left under
+    # the same project name. Plain docker compose leaves it empty.
+    labels:
+      com.drefyn.selfhost.compose-file: ${DREFYN_COMPOSE_FILE:-}

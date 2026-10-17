@@ -13,6 +13,15 @@ read_secret() {
   cat "$file"
 }
 
+# The superuser skips row level security, so its password gets the same floor as the roles.
+# The image has already set it by now; stopping here leaves the stack unhealthy.
+postgres_password="$(read_secret postgres_password)"
+if [ "${#postgres_password}" -lt 16 ]; then
+  echo "bootstrap: secret postgres_password must be at least 16 characters" >&2
+  exit 1
+fi
+unset postgres_password
+
 DREFYN_OWNER_PASSWORD="$(read_secret drefyn_owner_password)"
 DREFYN_APP_PASSWORD="$(read_secret drefyn_app_password)"
 DREFYN_PUBLIC_READER_PASSWORD="$(read_secret drefyn_public_reader_password)"
@@ -20,3 +29,16 @@ export DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD DREFYN_PUBLIC_READER_PASSWORD
 
 psql --no-psqlrc --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --file /etc/drefyn/bootstrap.sql
+
+# Nothing needs the superuser over TCP: the bootstrap and operators use the socket, where
+# peer ties it to the postgres OS user. Without this, anyone on the host who can reach the
+# loopback port is one password away from it. The first matching line wins, so it goes on top.
+# The server that starts after init reads the file fresh.
+umask 077
+hba="$PGDATA/pg_hba.conf"
+{
+  echo "# The superuser logs in over the local socket only."
+  echo "host all $POSTGRES_USER all reject"
+  cat "$hba"
+} >"$hba.drefyn"
+mv "$hba.drefyn" "$hba"
