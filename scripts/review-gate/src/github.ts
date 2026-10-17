@@ -173,28 +173,28 @@ const REVIEWS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $af
     pullRequest(number: $number) {
       reviews(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { author { login } authorAssociation submittedAt lastEditedAt state body }
+        nodes {
+          author { __typename login }
+          authorAssociation submittedAt lastEditedAt state body
+        }
       }
     }
   }
 }`;
 
-function reviewsConnection() {
-  const kind = 'reviews';
-  return (data: unknown): Connection => {
-    const repository = isRecord(data) ? data['repository'] : undefined;
-    const pr = isRecord(repository) ? repository['pullRequest'] : undefined;
-    const conn = isRecord(pr) ? pr[kind] : undefined;
-    const pageInfo = isRecord(conn) ? conn['pageInfo'] : undefined;
-    const nodes = isRecord(conn) ? conn['nodes'] : undefined;
-    if (!isRecord(pageInfo) || !Array.isArray(nodes)) {
-      throw new Error(`GraphQL returned no ${kind} connection for the PR`);
-    }
-    return {
-      nodes: nodes as unknown[],
-      hasNextPage: pageInfo['hasNextPage'] === true,
-      endCursor: str(pageInfo['endCursor']) ?? null,
-    };
+function reviewsConnection(data: unknown): Connection {
+  const repository = isRecord(data) ? data['repository'] : undefined;
+  const pr = isRecord(repository) ? repository['pullRequest'] : undefined;
+  const conn = isRecord(pr) ? pr['reviews'] : undefined;
+  const pageInfo = isRecord(conn) ? conn['pageInfo'] : undefined;
+  const nodes = isRecord(conn) ? conn['nodes'] : undefined;
+  if (!isRecord(pageInfo) || !Array.isArray(nodes)) {
+    throw new Error('GraphQL returned no reviews connection for the PR');
+  }
+  return {
+    nodes: nodes as unknown[],
+    hasNextPage: pageInfo['hasNextPage'] === true,
+    endCursor: str(pageInfo['endCursor']) ?? null,
   };
 }
 
@@ -209,6 +209,8 @@ function toReview(raw: unknown): Review {
   return {
     // Deleted accounts come back as null authors; GitHub shows them as "ghost".
     author: str(author?.['login']) ?? 'ghost',
+    // Anything but an explicit User, a missing type included, never counts.
+    authorType: str(author?.['__typename']) ?? 'unknown',
     authorAssociation: str(raw['authorAssociation']) ?? 'NONE',
     submittedAt,
     body: str(raw['body']) ?? '',
@@ -261,7 +263,7 @@ export async function loadGateInput(
   });
 
   const variables = { owner, name, number: prNumber };
-  const nodes = await client.graphqlConnection(REVIEWS_QUERY, variables, reviewsConnection());
+  const nodes = await client.graphqlConnection(REVIEWS_QUERY, variables, reviewsConnection);
   const reviews: Review[] = [];
   for (const node of nodes) {
     // A pending review was never posted. Dismissed ones stay, so a block survives dismissal.

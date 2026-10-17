@@ -19,6 +19,7 @@ afterEach(() => {
 // The shipped rules file allows this login for every reviewer.
 const member = (body: string, i: number) => ({
   author: 'Divine572',
+  authorType: 'User',
   authorAssociation: 'MEMBER',
   submittedAt: `2026-10-07T10:00:0${i}Z`,
   body,
@@ -147,11 +148,30 @@ describe('review-gate evaluate', () => {
   it('accepts reviews without an author association, since it is not used', async () => {
     const reviews = passingInput.reviews.map((e) => ({
       author: e.author,
+      authorType: e.authorType,
       submittedAt: e.submittedAt,
       body: e.body,
     }));
     const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
     expect(res.code).toBe(0);
+  });
+
+  it('exits 2 when a review has no author type, rather than guess it is a user', async () => {
+    const reviews = passingInput.reviews.map((e) => ({
+      author: e.author,
+      submittedAt: e.submittedAt,
+      body: e.body,
+    }));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('reviews[0] needs string author, authorType');
+  });
+
+  it('does not count a review whose author type is not User', async () => {
+    const reviews = passingInput.reviews.map((e, i) => (i === 0 ? { ...e, authorType: 'Bot' } : e));
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, reviews })]);
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('author is not a user account');
   });
 
   it('exits 2 when edited is not a boolean', async () => {
@@ -222,7 +242,7 @@ describe('review-gate github', () => {
         return Response.json({ message: 'comments are not a marker source' }, { status: 400 });
       }
       const nodes = passingInput.reviews.map((e) => ({
-        author: { login: e.author },
+        author: { __typename: e.authorType, login: e.author },
         authorAssociation: e.authorAssociation,
         submittedAt: e.submittedAt,
         lastEditedAt: null,
@@ -292,6 +312,8 @@ describe('review-gate usage', () => {
     const res = await run(['--help']);
     expect(res.code).toBe(0);
     expect(res.out).toContain('usage');
+    expect(res.out).toContain('changed files and reviews from a JSON file');
+    expect(res.out).not.toContain('comments');
   });
 
   it('exits 2 on an unknown command', async () => {

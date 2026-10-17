@@ -6,14 +6,17 @@
 #   and a review edited after submission blocks every reviewer its author may sign for
 #   until fresh reviews follow, so neither a deletion nor an edit can lift a block.
 #   Issue comments are not read at all.
-# - A marker counts only when its author's login is listed for that reviewer in
-#   scripts/review-gate/rules.json. Author association is not used: the Actions token
-#   cannot see private org membership and reports members as CONTRIBUTOR.
+# - A marker counts only when its author is a User account whose login is listed for
+#   that reviewer in scripts/review-gate/rules.json. GraphQL returns bot logins without
+#   the [bot] suffix, so the type is checked too. Author association is not used: the
+#   Actions token cannot see private org membership and reports members as CONTRIBUTOR.
+# - An approval counts only for the head SHA. A changes_requested marker counts on any
+#   SHA when it is that reviewer's newest review, since the head needs a newer approval.
 # - The gate script, its path rules and the allow list come from the PR base commit for
 #   PR and review events, and from the default branch for a dispatch, so editing them in
 #   a PR does not change how that PR is judged. This workflow never checks out PR code.
-#   While development lacks the script, review-gate-bootstrap.yml covers same repo PRs
-#   into it.
+#   If the trusted ref has no gate script, the run fails and posts an error status
+#   rather than pass or skip.
 # - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
 #   re-reads the PR head from the API and posts only for that SHA.
 # - Fork PRs cannot set the status from their own runs, since their pull_request and
@@ -56,7 +59,6 @@ jobs:
       contents: read # check out the gate script
       pull-requests: read # PR head, labels, files and reviews
     outputs:
-      present: ${{ steps.script.outputs.present }}
       state: ${{ steps.gate.outputs.state }}
       sha: ${{ steps.gate.outputs.sha }}
       description: ${{ steps.gate.outputs.description }}
@@ -76,24 +78,19 @@ jobs:
         with:
           ref: development
           persist-credentials: false
-      # Before the gate script reaches development there is nothing trusted to run; the
-      # bootstrap workflow owns that case, so this run steps aside without a status.
+      # Without a trusted copy of the script there is nothing safe to run. Failing here
+      # leaves no state output, so report posts an error status on the head.
       - name: Check for the gate script on the trusted ref
-        id: script
         run: |
-          if [ -f scripts/review-gate/src/cli.ts ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::gate script not on the trusted ref yet; review-gate-bootstrap.yml reports instead"
-            echo "present=false" >> "$GITHUB_OUTPUT"
+          if [ ! -f scripts/review-gate/src/cli.ts ]; then
+            echo "::error::the gate script is missing on the trusted ref; refusing to evaluate"
+            exit 1
           fi
-      - if: steps.script.outputs.present == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           package-manager-cache: false
       - name: Evaluate
-        if: steps.script.outputs.present == 'true'
         id: gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -111,7 +108,6 @@ jobs:
     # refreshes a fork PR's status.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
-      needs.evaluate.outputs.present != 'false' &&
       !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5

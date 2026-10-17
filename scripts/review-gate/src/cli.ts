@@ -17,7 +17,7 @@ export interface Deps {
 const USAGE = `usage: review-gate evaluate --input <file.json> [--rules <file>] [--github-output <file>] [--summary <file>]
        review-gate github --repo <owner/name> --pr <number> [--github-output <file>] [--summary <file>]
 
-  evaluate  read head SHA, labels, changed files and comments from a JSON file
+  evaluate  read head SHA, labels, changed files and reviews from a JSON file
   github    read them from the GitHub API using GITHUB_TOKEN
             (and GITHUB_API_URL and GITHUB_GRAPHQL_URL if set)
   --rules   path rules file, defaults to rules.json next to this package
@@ -28,8 +28,9 @@ exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
 class InputError extends Error {}
 
 const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'reviews']);
-const ENTRY_KEYS = new Set([
+const REVIEW_KEYS = new Set([
   'author',
+  'authorType',
   'authorAssociation',
   'submittedAt',
   'body',
@@ -60,10 +61,11 @@ function parseInput(raw: unknown): GateInput {
   if (!Array.isArray(reviews)) throw new InputError('reviews must be a list');
   const parsed = (reviews as unknown[]).map((item, i): Review => {
     const e = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
-    rejectUnknownKeys(e, ENTRY_KEYS, `reviews[${i}]`);
-    const { author, authorAssociation, submittedAt, body, edited, dismissed } = e;
+    rejectUnknownKeys(e, REVIEW_KEYS, `reviews[${i}]`);
+    const { author, authorType, authorAssociation, submittedAt, body, edited, dismissed } = e;
     if (
       typeof author !== 'string' ||
+      typeof authorType !== 'string' ||
       (authorAssociation !== undefined && typeof authorAssociation !== 'string') ||
       typeof submittedAt !== 'string' ||
       typeof body !== 'string' ||
@@ -71,11 +73,12 @@ function parseInput(raw: unknown): GateInput {
       (dismissed !== undefined && typeof dismissed !== 'boolean')
     ) {
       throw new InputError(
-        `reviews[${i}] needs string author, submittedAt and body; authorAssociation must be a string and edited and dismissed booleans if set`,
+        `reviews[${i}] needs string author, authorType, submittedAt and body; authorAssociation must be a string and edited and dismissed booleans if set`,
       );
     }
     return {
       author,
+      authorType,
       ...(authorAssociation === undefined ? {} : { authorAssociation }),
       submittedAt,
       body,

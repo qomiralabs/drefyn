@@ -89,9 +89,13 @@ with `gh pr review <number> --comment --body-file <file>` or from the review scr
 
 - Only reviews count. A marker in a plain PR comment is ignored, because comments can
   be deleted without trace and reviews cannot.
-- A marker counts only when its author's login is listed for that reviewer in
-  `scripts/review-gate/rules.json` on the base branch. GitHub's author association is
-  not used, because the Actions token cannot see private org membership.
+- A marker counts only when its author is a user account (not a bot) whose login is
+  listed for that reviewer in `scripts/review-gate/rules.json` on the base branch.
+  GitHub's author association is not used, because the Actions token cannot see
+  private org membership.
+- An approval counts only for the current head SHA. A `changes_requested` marker
+  blocks whatever SHA it names, as long as it is your newest review for that reviewer.
+  To lift it, post a newer approval for the head.
 - Editing a review after you submit it blocks every reviewer your login may sign for,
   whatever the review says now, until you post a fresh review with a valid marker for
   each of them. To change your mind, post a new review instead of editing.
