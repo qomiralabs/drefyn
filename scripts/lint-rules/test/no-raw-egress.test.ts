@@ -135,6 +135,76 @@ describe('no-raw-egress with ambient declarations', () => {
   });
 });
 
+describe('no-raw-egress through TypeScript wrappers, aliases and templates', () => {
+  it.each([
+    ['(globalThis as any).fetch("x");', 'fetch'],
+    ['globalThis!.fetch("x");', 'fetch'],
+    ['(<typeof globalThis>globalThis).fetch("x");', 'fetch'],
+    ['(globalThis satisfies object).WebSocket;', 'WebSocket'],
+    ['((globalThis as any) as typeof globalThis).globalThis.fetch("x");', 'fetch'],
+    ['const { fetch: f } = globalThis as any;\nf("x");', 'fetch'],
+    [
+      "import { createRequire as cr } from 'node:module';\ncr(import.meta.url)('node:net');",
+      'node:net',
+    ],
+    [
+      "import { createRequire as cr } from 'module';\nconst r = cr(import.meta.url);\nr('http');",
+      'http',
+    ],
+    ['process.getBuiltinModule(`node:http`);', 'node:http'],
+    [
+      "import { createRequire } from 'node:module';\ncreateRequire(import.meta.url)(`node:net`);",
+      'node:net',
+    ],
+    ["process.getBuiltinModule('node:quic');", 'node:quic'],
+    ["import 'quic';", 'quic'],
+  ])('reports %j', async (code, api) => {
+    const found = await lintAs('packages/web/src/wrapped.ts', code);
+    expect(found.map((r) => r.message)).toEqual([message(api, '@drefyn/web')]);
+  });
+
+  it('leaves an unrelated aliased import alone', async () => {
+    const code = "import { builtinModules as cr } from 'node:module';\nexport const n = cr.length;";
+    expect(await lintAs('packages/web/src/alias.ts', code)).toEqual([]);
+  });
+});
+
+describe('no-raw-egress on files loaded as code that no linter reads', () => {
+  const opaque = (spec: string) =>
+    `'${spec}' loads a file that is not source as code, so the egress rule cannot check it. Rename it to a source extension.`;
+
+  it('reports a require style load of a relative file with a non source extension', async () => {
+    const code = [
+      "import { createRequire } from 'node:module';",
+      'const load = createRequire(import.meta.url);',
+      "export const a = load('./net.txt');",
+      "export const b = createRequire(import.meta.url)('../x/run.css');",
+      "export const c = require('./data.md');",
+      "export const d = module.require('./blob.dat');",
+    ].join('\n');
+    const found = await lintAs('packages/web/src/opaque.ts', code);
+    expect(found.map((r) => [r.line, r.message])).toEqual([
+      [3, opaque('./net.txt')],
+      [4, opaque('../x/run.css')],
+      [5, opaque('./data.md')],
+      [6, opaque('./blob.dat')],
+    ]);
+  });
+
+  it('leaves source, JSON, extensionless and package specifiers and ESM style imports alone', async () => {
+    const code = [
+      "import './styles.css';",
+      "export const a = require('./data.json');",
+      "export const b = require('./other.js');",
+      "export const c = require('./other');",
+      "export const d = require('zod/package.json');",
+      "export const e = require('some-pkg/file.txt');",
+      "export const f = () => import('./theme.css');",
+    ].join('\n');
+    expect(await lintAs('packages/web/src/fine.ts', code)).toEqual([]);
+  });
+});
+
 describe('no-raw-egress exemptions', () => {
   it('allows the same code inside packages/egress', async () => {
     expect(await lintAs('packages/egress/src/raw.ts')).toEqual([]);

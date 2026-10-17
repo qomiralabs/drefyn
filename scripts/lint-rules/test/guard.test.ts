@@ -1,6 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { goodPackage, repoRoot, tempWorkspace, type TempWorkspace } from './helpers.ts';
 
@@ -12,7 +21,6 @@ const RAW = "export const f = fetch('x');\n";
 let ws: TempWorkspace;
 beforeEach(() => {
   ws = tempWorkspace();
-  execFileSync('git', ['init', '-q'], { cwd: ws.root });
   ws.write('.gitignore', 'node_modules/\ndist/\ncoverage/\n');
   ws.manifest('packages/a', goodPackage('a'));
   ws.write('packages/a/src/index.ts', 'export const a = 1;\n');
@@ -66,23 +74,125 @@ describe('guard on a clean tree', () => {
 
 describe('guard exit codes', () => {
   it('passes ESLint through unchanged, so a crash reads 2 and not 123 from GNU xargs', () => {
-    ws.write('packages/a/src/pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
-    ws.write('packages/a/src/packages/egress/raw.ts', RAW);
+    // A nested workspace file with no packages list makes the rule throw.
+    ws.write('packages/a/src/x/pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
+    ws.write('packages/a/src/x/raw.ts', RAW);
+    ws.write('pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
     execFileSync('git', ['add', '-A'], { cwd: ws.root });
     const result = spawnSync('bash', [guard], { cwd: ws.root, encoding: 'utf8' });
     expect(result.stderr).toContain('pnpm-workspace.yaml: no packages list');
     expect(result.status).toBe(2);
   });
 
-  it('exits 0 when there are no source files', () => {
+  it('fails when there are no source files, since this repo always has some', () => {
     const empty = tempWorkspace();
     try {
-      execFileSync('git', ['init', '-q'], { cwd: empty.root });
       const result = spawnSync('bash', [guard], { cwd: empty.root, encoding: 'utf8' });
-      expect(result.stdout).toBe('guard: no source files\n');
-      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('guard: no source files found\n');
+      expect(result.status).toBe(2);
     } finally {
       empty.cleanup();
+    }
+  });
+
+  it('fails when git fails instead of linting nothing', () => {
+    const broken = spawnSync('bash', [guard], {
+      cwd: ws.root,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_DIR: join(ws.root, 'missing') },
+    });
+    expect(broken.stderr).toContain('not a git repository');
+    expect(broken.status).not.toBe(0);
+    const outside = mkdtempSync(join(tmpdir(), 'drefyn-no-git-'));
+    try {
+      const result = spawnSync('bash', [guard], {
+        cwd: outside,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() },
+      });
+      expect(result.stderr).toContain('not a git repository');
+      expect(result.status).not.toBe(0);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a tracked file that was deleted from disk and still lints the rest', () => {
+    ws.write('packages/a/src/gone.ts', RAW);
+    ws.write('packages/a/src/raw.ts', RAW);
+    execFileSync('git', ['add', '-A'], { cwd: ws.root });
+    rmSync(join(ws.root, 'packages/a/src/gone.ts'));
+    const result = spawnSync('bash', [guard, '--format', 'json'], {
+      cwd: ws.root,
+      encoding: 'utf8',
+    });
+    const files = (JSON.parse(result.stdout) as { filePath: string; messages: unknown[] }[])
+      .filter((r) => r.messages.length > 0)
+      .map((r) => relative(realpathSync(ws.root), r.filePath));
+    expect(files).toEqual(['packages/a/src/raw.ts']);
+    expect(result.status).toBe(1);
+  });
+});
+
+describe('guard on file names and layouts it must not trust', () => {
+  it('lints a root file named like an option instead of reading it as one', () => {
+    ws.write('--config=evil.mjs', '');
+    ws.write(
+      'evil.mjs',
+      "import tseslint from 'typescript-eslint';\nexport default [{ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }];\n",
+    );
+    ws.write('shared/net.ts', RAW);
+    const { status, hits } = runGuard();
+    expect(hits).toEqual([egress('shared/net.ts')]);
+    expect(status).toBe(1);
+  });
+
+  it('keeps the real root when a nested pnpm-workspace.yaml claims a packages/egress', () => {
+    ws.write('packages/a/src/pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+    ws.manifest('packages/a/src/packages/egress', {
+      name: '@drefyn/egress',
+      private: true,
+      type: 'module',
+    });
+    ws.write('packages/a/src/packages/egress/raw.ts', RAW);
+    const { status, hits } = runGuard();
+    expect(hits).toEqual([egress('packages/a/src/packages/egress/raw.ts')]);
+    expect(status).toBe(1);
+  });
+
+  // Temp repos lack the real layout, so a guard.sh edit keyed on a file that only the
+  // real tree has would pass every other test here.
+  it('runs on a copy of the real repository tree and still reports a raw call', () => {
+    const copy = mkdtempSync(join(tmpdir(), 'drefyn-guard-copy-'));
+    try {
+      const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' })
+        .split('\0')
+        .filter((file) => file !== '' && existsSync(join(repoRoot, file)));
+      for (const file of tracked) {
+        mkdirSync(dirname(join(copy, file)), { recursive: true });
+        cpSync(join(repoRoot, file), join(copy, file));
+      }
+      execFileSync('git', ['init', '-q'], { cwd: copy });
+      mkdirSync(join(copy, 'shared'));
+      writeFileSync(join(copy, 'shared/net.ts'), RAW);
+      execFileSync('git', ['add', '-A'], { cwd: copy });
+      const result = spawnSync('bash', [guard, '--format', 'json'], {
+        cwd: copy,
+        encoding: 'utf8',
+      });
+      const parsed = JSON.parse(result.stdout) as { filePath: string; messages: unknown[] }[];
+      const flagged = parsed
+        .filter((r) => r.messages.length > 0)
+        .map((r) => relative(realpathSync(copy), r.filePath));
+      expect(flagged).toEqual(['shared/net.ts']);
+      const sources = tracked.filter(
+        (file) =>
+          /\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('scripts/lint-rules/test/fixtures/'),
+      );
+      expect(parsed).toHaveLength(sources.length + 1);
+      expect(result.status).toBe(1);
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
     }
   });
 });

@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
 import {
@@ -161,6 +162,106 @@ function checkNestedFiles(workspace: Workspace): Finding[] {
   };
   walk(workspace.root);
   return findings;
+}
+
+// File types a package may hold. Node's require runs any other extension, and a file
+// with none, as JavaScript, and the guard only lists source extensions, so such a file
+// would be code nothing lints.
+const PACKAGE_EXTENSIONS = new Set([
+  ...CODE_EXTENSIONS,
+  '.json',
+  '.css',
+  '.md',
+  '.txt',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.ico',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+]);
+
+interface IndexEntry {
+  path: string;
+  mode: string;
+}
+
+// Tracked entries with their git mode, plus new files that are not ignored, the same
+// list the guard lints. Read from git because a symlink or a submodule shows up there
+// as one entry whose contents nothing lists. No repository is an error, not a pass.
+function indexEntries(root: string): IndexEntry[] {
+  const git = (args: string[]) => {
+    try {
+      return execFileSync('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    } catch (error) {
+      const stderr = (error as { stderr?: unknown }).stderr;
+      const detail = typeof stderr === 'string' ? stderr.trim() : String(error);
+      throw new Error(`git ${args[0] ?? ''} failed in ${root}: ${detail}`, { cause: error });
+    }
+  };
+  const entries = git(['ls-files', '-s', '-z'])
+    .split('\0')
+    .filter((line) => line !== '')
+    .map((line) => {
+      const tab = line.indexOf('\t');
+      return { mode: line.slice(0, line.indexOf(' ')), path: line.slice(tab + 1) };
+    });
+  for (const path of git(['ls-files', '-z', '--others', '--exclude-standard']).split('\0')) {
+    if (path === '') continue;
+    const link = lstatSync(join(root, ...path.split('/'))).isSymbolicLink();
+    entries.push({ path, mode: link ? '120000' : '100644' });
+  }
+  return entries;
+}
+
+function checkIndex(workspace: Workspace): Finding[] {
+  const findings: Finding[] = [];
+  for (const { path, mode } of indexEntries(workspace.root)) {
+    const segments = path.split('/');
+    if (segments.includes('node_modules')) continue;
+    const full = join(workspace.root, ...segments);
+    const owner = ownerOf(workspace, full);
+    const add = (detail: string) => {
+      findings.push({
+        package: owner ? label(owner) : 'root',
+        field: relative(owner?.dir ?? workspace.root, full)
+          .split(sep)
+          .join('/'),
+        detail,
+      });
+    };
+    if (segments.some((segment) => segment.startsWith('-'))) {
+      add("starts with '-', which tools read as an option");
+    }
+    if (mode === '120000') {
+      add('symlinks are not allowed; the rules and the guard see the link, not its target');
+    } else if (mode === '160000') {
+      add('submodules are not allowed; nothing inside one is linted');
+    } else if (LAYOUT_ROOTS.some((prefix) => path.startsWith(prefix))) {
+      const name = segments.at(-1) ?? '';
+      if (NESTED_FILES.some(([pattern]) => pattern.test(name))) continue;
+      const ext = extname(name);
+      if (!PACKAGE_EXTENSIONS.has(ext)) {
+        add(
+          `file type ${ext === '' ? '(no extension)' : ext} is not allowed in a package; Node can load it as code and nothing lints it`,
+        );
+      }
+    }
+  }
+  return findings.sort((a, b) =>
+    a.package === b.package ? (a.field < b.field ? -1 : 1) : a.package < b.package ? -1 : 1,
+  );
 }
 
 const sorted = <T extends { name: string }>(entries: T[]) =>
@@ -330,6 +431,7 @@ export function checkWorkspace(root: string): CheckResult {
     checkDependencies(pkg, workspace, add);
   }
   findings.push(...checkNestedFiles(workspace));
+  findings.push(...checkIndex(workspace));
   const files = codeFiles(root);
   findings.push(...checkDirectives(workspace, files));
   return { findings, workspace: workspace.packages.length, packages, files: files.length };

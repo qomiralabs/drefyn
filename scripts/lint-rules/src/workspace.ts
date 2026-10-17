@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export interface WorkspacePackage {
   // Absolute directory, and the same path relative to the root with forward slashes.
@@ -36,6 +36,15 @@ export function findWorkspaceRoot(from: string): string | undefined {
     if (parent === dir) return undefined;
     dir = parent;
   }
+}
+
+// The root a rule works from: the one pinned in settings.drefyn.workspaceRoot (the
+// guard pins the git top level), else the nearest pnpm-workspace.yaml above the file.
+export function workspaceRootFor(file: string, settings: unknown): string | undefined {
+  const drefyn = isRecord(settings) ? settings['drefyn'] : undefined;
+  const pinned = isRecord(drefyn) ? drefyn['workspaceRoot'] : undefined;
+  if (typeof pinned === 'string' && isAbsolute(pinned)) return pinned;
+  return isAbsolute(file) ? findWorkspaceRoot(dirname(file)) : undefined;
 }
 
 const PACKAGES_KEY = /^(?:packages|'packages'|"packages")\s*:/;

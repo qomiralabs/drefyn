@@ -8,7 +8,7 @@ export interface ModuleReference {
   typeOnly: boolean;
 }
 
-function literal(value: unknown): { spec: string; loc: AST.SourceLocation } | undefined {
+export function literal(value: unknown): { spec: string; loc: AST.SourceLocation } | undefined {
   if (!isRecord(value) || !isRecord(value['loc'])) return undefined;
   const loc = value['loc'] as unknown as AST.SourceLocation;
   if (value['type'] === 'Literal') {

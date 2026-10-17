@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -57,6 +58,8 @@ export function tempWorkspace(patterns = ['packages/*', 'apps/*', 'scripts/*']):
   };
   write('pnpm-workspace.yaml', `packages:\n${patterns.map((p) => `  - ${p}\n`).join('')}`);
   write('package.json', JSON.stringify({ name: 'temp-root', private: true, type: 'module' }));
+  // The checker reads the git index, as CI does.
+  execFileSync('git', ['init', '-q'], { cwd: root });
   return {
     root,
     write,

@@ -5,8 +5,8 @@ import {
   cachedWorkspace,
   declaredDependencies,
   exportEntries,
-  findWorkspaceRoot,
   ownerOf,
+  workspaceRootFor,
   type WorkspacePackage,
 } from './workspace.ts';
 
@@ -46,7 +46,7 @@ export const noCrossPackageInternals: Rule.RuleModule = {
   create(context) {
     const file = context.filename;
     if (!isAbsolute(file)) return {};
-    const root = findWorkspaceRoot(dirname(file));
+    const root = workspaceRootFor(file, context.settings);
     if (root === undefined) return {};
     const workspace = cachedWorkspace(root);
     const here = ownerOf(workspace, file);

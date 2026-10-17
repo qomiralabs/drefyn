@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkWorkspace, formatFinding } from '../src/manifest.ts';
 import { goodPackage, repoRoot, SCRIPTS, tempWorkspace, type TempWorkspace } from './helpers.ts';
@@ -282,6 +285,93 @@ describe('manifest checker failures name the package and the field', () => {
   it('a package.json that is not valid JSON', () => {
     ws.write('packages/a/package.json', '{ "name": ');
     expect(check()).toEqual(['packages/a (no name): package.json: not valid JSON']);
+  });
+});
+
+describe('manifest checker on paths the rules and the guard cannot see through', () => {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: ws.root });
+  beforeEach(() => {
+    ws.manifest('packages/a', goodPackage('a'));
+    ws.manifest('scripts/tool', { name: '@drefyn/tool', private: true, type: 'module' });
+    ws.write('scripts/tool/src/secret.ts', 'export const secret = 1;\n');
+  });
+
+  it('a path segment that starts with a dash, which tools read as an option', () => {
+    ws.write('--config=evil.mjs', '');
+    ws.write('packages/a/src/-x/index.ts', 'export {};\n');
+    git('add', '-A');
+    const detail = "starts with '-', which tools read as an option";
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src/-x/index.ts: ${detail}`,
+      `root: --config=evil.mjs: ${detail}`,
+    ]);
+  });
+
+  it('a tracked or new symlink, file or directory, anywhere', () => {
+    // A directory link lets a package import another package's internals by a path
+    // that looks like its own.
+    symlinkSync('../../../scripts/tool/src', join(ws.root, 'packages/a/src-link'));
+    mkdirSync(join(ws.root, 'packages/a/src'), { recursive: true });
+    symlinkSync('../../../scripts/tool/src', join(ws.root, 'packages/a/src/hy'));
+    ws.write('packages/a/src/index.ts', "export * from './hy/secret.ts';\n");
+    symlinkSync('scripts/tool/src/secret.ts', join(ws.root, 'linked.ts'));
+    git('add', 'packages/a/src/hy', 'linked.ts', 'packages/a/src/index.ts');
+    const detail = 'symlinks are not allowed; the rules and the guard see the link, not its target';
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src-link: ${detail}`,
+      `packages/a (@drefyn/a): src/hy: ${detail}`,
+      `root: linked.ts: ${detail}`,
+    ]);
+  });
+
+  it('a submodule, whose contents are never linted', () => {
+    git('add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ws.root, encoding: 'utf8' });
+    git('update-index', '--add', '--cacheinfo', `160000,${head.trim()},packages/a/vendor`);
+    expect(check()).toEqual([
+      'packages/a (@drefyn/a): vendor: submodules are not allowed; nothing inside one is linted',
+    ]);
+  });
+
+  it('a file under packages/ or apps/ that Node could run but nothing lints', () => {
+    for (const name of ['net', 'net.dat', 'LOADER.MJS', 'run.sh', 'x.d.mts.bak']) {
+      ws.write(`packages/a/src/${name}`, 'module.exports = 1;\n');
+    }
+    ws.manifest('apps/web', goodPackage('web'));
+    ws.write('apps/web/src/.hidden', 'x');
+    const detail = (ext: string) =>
+      `file type ${ext} is not allowed in a package; Node can load it as code and nothing lints it`;
+    expect(check()).toEqual([
+      `apps/web (@drefyn/web): src/.hidden: ${detail('(no extension)')}`,
+      `packages/a (@drefyn/a): src/LOADER.MJS: ${detail('.MJS')}`,
+      `packages/a (@drefyn/a): src/net: ${detail('(no extension)')}`,
+      `packages/a (@drefyn/a): src/net.dat: ${detail('.dat')}`,
+      `packages/a (@drefyn/a): src/run.sh: ${detail('.sh')}`,
+      `packages/a (@drefyn/a): src/x.d.mts.bak: ${detail('.bak')}`,
+    ]);
+  });
+
+  it('passes source, JSON, styles, docs, images and fonts, and leaves scripts/ alone', () => {
+    const names = ['a.ts', 'b.tsx', 'c.mts', 'd.cts', 'e.js', 'f.jsx', 'g.mjs', 'h.cjs', 'i.d.ts'];
+    names.push('j.json', 'k.css', 'l.md', 'OFL.txt', 'm.svg', 'n.png', 'o.jpg', 'p.webp');
+    names.push('q.ico', 'r.woff2', 's.woff', 't.ttf', 'u.otf', 'v.avif', 'w.gif', 'x.jpeg');
+    for (const name of names) ws.write(`packages/a/src/${name}`, '\n');
+    ws.write('scripts/tool/run', '#!/bin/sh\n');
+    expect(check()).toEqual([]);
+  });
+
+  it('refuses a workspace that is not in a git repository', () => {
+    rmSync(join(ws.root, '.git'), { recursive: true, force: true });
+    const outside = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(ws.root) };
+    const before = process.env['GIT_CEILING_DIRECTORIES'];
+    process.env['GIT_CEILING_DIRECTORIES'] = outside.GIT_CEILING_DIRECTORIES;
+    try {
+      expect(() => checkWorkspace(ws.root)).toThrow(/not a git repository/);
+    } finally {
+      if (before === undefined) delete process.env['GIT_CEILING_DIRECTORIES'];
+      else process.env['GIT_CEILING_DIRECTORIES'] = before;
+    }
   });
 });
 

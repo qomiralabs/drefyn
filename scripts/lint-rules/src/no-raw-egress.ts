@@ -1,11 +1,11 @@
-import { dirname, isAbsolute, relative, sep } from 'node:path';
+import { relative, sep } from 'node:path';
 import type { AST, Rule, Scope } from 'eslint';
-import { moduleReferences } from './references.ts';
+import { literal, moduleReferences } from './references.ts';
 import {
   cachedWorkspace,
-  findWorkspaceRoot,
   isRecord,
   ownerOf,
+  workspaceRootFor,
   type WorkspacePackage,
 } from './workspace.ts';
 
@@ -30,9 +30,31 @@ const BANNED_BUILTINS = new Set([
   '_tls_common',
   '_tls_wrap',
   '_stream_wrap',
+  // Experimental in Node 24 behind a flag, but it opens UDP based connections.
+  'quic',
 ]);
 const GLOBAL_APIS = new Set(['fetch', 'WebSocket']);
 const GLOBAL_OBJECTS = new Set(['globalThis', 'window', 'self', 'global']);
+// Type only wrappers that leave the value as it is at run time.
+const TS_WRAPPERS = new Set([
+  'TSAsExpression',
+  'TSNonNullExpression',
+  'TSTypeAssertion',
+  'TSSatisfiesExpression',
+]);
+// What Node runs or parses when require loads a relative file by this extension; any
+// other extension is run as JavaScript too, which no linter here reads.
+const REQUIRE_SAFE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+]);
 
 interface AllowEntry {
   path: string;
@@ -107,19 +129,40 @@ function staticName(key: unknown, computed: boolean): string | undefined {
   return undefined;
 }
 
-function stringArgument(node: { arguments: unknown[] }): string | undefined {
-  const [first] = node.arguments;
-  return isRecord(first) && first['type'] === 'Literal' && typeof first['value'] === 'string'
-    ? first['value']
-    : undefined;
+function unwrap(node: unknown): unknown {
+  let current = node;
+  while (
+    isRecord(current) &&
+    typeof current['type'] === 'string' &&
+    TS_WRAPPERS.has(current['type'])
+  ) {
+    current = current['expression'];
+  }
+  return current;
 }
 
-// createRequire(...) or module.createRequire(...), which returns a working require.
-function isCreateRequireCall(node: unknown): boolean {
+// A string or a template with no ${}, the same forms imports accept.
+function stringArgument(node: { arguments: unknown[] }): string | undefined {
+  return literal(node.arguments[0])?.spec;
+}
+
+// A relative require of a file Node will run as code although nothing lints it.
+function isOpaqueLoad(spec: string): boolean {
+  if (!spec.startsWith('./') && !spec.startsWith('../')) return false;
+  const name = spec.split('/').at(-1) ?? '';
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && !REQUIRE_SAFE_EXTENSIONS.has(name.slice(dot));
+}
+
+// createRequire(...) under any local name, or <x>.createRequire(...); both return a
+// working require.
+function isCreateRequireCall(node: unknown, names: ReadonlySet<string>): boolean {
   if (!isRecord(node) || node['type'] !== 'CallExpression') return false;
-  const callee = node['callee'];
+  const callee = unwrap(node['callee']);
   if (!isRecord(callee)) return false;
-  if (callee['type'] === 'Identifier') return callee['name'] === 'createRequire';
+  if (callee['type'] === 'Identifier') {
+    return typeof callee['name'] === 'string' && names.has(callee['name']);
+  }
   return (
     callee['type'] === 'MemberExpression' &&
     staticName(callee['property'], callee['computed'] === true) === 'createRequire'
@@ -154,11 +197,13 @@ export const noRawEgress: Rule.RuleModule = {
     ],
     messages: {
       raw: "Outbound network calls go through @drefyn/egress (guardedFetch). Raw '{{api}}' is not allowed in {{pkg}}.",
+      opaque:
+        "'{{spec}}' loads a file that is not source as code, so the egress rule cannot check it. Rename it to a source extension.",
     },
   },
   create(context) {
     const file = context.filename;
-    const root = isAbsolute(file) ? findWorkspaceRoot(dirname(file)) : undefined;
+    const root = workspaceRootFor(file, context.settings);
     let pkg = 'this file';
     if (root !== undefined) {
       const workspace = cachedWorkspace(root);
@@ -172,16 +217,23 @@ export const noRawEgress: Rule.RuleModule = {
     const report = (loc: AST.SourceLocation | null | undefined, api: string) => {
       if (loc) context.report({ loc, messageId: 'raw', data: { api, pkg } });
     };
-    const reportModule = (node: {
-      arguments: unknown[];
-      loc?: AST.SourceLocation | null | undefined;
-    }) => {
+    // Every require style call: require, <x>.require, and a require from createRequire.
+    const reportModule = (
+      node: { arguments: unknown[]; loc?: AST.SourceLocation | null | undefined },
+      banned = true,
+    ) => {
       const spec = stringArgument(node);
-      if (spec !== undefined && isBannedModule(spec)) report(node.loc, spec);
+      if (spec === undefined || !node.loc) return;
+      if (banned && isBannedModule(spec)) report(node.loc, spec);
+      if (isOpaqueLoad(spec))
+        context.report({ loc: node.loc, messageId: 'opaque', data: { spec } });
     };
+    // Local names bound to createRequire by an import from module or node:module.
+    const createRequireNames = new Set(['createRequire']);
 
     // globalThis, or globalThis.globalThis and the like, unless a local has the name.
-    const isGlobalObject = (node: unknown, at: Node): boolean => {
+    const isGlobalObject = (raw: unknown, at: Node): boolean => {
+      const node = unwrap(raw);
       if (!isRecord(node)) return false;
       if (node['type'] === 'Identifier' && typeof node['name'] === 'string') {
         return (
@@ -231,7 +283,9 @@ export const noRawEgress: Rule.RuleModule = {
       VariableDeclarator: (node) => {
         destructure(node.id, node.init, node);
         // const load = createRequire(...); load('node:http')
-        if (node.id.type !== 'Identifier' || !isCreateRequireCall(node.init)) return;
+        if (node.id.type !== 'Identifier' || !isCreateRequireCall(node.init, createRequireNames)) {
+          return;
+        }
         for (const variable of context.sourceCode.getDeclaredVariables(node)) {
           for (const reference of variable.references) {
             const parent = (reference.identifier as Partial<Node>).parent;
@@ -247,11 +301,31 @@ export const noRawEgress: Rule.RuleModule = {
       AssignmentPattern: (node) => {
         destructure(node.left, node.right, node);
       },
+      Program: (node) => {
+        for (const statement of node.body) {
+          if (statement.type !== 'ImportDeclaration') continue;
+          const from = statement.source.value;
+          if (from !== 'module' && from !== 'node:module') continue;
+          for (const specifier of statement.specifiers) {
+            if (
+              specifier.type === 'ImportSpecifier' &&
+              staticName(specifier.imported, false) === 'createRequire'
+            ) {
+              createRequireNames.add(specifier.local.name);
+            }
+          }
+        }
+      },
       CallExpression: (node) => {
         modules.CallExpression?.(node);
         const callee = node.callee;
+        // require('x') itself: moduleReferences already reported a banned name.
+        if (callee.type === 'Identifier' && callee.name === 'require') {
+          reportModule(node, false);
+          return;
+        }
         // createRequire(import.meta.url)('node:http')
-        if (isCreateRequireCall(callee)) {
+        if (isCreateRequireCall(callee, createRequireNames)) {
           reportModule(node);
           return;
         }

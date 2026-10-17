@@ -23,13 +23,19 @@ Node, tsc and the exports maps. Files at the repo root outside every package (su
 `vitest.shared.ts`) are open to every package.
 
 `drefyn/no-raw-egress` reports `node:http`, `node:https`, `node:http2`, `node:net`,
-`node:tls`, `node:dgram`, `node:dns`, `node:dns/promises`, the `_http_*`, `_tls_*` and
-`_stream_wrap` internals behind them, and `undici`, each with or without `node:`. It
-catches them in imports, re-exports, `require()`, `module.require()`,
-`process.getBuiltinModule()` and a require made by `createRequire()`. It also reports
-any runtime use of the global `fetch` or `WebSocket`: bare, through `globalThis`,
-`window`, `self` or `global` (chained or destructured), and when the only binding is
-an ambient `declare`. Type only imports pass.
+`node:tls`, `node:dgram`, `node:dns`, `node:dns/promises`, `node:quic`, the `_http_*`,
+`_tls_*` and `_stream_wrap` internals behind them, and `undici`, each with or without
+`node:`. It catches them in imports, re-exports, `require()`, `module.require()`,
+`process.getBuiltinModule()` and a require made by `createRequire()` (under any name
+it is imported as), with a string or a template with no `${}`. It also reports any
+runtime use of the global `fetch` or `WebSocket`: bare, through `globalThis`,
+`window`, `self` or `global` (chained, destructured or behind `as`, `!`, `<T>` or
+`satisfies`), and when the only binding is an ambient `declare`. Type only imports
+pass.
+
+A require style load of a relative file with an extension other than a source one or
+`.json` (`require('./net.txt')`) is reported too: Node runs it as JavaScript, and
+nothing lints it. ESM imports of assets such as CSS are left alone for bundlers.
 
 The exemption belongs to the `@drefyn/egress` package at `packages/egress`, decided by
 the owning manifest, not by the path. Other exceptions go in
@@ -50,9 +56,13 @@ stop them:
 - `child_process` running `curl` or another binary
 - `process.binding('tcp_wrap')` and other native bindings
 - `import()` or `require()` with a computed specifier, such as `import('node:' + x)`
-- an aliased require (`const r = require; r('http')`)
+- an aliased require (`const r = require; r('http')`), a require from `createRequire`
+  assigned later (`let r; r = createRequire(...)`), and `.call` or `.apply` forms
+  (`require.call(null, 'http')`, `process.getBuiltinModule.call(process, 'node:http')`)
+- `getBuiltinModule` taken off `process` first (`const { getBuiltinModule } = process`)
 - computed or indirect global access: `globalThis[k]`, `Reflect.get(globalThis, 'fetch')`,
-  `const g = globalThis; g.fetch()`, `(0, globalThis).fetch`
+  `const g = globalThis; g.fetch()`, `(0, globalThis).fetch`,
+  `const { ...rest } = globalThis; rest.fetch`
 - an `imports` map entry that points at a builtin (`"#net": "net"`)
 - npm network clients (`axios`, `ws`, `pg` and the like); dependency review covers
   them today
@@ -72,6 +82,17 @@ included), and on any `eslint.config.*` or `pnpm-workspace.yaml` below the root.
 files change what the rules see for their folder. The fixtures under `test/fixtures`
 are exempt.
 
+It also reads the git index and the new files git would add, and fails on:
+
+- a path segment that starts with `-`, which a tool can read as an option
+- a symlink, file or directory, outside `node_modules`: the rules and the guard see
+  the link, not what it points to
+- a submodule, since nothing inside one is linted
+- a file under `packages/` or `apps/` with no extension or one outside source, JSON,
+  CSS, Markdown, text, images and fonts, since Node can load it as code
+
+It needs a git repository and fails without one.
+
 It refuses a `pnpm-workspace.yaml` it cannot read, or one with no packages list,
 rather than finding no packages and passing.
 
@@ -79,10 +100,21 @@ rather than finding no packages and passing.
 
 `pnpm lint:guard` (and the gate) lints every tracked or new source file once from the
 root with `guard.config.js`, which holds only the two rules. It runs with
-`--no-config-lookup`, `--no-inline-config` and `--no-ignore`, so a package script, a
-nested config, a config comment, an ignore pattern or a force added `dist/` file
-cannot switch the rules off. It needs no type information and takes about a second.
-Per package lint still runs the same rules with the full rule set, for the editor.
+`--no-config-lookup`, `--no-inline-config` and `--no-ignore`, ends the options with
+`--` so no file name is read as one, and pins the workspace root to the git top level
+so a nested `pnpm-workspace.yaml` cannot move it. So a package script, a nested config,
+a config comment, an ignore pattern, a force added `dist/` file or an option shaped
+file name cannot switch the rules off for the files it lists. It fails if git fails or
+lists no source files. It needs no type information and takes about a second. Per
+package lint still runs the same rules with the full rule set, for the editor.
+
+What it lists is files with a source extension; the manifest checker's rules on
+symlinks, submodules and file types under `packages/` and `apps/` cover what Node
+could load that the guard would not list. The guard trusts `guard.sh`,
+`guard.config.js`, `scripts/gate.sh` and the CI workflow. A change to any of them, like
+any change under `scripts/`, needs security review; the tests run the guard on a copy
+of the real tree to catch an edit that only skips the real layout, but review is what
+stops a deliberate one.
 
 ## Testing
 
