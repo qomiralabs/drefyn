@@ -48,7 +48,7 @@ done
 
 # The checks exec into the project's postgres container and --teardown deletes volumes, so
 # make sure that container is ours first.
-guard_project
+guard_project smoke
 
 config="$("${compose[@]}" config --format json)"
 project="$(jq -r '.name' <<<"$config")"
@@ -265,6 +265,18 @@ if [[ "$super_tcp" == *"pg_hba.conf rejects connection"* ]]; then
   pass "the superuser cannot log in over TCP, even with its password"
 else
   fail "the superuser cannot log in over TCP, even with its password" "$super_tcp"
+fi
+
+# Physical replication is a separate pg_hba database keyword, and a replication session can
+# copy every tenant's data and every password verifier. Nothing here replicates.
+# shellcheck disable=SC2016
+replication="$("${compose[@]}" exec -T postgres sh -c \
+  'PGPASSWORD="$(cat /run/secrets/postgres_password)" exec psql --no-psqlrc -qtA \
+    "host=127.0.0.1 user=postgres dbname=replication replication=true" -c IDENTIFY_SYSTEM' 2>&1 || true)"
+if [[ "$replication" == *"pg_hba.conf rejects replication connection"* ]]; then
+  pass "physical replication is refused over TCP"
+else
+  fail "physical replication is refused over TCP" "$replication"
 fi
 
 # The socket must check the OS user, or any process in the container could be any role.

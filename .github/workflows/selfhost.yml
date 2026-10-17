@@ -31,6 +31,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Newer Compose compares volume labels on every up, so record which one this run proved.
+      - name: Docker and Compose versions
+        run: |
+          docker version --format 'engine {{.Server.Version}}'
+          docker compose version
       - name: Scripts refuse a project created by another compose file
         run: bash scripts/selfhost-guard-test.sh
       - name: Wrong or short passwords never report healthy

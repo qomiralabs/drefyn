@@ -2,7 +2,9 @@
 # Proves the self host scripts refuse to touch a project that another compose file created
 # under the same name. It plants containers and volumes that look like they came from some
 # other checkout, runs every command against them, and checks each one stops without
-# changing what was planted or starting anything. Nothing here starts a real stack.
+# changing what was planted or starting anything. The last part starts real stacks to prove
+# plain docker compose and the scripts describe the data volume the same way, since newer
+# Compose offers to recreate a volume whose labels changed.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,6 +17,13 @@ if [ "$base" = drefyn ]; then
 fi
 # Keep clear of any stack already on the default port in case the guard fails open.
 export DREFYN_POSTGRES_PORT=55439
+# Values in the shell win over deploy/.env, so the real file is never read or changed.
+export DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
+  DREFYN_PUBLIC_READER_PASSWORD
+for var in DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
+  DREFYN_PUBLIC_READER_PASSWORD; do
+  printf -v "$var" '%s' "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+done
 real_docker="$(command -v docker)"
 scratch="$(mktemp -d)"
 commands=("selfhost.sh up" "selfhost.sh restart" "selfhost.sh down" "selfhost.sh reset --yes"
@@ -87,7 +96,9 @@ expect_refusal() {
 # nothing_started <project> <planted container id or empty>
 nothing_started() {
   local others
-  others="$(docker ps -aq --filter "label=com.docker.compose.project=$1" | grep -v "^${2:0:12}" || true)"
+  others="$(docker ps -aq --filter "label=com.docker.compose.project=$1")"
+  # With no planted container every container counts; an empty pattern would match them all.
+  if [ -n "$2" ]; then others="$(grep -v "^${2:0:12}" <<<"$others" || true)"; fi
   if [ -n "$others" ]; then
     fail "$3 starts nothing" "new containers: $others"
     # shellcheck disable=SC2086
@@ -135,7 +146,7 @@ for failing in ps "volume ls"; do
 done
 
 # A compose file that does not parse must say so, not exit silently.
-expect_refusal "explains a compose config error" "could not read the project name" \
+expect_refusal "explains a compose config error" "could not read the compose configuration" \
   "selfhost.sh down" COMPOSE_PROJECT_NAME="$project" DREFYN_POSTGRES_PORT=notaport
 
 # A container with the project label but no config_files label, as docker run makes.
@@ -177,6 +188,84 @@ if out="$(COMPOSE_PROJECT_NAME="$project" bash "$copy/scripts/selfhost.sh" down 
 else
   fail "selfhost.sh down accepts its own compose file under a path with a comma" "$out"
 fi
+
+# A volume labelled by an earlier build of this stack, with the compose file path and no stack
+# ID. Only reset may touch it; anything that would mount it must refuse and say how to recover.
+project="$base-oldlabel"
+projects+=("$project")
+docker volume create --label "com.docker.compose.project=$project" \
+  --label "com.docker.compose.volume=pgdata" --label "com.docker.compose.version=2.30.3" \
+  --label "com.drefyn.selfhost.compose-file=$root/deploy/compose.yaml" "${project}_pgdata" >/dev/null
+for cmd in "selfhost.sh up" "selfhost.sh restart" "selfhost-smoke.sh"; do
+  expect_refusal "refuses a volume from an earlier build" "earlier build" "$cmd" \
+    COMPOSE_PROJECT_NAME="$project"
+done
+nothing_started "$project" "" "commands against an earlier build's volume"
+if out="$(COMPOSE_PROJECT_NAME="$project" bash "$root/scripts/selfhost.sh" reset --yes 2>&1)" &&
+  [ -z "$(docker volume ls -q --filter "name=^${project}_pgdata$")" ]; then
+  pass "selfhost.sh reset --yes removes a volume from an earlier build"
+else
+  fail "selfhost.sh reset --yes removes a volume from an earlier build" "$out"
+fi
+
+# What each caller would label the volume with, from its own view of the config.
+config_labels() {
+  jq -cS '.volumes.pgdata.labels // {}' <<<"$1"
+}
+plain_config() {
+  docker compose -f "$root/deploy/compose.yaml" config --format json
+}
+script_config() {
+  # shellcheck disable=SC1091
+  bash -c '. "$1/scripts/selfhost-lib.sh"; "${compose[@]}" config --format json' _ "$root"
+}
+volume_labels() {
+  docker volume inspect --format '{{json .Labels}}' "$1" | jq -cS .
+}
+# expect_same_volume <project> <description>: both callers' labels are on the volume and agree.
+expect_same_volume() {
+  local labels plain script missing
+  labels="$(volume_labels "$1_pgdata")"
+  plain="$(config_labels "$(plain_config)")"
+  script="$(config_labels "$(script_config)")"
+  missing="$(jq -n --argjson v "$labels" --argjson p "$plain" --argjson s "$script" \
+    '[($p, $s) | to_entries[] | select($v[.key] != .value) | .key] | unique | join(",")')"
+  if [ "$plain" = "$script" ] && [ "$missing" = '""' ]; then
+    pass "$2"
+  else
+    fail "$2" "plain $plain, scripts $script, volume $labels"
+  fi
+}
+
+for order in scripts-first plain-first; do
+  project="$base-$order"
+  projects+=("$project")
+  export COMPOSE_PROJECT_NAME="$project"
+  if [ "$order" = scripts-first ]; then
+    first=(bash "$root/scripts/selfhost.sh" up)
+    second=(docker compose -f "$root/deploy/compose.yaml" up -d --wait)
+  else
+    first=(docker compose -f "$root/deploy/compose.yaml" up -d --wait)
+    second=(bash "$root/scripts/selfhost.sh" up)
+  fi
+  if ! out="$("${first[@]}" 2>&1)"; then
+    fail "$order: the first up succeeds" "$out"
+  fi
+  before="$(volume_labels "${project}_pgdata") $(volume_state "${project}_pgdata")"
+  if ! out="$("${second[@]}" 2>&1)"; then
+    fail "$order: the second up reuses the volume" "$out"
+  fi
+  after="$(volume_labels "${project}_pgdata") $(volume_state "${project}_pgdata")"
+  if [ "$before" = "$after" ]; then
+    pass "$order: the second up leaves the volume and its labels unchanged"
+  else
+    fail "$order: the second up leaves the volume and its labels unchanged" \
+      "before [$before], after [$after]"
+  fi
+  expect_same_volume "$project" "$order: plain docker compose and the scripts label the volume alike"
+  docker compose -f "$root/deploy/compose.yaml" down --volumes --timeout 5 >/dev/null 2>&1 || true
+  unset COMPOSE_PROJECT_NAME
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "guard test: $failures check(s) failed" >&2
