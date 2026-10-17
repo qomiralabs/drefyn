@@ -577,6 +577,46 @@ describe('manifest checker on inline disables of the boundary rules', () => {
     ]);
   });
 
+  it('I11: reads directives the way ESLint does: quoted names and long description markers', () => {
+    ws.write(
+      'packages/a/src/index.ts',
+      [
+        `// eslint-disable-next-line "${NO_EGRESS}"`,
+        `// eslint-disable-next-line '${NO_EGRESS}'`,
+        `// eslint-disable-next-line ${NO_EGRESS} --- reviewed`,
+        `/* eslint-disable no-console, '${NO_INTERNALS}' ---- because */`,
+        `// eslint-disable-line ${NO_EGRESS}\t--\tok`,
+        'export const a = 1;',
+      ].join('\n'),
+    );
+    ws.write(
+      'packages/a/src/blanket.ts',
+      '/* eslint-disable --- reviewed */\nexport const b = 1;\n',
+    );
+    expect(check()).toEqual([
+      'packages/a (@drefyn/a): src/blanket.ts:1: a blanket eslint-disable also turns off the drefyn rules; name the rules instead',
+      `packages/a (@drefyn/a): src/index.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:2: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:3: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:4: inline disable of ${NO_INTERNALS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:5: inline disable of ${NO_EGRESS} is not allowed`,
+    ]);
+  });
+
+  it('I11: leaves comments ESLint does not read as directives alone', () => {
+    ws.write(
+      'packages/a/src/index.ts',
+      [
+        `// see eslint-disable-next-line ${NO_EGRESS} in the docs`,
+        `/** eslint-disable ${NO_EGRESS} */`,
+        `// eslint-disable-next-line no-console -- not ${NO_EGRESS}`,
+        `// eslint-disable-next-line no-console --- mentions ${NO_INTERNALS}`,
+        'export const a = 1;',
+      ].join('\n'),
+    );
+    expect(check()).toEqual([]);
+  });
+
   it('fails on a blanket disable, which turns both rules off', () => {
     ws.write('packages/a/src/gen.tsx', '/* eslint-disable */\nexport const A = () => <div />;\n');
     expect(check()).toEqual([

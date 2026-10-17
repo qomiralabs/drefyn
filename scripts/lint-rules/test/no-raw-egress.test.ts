@@ -146,6 +146,11 @@ describe('no-raw-egress with type only bindings', () => {
       'WebSocket',
     ],
     ["interface globalThis { a: 1 }\nexport const r = globalThis.fetch('x');", 'fetch'],
+    [
+      'export type globalThis = unknown;\nexport const s4 = (u: string) => globalThis.fetch(u);',
+      'fetch',
+    ],
+    ['export type globalThis = unknown;\nexport const { fetch: s6 } = globalThis;', 'fetch'],
   ])('I9: reports through %j', async (code, api) => {
     const found = await lintAs('packages/web/src/typeonly.ts', code);
     expect(found.map((r) => r.message)).toEqual([message(api, '@drefyn/web')]);

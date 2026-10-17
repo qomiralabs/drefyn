@@ -362,21 +362,35 @@ function comments(path: string, text: string): Comment[] {
   }
 }
 
-// What a directive comment turns off, or undefined when it is not a directive.
-function disabledRules(comment: string): string[] | undefined {
-  const text = comment.trim();
-  const disable = /^eslint-disable(?:-next-line|-line)?(?:\s+([\s\S]*))?$/.exec(text);
-  if (disable) {
-    const list = (disable[1] ?? '').split(/(?:^|\s)--(?:\s|$)/)[0] ?? '';
-    return list
+interface Directive {
+  // eslint-disable and its line forms, or eslint for a rule config comment.
+  kind: 'disable' | 'config';
+  rules: string[];
+}
+
+// Parsed the way ESLint 10 parses comments: the text before the first run of two or
+// more dashes between spaces is the directive, the label is lower case words joined by
+// dashes, and a disable list is split on commas with one pair of matching quotes
+// stripped from each name. Anything ESLint would not read as a directive is not one.
+function parseDirective(comment: string): Directive | undefined {
+  const marker = /\s-{2,}\s/u.exec(comment);
+  const text = (marker ? comment.slice(0, marker.index) : comment).trim();
+  const label = /^([a-z]+(?:-[a-z]+)*)(?:\s|$)/u.exec(text)?.[1];
+  if (label === undefined) return undefined;
+  const value = text.slice(label.length).trim();
+  if (/^eslint-disable(?:-next-line|-line)?$/.test(label)) {
+    const rules = value
       .split(',')
-      .map((name) => name.trim())
+      .map((name) => name.trim().replace(/^(['"]?)(.*)\1$/su, '$2'))
       .filter((name) => name !== '');
+    return { kind: 'disable', rules };
   }
-  const config = /^eslint\s+([\s\S]*)$/.exec(text);
-  if (config?.[1] !== undefined) {
-    const names = configRuleNames(config[1]);
-    return GUARDED_RULES.filter((rule) => names.some((name) => name.includes(rule)));
+  if (label === 'eslint') {
+    const names = configRuleNames(value);
+    return {
+      kind: 'config',
+      rules: GUARDED_RULES.filter((rule) => names.some((name) => name.includes(rule))),
+    };
   }
   return undefined;
 }
@@ -426,8 +440,9 @@ function checkDirectives(workspace: Workspace, files: string[]): Finding[] {
       .split(sep)
       .join('/');
     for (const { value, line } of comments(file, text)) {
-      const rules = disabledRules(value);
-      if (rules === undefined) continue;
+      const directive = parseDirective(value);
+      if (directive === undefined) continue;
+      const { rules } = directive;
       const add = (detail: string) => {
         findings.push({
           package: owner ? label(owner) : 'root',
@@ -435,7 +450,7 @@ function checkDirectives(workspace: Workspace, files: string[]): Finding[] {
           detail,
         });
       };
-      if (rules.length === 0 && /^\s*eslint-disable/.test(value)) {
+      if (rules.length === 0 && directive.kind === 'disable') {
         add('a blanket eslint-disable also turns off the drefyn rules; name the rules instead');
         continue;
       }

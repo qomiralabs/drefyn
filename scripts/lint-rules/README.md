@@ -105,8 +105,10 @@ files `.gitignore`, `.npmrc`, `.nvmrc`, `.prettierignore`, `LICENSE`,
 - I10. A require style load of a relative file is judged by the file Node resolves.
 - I11. In every source file in the tree outside the fixtures (dot folders, dotfiles
   and tracked `dist/` or `coverage/` files included), no `eslint-disable` comment or
-  `/* eslint ... */` config comment names either rule, escapes decoded, and no blanket
-  `eslint-disable` appears.
+  `/* eslint ... */` config comment names either rule, and no blanket
+  `eslint-disable` appears. Comments are read the way ESLint reads them: the
+  description after a run of two or more dashes is dropped, quotes around a rule name
+  are stripped, and escapes in config comments are decoded.
 - I12. Every package has the exact lint and typecheck scripts, and none of the six
   config names ESLint loads (`eslint.config.js`, `.mjs`, `.cjs`, `.ts`, `.mts`,
   `.cts`) or a `pnpm-workspace.yaml` sits below the root outside the fixtures.
