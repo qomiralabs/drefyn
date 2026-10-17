@@ -42,6 +42,19 @@ fail() {
   printf 'FAIL  %s\n' "$1"
   if [ -n "${2:-}" ]; then printf '      %s\n' "$2"; fi
   failures=$((failures + 1))
+  server_log
+}
+# The server log of the project under test, if it has a postgres container, since the test
+# removes it before the CI log step runs. It holds no passwords.
+server_log() {
+  local ids
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=${project:-}" \
+    --filter "label=com.docker.compose.service=postgres" 2>/dev/null || true)"
+  if [ -n "${project:-}" ] && [ -n "$ids" ]; then
+    printf '      server log of %s, last 60 lines:\n' "$project"
+    docker compose -p "$project" -f "$root/deploy/compose.yaml" logs --no-color --tail 60 postgres \
+      2>&1 | sed 's/^/        /' || true
+  fi
 }
 
 projects=()
@@ -301,6 +314,14 @@ for order in scripts-first plain-first; do
     fail "$order: the second up reuses the volume" "$out"
   fi
   after="$(volume_labels "${project}_pgdata") $(volume_state "${project}_pgdata")"
+  # A zero exit from up --wait is not proof of health, so read it from docker.
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    "$(docker compose -p "$project" -f "$root/deploy/compose.yaml" ps -q postgres)" 2>&1 || true)"
+  if [ "$health" = healthy ]; then
+    pass "$order: postgres is healthy after the second up"
+  else
+    fail "$order: postgres is healthy after the second up" "health is [$health]"
+  fi
   if [ "$before" = "$after" ]; then
     pass "$order: the second up leaves the volume and its labels unchanged"
   else

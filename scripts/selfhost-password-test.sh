@@ -32,6 +32,15 @@ fail() {
   printf 'FAIL  %s\n' "$1"
   if [ -n "${2:-}" ]; then printf '      %s\n' "$2"; fi
   failures=$((failures + 1))
+  server_log
+}
+# Each case removes its stack straight away, so the server log only exists at the moment a
+# check fails. It holds no passwords: the bootstrap keeps them out, which smoke proves.
+server_log() {
+  if [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null)" ]; then
+    printf '      server log, last 60 lines:\n'
+    "${compose[@]}" logs --no-color --tail 60 postgres 2>&1 | sed 's/^/        /' || true
+  fi
 }
 
 cleanup() {
@@ -151,6 +160,45 @@ DREFYN_APP_PASSWORD=short-app
 bad_start "a short app password" "each role password must be at least 16 characters" \
   "fix deploy/.env first"
 DREFYN_APP_PASSWORD="$(secret)"
+
+# Compose has returned success from up --wait at the timeout while the container was still
+# restarting after a failed init, so the scripts must read health from docker themselves. This
+# shim runs the real up without waiting and always reports success.
+real_docker="$(command -v docker)"
+mkdir -p "$scratch/shim"
+cat >"$scratch/shim/docker" <<SHIM
+#!/usr/bin/env bash
+if [ "\$1" = compose ]; then
+  args=()
+  skip=false
+  up=false
+  for arg in "\$@"; do
+    if [ "\$skip" = true ]; then skip=false; continue; fi
+    case "\$arg" in
+      --wait) continue ;;
+      --wait-timeout) skip=true; continue ;;
+      up) up=true ;;
+    esac
+    args+=("\$arg")
+  done
+  if [ "\$up" = true ]; then
+    "$real_docker" "\${args[@]}" >/dev/null 2>&1
+    exit 0
+  fi
+fi
+exec "$real_docker" "\$@"
+SHIM
+chmod +x "$scratch/shim/docker"
+DREFYN_OWNER_PASSWORD=""
+if out="$(PATH="$scratch/shim:$PATH" bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+  fail "up fails when compose reports success but postgres is not healthy" "it exited 0: $out"
+elif [[ "$out" == *"not healthy"* ]]; then
+  pass "up fails when compose reports success but postgres is not healthy"
+else
+  fail "up fails when compose reports success but postgres is not healthy" "$out"
+fi
+reset_stack
+DREFYN_OWNER_PASSWORD="$(secret)"
 
 # Init can also stop before the bootstrap script runs at all: a crash, an out of memory kill, or
 # here an init script that fails first. The server the container restarts into must still
