@@ -26,6 +26,9 @@ Closes #<issue>
 
 ## Checklist
 
+<Tick every item that holds. If one does not apply, tick it and end the line with
+"(n/a: reason)", so an unticked box always means work still to do.>
+
 - [ ] Design choices explained above and recorded internally
 - [ ] Tests added first and passing
 - [ ] scripts/gate.sh passed
