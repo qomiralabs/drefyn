@@ -73,6 +73,8 @@ export type IgnoreReason =
 
 export interface IgnoredReview {
   author: string;
+  // Shown in the report because a bot can carry the same login as a listed user.
+  authorType: string;
   association: string;
   submittedAt: string;
   reviewer?: string;
@@ -189,6 +191,7 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
     const skip = (reason: IgnoreReason) => {
       ignored.push({
         author: review.author,
+        authorType: review.authorType,
         association: review.authorAssociation ?? 'unknown',
         submittedAt: review.submittedAt,
         ...(marker === undefined ? {} : { reviewer: marker.reviewer }),
@@ -270,6 +273,12 @@ export function evaluate(input: GateInput, config: GateConfig): GateResult {
   };
 }
 
+function resultNote(r: ReviewerResult): string {
+  if (r.edited === true) return ' (edited review; post a fresh one)';
+  if (r.sha !== undefined) return ` (on ${r.sha})`;
+  return '';
+}
+
 export function formatReport(result: GateResult): string {
   const width = Math.max(...result.reviewers.map((r) => r.reviewer.length)) + 2;
   const lines = [
@@ -280,18 +289,12 @@ export function formatReport(result: GateResult): string {
       if (r.state === 'missing') return `  ${name}missing (${r.reason})`;
       if (r.state === 'no-signers') return `  ${name}no logins allowed to sign (${r.reason})`;
       const what = r.state === 'approved' ? 'approved' : 'changes requested';
-      const note =
-        r.edited === true
-          ? ' (edited review; post a fresh one)'
-          : r.sha === undefined
-            ? ''
-            : ` (on ${r.sha})`;
-      return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}${note}`;
+      return `  ${name}${what} by ${r.by ?? '?'} at ${r.at ?? '?'}${resultNote(r)}`;
     }),
     result.ignored.length === 0 ? 'ignored markers: none' : 'ignored markers:',
     ...result.ignored.map((i) => {
       const target = i.reviewer === undefined ? '' : ` for ${i.reviewer}`;
-      return `  ${i.author} (${i.association}) at ${i.submittedAt}${target}: ${IGNORE_TEXT[i.reason]}`;
+      return `  ${i.author} (${i.authorType}, ${i.association}) at ${i.submittedAt}${target}: ${IGNORE_TEXT[i.reason]}`;
     }),
   ];
   return lines.join('\n') + '\n';
