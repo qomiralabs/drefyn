@@ -48,6 +48,7 @@ describe('package manifest', () => {
         'minimum',
         'reducedFadeCapMs',
         'requiredPairs',
+        'ruledOutPairs',
         'themeScript',
         'themeStorageKey',
         'tokens',

@@ -6,6 +6,7 @@ import {
   measure,
   minimum,
   requiredPairs,
+  ruledOutPairs,
 } from '../src/tokens/pairs.ts';
 
 // Every required pair with the ratio it measures today, floored to two decimals. A token change
@@ -140,6 +141,25 @@ const forbidden = [
   // Amber and teal marks never stand alone on paper; they sit beside a word or a tick.
   ['light', 'state.stale.mark', 'surface.ground', 'non-text', 2.05],
   ['light', 'signal.mark', 'surface.ground', 'non-text', 2.38],
+  // State words and captions never sit on the selection wash, and selected rows draw their
+  // edge from the rule token, not the control border.
+  ['light', 'state.fresh.text', 'accent.wash', 'text', 4.27],
+  ['light', 'state.stale.text', 'accent.wash', 'text', 4.28],
+  ['light', 'text.subtle', 'accent.wash', 'text', 4.05],
+  ['light', 'border.control', 'accent.wash', 'non-text', 2.94],
+] as const;
+
+// Ruled out by design even where the ratio passes, so the rule reads the same in both modes:
+// a selected row shows state with its icon and ink text, never coloured text.
+const ruledOut = [
+  ['light', 'state.broken.text', 'accent.wash', 'text', 5.51],
+  ['light', 'state.neutral.text', 'accent.wash', 'text', 6.46],
+  ['dark', 'state.fresh.text', 'accent.wash', 'text', 8.56],
+  ['dark', 'state.stale.text', 'accent.wash', 'text', 8.93],
+  ['dark', 'state.broken.text', 'accent.wash', 'text', 5.39],
+  ['dark', 'state.neutral.text', 'accent.wash', 'text', 5.91],
+  ['dark', 'text.subtle', 'accent.wash', 'text', 5.91],
+  ['dark', 'border.control', 'accent.wash', 'non-text', 3.11],
 ] as const;
 
 const key = (row: readonly unknown[]) => row.slice(0, 4).join(' ');
@@ -168,6 +188,27 @@ describe('forbidden contrast pairs', () => {
   it('lists exactly the forbidden pairs the tokens declare', () => {
     const declared = expandPairs(forbiddenPairs).map((p) => key([p.mode, p.fg, p.bg, p.kind]));
     expect(declared.sort()).toEqual(forbidden.map(key).sort());
+  });
+});
+
+describe('ruled out pairs', () => {
+  it.each(ruledOut)(
+    '%s %s on %s (%s) measures %s but is never used',
+    (mode, fg, bg, kind, ratio) => {
+      expect(measure({ fg, bg, kind }, mode)).toBe(ratio);
+    },
+  );
+
+  it('lists exactly the ruled out pairs the tokens declare', () => {
+    const declared = expandPairs(ruledOutPairs).map((p) => key([p.mode, p.fg, p.bg, p.kind]));
+    expect(declared.sort()).toEqual(ruledOut.map(key).sort());
+  });
+
+  it('never overlaps the required pairs', () => {
+    const required = new Set(expandPairs(requiredPairs).map((p) => key([p.mode, p.fg, p.bg])));
+    for (const p of expandPairs([...forbiddenPairs, ...ruledOutPairs])) {
+      expect(required.has(key([p.mode, p.fg, p.bg])), key([p.mode, p.fg, p.bg])).toBe(false);
+    }
   });
 });
 

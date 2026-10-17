@@ -14,6 +14,7 @@ import {
   measure,
   minimum,
   requiredPairs,
+  ruledOutPairs,
   type Backdrop,
   type ColorRole,
   type Pair,
@@ -62,7 +63,9 @@ const BACKDROPS: Backdrop[] = ['surface.ground', 'surface.raised', 'surface.sunk
 
 function pairMatrix(mode: Mode): string {
   const required = expandPairs(requiredPairs).filter((p) => p.mode === mode);
-  const forbidden = expandPairs(forbiddenPairs).filter((p) => p.mode === mode);
+  const forbidden = expandPairs([...forbiddenPairs, ...ruledOutPairs]).filter(
+    (p) => p.mode === mode,
+  );
   const onSurfaces = (p: Pair) => BACKDROPS.includes(p.bg);
   const fgs = [...new Set([...required, ...forbidden].filter(onSurfaces).map((p) => p.fg))];
   const cell = (fg: ColorRole, bg: Backdrop) => {
@@ -111,8 +114,8 @@ function pairsSection(): string {
     <section aria-labelledby="contrast">
       <h2 id="contrast">Contrast</h2>
       <p class="lede">Measured from the tokens and floored to two decimals. Text needs ${minimum.text}:1,
-      marks and control edges need ${minimum['non-text']}:1. Pairs marked not allowed fail on purpose and
-      the tests keep them failing.</p>
+      marks and control edges need ${minimum['non-text']}:1. Pairs marked not allowed are never used:
+      most fail, and the rest are ruled out so a rule reads the same in both modes.</p>
       <div class="matrices">${pairMatrix('light')}${pairMatrix('dark')}</div>
     </section>`;
 }

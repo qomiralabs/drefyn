@@ -32,6 +32,9 @@ The tests fail if they drift.
 
 - Text pairs reach 4.5:1 and marks and control edges reach 3:1, in both modes.
 - `text.subtle` sits on the ground only in light; amber and teal marks never stand alone.
+- Nothing coloured sits on the selection wash. A selected row shows state with its icon and ink
+  text, never state coloured text or subtle text, and draws its edge from `border.rule`, not
+  `border.control`. The pairs that fail are must fail pairs; the rest are in `ruledOutPairs`.
 - Under reduced motion nothing travels and no fade runs past 120 ms.
 - `tokens.css` stays under 2.5 KB gzipped.
 - Fonts are Latin subsets with their OFL licences beside them in `src/fonts`.

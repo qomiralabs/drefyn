@@ -137,6 +137,52 @@ export const forbiddenPairs: readonly PairGroup[] = [
     modes: ['light'],
     why: 'Amber and teal marks always sit beside a word or a tick in their text colour',
   },
+  {
+    fg: ['state.fresh.text', 'state.stale.text', 'text.subtle'],
+    bg: ['accent.wash'],
+    kind: 'text',
+    modes: ['light'],
+    why: 'A selected row shows state with its icon and ink text, never coloured text',
+  },
+  {
+    fg: ['border.control'],
+    bg: ['accent.wash'],
+    kind: 'non-text',
+    modes: ['light'],
+    why: 'A selected row draws its edge from the rule token',
+  },
+];
+
+// Combinations that measure fine but are never used, so a rule reads the same in both modes.
+// Components treat these exactly like the forbidden pairs.
+export const ruledOutPairs: readonly PairGroup[] = [
+  {
+    fg: ['state.broken.text', 'state.neutral.text'],
+    bg: ['accent.wash'],
+    kind: 'text',
+    modes: ['light'],
+    why: 'A selected row shows state with its icon and ink text, never coloured text',
+  },
+  {
+    fg: [
+      'state.fresh.text',
+      'state.stale.text',
+      'state.broken.text',
+      'state.neutral.text',
+      'text.subtle',
+    ],
+    bg: ['accent.wash'],
+    kind: 'text',
+    modes: ['dark'],
+    why: 'A selected row shows state with its icon and ink text, never coloured text',
+  },
+  {
+    fg: ['border.control'],
+    bg: ['accent.wash'],
+    kind: 'non-text',
+    modes: ['dark'],
+    why: 'A selected row draws its edge from the rule token',
+  },
 ];
 
 export function expandPairs(groups: readonly PairGroup[]): Pair[] {

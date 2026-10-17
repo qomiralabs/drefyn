@@ -7,6 +7,7 @@ export {
   measure,
   minimum,
   requiredPairs,
+  ruledOutPairs,
   type Backdrop,
   type ColorRole,
   type Pair,
