@@ -1,7 +1,8 @@
 # `@drefyn/lint-rules`
 
-Repo tooling that keeps workspace packages behind their public entry points. The root
-`eslint.config.js` loads the rules for every package at severity `error`.
+Repo tooling that keeps workspace packages behind their public entry points and keeps
+outbound network calls behind `@drefyn/egress`. The root `eslint.config.js` loads the
+rules for every package at severity `error`.
 
 ## Rules
 
@@ -16,6 +17,14 @@ that owns it, using `pnpm-workspace.yaml`, and reports:
 It checks static, type only and dynamic imports, re-exports, `import('x').T` types and
 `require()`. Builtins, URLs, `#imports`, absolute paths and npm packages are left to
 Node, tsc and the exports maps.
+
+`drefyn/no-raw-egress` reports `node:http`, `node:https`, `node:http2`, `node:net`,
+`node:tls`, `node:dgram`, `node:dns`, `node:dns/promises` and `undici` (with or
+without `node:`), and any runtime use of the global `fetch` or `WebSocket`, outside
+`packages/egress`. Type only imports pass. Exceptions go in `egressAllowList` in the
+root `eslint.config.js`, each with a `path` relative to the repo root (a trailing `/`
+covers a directory) and a `reason`. The config fails to load if either is missing.
+Every new entry needs a security review.
 
 ESLint reads manifests once per process. Restart an editor's ESLint server after
 changing a `package.json`.

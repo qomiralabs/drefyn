@@ -91,6 +91,8 @@ pnpm install
 - Depend on another package with `"@drefyn/<name>": "workspace:*"` and import it by
   name, never by a relative path into its folder. Apps depend on packages; nothing
   depends on an app.
+- Outbound network calls go through `@drefyn/egress`. Raw `fetch`, `http`, `net`,
+  `dns` and the like fail lint outside it.
 
 `pnpm lint` and `pnpm check:packages` enforce all of this, and the gate runs both.
 Inline `eslint-disable` comments for `drefyn/no-cross-package-internals` or

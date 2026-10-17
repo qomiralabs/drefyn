@@ -3,6 +3,17 @@ import js from '@eslint/js';
 import drefyn from '@drefyn/lint-rules';
 import tseslint from 'typescript-eslint';
 
+// Each entry lets one file or directory open raw network connections. They bypass the
+// SSRF guard, so every entry needs a security review and a reason that says why the
+// destination cannot be influenced by a customer.
+const egressAllowList = [
+  {
+    path: 'scripts/review-gate/src/github.ts',
+    reason:
+      'GitHub API client for the review gate in CI; the host is api.github.com or GITHUB_API_URL from the Actions runner, never customer input',
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -32,6 +43,7 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       'drefyn/no-cross-package-internals': 'error',
+      'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
     },
   },
   {

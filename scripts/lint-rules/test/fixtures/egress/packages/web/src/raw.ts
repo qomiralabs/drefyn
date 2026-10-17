@@ -1,0 +1,23 @@
+// Every raw way out. The test lints this same text inside and outside packages/egress.
+import http from 'node:http';
+import https from 'https';
+import * as http2 from 'node:http2';
+import { connect } from 'net';
+import tls from 'node:tls';
+import dgram from 'dgram';
+import { lookup } from 'node:dns';
+import dns from 'dns/promises';
+import { request } from 'undici';
+export { Agent } from 'undici/lib/dispatcher/agent.js';
+export * from 'node:https';
+export const lazy = () => import('node:net');
+export const required = require('http');
+export const fromFetch = fetch('https://example.com');
+export const fromGlobal = globalThis.fetch('https://example.com');
+export const fromComputed = globalThis['fetch'];
+export const socket = new WebSocket('wss://example.com');
+export const passed = [fetch];
+export const all = [http, https, http2, connect, tls, dgram, lookup, dns, request] as const;
+import legacyNet = require('node:net');
+import type legacyHttp = require('node:http');
+export { legacyNet, type legacyHttp };
