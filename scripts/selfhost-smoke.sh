@@ -200,18 +200,20 @@ SQL
 )"
 expect_rows "database drefyn searches app, then extensions" "search_path=app, extensions" "$search_path"
 
+# rolconfig must be null, not just empty, and pg_db_role_setting covers settings a role made
+# for one database only, which rolconfig does not show.
 role_settings="$(superuser_sql <<'SQL'
-select r.rolname, coalesce(array_to_string(r.rolconfig, ';'), ''),
+select r.rolname, r.rolconfig is null,
   (select count(*) from pg_db_role_setting s where s.setrole = r.oid)
 from pg_roles r
 where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
 order by r.rolname;
 SQL
 )"
-expect_rows "no role carries its own settings" \
-  "drefyn_app||0
-drefyn_owner||0
-drefyn_public_reader||0" "$role_settings"
+expect_rows "no role carries its own settings: rolconfig is null and pg_db_role_setting has no rows" \
+  "drefyn_app|t|0
+drefyn_owner|t|0
+drefyn_public_reader|t|0" "$role_settings"
 
 # PUBLIC gets nothing on the database: no CONNECT for roles created later, no TEMP for anyone.
 # The database owner's own entry is left out; it is the bootstrap superuser.
