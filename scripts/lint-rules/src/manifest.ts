@@ -30,7 +30,16 @@ export const GUARDED_RULES = ['drefyn/no-cross-package-internals', 'drefyn/no-ra
 
 // Only these trees hold product packages; scripts/* are repo tooling with no API.
 const LAYOUT_ROOTS = ['packages/', 'apps/'];
-const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
+export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+]);
 // The same folders the root ESLint config ignores, so the directive scan reads exactly
 // what lint reads. The guard step lints the rest, force added files included.
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage']);
@@ -164,11 +173,11 @@ function checkNestedFiles(workspace: Workspace): Finding[] {
   return findings;
 }
 
-// File types a package may hold. Node's require runs any other extension, and a file
-// with none, as JavaScript, and the guard only lists source extensions, so such a file
-// would be code nothing lints.
-const PACKAGE_EXTENSIONS = new Set([
-  ...CODE_EXTENSIONS,
+// File types allowed outside the reviewed set. Node's require runs any other extension,
+// and a file with none (dotfiles included), as JavaScript, and the guard only lists
+// source extensions, so such a file would be code nothing lints.
+export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
+  ...SOURCE_EXTENSIONS,
   '.json',
   '.css',
   '.md',
@@ -186,6 +195,22 @@ const PACKAGE_EXTENSIONS = new Set([
   '.ttf',
   '.otf',
 ]);
+
+// Paths every change to which needs security review, so they may hold any file type.
+// A test keeps these in step with the review gate rules and CODEOWNERS.
+export const REVIEWED_PREFIXES: readonly string[] = ['scripts/', '.github/', 'deploy/'];
+export const REVIEWED_ROOT_FILES: readonly string[] = [
+  '.gitignore',
+  '.npmrc',
+  '.nvmrc',
+  '.prettierignore',
+  'LICENSE',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+];
+
+const isReviewed = (path: string) =>
+  REVIEWED_PREFIXES.some((prefix) => path.startsWith(prefix)) || REVIEWED_ROOT_FILES.includes(path);
 
 interface IndexEntry {
   path: string;
@@ -210,26 +235,32 @@ function indexEntries(root: string): IndexEntry[] {
       throw new Error(`git ${args[0] ?? ''} failed in ${root}: ${detail}`, { cause: error });
     }
   };
-  const entries = git(['ls-files', '-s', '-z'])
-    .split('\0')
-    .filter((line) => line !== '')
-    .map((line) => {
-      const tab = line.indexOf('\t');
-      return { mode: line.slice(0, line.indexOf(' ')), path: line.slice(tab + 1) };
-    });
-  for (const path of git(['ls-files', '-z', '--others', '--exclude-standard']).split('\0')) {
-    if (path === '') continue;
-    const link = lstatSync(join(root, ...path.split('/'))).isSymbolicLink();
-    entries.push({ path, mode: link ? '120000' : '100644' });
+  // A path in a merge conflict is listed once per stage; judge it once.
+  const entries = new Map<string, IndexEntry>();
+  for (const line of git(['ls-files', '-s', '-z']).split('\0')) {
+    if (line === '') continue;
+    const path = line.slice(line.indexOf('\t') + 1);
+    if (!entries.has(path)) entries.set(path, { mode: line.slice(0, line.indexOf(' ')), path });
   }
-  return entries;
+  for (const listed of git(['ls-files', '-z', '--others', '--exclude-standard']).split('\0')) {
+    if (listed === '') continue;
+    // git lists an untracked nested repository as dir/; nothing inside it is listed,
+    // which is the same problem as a submodule.
+    if (listed.endsWith('/')) {
+      const path = listed.slice(0, -1);
+      entries.set(path, { path, mode: '160000' });
+      continue;
+    }
+    const link = lstatSync(join(root, ...listed.split('/'))).isSymbolicLink();
+    entries.set(listed, { path: listed, mode: link ? '120000' : '100644' });
+  }
+  return [...entries.values()];
 }
 
 function checkIndex(workspace: Workspace): Finding[] {
   const findings: Finding[] = [];
   for (const { path, mode } of indexEntries(workspace.root)) {
     const segments = path.split('/');
-    if (segments.includes('node_modules')) continue;
     const full = join(workspace.root, ...segments);
     const owner = ownerOf(workspace, full);
     const add = (detail: string) => {
@@ -241,6 +272,11 @@ function checkIndex(workspace: Workspace): Finding[] {
         detail,
       });
     };
+    // pnpm never writes into the index, so a committed node_modules entry is always
+    // hand made, and Node resolves bare names into it. Every other check still runs.
+    if (segments.some((segment) => segment.toLowerCase() === 'node_modules')) {
+      add('node_modules is never committed; Node resolves bare names into it and nothing lints it');
+    }
     if (segments.some((segment) => segment.startsWith('-'))) {
       add("starts with '-', which tools read as an option");
     }
@@ -248,13 +284,14 @@ function checkIndex(workspace: Workspace): Finding[] {
       add('symlinks are not allowed; the rules and the guard see the link, not its target');
     } else if (mode === '160000') {
       add('submodules are not allowed; nothing inside one is linted');
-    } else if (LAYOUT_ROOTS.some((prefix) => path.startsWith(prefix))) {
+    } else if (!isReviewed(path)) {
       const name = segments.at(-1) ?? '';
       if (NESTED_FILES.some(([pattern]) => pattern.test(name))) continue;
       const ext = extname(name);
-      if (!PACKAGE_EXTENSIONS.has(ext)) {
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
         add(
-          `file type ${ext === '' ? '(no extension)' : ext} is not allowed in a package; Node can load it as code and nothing lints it`,
+          `file type ${ext === '' ? '(no extension)' : ext} is not allowed outside scripts/, .github/ and deploy/; Node can load it as code and nothing lints it. ` +
+            'To allow a new type, add it to ALLOWED_EXTENSIONS in scripts/lint-rules/src/manifest.ts, which needs security review',
         );
       }
     }
@@ -373,7 +410,7 @@ function codeFiles(root: string): string[] {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!SKIP_DIRS.has(entry.name)) walk(full);
-      } else if (entry.isFile() && CODE_EXTENSIONS.has(extname(entry.name))) {
+      } else if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
         files.push(full);
       }
     }

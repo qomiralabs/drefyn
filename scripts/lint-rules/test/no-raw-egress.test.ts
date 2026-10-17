@@ -169,39 +169,81 @@ describe('no-raw-egress through TypeScript wrappers, aliases and templates', () 
   });
 });
 
-describe('no-raw-egress on files loaded as code that no linter reads', () => {
-  const opaque = (spec: string) =>
-    `'${spec}' loads a file that is not source as code, so the egress rule cannot check it. Rename it to a source extension.`;
+describe('no-raw-egress on require style loads of files that are not source', () => {
+  let ws: TempWorkspace | undefined;
+  afterEach(() => {
+    ws?.cleanup();
+    ws = undefined;
+  });
+  const opaque = (spec: string, file: string, advice = true) =>
+    `'${spec}' resolves to ${file}, which is not source; Node would run it as code.` +
+    (advice ? ' Use a source extension or .json.' : '');
+  const lintIn = async (code: string) => {
+    const root = ws?.root ?? '';
+    const local = makeEslint(root, { [RULE]: 'error' });
+    const found = reports(
+      await local.lintText(code, { filePath: join(root, 'packages/web/src/load.ts') }),
+    );
+    return found.map((r) => [r.line, r.message]);
+  };
+  const setup = () => {
+    ws = tempWorkspace();
+    ws.manifest('packages/web', { name: '@drefyn/web', private: true, type: 'module' });
+    for (const file of ['net.txt', 'x.css', 'net', '.tls', 'blob.dat', 'addon.node']) {
+      ws.write(`packages/web/src/${file}`, 'module.exports = 1;\n');
+    }
+    ws.write('packages/web/src/lib.v2.js', 'module.exports = 1;\n');
+    // QA row 51: a folder whose package.json main points at a text file.
+    ws.write('packages/web/src/lib/package.json', '{ "main": "net.txt" }\n');
+    ws.write('packages/web/src/lib/net.txt', 'module.exports = 1;\n');
+    // QA row 45c: an extensionless file in a root folder outside every package.
+    ws.write('vendor/net', 'module.exports = 1;\n');
+    ws.write('packages/web/src/data.json', '{}\n');
+    ws.write('packages/index.js', 'module.exports = 1;\n');
+    ws.write('packages/web/src/other.js', 'module.exports = 1;\n');
+  };
 
-  it('reports a require style load of a relative file with a non source extension', async () => {
+  it('I10: reports the file Node resolves when it is not source or JSON', async () => {
+    setup();
     const code = [
       "import { createRequire } from 'node:module';",
       'const load = createRequire(import.meta.url);',
       "export const a = load('./net.txt');",
-      "export const b = createRequire(import.meta.url)('../x/run.css');",
-      "export const c = require('./data.md');",
-      "export const d = module.require('./blob.dat');",
+      "export const b = createRequire(import.meta.url)('./x.css');",
+      "export const c = require('./net');",
+      "export const d = module.require('./.tls');",
+      "export const e = load('./blob.dat');",
+      "export const f = load('./addon.node');",
+      "export const g = load('./lib');",
+      "export const h = load('../../../vendor/net');",
     ].join('\n');
-    const found = await lintAs('packages/web/src/opaque.ts', code);
-    expect(found.map((r) => [r.line, r.message])).toEqual([
-      [3, opaque('./net.txt')],
-      [4, opaque('../x/run.css')],
-      [5, opaque('./data.md')],
-      [6, opaque('./blob.dat')],
+    expect(await lintIn(code)).toEqual([
+      [3, opaque('./net.txt', 'packages/web/src/net.txt')],
+      [4, opaque('./x.css', 'packages/web/src/x.css')],
+      [5, opaque('./net', 'packages/web/src/net')],
+      [6, opaque('./.tls', 'packages/web/src/.tls')],
+      [7, opaque('./blob.dat', 'packages/web/src/blob.dat')],
+      [8, opaque('./addon.node', 'packages/web/src/addon.node', false)],
+      [9, opaque('./lib', 'packages/web/src/lib/net.txt')],
+      [10, opaque('../../../vendor/net', 'vendor/net')],
     ]);
   });
 
-  it('leaves source, JSON, extensionless and package specifiers and ESM style imports alone', async () => {
+  it('I10: leaves source, JSON, directories, missing files and ESM imports alone', async () => {
+    setup();
     const code = [
-      "import './styles.css';",
-      "export const a = require('./data.json');",
-      "export const b = require('./other.js');",
-      "export const c = require('./other');",
-      "export const d = require('zod/package.json');",
-      "export const e = require('some-pkg/file.txt');",
-      "export const f = () => import('./theme.css');",
+      "import { createRequire } from 'node:module';",
+      "import './x.css';",
+      'const load = createRequire(import.meta.url);',
+      "export const a = load('./lib.v2');",
+      "export const b = load('../..');",
+      "export const c = require('./data.json');",
+      "export const d = require('./other');",
+      "export const e = require('./missing.txt');",
+      "export const f = require('zod/package.json');",
+      "export const g = () => import('./x.css');",
     ].join('\n');
-    expect(await lintAs('packages/web/src/fine.ts', code)).toEqual([]);
+    expect(await lintIn(code)).toEqual([]);
   });
 });
 

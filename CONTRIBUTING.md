@@ -77,6 +77,7 @@ staged files plus the hygiene check.
 Packages are TypeScript source with no build step. Start from the template:
 
 ```sh
+mkdir -p packages
 cp -R templates/package packages/<name>
 grep -rl __name__ packages/<name> | xargs sed -i.bak 's/__name__/<name>/g'
 find packages/<name> -name '*.bak' -delete
@@ -97,6 +98,12 @@ pnpm install
 
 - Keep the template's `lint` and `typecheck` scripts exactly as they are. Do not add
   an `eslint.config.*` or a `pnpm-workspace.yaml` anywhere below the root.
+- Outside `scripts/`, `.github/` and `deploy/`, every file needs a source extension
+  or one of the asset types in `ALLOWED_EXTENSIONS` (`scripts/lint-rules/src/manifest.ts`):
+  JSON, CSS, Markdown, text, images and fonts. Node can run any other file as code,
+  and nothing lints it. To allow a new type, propose it in a PR that changes that
+  list; it gets security review. Symlinks, submodules, `node_modules` folders and
+  names starting with `-` are refused everywhere.
 
 `pnpm lint`, `pnpm lint:guard` and `pnpm check:packages` enforce all of this, and the
 gate runs all three. Inline `eslint-disable` or `/* eslint ... */` comments for

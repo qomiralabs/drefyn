@@ -1,8 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkWorkspace, formatFinding } from '../src/manifest.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  checkWorkspace,
+  formatFinding,
+  REVIEWED_PREFIXES,
+  REVIEWED_ROOT_FILES,
+} from '../src/manifest.ts';
 import { goodPackage, repoRoot, SCRIPTS, tempWorkspace, type TempWorkspace } from './helpers.ts';
 
 let ws: TempWorkspace;
@@ -290,13 +295,30 @@ describe('manifest checker failures name the package and the field', () => {
 
 describe('manifest checker on paths the rules and the guard cannot see through', () => {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: ws.root });
+  // Ignored paths only reach the index when someone forces them in, which is the case
+  // these tests stand for.
+  const forceAdd = (...paths: string[]) => git('add', '--force', '--', ...paths);
+  const gitlink = (path: string) => {
+    git('add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ws.root, encoding: 'utf8' });
+    git('update-index', '--add', '--cacheinfo', `160000,${head.trim()},${path}`);
+  };
   beforeEach(() => {
     ws.manifest('packages/a', goodPackage('a'));
     ws.manifest('scripts/tool', { name: '@drefyn/tool', private: true, type: 'module' });
     ws.write('scripts/tool/src/secret.ts', 'export const secret = 1;\n');
   });
 
-  it('a path segment that starts with a dash, which tools read as an option', () => {
+  const SYMLINK = 'symlinks are not allowed; the rules and the guard see the link, not its target';
+  const SUBMODULE = 'submodules are not allowed; nothing inside one is linted';
+  const NODE_MODULES =
+    'node_modules is never committed; Node resolves bare names into it and nothing lints it';
+  const fileType = (ext: string) =>
+    `file type ${ext} is not allowed outside scripts/, .github/ and deploy/; Node can load it as code and nothing lints it. ` +
+    'To allow a new type, add it to ALLOWED_EXTENSIONS in scripts/lint-rules/src/manifest.ts, which needs security review';
+
+  it('I5: a path segment that starts with a dash, which tools read as an option', () => {
     ws.write('--config=evil.mjs', '');
     ws.write('packages/a/src/-x/index.ts', 'export {};\n');
     git('add', '-A');
@@ -307,70 +329,190 @@ describe('manifest checker on paths the rules and the guard cannot see through',
     ]);
   });
 
-  it('a tracked or new symlink, file or directory, anywhere', () => {
+  it('I4: a tracked or new symlink, file or directory, at the root, in packages and in scripts', () => {
     // A directory link lets a package import another package's internals by a path
     // that looks like its own.
     symlinkSync('../../../scripts/tool/src', join(ws.root, 'packages/a/src-link'));
     mkdirSync(join(ws.root, 'packages/a/src'), { recursive: true });
     symlinkSync('../../../scripts/tool/src', join(ws.root, 'packages/a/src/hy'));
+    symlinkSync('../../scripts/tool/src/secret.ts', join(ws.root, 'packages/a/file.ts'));
     ws.write('packages/a/src/index.ts', "export * from './hy/secret.ts';\n");
     symlinkSync('scripts/tool/src/secret.ts', join(ws.root, 'linked.ts'));
-    git('add', 'packages/a/src/hy', 'linked.ts', 'packages/a/src/index.ts');
-    const detail = 'symlinks are not allowed; the rules and the guard see the link, not its target';
+    symlinkSync('scripts/tool/src', join(ws.root, 'linked-dir'));
+    symlinkSync('src/secret.ts', join(ws.root, 'scripts/tool/link.ts'));
+    symlinkSync('src', join(ws.root, 'scripts/tool/link-dir'));
+    git('add', 'packages/a/src/hy', 'linked.ts', 'scripts/tool/link.ts', 'packages/a/src/index.ts');
     expect(check()).toEqual([
-      `packages/a (@drefyn/a): src-link: ${detail}`,
-      `packages/a (@drefyn/a): src/hy: ${detail}`,
-      `root: linked.ts: ${detail}`,
+      `packages/a (@drefyn/a): file.ts: ${SYMLINK}`,
+      `packages/a (@drefyn/a): src-link: ${SYMLINK}`,
+      `packages/a (@drefyn/a): src/hy: ${SYMLINK}`,
+      `root: linked-dir: ${SYMLINK}`,
+      `root: linked.ts: ${SYMLINK}`,
+      `scripts/tool (@drefyn/tool): link-dir: ${SYMLINK}`,
+      `scripts/tool (@drefyn/tool): link.ts: ${SYMLINK}`,
     ]);
   });
 
-  it('a submodule, whose contents are never linted', () => {
-    git('add', '-A');
-    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ws.root, encoding: 'utf8' });
-    git('update-index', '--add', '--cacheinfo', `160000,${head.trim()},packages/a/vendor`);
+  it('I4: a submodule at the root, in packages and in scripts, and a nested repository', () => {
+    gitlink('packages/a/vendor');
+    // An untracked nested repository: git lists it as packages/a/nested/ and nothing in it.
+    mkdirSync(join(ws.root, 'packages/a/nested'), { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: join(ws.root, 'packages/a/nested') });
+    ws.write('packages/a/nested/x.ts', 'export {};\n');
+    git('update-index', '--add', '--cacheinfo', `160000,${'a'.repeat(40)},sub`);
+    git('update-index', '--add', '--cacheinfo', `160000,${'b'.repeat(40)},scripts/tool/sub`);
     expect(check()).toEqual([
-      'packages/a (@drefyn/a): vendor: submodules are not allowed; nothing inside one is linted',
+      `packages/a (@drefyn/a): nested: ${SUBMODULE}`,
+      `packages/a (@drefyn/a): vendor: ${SUBMODULE}`,
+      `root: sub: ${SUBMODULE}`,
+      `scripts/tool (@drefyn/tool): sub: ${SUBMODULE}`,
     ]);
   });
 
-  it('a file under packages/ or apps/ that Node could run but nothing lints', () => {
-    for (const name of ['net', 'net.dat', 'LOADER.MJS', 'run.sh', 'x.d.mts.bak']) {
+  it('I3: anything under a node_modules segment, any case, anywhere, fixtures included', () => {
+    for (const path of [
+      'packages/a/src/node_modules/x',
+      'packages/a/src/node_modules/x.ts',
+      'scripts/x/node_modules/y.js',
+      'common/Node_Modules/x.js',
+      'scripts/lint-rules/test/fixtures/w/node_modules/z.js',
+    ]) {
+      ws.write(path, 'module.exports = 1;\n');
+    }
+    symlinkSync('../../../../scripts/tool/src', join(ws.root, 'packages/a/src/node_modules/gh'));
+    forceAdd(
+      'packages/a/src/node_modules',
+      'scripts/x/node_modules/y.js',
+      'common/Node_Modules/x.js',
+      'scripts/lint-rules/test/fixtures/w/node_modules/z.js',
+    );
+    gitlink('packages/a/src/node_modules/sub');
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src/node_modules/gh: ${NODE_MODULES}`,
+      `packages/a (@drefyn/a): src/node_modules/gh: ${SYMLINK}`,
+      `packages/a (@drefyn/a): src/node_modules/sub: ${NODE_MODULES}`,
+      `packages/a (@drefyn/a): src/node_modules/sub: ${SUBMODULE}`,
+      `packages/a (@drefyn/a): src/node_modules/x: ${NODE_MODULES}`,
+      `packages/a (@drefyn/a): src/node_modules/x: ${fileType('(no extension)')}`,
+      `packages/a (@drefyn/a): src/node_modules/x.ts: ${NODE_MODULES}`,
+      `root: common/Node_Modules/x.js: ${NODE_MODULES}`,
+      `root: scripts/lint-rules/test/fixtures/w/node_modules/z.js: ${NODE_MODULES}`,
+      `root: scripts/x/node_modules/y.js: ${NODE_MODULES}`,
+    ]);
+  });
+
+  it('I1: a file outside the reviewed set that Node could run but nothing lints', () => {
+    for (const name of ['net', 'net.dat', 'LOADER.MJS', 'run.sh', 'x.d.mts.bak', 'x.MJS']) {
       ws.write(`packages/a/src/${name}`, 'module.exports = 1;\n');
     }
     ws.manifest('apps/web', goodPackage('web'));
     ws.write('apps/web/src/.hidden', 'x');
-    const detail = (ext: string) =>
-      `file type ${ext} is not allowed in a package; Node can load it as code and nothing lints it`;
+    // lib/net is QA rows 45 and 45c: a root file Node loads as ESM or through require.
+    for (const path of [
+      'common/net',
+      'common/.tls',
+      'vendor/net',
+      'templates/x/net',
+      'foo.yaml',
+      'lib/net',
+    ]) {
+      ws.write(path, 'module.exports = 1;\n');
+    }
+    ws.write('addon.node', '');
+    ws.write('lib/x.wasm', '');
     expect(check()).toEqual([
-      `apps/web (@drefyn/web): src/.hidden: ${detail('(no extension)')}`,
-      `packages/a (@drefyn/a): src/LOADER.MJS: ${detail('.MJS')}`,
-      `packages/a (@drefyn/a): src/net: ${detail('(no extension)')}`,
-      `packages/a (@drefyn/a): src/net.dat: ${detail('.dat')}`,
-      `packages/a (@drefyn/a): src/run.sh: ${detail('.sh')}`,
-      `packages/a (@drefyn/a): src/x.d.mts.bak: ${detail('.bak')}`,
+      `apps/web (@drefyn/web): src/.hidden: ${fileType('(no extension)')}`,
+      `packages/a (@drefyn/a): src/LOADER.MJS: ${fileType('.MJS')}`,
+      `packages/a (@drefyn/a): src/net: ${fileType('(no extension)')}`,
+      `packages/a (@drefyn/a): src/net.dat: ${fileType('.dat')}`,
+      `packages/a (@drefyn/a): src/run.sh: ${fileType('.sh')}`,
+      `packages/a (@drefyn/a): src/x.MJS: ${fileType('.MJS')}`,
+      `packages/a (@drefyn/a): src/x.d.mts.bak: ${fileType('.bak')}`,
+      `root: addon.node: ${fileType('.node')}`,
+      `root: common/.tls: ${fileType('(no extension)')}`,
+      `root: common/net: ${fileType('(no extension)')}`,
+      `root: foo.yaml: ${fileType('.yaml')}`,
+      `root: lib/net: ${fileType('(no extension)')}`,
+      `root: lib/x.wasm: ${fileType('.wasm')}`,
+      `root: templates/x/net: ${fileType('(no extension)')}`,
+      `root: vendor/net: ${fileType('(no extension)')}`,
     ]);
   });
 
-  it('passes source, JSON, styles, docs, images and fonts, and leaves scripts/ alone', () => {
+  it('I1: passes every allowed type, the reviewed set and the listed root files', () => {
     const names = ['a.ts', 'b.tsx', 'c.mts', 'd.cts', 'e.js', 'f.jsx', 'g.mjs', 'h.cjs', 'i.d.ts'];
     names.push('j.json', 'k.css', 'l.md', 'OFL.txt', 'm.svg', 'n.png', 'o.jpg', 'p.webp');
     names.push('q.ico', 'r.woff2', 's.woff', 't.ttf', 'u.otf', 'v.avif', 'w.gif', 'x.jpeg');
-    for (const name of names) ws.write(`packages/a/src/${name}`, '\n');
+    for (const name of names) {
+      ws.write(`packages/a/src/${name}`, '\n');
+      ws.write(`common/${name}`, '\n');
+    }
     ws.write('scripts/tool/run', '#!/bin/sh\n');
+    ws.write('.github/workflows/ci.yml', 'on: push\n');
+    ws.write('deploy/compose.yaml', 'services: {}\n');
+    for (const name of REVIEWED_ROOT_FILES) ws.write(name, '\n');
+    ws.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n  - apps/*\n  - scripts/*\n');
     expect(check()).toEqual([]);
   });
 
-  it('refuses a workspace that is not in a git repository', () => {
-    rmSync(join(ws.root, '.git'), { recursive: true, force: true });
-    const outside = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(ws.root) };
-    const before = process.env['GIT_CEILING_DIRECTORIES'];
-    process.env['GIT_CEILING_DIRECTORIES'] = outside.GIT_CEILING_DIRECTORIES;
-    try {
+  it('I1: judges a path in a merge conflict once, not once per stage', () => {
+    const commit = (m: string) =>
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', m);
+    ws.write('common/run', 'base\n');
+    git('add', '-A');
+    commit('base');
+    git('checkout', '-q', '-b', 'other');
+    ws.write('common/run', 'other\n');
+    git('add', '-A');
+    commit('other');
+    git('checkout', '-q', '-');
+    ws.write('common/run', 'main\n');
+    git('add', '-A');
+    commit('main');
+    const merge = spawnSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'other'],
+      {
+        cwd: ws.root,
+        encoding: 'utf8',
+      },
+    );
+    expect(merge.status).not.toBe(0);
+    const stages = execFileSync('git', ['ls-files', '-s', 'common/run'], {
+      cwd: ws.root,
+      encoding: 'utf8',
+    });
+    expect(stages.trim().split('\n')).toHaveLength(3);
+    expect(check()).toEqual([`root: common/run: ${fileType('(no extension)')}`]);
+  });
+
+  describe('outside git', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('I8: refuses a workspace that is not in a git repository', () => {
+      rmSync(join(ws.root, '.git'), { recursive: true, force: true });
+      vi.stubEnv('GIT_CEILING_DIRECTORIES', dirname(ws.root));
       expect(() => checkWorkspace(ws.root)).toThrow(/not a git repository/);
-    } finally {
-      if (before === undefined) delete process.env['GIT_CEILING_DIRECTORIES'];
-      else process.env['GIT_CEILING_DIRECTORIES'] = before;
+    });
+  });
+});
+
+describe('the reviewed set matches the review gate', () => {
+  it('I2: every reviewed prefix and root file asks for security review and has a code owner', () => {
+    const rules = JSON.parse(
+      readFileSync(join(repoRoot, 'scripts/review-gate/rules.json'), 'utf8'),
+    ) as { rules: { reviewer: string; prefixes: string[]; names: string[] }[] };
+    const security = rules.rules.find((rule) => rule.reviewer === 'security-reviewer');
+    expect(security?.prefixes).toEqual(expect.arrayContaining([...REVIEWED_PREFIXES]));
+    expect(security?.names).toEqual(expect.arrayContaining([...REVIEWED_ROOT_FILES]));
+    const owners = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+      .map((line) => line.split(/\s+/)[0]);
+    for (const path of [...REVIEWED_PREFIXES, ...REVIEWED_ROOT_FILES]) {
+      expect(owners, path).toContain(`/${path}`);
     }
   });
 });

@@ -3,6 +3,9 @@
 # judge it.
 /.github/                  @Divine572
 /scripts/                  @Divine572
+/deploy/                   @Divine572
+/.gitignore                @Divine572
+/LICENSE                   @Divine572
 /renovate.json             @Divine572
 /SECURITY.md               @Divine572
 /package.json              @Divine572

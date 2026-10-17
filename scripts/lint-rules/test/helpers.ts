@@ -58,7 +58,8 @@ export function tempWorkspace(patterns = ['packages/*', 'apps/*', 'scripts/*']):
   };
   write('pnpm-workspace.yaml', `packages:\n${patterns.map((p) => `  - ${p}\n`).join('')}`);
   write('package.json', JSON.stringify({ name: 'temp-root', private: true, type: 'module' }));
-  // The checker reads the git index, as CI does.
+  // The checker reads the git index, as CI does, and like the repo ignores installs.
+  write('.gitignore', 'node_modules/\n');
   execFileSync('git', ['init', '-q'], { cwd: root });
   return {
     root,

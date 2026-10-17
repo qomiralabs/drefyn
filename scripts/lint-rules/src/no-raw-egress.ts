@@ -1,4 +1,6 @@
-import { relative, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, extname, isAbsolute, relative, sep } from 'node:path';
 import type { AST, Rule, Scope } from 'eslint';
 import { literal, moduleReferences } from './references.ts';
 import {
@@ -146,12 +148,20 @@ function stringArgument(node: { arguments: unknown[] }): string | undefined {
   return literal(node.arguments[0])?.spec;
 }
 
-// A relative require of a file Node will run as code although nothing lints it.
-function isOpaqueLoad(spec: string): boolean {
-  if (!spec.startsWith('./') && !spec.startsWith('../')) return false;
-  const name = spec.split('/').at(-1) ?? '';
-  const dot = name.lastIndexOf('.');
-  return dot > 0 && !REQUIRE_SAFE_EXTENSIONS.has(name.slice(dot));
+// Where Node's require would load a relative specifier from this file, or undefined
+// when it does not resolve (Node throws at run time) or is not relative. Judging the
+// resolved file, not the text, handles ./net (no extension), ./.tls, ./lib.v2 that
+// resolves to lib.v2.js and a directory that resolves to its index.
+function resolveRelative(file: string, spec: string): string | undefined {
+  if (!isAbsolute(file)) return undefined;
+  if (spec !== '.' && spec !== '..' && !spec.startsWith('./') && !spec.startsWith('../')) {
+    return undefined;
+  }
+  try {
+    return createRequire(file).resolve(spec);
+  } catch {
+    return undefined;
+  }
 }
 
 // createRequire(...) under any local name, or <x>.createRequire(...); both return a
@@ -198,7 +208,8 @@ export const noRawEgress: Rule.RuleModule = {
     messages: {
       raw: "Outbound network calls go through @drefyn/egress (guardedFetch). Raw '{{api}}' is not allowed in {{pkg}}.",
       opaque:
-        "'{{spec}}' loads a file that is not source as code, so the egress rule cannot check it. Rename it to a source extension.",
+        "'{{spec}}' resolves to {{file}}, which is not source; Node would run it as code. Use a source extension or .json.",
+      addon: "'{{spec}}' resolves to {{file}}, which is not source; Node would run it as code.",
     },
   },
   create(context) {
@@ -214,6 +225,13 @@ export const noRawEgress: Rule.RuleModule = {
       pkg =
         owner?.name ?? owner?.rel ?? (typeof rootName === 'string' ? rootName : 'the root package');
     }
+    // Resolution returns real paths, so compare against the real root (macOS keeps
+    // temp folders behind /var -> /private/var).
+    const realRoot = root === undefined ? undefined : realpathSync(root);
+    const shown = (target: string) =>
+      relative(realRoot ?? dirname(file), target)
+        .split(sep)
+        .join('/');
     const report = (loc: AST.SourceLocation | null | undefined, api: string) => {
       if (loc) context.report({ loc, messageId: 'raw', data: { api, pkg } });
     };
@@ -225,8 +243,15 @@ export const noRawEgress: Rule.RuleModule = {
       const spec = stringArgument(node);
       if (spec === undefined || !node.loc) return;
       if (banned && isBannedModule(spec)) report(node.loc, spec);
-      if (isOpaqueLoad(spec))
-        context.report({ loc: node.loc, messageId: 'opaque', data: { spec } });
+      const target = resolveRelative(file, spec);
+      if (target === undefined) return;
+      const ext = extname(target);
+      if (REQUIRE_SAFE_EXTENSIONS.has(ext)) return;
+      context.report({
+        loc: node.loc,
+        messageId: ext === '.node' ? 'addon' : 'opaque',
+        data: { spec, file: shown(target) },
+      });
     };
     // Local names bound to createRequire by an import from module or node:module.
     const createRequireNames = new Set(['createRequire']);

@@ -10,7 +10,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # process substitution it would be lost and the guard would lint nothing and pass.
 top="$(git rev-parse --show-toplevel)"
 cd "$top"
-list="$(mktemp)"
+# An explicit template, because macOS mktemp ignores TMPDIR and GNU mktemp honours it.
+list="$(mktemp "${TMPDIR:-/tmp}/drefyn-guard.XXXXXX")"
+# Covers the early exits; exec below replaces the shell, so the file is removed first.
 trap 'rm -f "$list"' EXIT
 # Fixture workspaces hold broken imports on purpose; their tests lint them.
 git ls-files -z --cached --others --exclude-standard -- \
@@ -23,6 +25,7 @@ while IFS= read -r -d '' file; do
   # result; CI checks out a clean tree, so skipping it only affects local runs.
   if [ -e "$file" ]; then files+=("$file"); fi
 done <"$list"
+rm -f "$list"
 if [ "${#files[@]}" -eq 0 ]; then
   echo "guard: no source files found" >&2
   exit 2

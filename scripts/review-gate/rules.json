@@ -30,6 +30,8 @@
         "guard.config.js",
         ".gitmodules",
         ".gitattributes",
+        ".gitignore",
+        "LICENSE",
         "vitest.shared.ts",
         ".prettierrc.json",
         ".prettierignore"

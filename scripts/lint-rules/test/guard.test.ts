@@ -1,11 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -160,36 +164,78 @@ describe('guard on file names and layouts it must not trust', () => {
     expect(status).toBe(1);
   });
 
+  it('I6: fails on a committed source file under node_modules, which ESLint will not lint', () => {
+    ws.write('packages/a/src/node_modules/x.ts', RAW);
+    execFileSync('git', ['add', '--force', '--', 'packages/a/src/node_modules/x.ts'], {
+      cwd: ws.root,
+    });
+    const result = spawnSync('bash', [guard], { cwd: ws.root, encoding: 'utf8' });
+    expect(result.stdout).toContain('packages/a/src/node_modules/x.ts');
+    expect(result.status).toBe(1);
+  });
+
+  it('I7: ignores a root eslint.config.js that ignores everything', () => {
+    ws.write('eslint.config.js', "export default [{ ignores: ['**'] }];\n");
+    ws.write('packages/a/src/raw.ts', RAW);
+    const { status, hits } = runGuard();
+    expect(hits).toEqual([egress('packages/a/src/raw.ts')]);
+    expect(status).toBe(1);
+  });
+
+  it('leaves no temp file behind', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'drefyn-guard-tmp-'));
+    try {
+      const result = spawnSync('bash', [guard], {
+        cwd: ws.root,
+        encoding: 'utf8',
+        env: { ...process.env, TMPDIR: tmp },
+      });
+      expect(result.status).toBe(0);
+      // Node's compile cache may land here too; only the guard's own file matters.
+      expect(readdirSync(tmp).filter((name) => name.startsWith('drefyn-guard.'))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   // Temp repos lack the real layout, so a guard.sh edit keyed on a file that only the
   // real tree has would pass every other test here.
-  it('runs on a copy of the real repository tree and still reports a raw call', () => {
+  it('I6: on a copy of the real tree, lints exactly its source files and reports a raw call', () => {
     const copy = mkdtempSync(join(tmpdir(), 'drefyn-guard-copy-'));
     try {
       const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' })
         .split('\0')
         .filter((file) => file !== '' && existsSync(join(repoRoot, file)));
       for (const file of tracked) {
+        const from = join(repoRoot, file);
         mkdirSync(dirname(join(copy, file)), { recursive: true });
-        cpSync(join(repoRoot, file), join(copy, file));
+        // Copy a link as a link; the checker, not this test, refuses links.
+        if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), join(copy, file));
+        else copyFileSync(from, join(copy, file));
       }
       execFileSync('git', ['init', '-q'], { cwd: copy });
-      mkdirSync(join(copy, 'shared'));
-      writeFileSync(join(copy, 'shared/net.ts'), RAW);
+      // A folder name the real tree cannot already hold.
+      const probe = relative(copy, mkdtempSync(join(copy, 'guard-probe-')));
+      writeFileSync(join(copy, probe, 'net.ts'), RAW);
       execFileSync('git', ['add', '-A'], { cwd: copy });
       const result = spawnSync('bash', [guard, '--format', 'json'], {
         cwd: copy,
         encoding: 'utf8',
       });
       const parsed = JSON.parse(result.stdout) as { filePath: string; messages: unknown[] }[];
+      const real = realpathSync(copy);
+      const linted = parsed.map((r) => relative(real, r.filePath)).sort();
+      const sources = [...tracked, `${probe}/net.ts`]
+        .filter(
+          (file) =>
+            /\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('scripts/lint-rules/test/fixtures/'),
+        )
+        .sort();
+      expect(linted).toEqual(sources);
       const flagged = parsed
         .filter((r) => r.messages.length > 0)
-        .map((r) => relative(realpathSync(copy), r.filePath));
-      expect(flagged).toEqual(['shared/net.ts']);
-      const sources = tracked.filter(
-        (file) =>
-          /\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('scripts/lint-rules/test/fixtures/'),
-      );
-      expect(parsed).toHaveLength(sources.length + 1);
+        .map((r) => relative(real, r.filePath));
+      expect(flagged).toEqual([`${probe}/net.ts`]);
       expect(result.status).toBe(1);
     } finally {
       rmSync(copy, { recursive: true, force: true });

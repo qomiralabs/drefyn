@@ -98,6 +98,8 @@ describe('the shipped rules file', () => {
     'packages/egress/package.json',
     'packages/web/src/pnpm-workspace.yaml',
     '.gitmodules',
+    '.gitignore',
+    'LICENSE',
     '.gitattributes',
     'packages/web/.gitattributes',
     'vitest.shared.ts',
