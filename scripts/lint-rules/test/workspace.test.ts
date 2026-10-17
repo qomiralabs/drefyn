@@ -25,8 +25,32 @@ describe('parseWorkspacePatterns', () => {
     ]);
   });
 
-  it('returns nothing when there is no packages key', () => {
-    expect(parseWorkspacePatterns('minimumReleaseAge: 4320\n')).toEqual([]);
+  it('reads an unindented block list, which YAML treats the same as an indented one', () => {
+    const yaml = "packages:\n- 'packages/*'\n- apps/*\n# note\nminimumReleaseAge: 1\n";
+    expect(parseWorkspacePatterns(yaml)).toEqual(['packages/*', 'apps/*']);
+  });
+
+  it('reads a quoted packages key', () => {
+    expect(parseWorkspacePatterns('"packages":\n  - packages/*\n')).toEqual(['packages/*']);
+    expect(parseWorkspacePatterns("'packages':\n- apps/*\n")).toEqual(['apps/*']);
+  });
+
+  it('refuses a missing or empty packages list instead of finding no packages', () => {
+    expect(() => parseWorkspacePatterns('minimumReleaseAge: 4320\n')).toThrow(
+      /pnpm-workspace.yaml: no packages list/,
+    );
+    expect(() => parseWorkspacePatterns('packages:\nminimumReleaseAge: 1\n')).toThrow(
+      /pnpm-workspace.yaml: no packages list/,
+    );
+  });
+
+  it('refuses an entry indented deeper than the first, which YAML reads as a continuation', () => {
+    expect(() => parseWorkspacePatterns('packages:\n  - a/*\n    - b/*\n')).toThrow(
+      /cannot read packages entry '- b\/\*'/,
+    );
+    expect(() => parseWorkspacePatterns('packages:\n- a/*\n  - b/*\n')).toThrow(
+      /cannot read packages entry/,
+    );
   });
 
   it('refuses a list form it cannot read rather than guessing', () => {

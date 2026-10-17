@@ -31,7 +31,9 @@ describe('check-packages cli', () => {
     ws.manifest('packages/a', goodPackage('a'));
     ws.write('packages/a/src/index.ts', 'export const a = 1;\n');
     expect(main(['--root', ws.root], io)).toBe(0);
-    expect(out).toBe('check:packages: clean (1 packages, 1 source files)\n');
+    expect(out).toBe(
+      'check:packages: clean (1 workspace package, 1 under packages/ and apps/, 1 source file)\n',
+    );
     expect(err).toBe('');
   });
 
@@ -54,6 +56,20 @@ describe('check-packages cli', () => {
     } finally {
       process.chdir(before);
     }
+  });
+
+  it('says problem for a single finding', () => {
+    ws.manifest('packages/a', goodPackage('b'));
+    expect(main(['--root', ws.root], io)).toBe(1);
+    expect(err).toBe(
+      "packages/a (@drefyn/b): name: must be '@drefyn/a'\ncheck:packages: 1 problem\n",
+    );
+  });
+
+  it('exits 2 when pnpm-workspace.yaml lists no packages', () => {
+    ws.write('pnpm-workspace.yaml', 'packages:\nminimumReleaseAge: 1\n');
+    expect(main(['--root', ws.root], io)).toBe(2);
+    expect(err).toBe('check:packages: error: pnpm-workspace.yaml: no packages list\n');
   });
 
   it('exits 2 on a bad flag or when there is no workspace', () => {

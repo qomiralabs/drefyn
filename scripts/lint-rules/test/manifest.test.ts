@@ -78,9 +78,11 @@ describe('manifest checker failures name the package and the field', () => {
       'packages/b',
       goodPackage('b', { exports: { '.': './src/index.ts', import: './src/x.ts' } }),
     );
+    ws.manifest('packages/c', goodPackage('c', { exports: {} }));
     expect(check()).toEqual([
       'packages/a (@drefyn/a): exports: must be a string or an object',
       'packages/b (@drefyn/b): exports: mixes subpath keys and condition keys',
+      "packages/c (@drefyn/c): exports: has no entry points; point '.' at ./src/index.ts",
     ]);
   });
 
@@ -205,23 +207,76 @@ describe('manifest checker failures name the package and the field', () => {
     ]);
   });
 
-  it('lint or typecheck scripts that do not run eslint and tsc', () => {
-    ws.manifest('packages/a', goodPackage('a', { scripts: { lint: 'echo skipped' } }));
+  it('lint or typecheck scripts that are not exactly the template commands', () => {
+    const lint = (detail: string) =>
+      `packages/${detail} (@drefyn/${detail}): scripts.lint: must be 'eslint --max-warnings 0 .'; the boundary rules only run through it`;
+    const typecheck = (detail: string) =>
+      `packages/${detail} (@drefyn/${detail}): scripts.typecheck: must be 'tsc -p tsconfig.json'; the boundary rules only run through it`;
+    const cases: [string, Record<string, string>][] = [
+      ['a', { lint: 'echo skipped' }],
+      ['b', { ...SCRIPTS, lint: 'echo eslint skipped' }],
+      ['c', { ...SCRIPTS, lint: `eslint --max-warnings 0 --rule "${NO_EGRESS}: off" .` }],
+      ['d', { ...SCRIPTS, lint: 'eslint -c other.config.js .' }],
+      ['e', { ...SCRIPTS, lint: 'eslint --no-config-lookup .' }],
+      ['f', { ...SCRIPTS, lint: 'eslint --max-warnings 0 . --ignore-pattern src' }],
+      ['g', { ...SCRIPTS, typecheck: 'tsc -p other.json' }],
+    ];
+    for (const [name, scripts] of cases)
+      ws.manifest(`packages/${name}`, goodPackage(name, { scripts }));
     expect(check()).toEqual([
-      'packages/a (@drefyn/a): scripts.lint: must run eslint; the boundary rules only run through it',
-      'packages/a (@drefyn/a): scripts.typecheck: must run tsc; the boundary rules only run through it',
+      lint('a'),
+      typecheck('a'),
+      lint('b'),
+      lint('c'),
+      lint('d'),
+      lint('e'),
+      lint('f'),
+      typecheck('g'),
     ]);
   });
 
-  it('a package level ESLint config, which would replace the root one', () => {
+  it('an ESLint config anywhere below the root, in every extension', () => {
     ws.manifest('packages/a', goodPackage('a'));
     ws.write('packages/a/eslint.config.mjs', 'export default [];\n');
+    ws.write('packages/a/src/sub/eslint.config.js', 'export default [{}];\n');
+    ws.write('packages/a/src/deep/er/eslint.config.cjs', 'module.exports = [];\n');
+    ws.write('packages/a/src/build/eslint.config.ts', 'export default [];\n');
+    ws.write('packages/a/src/dist/eslint.config.mts', 'export default [];\n');
+    ws.write('packages/a/.hidden/eslint.config.cts', 'export default [];\n');
     ws.manifest('scripts/tool', { name: '@drefyn/tool', private: true, type: 'module' });
     ws.write('scripts/tool/eslint.config.js', 'export default [];\n');
+    ws.write('shared/eslint.config.js', 'export default [];\n');
+    const detail = 'replaces the root config and drops the drefyn rules for that folder';
     expect(check()).toEqual([
-      'packages/a (@drefyn/a): eslint.config.mjs: replaces the root config and drops the drefyn rules',
-      'scripts/tool (@drefyn/tool): eslint.config.js: replaces the root config and drops the drefyn rules',
+      `packages/a (@drefyn/a): .hidden/eslint.config.cts: ${detail}`,
+      `packages/a (@drefyn/a): eslint.config.mjs: ${detail}`,
+      `packages/a (@drefyn/a): src/build/eslint.config.ts: ${detail}`,
+      `packages/a (@drefyn/a): src/deep/er/eslint.config.cjs: ${detail}`,
+      `packages/a (@drefyn/a): src/dist/eslint.config.mts: ${detail}`,
+      `packages/a (@drefyn/a): src/sub/eslint.config.js: ${detail}`,
+      `scripts/tool (@drefyn/tool): eslint.config.js: ${detail}`,
+      `root: shared/eslint.config.js: ${detail}`,
     ]);
+  });
+
+  it('a pnpm-workspace.yaml anywhere below the root', () => {
+    ws.manifest('packages/a', goodPackage('a'));
+    ws.write('packages/a/src/pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
+    ws.write('tools/nested/pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+    const detail = 'starts a separate workspace, so the drefyn rules stop seeing the real packages';
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src/pnpm-workspace.yaml: ${detail}`,
+      `root: tools/nested/pnpm-workspace.yaml: ${detail}`,
+    ]);
+  });
+
+  it('leaves the lint rule fixtures and node_modules alone', () => {
+    ws.manifest('packages/a', goodPackage('a'));
+    ws.write('scripts/lint-rules/test/fixtures/w/pnpm-workspace.yaml', 'packages:\n  - p/*\n');
+    ws.write('scripts/lint-rules/test/fixtures/w/eslint.config.js', 'export default [];\n');
+    ws.write('packages/a/node_modules/dep/eslint.config.js', 'export default [];\n');
+    ws.write('packages/a/node_modules/dep/pnpm-workspace.yaml', 'packages: []\n');
+    expect(check()).toEqual([]);
   });
 
   it('a package.json that is not valid JSON', () => {
@@ -252,6 +307,41 @@ describe('manifest checker on inline disables of the boundary rules', () => {
       `packages/a (@drefyn/a): src/index.ts:3: inline disable of ${NO_INTERNALS} is not allowed`,
       `packages/a (@drefyn/a): src/index.ts:4: inline disable of ${NO_INTERNALS} is not allowed`,
       `packages/a (@drefyn/a): src/index.ts:5: inline disable of ${NO_EGRESS} is not allowed`,
+    ]);
+  });
+
+  it('fails on a config comment that spells a rule name with JSON escapes', () => {
+    // ESLint decodes the comment as JSON, so these turn the rules off just the same.
+    const escapedEgress = NO_EGRESS.replace('-', '\\u002d');
+    const escapedInternals = NO_INTERNALS.replace('/', '\\/');
+    ws.write(
+      'packages/a/src/index.ts',
+      [
+        `/* eslint "${escapedEgress}": "off" */`,
+        `/* eslint "${escapedInternals}": 0, "no-console": "off" */`,
+        `/* eslint "\\u0064refyn/no-raw-egress": ["off"] */`,
+        'export const a = 1;',
+      ].join('\n'),
+    );
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src/index.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:2: inline disable of ${NO_INTERNALS} is not allowed`,
+      `packages/a (@drefyn/a): src/index.ts:3: inline disable of ${NO_EGRESS} is not allowed`,
+    ]);
+  });
+
+  it('checks build/ and out/ folders, which ESLint lints', () => {
+    ws.write(
+      'packages/a/src/build/raw.ts',
+      `// eslint-disable-next-line ${NO_EGRESS}\nfetch('x');\n`,
+    );
+    ws.write(
+      'packages/a/src/out/raw.ts',
+      `// eslint-disable-next-line ${NO_EGRESS}\nfetch('x');\n`,
+    );
+    expect(check()).toEqual([
+      `packages/a (@drefyn/a): src/build/raw.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/out/raw.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
     ]);
   });
 

@@ -1,3 +1,4 @@
 # A tiny workspace of its own, so the rule resolves owners here and not in the repo.
 packages:
   - 'packages/*'
+  - 'apps/*'

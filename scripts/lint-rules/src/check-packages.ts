@@ -11,12 +11,15 @@ export interface Io {
 const USAGE = `usage: check-packages [--root <dir>]
 
 Checks every workspace package manifest under packages/ and apps/ against the package
-layout, and every source file for inline disables of the drefyn boundary rules.
+layout, every source file for inline disables of the drefyn boundary rules, and the
+tree for nested eslint.config.* and pnpm-workspace.yaml files.
 
   --root <dir>  workspace root (default: the nearest pnpm-workspace.yaml above cwd)
 
 exit codes: 0 clean, 1 problems found, 2 usage or read error
 `;
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 export function main(argv: string[], io: Io): number {
   let values;
@@ -51,11 +54,15 @@ export function main(argv: string[], io: Io): number {
   }
 
   if (result.findings.length === 0) {
-    io.out(`check:packages: clean (${result.packages} packages, ${result.files} source files)\n`);
+    // The workspace count is printed so a reader change that drops packages shows up.
+    io.out(
+      `check:packages: clean (${count(result.workspace, 'workspace package')}, ` +
+        `${result.packages} under packages/ and apps/, ${count(result.files, 'source file')})\n`,
+    );
     return 0;
   }
   io.err(result.findings.map((finding) => formatFinding(finding) + '\n').join(''));
-  io.err(`check:packages: ${result.findings.length} problems\n`);
+  io.err(`check:packages: ${count(result.findings.length, 'problem')}\n`);
   return 1;
 }
 

@@ -4,15 +4,30 @@ import { moduleReferences } from './references.ts';
 import {
   cachedWorkspace,
   declaredDependencies,
-  exportKeys,
+  exportEntries,
   findWorkspaceRoot,
   ownerOf,
+  type WorkspacePackage,
 } from './workspace.ts';
 
 const SCOPED = /^(@drefyn\/[^/]+)(\/.+)?$/;
 
 const isRelative = (spec: string) =>
   spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../');
+
+// The package a relative path names after its last node_modules segment, if any.
+// Those folders are pnpm links, so the path text sits in the importer while Node loads
+// the linked package's files; following the link by name avoids realpath, which also
+// rewrites symlinked roots such as /var on macOS and would then match no package.
+function linkedName(spec: string): string | undefined {
+  const parts = spec.split('/');
+  const at = parts.lastIndexOf('node_modules');
+  if (at === -1) return undefined;
+  const [first = '', second = ''] = parts.slice(at + 1);
+  return first.startsWith('@') ? `${first}/${second}` : first;
+}
+
+const isApp = (pkg: WorkspacePackage) => pkg.rel.startsWith('apps/');
 
 export const noCrossPackageInternals: Rule.RuleModule = {
   meta: {
@@ -21,6 +36,8 @@ export const noCrossPackageInternals: Rule.RuleModule = {
     schema: [],
     messages: {
       internal: "'{{spec}}' reaches into {{pkg}} internals. Import from '{{pkg}}' instead.",
+      app: "'{{spec}}' reaches into {{pkg}}, which is an app. Apps are never imported; move the shared code into a package.",
+      linked: "'{{spec}}' goes through node_modules. Import the package by name.",
       unexported: "'{{spec}}' is not an entry point of {{pkg}}. Public entry points: {{entries}}.",
       undeclared:
         "'{{pkg}}' is not a declared dependency of {{importer}}. Add it with workspace:*.",
@@ -46,13 +63,20 @@ export const noCrossPackageInternals: Rule.RuleModule = {
     // paths, npm packages) is left to Node, tsc and the exports maps.
     return moduleReferences(({ spec, loc }) => {
       if (isRelative(spec)) {
-        const target = ownerOf(workspace, resolve(dirname(file), spec));
+        const name = linkedName(spec);
+        const target =
+          name === undefined
+            ? ownerOf(workspace, resolve(dirname(file), spec))
+            : workspace.packages.find((candidate) => candidate.name === name);
         if (target !== undefined && target !== here) {
+          const pkg = target.name ?? target.rel;
           context.report({
             loc,
-            messageId: 'internal',
-            data: { spec, pkg: target.name ?? target.rel },
+            messageId: isApp(target) ? 'app' : 'internal',
+            data: { spec, pkg },
           });
+        } else if (name !== undefined) {
+          context.report({ loc, messageId: 'linked', data: { spec } });
         }
         return;
       }
@@ -65,13 +89,14 @@ export const noCrossPackageInternals: Rule.RuleModule = {
       const sub = match?.[2];
       const target = workspace.packages.find((candidate) => candidate.name === pkg);
       if (sub === undefined || target === undefined) return;
-      const keys = exportKeys(target.manifest['exports']);
+      const entries = exportEntries(target.manifest['exports']);
+      const keys = typeof entries === 'string' ? [] : entries.map(([key]) => key);
       if (keys.includes(`.${sub}`)) return;
-      const entries = keys.map((key) => (key === '.' ? pkg : pkg + key.slice(1))).join(', ');
+      const listed = keys.map((key) => (key === '.' ? pkg : pkg + key.slice(1))).join(', ');
       context.report({
         loc,
         messageId: 'unexported',
-        data: { spec, pkg, entries: entries || 'none' },
+        data: { spec, pkg, entries: listed || 'none' },
       });
     });
   },

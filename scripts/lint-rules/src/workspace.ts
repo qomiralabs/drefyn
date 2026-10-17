@@ -38,30 +38,39 @@ export function findWorkspaceRoot(from: string): string | undefined {
   }
 }
 
+const PACKAGES_KEY = /^(?:packages|'packages'|"packages")\s*:/;
+const ENTRY = /^-\s+(?:'([^']*)'|"([^"]*)"|([^\s#'"]+))\s*(?:#.*)?$/;
+
 // Only the packages list matters here, and pnpm writes it as a plain block sequence.
 // Anything else is refused so a layout change cannot silently drop packages from the
-// boundary checks.
+// boundary checks: with no packages every rule and check passes vacuously.
 export function parseWorkspacePatterns(yaml: string): string[] {
   const patterns: string[] = [];
   let inPackages = false;
+  let indent: number | undefined;
   for (const raw of yaml.split(/\r?\n/)) {
     const trimmed = raw.trim();
     if (trimmed === '' || trimmed.startsWith('#')) continue;
-    if (!/^\s/.test(raw)) {
-      inPackages = /^packages\s*:/.test(raw);
-      if (inPackages && !/^packages\s*:\s*(#.*)?$/.test(raw)) {
+    const column = raw.length - raw.trimStart().length;
+    // YAML allows the list under a top level key to start at column 0.
+    if (column === 0 && !(inPackages && trimmed.startsWith('-'))) {
+      inPackages = PACKAGES_KEY.test(raw);
+      if (inPackages && !/^\S+\s*:\s*(#.*)?$/.test(raw)) {
         throw new Error(`pnpm-workspace.yaml: cannot read '${trimmed}'; use a block list`);
       }
       continue;
     }
     if (!inPackages) continue;
-    const match = /^-\s+(?:'([^']*)'|"([^"]*)"|([^\s#'"]+))\s*(?:#.*)?$/.exec(trimmed);
+    // A deeper item is a continuation of the previous scalar in YAML, not a new entry.
+    indent ??= column;
+    const match = column === indent ? ENTRY.exec(trimmed) : null;
     const pattern = match?.[1] ?? match?.[2] ?? match?.[3];
     if (pattern === undefined) {
       throw new Error(`pnpm-workspace.yaml: cannot read packages entry '${trimmed}'`);
     }
     patterns.push(pattern);
   }
+  if (patterns.length === 0) throw new Error('pnpm-workspace.yaml: no packages list');
   return patterns;
 }
 
@@ -131,13 +140,17 @@ export function declaredDependencies(manifest: Record<string, unknown>): Set<str
   return names;
 }
 
-// Subpath keys of an exports map. A string or a conditions object is the "." entry.
-export function exportKeys(exports: unknown): string[] {
-  if (typeof exports === 'string') return ['.'];
-  if (!isRecord(exports)) return [];
+// Subpath entries of an exports map. A string or a map of conditions is the "." entry.
+// Node refuses a map that mixes the two, so that comes back as an error string.
+export function exportEntries(exports: unknown): [string, unknown][] | string {
+  if (typeof exports === 'string') return [['.', exports]];
+  if (!isRecord(exports)) return 'must be a string or an object';
   const keys = Object.keys(exports);
-  if (keys.length > 0 && keys.every((key) => !key.startsWith('.'))) return ['.'];
-  return keys.filter((key) => key.startsWith('.'));
+  if (keys.length === 0) return [];
+  const subpaths = keys.filter((key) => key.startsWith('.'));
+  if (subpaths.length === 0) return [['.', exports]];
+  if (subpaths.length !== keys.length) return 'mixes subpath keys and condition keys';
+  return Object.entries(exports);
 }
 
 const cache = new Map<string, Workspace>();

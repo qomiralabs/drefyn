@@ -3,6 +3,7 @@ import { basename, extname, join, relative, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
 import {
   DEPENDENCY_FIELDS,
+  exportEntries,
   isRecord,
   loadWorkspace,
   ownerOf,
@@ -18,6 +19,8 @@ export interface Finding {
 
 export interface CheckResult {
   findings: Finding[];
+  // Workspace packages found, and how many of them sit under packages/ and apps/.
+  workspace: number;
   packages: number;
   files: number;
 }
@@ -27,7 +30,18 @@ export const GUARDED_RULES = ['drefyn/no-cross-package-internals', 'drefyn/no-ra
 // Only these trees hold product packages; scripts/* are repo tooling with no API.
 const LAYOUT_ROOTS = ['packages/', 'apps/'];
 const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', 'build', 'out']);
+// The same folders the root ESLint config ignores, so the directive scan reads exactly
+// what lint reads. The guard step lints the rest, force added files included.
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage']);
+// Committed fixture workspaces carry their own configs on purpose.
+const FIXTURES = 'scripts/lint-rules/test/fixtures/';
+
+// The exact commands from the package template. Any other flag or wrapper can switch
+// the rules off for that package (--rule, -c, --no-config-lookup, --ignore-pattern).
+export const REQUIRED_SCRIPTS = {
+  lint: 'eslint --max-warnings 0 .',
+  typecheck: 'tsc -p tsconfig.json',
+} as const;
 
 export function formatFinding(finding: Finding): string {
   return `${finding.package}: ${finding.field}: ${finding.detail}`;
@@ -42,16 +56,6 @@ function targets(value: unknown): (string | undefined)[] {
   if (Array.isArray(value)) return value.flatMap((item: unknown) => targets(item));
   if (isRecord(value)) return Object.values(value).flatMap(targets);
   return [undefined];
-}
-
-function exportEntries(exports: unknown): [string, unknown][] | string {
-  if (typeof exports === 'string') return [['.', exports]];
-  if (!isRecord(exports)) return 'must be a string or an object';
-  const keys = Object.keys(exports);
-  const subpaths = keys.filter((key) => key.startsWith('.'));
-  if (subpaths.length === 0) return [['.', exports]];
-  if (subpaths.length !== keys.length) return 'mixes subpath keys and condition keys';
-  return Object.entries(exports);
 }
 
 function checkLayout(pkg: WorkspacePackage, add: (field: string, detail: string) => void) {
@@ -70,13 +74,9 @@ function checkLayout(pkg: WorkspacePackage, add: (field: string, detail: string)
   // Turbo only lints and typechecks a package through these scripts, so without them
   // the rules and the exports map never see its code.
   const scripts = isRecord(manifest['scripts']) ? manifest['scripts'] : {};
-  for (const [script, tool] of [
-    ['lint', 'eslint'],
-    ['typecheck', 'tsc'],
-  ] as const) {
-    const command = scripts[script];
-    if (typeof command !== 'string' || !command.includes(tool)) {
-      add(`scripts.${script}`, `must run ${tool}; the boundary rules only run through it`);
+  for (const [script, command] of Object.entries(REQUIRED_SCRIPTS)) {
+    if (scripts[script] !== command) {
+      add(`scripts.${script}`, `must be '${command}'; the boundary rules only run through it`);
     }
   }
 }
@@ -95,6 +95,7 @@ function checkExports(
     add('exports', entries);
     return;
   }
+  if (entries.length === 0) add('exports', "has no entry points; point '.' at ./src/index.ts");
   const published = manifest['private'] !== true;
   const base = published ? './dist/' : './src/';
   for (const [key, target] of entries) {
@@ -118,15 +119,52 @@ function checkExports(
   }
 }
 
-// ESLint uses the nearest config file, so one inside a package would silently replace
-// the root config and the drefyn rules with it.
-function checkEslintConfig(pkg: WorkspacePackage, add: (field: string, detail: string) => void) {
-  for (const entry of readdirSync(pkg.dir)) {
-    if (/^eslint\.config\.[cm]?[jt]s$/.test(entry)) {
-      add(entry, 'replaces the root config and drops the drefyn rules');
+const NESTED_FILES: [RegExp, string][] = [
+  // ESLint looks up the config from each file's own folder.
+  [
+    /^eslint\.config\.[cm]?[jt]s$/,
+    'replaces the root config and drops the drefyn rules for that folder',
+  ],
+  // The rules take the nearest pnpm-workspace.yaml as the root.
+  [
+    /^pnpm-workspace\.yaml$/,
+    'starts a separate workspace, so the drefyn rules stop seeing the real packages',
+  ],
+];
+
+// Every file below the root, dot folders and build output included: a config there
+// still changes what ESLint does for its folder.
+function checkNestedFiles(workspace: Workspace): Finding[] {
+  const findings: Finding[] = [];
+  const walk = (dir: string) => {
+    for (const entry of sorted(readdirSync(dir, { withFileTypes: true }))) {
+      const full = join(dir, entry.name);
+      const rel = relative(workspace.root, full).split(sep).join('/');
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && entry.name !== '.git' && rel + '/' !== FIXTURES) {
+          walk(full);
+        }
+        continue;
+      }
+      if (dir === workspace.root) continue;
+      const detail = NESTED_FILES.find(([pattern]) => pattern.test(entry.name))?.[1];
+      if (detail === undefined) continue;
+      const owner = ownerOf(workspace, full);
+      findings.push({
+        package: owner ? label(owner) : 'root',
+        field: relative(owner?.dir ?? workspace.root, full)
+          .split(sep)
+          .join('/'),
+        detail,
+      });
     }
-  }
+  };
+  walk(workspace.root);
+  return findings;
 }
+
+const sorted = <T extends { name: string }>(entries: T[]) =>
+  entries.sort((a, b) => (a.name < b.name ? -1 : 1));
 
 function checkDependencies(
   pkg: WorkspacePackage,
@@ -201,18 +239,35 @@ function disabledRules(comment: string): string[] | undefined {
   }
   const config = /^eslint\s+([\s\S]*)$/.exec(text);
   if (config?.[1] !== undefined) {
-    const body = config[1];
-    return GUARDED_RULES.filter((rule) => body.includes(rule));
+    const names = configRuleNames(config[1]);
+    return GUARDED_RULES.filter((rule) => names.some((name) => name.includes(rule)));
   }
   return undefined;
+}
+
+// ESLint decodes a rule config comment as JSON or a looser JSON like form, so a name
+// can hide behind escapes such as \u002d. Match the decoded keys and the text with its
+// escapes undone; the guard step, which ignores config comments, backs this up.
+function configRuleNames(body: string): string[] {
+  const unescaped = body
+    .replace(/\\u\{?([0-9a-fA-F]{1,6})\}?/g, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/\\(.)/g, '$1');
+  const names = [body, unescaped];
+  try {
+    const parsed: unknown = JSON.parse(`{${body}}`);
+    if (isRecord(parsed)) names.push(...Object.keys(parsed));
+  } catch {
+    // Not JSON; the text forms above still apply.
+  }
+  return names;
 }
 
 function codeFiles(root: string): string[] {
   const files: string[] = [];
   const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-      a.name < b.name ? -1 : 1,
-    )) {
+    for (const entry of sorted(readdirSync(dir, { withFileTypes: true }))) {
       if (entry.name.startsWith('.')) continue;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -272,10 +327,10 @@ export function checkWorkspace(root: string): CheckResult {
       packages += 1;
       checkLayout(pkg, add);
     }
-    checkEslintConfig(pkg, add);
     checkDependencies(pkg, workspace, add);
   }
+  findings.push(...checkNestedFiles(workspace));
   const files = codeFiles(root);
   findings.push(...checkDirectives(workspace, files));
-  return { findings, packages, files: files.length };
+  return { findings, workspace: workspace.packages.length, packages, files: files.length };
 }

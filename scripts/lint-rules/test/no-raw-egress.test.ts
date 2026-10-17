@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { fixture, makeEslint, reports } from './helpers.ts';
+import { afterEach, describe, expect, it } from 'vitest';
+import { fixture, makeEslint, reports, tempWorkspace, type TempWorkspace } from './helpers.ts';
 
 const RULE = 'drefyn/no-raw-egress';
 const root = fixture('egress');
 const raw = readFileSync(join(root, 'packages/web/src/raw.ts'), 'utf8');
+const RAW_FETCH = "export const f = fetch('x');";
 
 const allow = [
   { path: 'scripts/tool/src/github.ts', reason: 'fixed GitHub API host' },
@@ -37,6 +38,22 @@ const expected: [number, string][] = [
   [18, 'WebSocket'],
   [19, 'fetch'],
   [21, 'node:net'], // import x = require(); the type only form on line 22 is fine
+  [24, 'tls'],
+  [25, 'node:dgram'],
+  [26, 'dns'],
+  [27, 'fetch'], // destructured from globalThis
+  [28, 'fetch'], // globalThis.globalThis
+  [29, 'node:http'], // process.getBuiltinModule
+  [31, 'node:https'], // createRequire(...)(...)
+  [33, 'net'], // a require made by createRequire
+  [34, '_http_client'],
+  [35, 'node:tls'], // module.require
+  [38, 'WebSocket'], // destructuring assignment
+  [39, 'fetch'], // parameter default
+  [43, 'fetch'], // nested pattern
+  [46, '_http_agent'],
+  [47, 'node:_tls_wrap'],
+  [48, '_stream_wrap'],
 ];
 
 async function lintAs(path: string, code = raw) {
@@ -68,6 +85,56 @@ describe('no-raw-egress outside packages/egress', () => {
   });
 });
 
+describe('no-raw-egress with ambient declarations', () => {
+  // declare emits no code, so the name still means the global at run time.
+  it.each([
+    ['declare const fetch: (url: string) => unknown;\nexport const a = fetch("x");', 'fetch'],
+    ['declare function fetch(url: string): unknown;\nexport const a = fetch("x");', 'fetch'],
+    [
+      'declare let WebSocket: new (url: string) => object;\nexport const s = WebSocket;',
+      'WebSocket',
+    ],
+    [
+      'declare const globalThis: { fetch(url: string): unknown };\nexport const a = globalThis.fetch("x");',
+      'fetch',
+    ],
+    [
+      'declare const globalThis: { fetch(url: string): unknown };\nexport const { fetch: f } = globalThis;',
+      'fetch',
+    ],
+    ['declare global {\n  var WebSocket: unknown;\n}\nexport const s = WebSocket;', 'WebSocket'],
+  ])('reports through %j', async (code, api) => {
+    const found = await lintAs('packages/web/src/ambient.ts', code);
+    expect(found.map((r) => r.message)).toEqual([message(api, '@drefyn/web')]);
+  });
+
+  it('still treats a real local binding as a local', async () => {
+    const code = [
+      'const fetch = (url: string) => url;',
+      'const globalThis = { fetch };',
+      'export const a = [fetch("x"), globalThis.fetch("x")];',
+      'export const { fetch: f } = globalThis;',
+    ].join('\n');
+    expect(await lintAs('packages/web/src/local.ts', code)).toEqual([]);
+  });
+
+  it('leaves look alike calls with other names or computed arguments alone', async () => {
+    const code = [
+      "import { createRequire } from 'node:module';",
+      'const name = String(Date.now());',
+      'export const a = createRequire(import.meta.url)(name);',
+      "export const b = process.getBuiltinModule('node:path');",
+      "export const c = createRequire(import.meta.url)('node:path');",
+      "export const d = module.require('node:fs');",
+      'export const e = ({ fetch: 1 }).fetch;',
+      'export const { other } = globalThis;',
+      "export const { ['fetch']: g } = { fetch: 1 };",
+      'export const { [name]: h } = globalThis;',
+    ].join('\n');
+    expect(await lintAs('packages/web/src/lookalike.ts', code)).toEqual([]);
+  });
+});
+
 describe('no-raw-egress exemptions', () => {
   it('allows the same code inside packages/egress', async () => {
     expect(await lintAs('packages/egress/src/raw.ts')).toEqual([]);
@@ -87,6 +154,47 @@ describe('no-raw-egress exemptions', () => {
     ).toHaveLength(1);
     expect(await lintAs('scripts/tool/vendored.ts', "export const f = fetch('x');")).toHaveLength(
       1,
+    );
+  });
+});
+
+describe('no-raw-egress exemption is decided by the owning package', () => {
+  let ws: TempWorkspace | undefined;
+  afterEach(() => {
+    ws?.cleanup();
+    ws = undefined;
+  });
+  const lintIn = async (path: string) => {
+    const root = ws?.root ?? '';
+    const local = makeEslint(root, { [RULE]: 'error' });
+    return reports(await local.lintText(RAW_FETCH, { filePath: join(root, path) }));
+  };
+
+  it('exempts packages/egress only when it is the @drefyn/egress package', async () => {
+    ws = tempWorkspace();
+    ws.manifest('packages/egress', { name: '@drefyn/egress', private: true, type: 'module' });
+    expect(await lintIn('packages/egress/src/raw.ts')).toEqual([]);
+  });
+
+  it('does not exempt a packages/egress folder with no manifest or another name', async () => {
+    ws = tempWorkspace();
+    expect((await lintIn('packages/egress/src/raw.ts')).map((r) => r.message)).toEqual([
+      message('fetch', 'temp-root'),
+    ]);
+    ws.cleanup();
+    ws = tempWorkspace();
+    ws.manifest('packages/egress', { name: '@drefyn/other', private: true, type: 'module' });
+    expect((await lintIn('packages/egress/src/raw.ts')).map((r) => r.message)).toEqual([
+      message('fetch', '@drefyn/other'),
+    ]);
+  });
+
+  it('fails loudly when a nested pnpm-workspace.yaml lists no packages', async () => {
+    ws = tempWorkspace();
+    ws.manifest('packages/web', { name: '@drefyn/web', private: true, type: 'module' });
+    ws.write('packages/web/src/pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
+    await expect(lintIn('packages/web/src/packages/egress/a.ts')).rejects.toThrow(
+      /no packages list/,
     );
   });
 });

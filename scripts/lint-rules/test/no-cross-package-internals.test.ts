@@ -48,6 +48,52 @@ describe('no-cross-package-internals on the bad fixture', () => {
   });
 });
 
+describe('no-cross-package-internals on paths through node_modules', () => {
+  const lint = async (code: string) =>
+    reports(await eslint.lintText(code, { filePath: join(root, 'packages/y/src/linked.ts') }));
+
+  it('reports a relative path through a node_modules link as internal to that package', async () => {
+    const own = '../node_modules/@drefyn/x/src/internal.ts';
+    const top = '../../../node_modules/@drefyn/x/src/internal.ts';
+    const found = await lint(
+      `import { secret } from '${own}';\nexport { value } from '${top}';\nexport { secret };`,
+    );
+    expect(found).toEqual([
+      { line: 1, ruleId: RULE, message: internal(own) },
+      { line: 2, ruleId: RULE, message: internal(top) },
+    ]);
+  });
+
+  it('reports any other relative path through node_modules', async () => {
+    const spec = '../node_modules/zod/lib/index.js';
+    const self = '../node_modules/@drefyn/y/src/index.ts';
+    const found = await lint(
+      `import z from '${spec}';\nimport y from '${self}';\nexport { z, y };`,
+    );
+    const message = (s: string) => `'${s}' goes through node_modules. Import the package by name.`;
+    expect(found).toEqual([
+      { line: 1, ruleId: RULE, message: message(spec) },
+      { line: 2, ruleId: RULE, message: message(self) },
+    ]);
+  });
+});
+
+describe('no-cross-package-internals on apps', () => {
+  it('says apps are never imported instead of suggesting the app name', async () => {
+    const spec = '../../../apps/site/src/index.ts';
+    const results = await eslint.lintText(`export { page } from '${spec}';`, {
+      filePath: join(root, 'packages/y/src/app.ts'),
+    });
+    expect(reports(results)).toEqual([
+      {
+        line: 1,
+        ruleId: RULE,
+        message: `'${spec}' reaches into @drefyn/site, which is an app. Apps are never imported; move the shared code into a package.`,
+      },
+    ]);
+  });
+});
+
 describe('no-cross-package-internals on good input', () => {
   it('leaves same package, public, builtin, URL, # and absolute imports alone', async () => {
     const found = reports(
