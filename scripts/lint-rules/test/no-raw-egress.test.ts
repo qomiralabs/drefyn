@@ -151,9 +151,46 @@ describe('no-raw-egress with type only bindings', () => {
       'fetch',
     ],
     ['export type globalThis = unknown;\nexport const { fetch: s6 } = globalThis;', 'fetch'],
+    [
+      "namespace fetch {\n  export type Options = object;\n}\nexport const r = fetch('http://127.0.0.1:9');",
+      'fetch',
+    ],
+    [
+      "namespace WebSocket {\n  export type Options = object;\n}\nexport const r = new WebSocket('wss://x');",
+      'WebSocket',
+    ],
+    [
+      "type fetch = unknown;\ndeclare const fetch: (u: string) => unknown;\nexport const r = fetch('x');",
+      'fetch',
+    ],
+    [
+      "namespace self {\n  export interface X {\n    a: 1;\n  }\n}\nexport const r = self.fetch('x');",
+      'fetch',
+    ],
+    [
+      "namespace window {\n  export namespace inner {\n    export type T = 1;\n  }\n}\nexport const r = window?.fetch('x');",
+      'fetch',
+    ],
+    // A type parameter is a type, so the value reference inside still means the global.
+    ["export function f<fetch>() {\n  return fetch('x');\n}", 'fetch'],
   ])('I9: reports through %j', async (code, api) => {
     const found = await lintAs('packages/web/src/typeonly.ts', code);
     expect(found.map((r) => r.message)).toEqual([message(api, '@drefyn/web')]);
+  });
+
+  it('I9: still treats a namespace with values as a local', async () => {
+    const code = [
+      'namespace fetch {',
+      '  export const x = 1;',
+      '}',
+      'namespace self {',
+      '  export function fetch() {',
+      '    return 1;',
+      '  }',
+      '}',
+      'export const r = [fetch.x, self.fetch()];',
+    ].join('\n');
+    expect(await lintAs('packages/web/src/valuens.ts', code)).toEqual([]);
   });
 
   it('I9: still treats a value import as a local', async () => {

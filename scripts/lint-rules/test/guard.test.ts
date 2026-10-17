@@ -188,15 +188,21 @@ describe('guard on file names and layouts it must not trust', () => {
     try {
       const real = execFileSync('sh', ['-c', 'command -v mktemp'], { encoding: 'utf8' }).trim();
       const log = join(shim, 'made.log');
+      // Paths go in through the environment, so no quoting in the script can break.
       writeFileSync(
         join(shim, 'mktemp'),
-        `#!/bin/sh\np="$('${real}' "$@")" || exit $?\nprintf '%s\\n' "$p" >> '${log}'\nprintf '%s\\n' "$p"\n`,
+        '#!/bin/sh\np="$("$SHIM_REAL_MKTEMP" "$@")" || exit $?\nprintf \'%s\\n\' "$p" >> "$SHIM_LOG"\nprintf \'%s\\n\' "$p"\n',
         { mode: 0o755 },
       );
       const result = spawnSync('bash', [guard], {
         cwd: ws.root,
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${shim}:${process.env['PATH'] ?? ''}` },
+        env: {
+          ...process.env,
+          PATH: `${shim}:${process.env['PATH'] ?? ''}`,
+          SHIM_REAL_MKTEMP: real,
+          SHIM_LOG: log,
+        },
       });
       expect(result.status).toBe(0);
       const made = readFileSync(log, 'utf8')

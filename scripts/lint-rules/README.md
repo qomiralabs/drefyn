@@ -30,9 +30,11 @@ Node, tsc and the exports maps. Files at the repo root outside every package (su
 it is imported as), with a string or a template with no `${}`. It also reports any
 runtime use of the global `fetch` or `WebSocket`: bare, through `globalThis`,
 `window`, `self` or `global` (chained, destructured or behind `as`, `!`, `<T>` or
-`satisfies`), and when the only binding of the name is erased at compile time (an
-ambient `declare`, a type alias, an interface or a type only import). Type only
-imports themselves pass.
+`satisfies`), and when every binding of the name in scope is erased at compile time:
+an ambient `declare`, a type alias, an interface, a namespace, a type parameter, or a
+type only import (`import type { x }` or `import { type x }`). A value binding of the
+same name (a `const`, a function, a class, a parameter or a value import) is a local
+and is not reported. Type only imports themselves pass.
 
 A `require`, `module.require` or `createRequire` require with a literal relative
 specifier is reported when the file Node resolves it to has no extension, or one other

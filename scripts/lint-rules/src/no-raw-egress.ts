@@ -100,11 +100,38 @@ function isAmbient(def: Scope.Definition): boolean {
   return false;
 }
 
-// TypeScript also erases a type alias, an interface and a type only import, so none
-// of them shadows the global either.
+// A namespace that holds only types (aliases, interfaces, nested such namespaces, or
+// exports of them) emits no code. One with values is a real run time object.
+function isTypesOnlyNamespace(node: unknown): boolean {
+  if (!isRecord(node) || node['type'] !== 'TSModuleDeclaration') return false;
+  const body = node['body'];
+  if (body === undefined || body === null) return true;
+  if (isRecord(body) && body['type'] === 'TSModuleDeclaration') return isTypesOnlyNamespace(body);
+  if (!isRecord(body) || !Array.isArray(body['body'])) return false;
+  const statements: unknown[] = body['body'];
+  return statements.every((statement) => {
+    const inner =
+      isRecord(statement) && statement['type'] === 'ExportNamedDeclaration'
+        ? statement['declaration']
+        : statement;
+    if (!isRecord(inner)) return false;
+    if (inner['type'] === 'TSTypeAliasDeclaration' || inner['type'] === 'TSInterfaceDeclaration') {
+      return true;
+    }
+    return isTypesOnlyNamespace(inner);
+  });
+}
+
+// TypeScript also erases a type alias, an interface, a types only namespace and a type
+// only import, so none of them shadows the global either. A pure alias or interface is
+// already a type only variable; the alias and interface branch below is for a name
+// merged with an ambient declare, where every definition is erased but the variable
+// still counts as a value.
 function isErased(def: Scope.Definition): boolean {
   if (isAmbient(def)) return true;
   const node: unknown = def.node;
+  // ESLint's types list only JavaScript definition kinds; typescript-eslint adds these.
+  if ((def.type as string) === 'TSModuleName') return isTypesOnlyNamespace(node);
   if (!isRecord(node)) return false;
   if (node['type'] === 'TSTypeAliasDeclaration' || node['type'] === 'TSInterfaceDeclaration') {
     return true;
