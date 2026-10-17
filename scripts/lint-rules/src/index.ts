@@ -2,6 +2,8 @@ import type { ESLint } from 'eslint';
 import { noCrossPackageInternals } from './no-cross-package-internals.ts';
 import { noRawEgress } from './no-raw-egress.ts';
 
+export { egressAllowList } from './egress-allow-list.ts';
+
 const plugin = {
   meta: { name: '@drefyn/lint-rules' },
   rules: {

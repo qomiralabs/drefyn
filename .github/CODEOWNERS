@@ -14,6 +14,11 @@
 /turbo.json                @Divine572
 /tsconfig*.json            @Divine572
 /eslint.config.js          @Divine572
+# A nested ESLint config drops the boundary rules for its folder.
+**/eslint.config.*         @Divine572
+/scripts/lint-rules/guard.config.js @Divine572
+# Everything here may open raw network connections, so every change is a security change.
+/packages/egress/          @Divine572
 /vitest.shared.ts          @Divine572
 /.prettierrc.json          @Divine572
 /.prettierignore           @Divine572

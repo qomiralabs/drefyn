@@ -52,10 +52,10 @@ Run the full gate before you push. CI runs the same script.
 pnpm gate
 ```
 
-It runs a frozen lockfile install, format check, lint with zero warnings, the package
-manifest check, strict typecheck, tests with coverage (85 percent lines at least), the
-dependency license policy, the hygiene check on tracked files and on commit messages
-since `origin/development` and, when it is installed, gitleaks.
+It runs a frozen lockfile install, format check, lint with zero warnings, the boundary
+guard, the package manifest check, strict typecheck, tests with coverage (85 percent
+lines at least), the dependency license policy, the hygiene check on tracked files and
+on commit messages since `origin/development` and, when it is installed, gitleaks.
 
 Single steps while you work:
 
@@ -65,7 +65,8 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm hygiene       # dashes and tracked internal files
-pnpm check:packages # package manifests and banned inline disables
+pnpm lint:guard     # the boundary rules over every file, nothing can switch them off
+pnpm check:packages # package manifests, banned inline disables and nested configs
 ```
 
 `scripts/precommit.sh` is a faster check meant for a pre-commit hook: formatting of
@@ -94,10 +95,14 @@ pnpm install
 - Outbound network calls go through `@drefyn/egress`. Raw `fetch`, `http`, `net`,
   `dns` and the like fail lint outside it.
 
-`pnpm lint` and `pnpm check:packages` enforce all of this, and the gate runs both.
-Inline `eslint-disable` comments for `drefyn/no-cross-package-internals` or
-`drefyn/no-raw-egress` fail the check, so fix the import instead. The rules are
-described in `scripts/lint-rules/README.md`.
+- Keep the template's `lint` and `typecheck` scripts exactly as they are. Do not add
+  an `eslint.config.*` or a `pnpm-workspace.yaml` anywhere below the root.
+
+`pnpm lint`, `pnpm lint:guard` and `pnpm check:packages` enforce all of this, and the
+gate runs all three. Inline `eslint-disable` or `/* eslint ... */` comments for
+`drefyn/no-cross-package-internals` or `drefyn/no-raw-egress` fail the check, so fix
+the import instead. The rules, the guard step and what they do not catch are described
+in `scripts/lint-rules/README.md`.
 
 ## Tests
 

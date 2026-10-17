@@ -11,6 +11,7 @@
     "typecheck:root": "tsc -p tsconfig.json",
     "lint": "turbo run lint lint:root",
     "lint:root": "eslint --max-warnings 0 eslint.config.js vitest.shared.ts",
+    "lint:guard": "bash scripts/lint-rules/guard.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "turbo run test",
