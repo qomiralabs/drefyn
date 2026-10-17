@@ -2,9 +2,17 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readBlobs } from '../src/git.ts';
 import { checkCommits, checkPullRequest, checkTrackedFiles } from '../src/run.ts';
 import { CO_AUTHOR, EM_DASH, EN_DASH, makeRepo, type TempRepo } from './helpers.ts';
+
+// The real reader stays in place; one test swaps in a result with a blob missing,
+// which real git cannot be made to produce.
+vi.mock('../src/git.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/git.ts')>();
+  return { ...actual, readBlobs: vi.fn(actual.readBlobs) };
+});
 
 // Spawning git is slow on a loaded machine, so every fixture repo is built once, up
 // front, and the tests only read them.
@@ -124,6 +132,13 @@ describe('checkTrackedFiles', () => {
   it('handles a repo with nothing tracked', async () => {
     const result = await checkTrackedFiles(repos.empty.dir);
     expect(result).toEqual({ findings: [], scanned: 0, skippedBinary: 0 });
+  });
+
+  it('fails instead of scanning a missing blob as empty', async () => {
+    vi.mocked(readBlobs).mockResolvedValueOnce(new Map());
+    await expect(checkTrackedFiles(repos.dashes.dir)).rejects.toThrow(
+      /no blob was read for docs\/a\.md \([0-9a-f]{40}\)/,
+    );
   });
 
   it('fails loudly outside a git repo', async () => {
