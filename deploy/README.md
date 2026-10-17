@@ -7,7 +7,7 @@ other services join it as they are built.
 
 - Docker Engine 25 or later, for the healthcheck's start interval
 - Docker Compose 2.23.1 or later, for secrets read from the environment
-- `jq`, for the smoke check
+- `jq`, for the scripts and the smoke check
 
 ## Start, stop, reset
 
@@ -27,7 +27,8 @@ seconds on a restart. Like `restart`, `up` recreates the container when the stac
 running, so Postgres is down for a few seconds.
 
 To write `deploy/.env` yourself, copy `deploy/.env.example`, set `DREFYN_STACK_ID` to any
-random value, and fill every password, including the superuser's, with at least 16 random
+random value (it is not a secret, but it must never change after the first start and must not
+be copied to another checkout), and fill every password, including the superuser's, with at least 16 random
 characters. Empty or short passwords stop the first start on purpose, and the superuser
 stays closed to TCP even then. `deploy/.env` is gitignored; make it readable only by you
 (`chmod 600 deploy/.env`, which `up` warns about if you forget) and keep it out of backups
@@ -50,8 +51,11 @@ A first start that was interrupted leaves nothing in the log; `reset --yes` and 
 The container runs as the `postgres` user with all capabilities dropped. Passwords reach it
 as Compose secrets, so they appear as files in `/run/secrets` and not in `docker inspect`.
 Local socket logins use peer authentication and every TCP login needs a password, loopback
-included. The superuser cannot log in over TCP at all, even with its password; reach it with
-`docker compose exec postgres psql -U postgres -d drefyn`.
+included. The superuser cannot log in over TCP at all, even with its password, and nothing can
+start a replication session; reach the superuser with
+`docker compose exec postgres psql -U postgres -d drefyn`. These rules live in
+`postgres/pg_hba.conf`, which the server reads from a read only mount rather than from the
+data directory, so they hold from the very first start, even one that stopped halfway.
 
 On the first start, with an empty volume, `postgres/bootstrap.sql` runs once as the
 superuser and creates:
@@ -145,14 +149,19 @@ before it reads any password unless the server already logs nothing. These recor
 `create role ... password` in plain text, even when it succeeds:
 
 - `log_statement` set to `ddl`, `mod` or `all`
+- `log_min_error_statement` at `error` (the default) or lower, which logs a statement that
+  fails, so a `create role` refused by a password policy logs its password
 - `log_min_duration_statement` or `log_min_duration_sample` at 0 or more
 - `log_transaction_sample_rate` above 0
-- `pgaudit` in `shared_preload_libraries`, whatever the session sets
+- `pgaudit` loaded, whatever the session sets
+- `auto_explain` loaded, which with `auto_explain.log_min_duration` at 0 or more logs the
+  query text, password checks included
 
-Turn them off for the run. If you have checked that nothing logs these statements, or you
-will change each password afterwards with `\password` as above, run the file with
-`DREFYN_BOOTSTRAP_LOG_CHECKED=yes` set. A master user that cannot read
-`shared_preload_libraries` also needs it.
+The file checks all of these, and finds `pgaudit` and `auto_explain` in any of the three
+preload lists in any spelling. Turn them off for the run. If you have checked that nothing
+logs these statements, or you will change each password afterwards with `\password` as
+above, run the file with `DREFYN_BOOTSTRAP_LOG_CHECKED=yes` set. A master user that cannot
+read the preload lists also needs it.
 
 The master user owns schema `extensions` and the extension. After an engine upgrade, or when
 the provider adds a newer pgvector, it runs `alter extension vector update to '<version>'`,
@@ -169,9 +178,11 @@ refuse.
 
 The data volume carries a label with `DREFYN_STACK_ID` from `deploy/.env`, so plain
 `docker compose` and the scripts label it the same way and Compose never asks to recreate
-it. A volume with another stack ID, or none, is refused. A volume from an earlier build of
-this stack, labelled with the compose file path, can only be removed: `reset --yes` deletes
-it.
+it. Set it in `deploy/.env` only, not in the shell. It identifies the stack and is not a
+secret. It must never change after the first start: a changed ID makes the scripts refuse,
+naming both IDs, and newer Compose then offers to recreate the volume, which deletes the data.
+A volume with another stack ID, or none, is refused. A volume from an earlier build of this
+stack, labelled with the compose file path, can only be removed: `reset --yes` deletes it.
 
 Set `COMPOSE_PROJECT_NAME` (in the shell or in `deploy/.env`) and a different
 `DREFYN_POSTGRES_PORT` to run this stack beside another one, for example from another

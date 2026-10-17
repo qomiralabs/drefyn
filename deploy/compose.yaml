@@ -20,10 +20,13 @@ services:
       POSTGRES_DB: drefyn
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      # initdb trusts every local and loopback connection by default, which would let any
-      # process in the container log in as any role. Peer keeps the socket to the matching
-      # OS user, and TCP, loopback included, always needs a password.
+      # The server reads its login rules from postgres/pg_hba.conf below. These keep the
+      # data directory's own copy strict as well, in case anyone points the server back at it.
       POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
+    # The login rules come from a read only file rather than the data directory, so they hold
+    # from the first start even when init stops halfway. The image passes these arguments to
+    # the temporary init server too.
+    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]
     # Passed as secrets so they show up as files in the container, not in docker inspect.
     # Compose copies these into the container before start, which is why the root
     # filesystem cannot be read only.
@@ -37,6 +40,7 @@ services:
       - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
       - ./postgres/bootstrap.sql:/etc/drefyn/bootstrap.sql:ro
       - ./postgres/healthcheck.sh:/etc/drefyn/healthcheck.sh:ro
+      - ./postgres/pg_hba.conf:/etc/drefyn/pg_hba.conf:ro
     ports:
       - 127.0.0.1:${DREFYN_POSTGRES_PORT:-55432}:5432
     # Logs in as every role with its secret, so a failed bootstrap or a password that no

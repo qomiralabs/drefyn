@@ -26,15 +26,24 @@ random_secret() {
   od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
 }
 
+# Called on its own line, never on the left of && or ||, so set -e stays on inside it and any
+# failure here stops the script before the guard and before compose.
 ensure_env() {
   if [ -f "$env_file" ]; then return; fi
-  local line key
+  local line key value
   env_tmp="$(mktemp "$deploy/.env.XXXXXX")"
   chmod 600 "$env_tmp"
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID)=$ ]]; then
       key="${BASH_REMATCH[1]}"
-      printf '%s=%s\n' "$key" "$(random_secret)" >>"$env_tmp"
+      # A failure inside a command substitution used as an argument would go unnoticed and
+      # leave the value empty, so generate it on its own and check it.
+      value="$(random_secret)"
+      if [ "${#value}" -ne 48 ]; then
+        say <<<"selfhost: could not generate a random value for $key; nothing was written."
+        exit 1
+      fi
+      printf '%s=%s\n' "$key" "$value" >>"$env_tmp"
     else
       printf '%s\n' "$line" >>"$env_tmp"
     fi
@@ -46,8 +55,10 @@ ensure_env() {
 
 # A hand written .env gets the umask default, which is usually readable by everyone.
 warn_env_mode() {
-  if [ -f "$env_file" ] && [ -n "$(find "$env_file" -prune \
-    \( -perm -040 -o -perm -004 -o -perm -020 -o -perm -002 \) -print)" ]; then
+  local open
+  if [ ! -f "$env_file" ]; then return; fi
+  open="$(find "$env_file" -prune \( -perm -040 -o -perm -004 -o -perm -020 -o -perm -002 \) -print)"
+  if [ -n "$open" ]; then
     say <<<"selfhost: warning: $env_file can be read or written by other users; run chmod 600 on it"
   fi
 }
@@ -56,19 +67,19 @@ warn_env_mode() {
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
 wait_healthy() {
-  local start end container health
+  local start end container status
   start="$(date +%s)"
   if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
     end="$(date +%s)"
+    # Diagnostics only: the script exits 1 below whatever these return.
     container="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
-    health=""
+    status=""
     if [ -n "$container" ]; then
-      health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-        "$container" 2>/dev/null || true)"
+      status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
     fi
-    # A port clash or a name conflict fails at once, before the healthcheck ever ran, so say
-    # so rather than blame health.
-    if [ "$health" = starting ] || [ "$health" = unhealthy ]; then
+    # A port clash or a name conflict fails at once and leaves the container never started, so
+    # say compose failed rather than blame health.
+    if [ -n "$status" ] && [ "$status" != created ]; then
       say <<<"selfhost: postgres is not healthy after $((end - start))s: $(health_output "$container")"
     else
       say <<<"selfhost: compose could not start postgres ($((end - start))s); its error is above."
@@ -81,8 +92,12 @@ wait_healthy() {
 }
 
 case "${1:-}" in
-  # up writes deploy/.env first, because the stack ID the guard compares lives there.
-  up) ensure_env && guard_project up ;;
+  # up writes deploy/.env first, because the stack ID the guard compares lives there. Two
+  # statements, not &&, so a failure in ensure_env stops the script instead of skipping the guard.
+  up)
+    ensure_env
+    guard_project up
+    ;;
   down | restart | reset) guard_project "$1" ;;
   *) usage ;;
 esac

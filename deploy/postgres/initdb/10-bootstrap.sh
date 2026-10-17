@@ -4,22 +4,6 @@
 # the container can connect before the roles exist.
 set -euo pipefail
 
-# Nothing needs the superuser over TCP: the bootstrap and operators use the socket, where
-# peer ties it to the postgres OS user. Nothing replicates either, and a replication session
-# copies every tenant's data. This goes first, before any check that can fail: after a failed
-# first start the container restarts into a server that skips init, and it must not come up
-# with these open. The first matching line wins, so the rejects go on top. The init server
-# only listens on the socket, and the server that starts next reads the file fresh.
-umask 077
-hba="$PGDATA/pg_hba.conf"
-{
-  echo "# The superuser logs in over the local socket only, and nothing replicates."
-  echo "host all $POSTGRES_USER all reject"
-  echo "host replication all all reject"
-  cat "$hba"
-} >"$hba.drefyn"
-mv "$hba.drefyn" "$hba"
-
 read_secret() {
   local file="/run/secrets/$1"
   if [ ! -s "$file" ]; then

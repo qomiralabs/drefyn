@@ -27,15 +27,21 @@ select has_parameter_privilege('log_statement', 'SET')
   set log_transaction_sample_rate = 0;
 \endif
 
--- A managed database's master user may not be allowed to change these, and pgaudit logs
--- whatever the session says. Stop unless this session really logs no statements, or the
--- operator has checked and says so. A preload list this role cannot read counts as unsafe.
+-- A managed database's master user may not be allowed to change these, and pgaudit and
+-- auto_explain log whatever the session says. Stop unless this session really logs no
+-- statements, failed ones included, or the operator has checked and says so. A library is
+-- matched anywhere in the preload lists, so $libdir/pgaudit, pgaudit.so and quoted names
+-- count, and a list this role cannot read counts as unsafe.
 select current_setting('log_statement') = 'none'
+  and current_setting('log_min_error_statement') in ('log', 'fatal', 'panic')
   and current_setting('log_min_duration_statement') = '-1'
   and current_setting('log_min_duration_sample') = '-1'
   and current_setting('log_transaction_sample_rate') = '0'
-  and coalesce((select setting !~ '(^|[ ,])pgaudit([ ,]|$)'
-    from pg_settings where name = 'shared_preload_libraries'), false) as log_is_quiet \gset
+  and coalesce((
+    select count(*) = 3 and bool_and(setting !~* '(pgaudit|auto_explain)')
+    from pg_settings
+    where name in ('shared_preload_libraries', 'session_preload_libraries',
+      'local_preload_libraries')), false) as log_is_quiet \gset
 \if :log_is_quiet
 \else
   \getenv log_checked DREFYN_BOOTSTRAP_LOG_CHECKED
