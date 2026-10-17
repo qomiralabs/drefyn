@@ -64,6 +64,29 @@ describe('guard on a clean tree', () => {
   });
 });
 
+describe('guard exit codes', () => {
+  it('passes ESLint through unchanged, so a crash reads 2 and not 123 from GNU xargs', () => {
+    ws.write('packages/a/src/pnpm-workspace.yaml', 'minimumReleaseAge: 1\n');
+    ws.write('packages/a/src/packages/egress/raw.ts', RAW);
+    execFileSync('git', ['add', '-A'], { cwd: ws.root });
+    const result = spawnSync('bash', [guard], { cwd: ws.root, encoding: 'utf8' });
+    expect(result.stderr).toContain('pnpm-workspace.yaml: no packages list');
+    expect(result.status).toBe(2);
+  });
+
+  it('exits 0 when there are no source files', () => {
+    const empty = tempWorkspace();
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: empty.root });
+      const result = spawnSync('bash', [guard], { cwd: empty.root, encoding: 'utf8' });
+      expect(result.stdout).toBe('guard: no source files\n');
+      expect(result.status).toBe(0);
+    } finally {
+      empty.cleanup();
+    }
+  });
+});
+
 describe('guard catches what per package lint can miss', () => {
   it.each(['js', 'mjs', 'cjs', 'ts', 'mts', 'cts'])(
     'a nested eslint.config.%s that drops the rules for its folder',
