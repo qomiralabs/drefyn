@@ -33,12 +33,19 @@ jobs:
           persist-credentials: false
       - name: Scripts refuse a project created by another compose file
         run: bash scripts/selfhost-guard-test.sh
-      # The same commands a self hoster runs, from a clean runner with no volume.
+      - name: Wrong or short passwords never report healthy
+        run: bash scripts/selfhost-password-test.sh
+      # The same commands a self hoster runs, from a clean runner with no volume. The wait
+      # matches the promise that a clean start is healthy within a minute.
       - name: Start
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 60
         run: bash scripts/selfhost.sh up
       - name: Smoke check
         run: bash scripts/selfhost-smoke.sh
       - name: Restart keeps the data and the roles
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 60
         run: |
           bash scripts/selfhost.sh restart
           bash scripts/selfhost-smoke.sh

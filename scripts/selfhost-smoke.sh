@@ -74,7 +74,7 @@ health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{
 if [ "$health" = "healthy" ]; then
   pass "postgres is healthy"
 else
-  fail "postgres is healthy" "health is $health"
+  fail "postgres is healthy" "health is $health: $(health_output "$container")"
   finish
 fi
 
@@ -83,6 +83,14 @@ if [ "$user" = "postgres" ]; then
   pass "container runs as the postgres user, not root"
 else
   fail "container runs as the postgres user, not root" "user is '${user:-root}'"
+fi
+
+limits="$(docker inspect --format '{{.HostConfig.PidsLimit}} {{.HostConfig.Memory}}' "$container")"
+read -r pids memory <<<"$limits"
+if [ "${pids:-0}" -gt 0 ] && [ "${memory:-0}" -gt 0 ]; then
+  pass "container has a process and a memory limit"
+else
+  fail "container has a process and a memory limit" "pids limit ${pids:-none}, memory ${memory:-none}"
 fi
 
 # Superuser queries go over the container's local socket. Output is unaligned, one row per line.
@@ -94,12 +102,12 @@ superuser_sql() {
 # Role connections go over TCP with the role's own password, so they also prove the
 # password works and that TCP is not trust.
 role_sql() {
-  local role="$1" secret="$2"
+  local role="$1" secret="$2" database="${3:-drefyn}"
   # Expanded by the shell inside the container, where the secret file lives.
   # shellcheck disable=SC2016
-  "${compose[@]}" exec -T -e ROLE="$role" -e SECRET="$secret" postgres sh -c \
+  "${compose[@]}" exec -T -e ROLE="$role" -e SECRET="$secret" -e DATABASE="$database" postgres sh -c \
     'PGPASSWORD="$(cat "/run/secrets/$SECRET")" exec psql --no-psqlrc -v ON_ERROR_STOP=1 -qtA \
-      --host 127.0.0.1 --username "$ROLE" --dbname drefyn'
+      --host 127.0.0.1 --username "$ROLE" --dbname "$DATABASE"'
 }
 
 expect_rows() {
@@ -110,6 +118,16 @@ expect_rows() {
     fail "$name" "expected [$expected], got [$actual]"
   fi
 }
+
+# Older 18.x servers have code execution bugs that any login role can reach. Raise this with
+# each Postgres security release, so a stale image digest fails here.
+min_server_version_num=180006
+version="$(superuser_sql <<<"select current_setting('server_version_num')::int >= $min_server_version_num, current_setting('server_version');")"
+if [[ "$version" == "t|"* ]]; then
+  pass "server is at least version $min_server_version_num (${version#t|})"
+else
+  fail "server is at least version $min_server_version_num" "server is ${version#*|}"
+fi
 
 # Role attributes. Columns: name, super, bypassrls, createrole, createdb, inherit, login.
 roles="$(superuser_sql <<'SQL'
@@ -155,27 +173,45 @@ expect_rows "app and public reader roles have no rights on schema public" \
 drefyn_public_reader|f|f" "$public_schema"
 
 # The extension is created once by the bootstrap, in its own schema, so migrations never need
-# a superuser.
+# a superuser. The superuser owns both, so no other role can drop them.
 vector="$(superuser_sql <<'SQL'
-select n.nspname, e.extversion, pg_get_userbyid(n.nspowner)
+select n.nspname, e.extversion, pg_get_userbyid(n.nspowner), pg_get_userbyid(e.extowner)
 from pg_extension e join pg_namespace n on n.oid = e.extnamespace
 where e.extname = 'vector';
 SQL
 )"
-expect_rows "pgvector 0.8.2 is installed in schema extensions, which drefyn_owner owns" \
-  "extensions|0.8.2|drefyn_owner" "$vector"
+expect_rows "pgvector 0.8.7 is installed in schema extensions, both owned by the superuser" \
+  "extensions|0.8.7|postgres|postgres" "$vector"
 
-search_paths="$(superuser_sql <<'SQL'
-select rolname, array_to_string(rolconfig, ';')
-from pg_roles
-where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
-order by rolname;
+# Exactly these entries: the three roles may use the schema, nobody but the superuser may
+# create in it, and PUBLIC has nothing.
+extension_acl="$(superuser_sql <<<"select nspacl from pg_namespace where nspname = 'extensions';")"
+expect_rows "only the three roles may use schema extensions, and only the superuser may create in it" \
+  "{postgres=UC/postgres,drefyn_owner=U/postgres,drefyn_app=U/postgres,drefyn_public_reader=U/postgres}" \
+  "$extension_acl"
+
+# The search path is a database setting, so a role can only drift from it by changing its
+# own settings, and those must stay empty.
+search_path="$(superuser_sql <<'SQL'
+select coalesce(array_to_string(s.setconfig, ';'), '')
+from pg_db_role_setting s join pg_database d on d.oid = s.setdatabase
+where d.datname = 'drefyn' and s.setrole = 0;
 SQL
 )"
-expect_rows "each role searches app, then extensions" \
-  "drefyn_app|search_path=app, extensions
-drefyn_owner|search_path=app, extensions
-drefyn_public_reader|search_path=app, extensions" "$search_paths"
+expect_rows "database drefyn searches app, then extensions" "search_path=app, extensions" "$search_path"
+
+role_settings="$(superuser_sql <<'SQL'
+select r.rolname, coalesce(array_to_string(r.rolconfig, ';'), ''),
+  (select count(*) from pg_db_role_setting s where s.setrole = r.oid)
+from pg_roles r
+where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
+order by r.rolname;
+SQL
+)"
+expect_rows "no role carries its own settings" \
+  "drefyn_app||0
+drefyn_owner||0
+drefyn_public_reader||0" "$role_settings"
 
 # PUBLIC gets nothing on the database: no CONNECT for roles created later, no TEMP for anyone.
 # The database owner's own entry is left out; it is the bootstrap superuser.
@@ -184,13 +220,26 @@ select coalesce(string_agg(entry, ',' order by entry), '')
 from (
   select case a.grantee when 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end
     || ':' || a.privilege_type as entry
-  from pg_database d, aclexplode(d.datacl) a
+  from pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
   where d.datname = current_database() and a.grantee <> d.datdba
 ) entries;
 SQL
 )"
 expect_rows "only the three roles may connect, and PUBLIC has no rights on the database" \
   "drefyn_app:CONNECT,drefyn_owner:CONNECT,drefyn_public_reader:CONNECT" "$database_acl"
+
+# The same for the databases every cluster has, so a role made later has nowhere to go.
+other_acl="$(superuser_sql <<'SQL'
+select d.datname, coalesce((
+  select string_agg(case a.grantee when 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end
+    || ':' || a.privilege_type, ',' order by a.privilege_type)
+  from aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+  where a.grantee <> d.datdba), '')
+from pg_database d where d.datname in ('postgres', 'template1') order by d.datname;
+SQL
+)"
+expect_rows "nobody but the superuser may connect to postgres or template1" "postgres|
+template1|" "$other_acl"
 
 whoami="$(role_sql drefyn_app drefyn_app_password <<<'select current_user;' 2>&1 || true)"
 expect_rows "drefyn_app logs in over TCP with its password" "drefyn_app" "$whoami"
@@ -205,15 +254,36 @@ else
   fail "a wrong password is refused over TCP" "$wrong"
 fi
 
+# Even the right superuser password is refused over TCP; operators use docker exec.
+# shellcheck disable=SC2016
+super_tcp="$("${compose[@]}" exec -T postgres sh -c \
+  'PGPASSWORD="$(cat /run/secrets/postgres_password)" exec psql --no-psqlrc -qtA \
+    --host 127.0.0.1 --username postgres --dbname drefyn -c "select 1"' 2>&1 || true)"
+if [[ "$super_tcp" == *"pg_hba.conf rejects connection"* ]]; then
+  pass "the superuser cannot log in over TCP, even with its password"
+else
+  fail "the superuser cannot log in over TCP, even with its password" "$super_tcp"
+fi
+
+# The socket must check the OS user, or any process in the container could be any role.
+peer="$("${compose[@]}" exec -T postgres psql --no-psqlrc -qtA --username drefyn_app \
+  --dbname drefyn -c 'select 1' 2>&1 || true)"
+if [[ "$peer" == *"Peer authentication failed"* ]]; then
+  pass "the socket refuses a role that does not match the OS user"
+else
+  fail "the socket refuses a role that does not match the OS user" "$peer"
+fi
+
 # Each statement must fail with a permission error, not succeed and not fail for another reason.
 expect_denied() {
-  local role="$1" secret="$2" statement="$3" message="$4" out
-  if out="$(role_sql "$role" "$secret" <<<"$statement" 2>&1)"; then
-    fail "$role cannot run: $statement" "it succeeded"
+  local role="$1" secret="$2" statement="$3" message="$4" database="${5:-drefyn}" out name
+  name="$role cannot run in $database: $statement"
+  if out="$(role_sql "$role" "$secret" "$database" <<<"$statement" 2>&1)"; then
+    fail "$name" "it succeeded"
   elif [[ "$out" == *"$message"* ]]; then
-    pass "$role cannot run: $statement"
+    pass "$name"
   else
-    fail "$role cannot run: $statement" "unexpected error: $out"
+    fail "$name" "unexpected error: $out"
   fi
 }
 for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public_reader_password"; do
@@ -225,7 +295,32 @@ for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public
   expect_denied "$role" "$secret" "create temp table smoke (id int);" \
     'permission denied to create temporary tables in database "drefyn"'
   expect_denied "$role" "$secret" "create schema smoke;" "permission denied for database drefyn"
+  for database in postgres template1; do
+    expect_denied "$role" "$secret" "select 1;" "permission denied for database \"$database\"" "$database"
+  done
 done
+
+# The owner runs migrations but must not be able to remove pgvector or hide objects in its
+# schema, where the catalog checks do not look. Each runs in a transaction that is rolled back.
+expect_denied drefyn_owner drefyn_owner_password "begin; drop schema extensions cascade; rollback;" \
+  "must be owner of schema extensions"
+expect_denied drefyn_owner drefyn_owner_password "create table extensions.smoke (id int);" \
+  "permission denied for schema extensions"
+expect_denied drefyn_owner drefyn_owner_password \
+  "create function extensions.p() returns int language sql as 'select 1';" \
+  "permission denied for schema extensions"
+expect_denied drefyn_owner drefyn_owner_password "alter extension vector update;" \
+  "must be owner of extension vector"
+owner_vector="$(role_sql drefyn_owner drefyn_owner_password 2>&1 <<'SQL' || true
+begin;
+create table app.smoke_vector (v vector(2));
+create index on app.smoke_vector using hnsw (v vector_cosine_ops);
+insert into app.smoke_vector values ('[1,0]');
+select v <=> '[0,1]' from app.smoke_vector;
+rollback;
+SQL
+)"
+expect_rows "drefyn_owner can create a vector column with an HNSW index in app" "1" "$owner_vector"
 
 # Unqualified, so this also proves each role finds the type through its search_path.
 for pair in "drefyn_owner drefyn_owner_password" "drefyn_app drefyn_app_password" \
@@ -236,8 +331,43 @@ for pair in "drefyn_owner drefyn_owner_password" "drefyn_app drefyn_app_password
   expect_rows "$role computes cosine distance with pgvector" "1|0" "$distance"
 done
 
+# Run the bootstrap again, as an operator might by mistake on a managed database, with
+# statement logging forced on. It must refuse before any role is touched, and the server log
+# must never see a password.
+canary="smokecanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+rerun="$("${compose[@]}" exec -T -e PGOPTIONS='-c log_statement=all' \
+  -e DREFYN_OWNER_PASSWORD="$canary" -e DREFYN_APP_PASSWORD="$canary" \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" postgres \
+  psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1 || true)"
+if [[ "$rerun" == *"the bootstrap has already run"* ]]; then
+  pass "a second bootstrap stops before creating anything"
+else
+  fail "a second bootstrap stops before creating anything" "$rerun"
+fi
+# The server writes its log as it goes, but docker collects it on its own schedule. Wait for a
+# marker logged after the rerun, so a missing canary means it was never written.
+marker="smokemarker$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+superuser_sql <<<"do \$\$ begin raise log '%', '$marker'; end \$\$;" >/dev/null
+server_log=""
+for _ in $(seq 1 20); do
+  server_log="$(docker logs "$container" 2>&1)"
+  if [[ "$server_log" == *"$marker"* ]]; then break; fi
+  sleep 0.5
+done
+if [[ "$server_log" != *"$marker"* ]]; then
+  fail "the server log never shows a password" "marker $marker did not reach docker logs"
+elif [[ "$server_log" == *"$canary"* ]]; then
+  fail "the server log never shows a password" \
+    "$(grep -c "$canary" <<<"$server_log") log line(s) hold the canary password"
+else
+  pass "the server log never shows a password"
+fi
+
 if [ "$teardown" = true ]; then
-  "${compose[@]}" down --volumes --timeout 30 >/dev/null 2>&1
+  if ! out="$("${compose[@]}" down --volumes --timeout 30 2>&1)"; then
+    fail "down --volumes succeeds" "$out"
+    finish
+  fi
   left="$(docker ps -aq --filter "label=com.docker.compose.project=$project")"
   if [ -z "$left" ]; then
     pass "down --volumes removes every container"
