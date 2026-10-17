@@ -30,8 +30,9 @@ Node, tsc and the exports maps. Files at the repo root outside every package (su
 it is imported as), with a string or a template with no `${}`. It also reports any
 runtime use of the global `fetch` or `WebSocket`: bare, through `globalThis`,
 `window`, `self` or `global` (chained, destructured or behind `as`, `!`, `<T>` or
-`satisfies`), and when the only binding is an ambient `declare`. Type only imports
-pass.
+`satisfies`), and when the only binding of the name is erased at compile time (an
+ambient `declare`, a type alias, an interface or a type only import). Type only
+imports themselves pass.
 
 A `require`, `module.require` or `createRequire` require with a literal relative
 specifier is reported when the file Node resolves it to has no extension, or one other
@@ -102,9 +103,13 @@ files `.gitignore`, `.npmrc`, `.nvmrc`, `.prettierignore`, `LICENSE`,
   no repository and an unreadable workspace file all fail the gate.
 - I9. The rules catch the literal static forms listed under Rules above.
 - I10. A require style load of a relative file is judged by the file Node resolves.
-- I11. No disable or config comment names either rule, escapes decoded.
-- I12. Every package has the exact lint and typecheck scripts, and no
-  `eslint.config.*` or `pnpm-workspace.yaml` sits below the root outside the fixtures.
+- I11. In every source file in the tree outside the fixtures (dot folders, dotfiles
+  and tracked `dist/` or `coverage/` files included), no `eslint-disable` comment or
+  `/* eslint ... */` config comment names either rule, escapes decoded, and no blanket
+  `eslint-disable` appears.
+- I12. Every package has the exact lint and typecheck scripts, and none of the six
+  config names ESLint loads (`eslint.config.js`, `.mjs`, `.cjs`, `.ts`, `.mts`,
+  `.cts`) or a `pnpm-workspace.yaml` sits below the root outside the fixtures.
 - I13. The manifest rules under Manifest checker above.
 - I14. The template, the good fixtures and the current tree produce no reports, and
   every invariant has a named test.

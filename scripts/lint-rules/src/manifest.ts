@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
 import {
@@ -40,9 +40,6 @@ export const SOURCE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.mjs',
   '.cjs',
 ]);
-// The same folders the root ESLint config ignores, so the directive scan reads exactly
-// what lint reads. The guard step lints the rest, force added files included.
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage']);
 // Committed fixture workspaces carry their own configs on purpose.
 const FIXTURES = 'scripts/lint-rules/test/fixtures/';
 
@@ -254,12 +251,13 @@ function indexEntries(root: string): IndexEntry[] {
     const link = lstatSync(join(root, ...listed.split('/'))).isSymbolicLink();
     entries.set(listed, { path: listed, mode: link ? '120000' : '100644' });
   }
-  return [...entries.values()];
+  // Path order, so findings read the same whichever list a path came from.
+  return [...entries.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
 }
 
-function checkIndex(workspace: Workspace): Finding[] {
+function checkIndex(workspace: Workspace, entries: readonly IndexEntry[]): Finding[] {
   const findings: Finding[] = [];
-  for (const { path, mode } of indexEntries(workspace.root)) {
+  for (const { path, mode } of entries) {
     const segments = path.split('/');
     const full = join(workspace.root, ...segments);
     const owner = ownerOf(workspace, full);
@@ -402,21 +400,20 @@ function configRuleNames(body: string): string[] {
   return names;
 }
 
-function codeFiles(root: string): string[] {
-  const files: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of sorted(readdirSync(dir, { withFileTypes: true }))) {
-      if (entry.name.startsWith('.')) continue;
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) walk(full);
-      } else if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
-        files.push(full);
-      }
-    }
-  };
-  walk(root);
-  return files;
+// Source files in the tree, the same list the guard lints: tracked or new, dot folders
+// and force added build output included, fixtures and links left out. A tracked file
+// missing from disk is skipped, since a checkout cannot have one.
+function sourceFiles(root: string, entries: readonly IndexEntry[]): string[] {
+  return entries
+    .filter(
+      ({ path, mode }) =>
+        mode !== '120000' &&
+        mode !== '160000' &&
+        !path.startsWith(FIXTURES) &&
+        SOURCE_EXTENSIONS.has(extname(path)),
+    )
+    .map(({ path }) => join(root, ...path.split('/')))
+    .filter((file) => existsSync(file));
 }
 
 function checkDirectives(workspace: Workspace, files: string[]): Finding[] {
@@ -468,8 +465,9 @@ export function checkWorkspace(root: string): CheckResult {
     checkDependencies(pkg, workspace, add);
   }
   findings.push(...checkNestedFiles(workspace));
-  findings.push(...checkIndex(workspace));
-  const files = codeFiles(root);
+  const entries = indexEntries(root);
+  findings.push(...checkIndex(workspace, entries));
+  const files = sourceFiles(root, entries);
   findings.push(...checkDirectives(workspace, files));
   return { findings, workspace: workspace.packages.length, packages, files: files.length };
 }

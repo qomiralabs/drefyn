@@ -407,7 +407,7 @@ describe('manifest checker on paths the rules and the guard cannot see through',
     }
     ws.manifest('apps/web', goodPackage('web'));
     ws.write('apps/web/src/.hidden', 'x');
-    // lib/net is QA rows 45 and 45c: a root file Node loads as ESM or through require.
+    // lib/net: a root folder file that Node loads as ESM or through require.
     for (const path of [
       'common/net',
       'common/.tls',
@@ -603,7 +603,8 @@ describe('manifest checker on inline disables of the boundary rules', () => {
     ]);
   });
 
-  it('ignores other rules, strings, prose and build output', () => {
+  it('ignores other rules, strings, prose and ignored paths that are not in the tree', () => {
+    ws.write('.gitignore', 'node_modules/\ndist/\n');
     ws.write(
       'packages/a/src/index.ts',
       [
@@ -615,7 +616,32 @@ describe('manifest checker on inline disables of the boundary rules', () => {
     ws.write('packages/a/README.md', `Never write // eslint-disable-next-line ${NO_EGRESS}.\n`);
     ws.write('packages/a/node_modules/dep/index.js', '/* eslint-disable */\n');
     ws.write('packages/a/dist/index.js', '/* eslint-disable */\n');
-    ws.write('.cache/x.js', '/* eslint-disable */\n');
+    ws.write(
+      'scripts/lint-rules/test/fixtures/w/src/x.ts',
+      `// eslint-disable-next-line ${NO_EGRESS}\n`,
+    );
     expect(check()).toEqual([]);
+  });
+
+  it('I11: reads every source file in the tree, dot folders and tracked build output included', () => {
+    ws.write('.gitignore', 'node_modules/\ndist/\ncoverage/\n');
+    const disable = `// eslint-disable-next-line ${NO_EGRESS}\nfetch('x');\n`;
+    ws.write('packages/a/src/.gen/raw.ts', disable);
+    ws.write('packages/a/.storybook/main.ts', disable);
+    ws.write('.storybook/main.ts', disable);
+    ws.write('packages/a/dist/x.js', `/* eslint-disable ${NO_EGRESS} */\n`);
+    ws.write('common/coverage/y.ts', '/* eslint-disable */\n');
+    ws.write('.cache/x.js', disable);
+    execFileSync('git', ['add', '--force', '--', 'packages/a/dist/x.js', 'common/coverage/y.ts'], {
+      cwd: ws.root,
+    });
+    expect(check()).toEqual([
+      `root: .cache/x.js:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `root: .storybook/main.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+      'root: common/coverage/y.ts:1: a blanket eslint-disable also turns off the drefyn rules; name the rules instead',
+      `packages/a (@drefyn/a): .storybook/main.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): dist/x.js:1: inline disable of ${NO_EGRESS} is not allowed`,
+      `packages/a (@drefyn/a): src/.gen/raw.ts:1: inline disable of ${NO_EGRESS} is not allowed`,
+    ]);
   });
 });

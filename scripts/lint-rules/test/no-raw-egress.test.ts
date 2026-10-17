@@ -135,6 +135,32 @@ describe('no-raw-egress with ambient declarations', () => {
   });
 });
 
+describe('no-raw-egress with type only bindings', () => {
+  // TypeScript erases these, so at run time the name is still the global.
+  it.each([
+    ["type global = never;\nexport const r = global.fetch('https://x');", 'fetch'],
+    ["export type self = never;\nexport const r = self.fetch('x');", 'fetch'],
+    ["import type { fetch } from './types.ts';\nexport const r = fetch('https://x');", 'fetch'],
+    [
+      "import { type WebSocket } from './types.ts';\nexport const r = new WebSocket('wss://x');",
+      'WebSocket',
+    ],
+    ["interface globalThis { a: 1 }\nexport const r = globalThis.fetch('x');", 'fetch'],
+  ])('I9: reports through %j', async (code, api) => {
+    const found = await lintAs('packages/web/src/typeonly.ts', code);
+    expect(found.map((r) => r.message)).toEqual([message(api, '@drefyn/web')]);
+  });
+
+  it('I9: still treats a value import as a local', async () => {
+    const code = [
+      "import { fetch, type Other } from './client.ts';",
+      "import self from './self.ts';",
+      "export const r: Other = [fetch('x'), self.fetch('x')];",
+    ].join('\n');
+    expect(await lintAs('packages/web/src/valueimport.ts', code)).toEqual([]);
+  });
+});
+
 describe('no-raw-egress through TypeScript wrappers, aliases and templates', () => {
   it.each([
     ['(globalThis as any).fetch("x");', 'fetch'],
@@ -193,10 +219,10 @@ describe('no-raw-egress on require style loads of files that are not source', ()
       ws.write(`packages/web/src/${file}`, 'module.exports = 1;\n');
     }
     ws.write('packages/web/src/lib.v2.js', 'module.exports = 1;\n');
-    // QA row 51: a folder whose package.json main points at a text file.
+    // A folder whose package.json main points at a text file.
     ws.write('packages/web/src/lib/package.json', '{ "main": "net.txt" }\n');
     ws.write('packages/web/src/lib/net.txt', 'module.exports = 1;\n');
-    // QA row 45c: an extensionless file in a root folder outside every package.
+    // An extensionless file in a root folder outside every package.
     ws.write('vendor/net', 'module.exports = 1;\n');
     ws.write('packages/web/src/data.json', '{}\n');
     ws.write('packages/index.js', 'module.exports = 1;\n');

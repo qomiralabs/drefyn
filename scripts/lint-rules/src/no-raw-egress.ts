@@ -100,8 +100,26 @@ function isAmbient(def: Scope.Definition): boolean {
   return false;
 }
 
+// TypeScript also erases a type alias, an interface and a type only import, so none
+// of them shadows the global either.
+function isErased(def: Scope.Definition): boolean {
+  if (isAmbient(def)) return true;
+  const node: unknown = def.node;
+  if (!isRecord(node)) return false;
+  if (node['type'] === 'TSTypeAliasDeclaration' || node['type'] === 'TSInterfaceDeclaration') {
+    return true;
+  }
+  if (def.type !== 'ImportBinding') return false;
+  const declaration = node['parent'];
+  return (
+    node['importKind'] === 'type' || (isRecord(declaration) && declaration['importKind'] === 'type')
+  );
+}
+
 const isRealBinding = (variable: Scope.Variable) =>
-  variable.defs.length > 0 && !variable.defs.every(isAmbient);
+  (variable as { isValueVariable?: boolean }).isValueVariable !== false &&
+  variable.defs.length > 0 &&
+  !variable.defs.every(isErased);
 
 function isShadowed(scope: Scope.Scope | null, name: string): boolean {
   for (let current = scope; current !== null; current = current.upper) {
@@ -152,6 +170,8 @@ function stringArgument(node: { arguments: unknown[] }): string | undefined {
 // when it does not resolve (Node throws at run time) or is not relative. Judging the
 // resolved file, not the text, handles ./net (no extension), ./.tls, ./lib.v2 that
 // resolves to lib.v2.js and a directory that resolves to its index.
+// Node caches resolutions for the life of the process, so a long running editor ESLint
+// can keep an old answer after a rename; the gate starts fresh every run.
 function resolveRelative(file: string, spec: string): string | undefined {
   if (!isAbsolute(file)) return undefined;
   if (spec !== '.' && spec !== '..' && !spec.startsWith('./') && !spec.startsWith('../')) {
@@ -227,11 +247,13 @@ export const noRawEgress: Rule.RuleModule = {
     }
     // Resolution returns real paths, so compare against the real root (macOS keeps
     // temp folders behind /var -> /private/var).
-    const realRoot = root === undefined ? undefined : realpathSync(root);
-    const shown = (target: string) =>
-      relative(realRoot ?? dirname(file), target)
+    let realRoot: string | undefined;
+    const shown = (target: string) => {
+      if (root !== undefined) realRoot ??= realpathSync(root);
+      return relative(realRoot ?? dirname(file), target)
         .split(sep)
         .join('/');
+    };
     const report = (loc: AST.SourceLocation | null | undefined, api: string) => {
       if (loc) context.report({ loc, messageId: 'raw', data: { api, pkg } });
     };

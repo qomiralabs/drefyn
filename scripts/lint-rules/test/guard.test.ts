@@ -5,7 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -183,18 +183,29 @@ describe('guard on file names and layouts it must not trust', () => {
   });
 
   it('leaves no temp file behind', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'drefyn-guard-tmp-'));
+    // A mktemp shim records every path the guard creates, wherever the platform puts it.
+    const shim = mkdtempSync(join(tmpdir(), 'drefyn-guard-shim-'));
     try {
+      const real = execFileSync('sh', ['-c', 'command -v mktemp'], { encoding: 'utf8' }).trim();
+      const log = join(shim, 'made.log');
+      writeFileSync(
+        join(shim, 'mktemp'),
+        `#!/bin/sh\np="$('${real}' "$@")" || exit $?\nprintf '%s\\n' "$p" >> '${log}'\nprintf '%s\\n' "$p"\n`,
+        { mode: 0o755 },
+      );
       const result = spawnSync('bash', [guard], {
         cwd: ws.root,
         encoding: 'utf8',
-        env: { ...process.env, TMPDIR: tmp },
+        env: { ...process.env, PATH: `${shim}:${process.env['PATH'] ?? ''}` },
       });
       expect(result.status).toBe(0);
-      // Node's compile cache may land here too; only the guard's own file matters.
-      expect(readdirSync(tmp).filter((name) => name.startsWith('drefyn-guard.'))).toEqual([]);
+      const made = readFileSync(log, 'utf8')
+        .split('\n')
+        .filter((line) => line !== '');
+      expect(made.length).toBeGreaterThan(0);
+      expect(made.filter((path) => existsSync(path))).toEqual([]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmSync(shim, { recursive: true, force: true });
     }
   });
 
