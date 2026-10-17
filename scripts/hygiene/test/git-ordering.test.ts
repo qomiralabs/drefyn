@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Real git only loses this race under heavy load, so a fake child lets each test pick
-// the order in which the process closes and stdin fails or finishes.
+// Real git only hits the bad orderings now and then under load, so a fake child lets each
+// test choose how the process exit and the stdin write line up.
 class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
@@ -32,7 +32,12 @@ class FakeChild extends EventEmitter {
     await settle();
   }
 
-  async exit(code: number, stdout = '', stderr = ''): Promise<void> {
+  // Node destroys the child's stdin when the process exits, before exit and close fire.
+  // A write still pending at that point is dropped without an error event, which is the
+  // case that let runGit pass. keepStdin skips that step to model orderings Node does
+  // not produce today.
+  async exit(code: number, stdout = '', stderr = '', keepStdin = false): Promise<void> {
+    if (!keepStdin) this.stdin?.destroy();
     this.stdout.end(stdout);
     this.stderr.end(stderr);
     await settle();
@@ -76,14 +81,12 @@ beforeEach(() => {
   spawn.mockClear();
 });
 
-describe('runGit settles only after the process and stdin are both done', () => {
-  it('rejects when stdin fails after git already closed with exit 0', async () => {
+describe('runGit treats unread input as a failure', () => {
+  it('rejects when git exits 0 while a write is still pending', async () => {
     const run = track(runGit('/repo', ['--version'], 'input'));
     await settle();
     await child.exit(0, 'git version 2.50.0\n');
-    expect(run.settled()).toBe(false);
-    await child.failStdin();
-    await expect(run.promise).rejects.toThrow(/git --version closed its input early: write EPIPE/);
+    await expect(run.promise).rejects.toThrow(/git --version closed its input early/);
   });
 
   it('rejects when stdin fails before git closes with exit 0', async () => {
@@ -92,16 +95,7 @@ describe('runGit settles only after the process and stdin are both done', () => 
     await child.failStdin();
     expect(run.settled()).toBe(false);
     await child.exit(0, 'git version 2.50.0\n');
-    await expect(run.promise).rejects.toThrow(/git --version closed its input early/);
-  });
-
-  it('waits for stdin to finish when git closes first, then returns the output', async () => {
-    const run = track(runGit('/repo', ['cat-file', '--batch'], 'abc\n'));
-    await settle();
-    await child.exit(0, 'out');
-    expect(run.settled()).toBe(false);
-    await child.finishStdin();
-    await expect(run.promise).resolves.toEqual(Buffer.from('out'));
+    await expect(run.promise).rejects.toThrow(/git --version closed its input early: write EPIPE/);
   });
 
   it('returns the output when stdin finishes before git closes', async () => {
@@ -113,11 +107,10 @@ describe('runGit settles only after the process and stdin are both done', () => 
     await expect(run.promise).resolves.toEqual(Buffer.from('out'));
   });
 
-  it('reports the exit code and stderr when git fails, whatever stdin did', async () => {
+  it('reports the exit code and stderr when git fails with a write still pending', async () => {
     const run = track(runGit('/repo', ['cat-file', '--no-such-flag'], 'input'));
     await settle();
     await child.exit(128, '', 'error: unknown option\n');
-    await child.failStdin();
     await expect(run.promise).rejects.toThrow(
       /git cat-file failed \(exit 128\): error: unknown option$/,
     );
@@ -139,5 +132,16 @@ describe('runGit settles only after the process and stdin are both done', () => 
     await child.failStdin();
     await child.exit(0);
     await expect(run.promise).rejects.toBe(error);
+  });
+
+  // Guard: Node does not deliver a stdin error after close today, but settling on close
+  // alone would pass a dropped input if it ever did.
+  it('still rejects if a stdin error arrives after close', async () => {
+    const run = track(runGit('/repo', ['--version'], 'input'));
+    await settle();
+    await child.exit(0, 'git version 2.50.0\n', '', true);
+    expect(run.settled()).toBe(false);
+    await child.failStdin();
+    await expect(run.promise).rejects.toThrow(/git --version closed its input early: write EPIPE/);
   });
 });

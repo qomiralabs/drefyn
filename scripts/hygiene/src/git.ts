@@ -25,9 +25,10 @@ export function runGit(cwd: string, args: string[], input?: string): Promise<Buf
     const name = args[0] ?? '';
     let failed = false;
     let exitCode: number | null | undefined;
-    // Stays false until stdin is flushed or has failed. The child's close event does not
-    // wait for stdin, so an EPIPE can land after close; settling on close alone would
-    // count a run where git dropped its input as a success.
+    // Stays false until stdin is flushed or has failed. When git exits, Node destroys
+    // stdin, and a write still pending then fails without an error event, so only
+    // finished() sees it. Settling on close or on an error listener would count a run
+    // where git dropped its input as a success.
     let inputDone = input === undefined || child.stdin === null;
     let inputError: Error | undefined;
 
@@ -55,8 +56,8 @@ export function runGit(cwd: string, args: string[], input?: string): Promise<Buf
     });
     if (input !== undefined && child.stdin !== null) {
       // git can exit before reading all of its input, for example on a bad argument. A
-      // broken pipe is recorded rather than thrown so a non zero exit still reports
-      // git's own error.
+      // broken pipe, a write cancelled at exit or a premature close is recorded rather
+      // than thrown, so a non zero exit still reports git's own error.
       finished(child.stdin, { readable: false }, (error) => {
         inputError = error ?? undefined;
         inputDone = true;
