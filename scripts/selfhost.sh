@@ -67,12 +67,23 @@ warn_env_mode() {
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
 wait_healthy() {
-  local start end container status first
+  local start end container status first healthy=true
   start="$(date +%s)"
   if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
-    end="$(date +%s)"
+    healthy=false
+  fi
+  end="$(date +%s)"
+  container="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
+  # Compose has returned success from up --wait at the timeout while the container was still
+  # restarting after a failed init, so its exit code is not proof. Only docker's own health
+  # status for exactly one running postgres container is.
+  if [ "$healthy" = true ] && [ "$(docker inspect --format \
+    '{{if .State.Health}}{{.State.Health.Status}}{{end}} {{.State.Status}} {{.State.Restarting}}' \
+    "$container" 2>/dev/null || true)" != "healthy running false" ]; then
+    healthy=false
+  fi
+  if [ "$healthy" = false ]; then
     # Diagnostics only: the script exits 1 below whatever these return.
-    container="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
     status=""
     if [ -n "$container" ]; then
       status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
@@ -89,7 +100,6 @@ wait_healthy() {
     say <<<"The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
     exit 1
   fi
-  end="$(date +%s)"
   echo "selfhost: healthy in $((end - start))s"
 }
 

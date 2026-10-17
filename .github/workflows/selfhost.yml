@@ -56,6 +56,11 @@ jobs:
           bash scripts/selfhost-smoke.sh
       - name: Tear down
         run: bash scripts/selfhost-smoke.sh --teardown
+      # The test scripts print their own stacks' logs when a check fails, because they remove
+      # those stacks themselves. This covers the main stack. The ID only satisfies compose's
+      # interpolation when no deploy/.env was written; logs never reads it.
       - name: Logs
         if: failure()
+        env:
+          DREFYN_STACK_ID: logs-only
         run: docker compose -f deploy/compose.yaml logs --no-color --timestamps
