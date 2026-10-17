@@ -1,0 +1,67 @@
+# Self host stack. Start it with scripts/selfhost.sh up; see deploy/README.md.
+name: drefyn
+
+services:
+  postgres:
+    # Same Postgres major and pgvector as the hosted database, so a query that works here
+    # works there. The digest is the multi arch index, so amd64 and arm64 hosts get the
+    # same build.
+    image: pgvector/pgvector:0.8.2-pg18@sha256:42e7f6b4e1eceb02ff14e3e6bc6108bbe259abbe83879dc1845d0da1ddeb555d
+    # The image starts as root only to chown the data directory and drop to postgres. A
+    # fresh named volume already belongs to postgres, so start there and skip root.
+    user: postgres
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_DB: drefyn
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # initdb trusts every local and loopback connection by default, which would let any
+      # process in the container log in as any role. Peer keeps the socket to the matching
+      # OS user, and TCP, loopback included, always needs a password.
+      POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
+    # Passed as secrets so they show up as files in the container, not in docker inspect.
+    # Compose copies these into the container before start, which is why the root
+    # filesystem cannot be read only.
+    secrets:
+      - postgres_password
+      - drefyn_owner_password
+      - drefyn_app_password
+      - drefyn_public_reader_password
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/bootstrap.sql:/etc/drefyn/bootstrap.sql:ro
+    ports:
+      - 127.0.0.1:${DREFYN_POSTGRES_PORT:-55432}:5432
+    # TCP only opens once the init scripts have finished, and the role count proves the
+    # bootstrap ran. A socket only check would pass during init.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready --quiet --host 127.0.0.1 --username postgres --dbname drefyn &&
+          [ "$$(psql --no-psqlrc -qtA --username postgres --dbname drefyn -c
+          "select count(*) from pg_roles where rolname in
+          ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')")" = 3 ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    # Fast shutdown can take a while with a busy buffer cache; a kill means crash recovery.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+secrets:
+  postgres_password:
+    environment: DREFYN_POSTGRES_PASSWORD
+  drefyn_owner_password:
+    environment: DREFYN_OWNER_PASSWORD
+  drefyn_app_password:
+    environment: DREFYN_APP_PASSWORD
+  drefyn_public_reader_password:
+    environment: DREFYN_PUBLIC_READER_PASSWORD
+
+volumes:
+  pgdata:
