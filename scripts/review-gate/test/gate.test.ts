@@ -203,7 +203,7 @@ describe('evaluate: who may sign', () => {
 
   // GraphQL drops the [bot] suffix from bot logins, so a bot can look like a listed user.
   it.each(['Bot', 'Mannequin', 'EnterpriseUserAccount', 'Organization', 'unknown'])(
-    'does not count an approval from a %s author whose login is on the list',
+    'does not count an approval from an author of type %s whose login is on the list',
     (authorType) => {
       const reviews = [
         ...approveAll('code-reviewer', 'qa-verifier'),
@@ -224,7 +224,9 @@ describe('evaluate: who may sign', () => {
 
   it('matches the author type exactly', () => {
     const reviews = BASE.map((r) => review(marker(r), { authorType: 'user' }));
-    expect(gate(reviews).pass).toBe(false);
+    const result = gate(reviews);
+    expect(result.pass).toBe(false);
+    expect(result.ignored.map((i) => i.reason)).toEqual(BASE.map(() => 'not-a-user'));
   });
 
   it('does not let a bot block with changes_requested or an edit', () => {
@@ -650,10 +652,10 @@ describe('formatReport', () => {
     expect(report).toMatch(/performance-reviewer\s+no logins allowed to sign \(label needs-perf\)/);
     expect(report).toContain('ignored markers:');
     expect(report).toContain(
-      '  lead (CONTRIBUTOR) at 2026-10-07T10:01:00.000Z for qa-verifier: approval for another SHA',
+      '  lead (User, CONTRIBUTOR) at 2026-10-07T10:01:00.000Z for qa-verifier: approval for another SHA',
     );
     expect(report).toContain(
-      '  drive-by (NONE) at 2026-10-07T10:02:00.000Z for hygiene-auditor: login not allowed to sign for this reviewer',
+      '  drive-by (User, NONE) at 2026-10-07T10:02:00.000Z for hygiene-auditor: login not allowed to sign for this reviewer',
     );
   });
 
@@ -664,16 +666,17 @@ describe('formatReport', () => {
     );
   });
 
-  it('names a bot author as not a user', () => {
+  // A bot can share a listed user's login, so the type is what tells them apart.
+  it('names a bot author as not a user and shows its type', () => {
     const report = formatReport(gate([review(marker('code-reviewer'), { authorType: 'Bot' })]));
     expect(report).toMatch(
-      /lead \(CONTRIBUTOR\) at .* for code-reviewer: author is not a user account/,
+      /lead \(Bot, CONTRIBUTOR\) at .* for code-reviewer: author is not a user account/,
     );
   });
 
   it('labels an ignored review without a reviewer name', () => {
     const report = formatReport(gate([review(`drefyn-review sha=${HEAD}`, { author: 'x' })]));
-    expect(report).toMatch(/x \(CONTRIBUTOR\) at .*: no valid marker on the last line/);
+    expect(report).toMatch(/x \(User, CONTRIBUTOR\) at .*: no valid marker on the last line/);
   });
 });
 
