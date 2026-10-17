@@ -3,10 +3,10 @@ name: drefyn
 
 services:
   postgres:
-    # Same Postgres major and pgvector as the hosted database, so a query that works here
-    # works there. The digest is the multi arch index, so amd64 and arm64 hosts get the
-    # same build.
-    image: pgvector/pgvector:0.8.2-pg18@sha256:42e7f6b4e1eceb02ff14e3e6bc6108bbe259abbe83879dc1845d0da1ddeb555d
+    # Same Postgres major as the hosted database on its newest patched minor, with a pgvector
+    # whose SQL matches what hosted ships, so a query that works here works there. The digest
+    # is the multi arch index, so amd64 and arm64 hosts get the same build.
+    image: pgvector/pgvector:0.8.7-pg18-bookworm@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
     # The image starts as root only to chown the data directory and drop to postgres. A
     # fresh named volume already belongs to postgres, so start there and skip root.
     user: postgres
