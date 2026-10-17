@@ -12,6 +12,8 @@ export default tseslint.config(
       '**/.turbo/**',
       // Lint fixtures are read by their tests with their own config.
       '**/test/fixtures/**',
+      // Written by the token generator and checked against its source by a test.
+      'packages/ui/src/generated/**',
     ],
   },
   js.configs.recommended,
