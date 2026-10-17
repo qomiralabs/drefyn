@@ -36,8 +36,8 @@ The tests fail if they drift.
 - `tokens.css` stays under 2.5 KB gzipped.
 - Fonts are Latin subsets with their OFL licences beside them in `src/fonts`.
 
-Arbitrary Tailwind values (`p-[13px]`), raw durations and colour opacity modifiers are rejected by
-`drefyn/no-arbitrary-values` from `scripts/lint-rules`.
+Arbitrary Tailwind values (`p-[13px]`), bare durations, delays, line widths and opacity, and colour
+opacity modifiers are rejected by `drefyn/no-arbitrary-values` from `scripts/lint-rules`.
 
 ## Preview
 

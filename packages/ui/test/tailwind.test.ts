@@ -80,6 +80,15 @@ describe('Tailwind theme', () => {
     }
   });
 
+  it('still compiles bare numbers and brackets, which is why the lint rule rejects them', async () => {
+    // Kept in a fixture: the lint rule rightly rejects these anywhere in source.
+    const escapes = JSON.parse(
+      readFileSync(join(here, 'fixtures/tailwind-escapes.json'), 'utf8'),
+    ) as string[];
+    const css = await build(escapes);
+    for (const cls of escapes) expect(css, cls).toContain(`.${cls.replace(/[[\]/]/g, '\\$&')}`);
+  });
+
   it('generates nothing from the Tailwind defaults', async () => {
     const offScale = [
       'p-5',

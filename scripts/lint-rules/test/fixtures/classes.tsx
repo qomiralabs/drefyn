@@ -12,6 +12,10 @@ export function Card() {
       <span className="min-[700px]:p-16">bad</span>
       <span className="transition duration-200">bad</span>
       <span className="bg-raised text-ink/60">bad</span>
+      <span className="border-2 border-rule">bad</span>
+      <span className="opacity-50">bad</span>
+      <span className="transition delay-150 duration-base">bad</span>
+      <span className="border-0 opacity-0 hover:opacity-100">good</span>
       <span className="p-16 text-ink rounded-md duration-base sm:p-8">good</span>
       <span className="data-[state=open]:bg-raised aria-[expanded=true]:text-ink">good</span>
     </div>

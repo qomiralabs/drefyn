@@ -25,9 +25,12 @@ const arbitrary = (token: string) => ({ messageId: 'arbitrary' as const, data: {
 tester.run('no-arbitrary-values', noArbitraryValues, {
   valid: [
     `const c = 'p-16 bg-ground text-ink rounded-md shadow-1';`,
-    `const c = 'sm:p-8 hover:bg-raised focus-visible:outline-2';`,
+    `const c = 'sm:p-8 hover:bg-raised focus-visible:outline';`,
     `const c = 'data-[state=open]:bg-raised group-aria-[selected=true]:text-ink';`,
     `const c = 'w-1/2 aspect-16/9 grid-cols-3 duration-base ease-enter';`,
+    // Zero is not a size, and full or no opacity is the measured colour or nothing.
+    `const c = 'border-0 outline-0 opacity-0 opacity-100 delay-0 duration-0';`,
+    `const c = 'border border-rule outline outline-focus-ring ring-accent-ink';`,
     // Plain prose and data are not class lists.
     `const s = 'Look at [this] and a-b';`,
     `const list = [1, 2, 3];`,
@@ -49,6 +52,27 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     {
       code: `const c = 'text-ink/50';`,
       errors: [{ messageId: 'opacity', data: { token: 'text-ink/50' } }],
+    },
+    ...[
+      'border-2',
+      'border-x-2',
+      'border-t-4',
+      'divide-y-2',
+      'outline-2',
+      'outline-offset-4',
+      'ring-1',
+      'ring-offset-2',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'stroke' as const, data: { token } }],
+    })),
+    ...['opacity-50', 'hover:opacity-80', 'backdrop-opacity-40'].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'opacity' as const, data: { token } }],
+    })),
+    {
+      code: `const c = 'delay-150';`,
+      errors: [{ messageId: 'delay', data: { token: 'delay-150' } }],
     },
     {
       code: `const c = 'duration-200';`,
