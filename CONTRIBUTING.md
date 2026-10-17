@@ -52,10 +52,10 @@ Run the full gate before you push. CI runs the same script.
 pnpm gate
 ```
 
-It runs a frozen lockfile install, format check, lint with zero warnings, strict
-typecheck, tests with coverage (85 percent lines at least), the dependency license
-policy, the hygiene check on tracked files and on commit messages since
-`origin/development` and, when it is installed, gitleaks.
+It runs a frozen lockfile install, format check, lint with zero warnings, the package
+manifest check, strict typecheck, tests with coverage (85 percent lines at least), the
+dependency license policy, the hygiene check on tracked files and on commit messages
+since `origin/development` and, when it is installed, gitleaks.
 
 Single steps while you work:
 
@@ -65,10 +65,37 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm hygiene       # dashes and tracked internal files
+pnpm check:packages # package manifests and banned inline disables
 ```
 
 `scripts/precommit.sh` is a faster check meant for a pre-commit hook: formatting of
 staged files plus the hygiene check.
+
+## Adding a package
+
+Packages are TypeScript source with no build step. Start from the template:
+
+```sh
+cp -R templates/package packages/<name>
+grep -rl __name__ packages/<name> | xargs sed -i.bak 's/__name__/<name>/g'
+find packages/<name> -name '*.bak' -delete
+pnpm install
+```
+
+- The name is always `@drefyn/<directory>`, with `"type": "module"` and
+  `"private": true`.
+- Everything other packages may use is exported from `src/index.ts`. Add a subpath
+  export only for a non JavaScript asset (`./tokens.css`), a separate runtime surface
+  (`./server`, `./client`) or test helpers (`./testing`), each listed by name. No
+  wildcards and no `src` paths as keys.
+- Depend on another package with `"@drefyn/<name>": "workspace:*"` and import it by
+  name, never by a relative path into its folder. Apps depend on packages; nothing
+  depends on an app.
+
+`pnpm lint` and `pnpm check:packages` enforce all of this, and the gate runs both.
+Inline `eslint-disable` comments for `drefyn/no-cross-package-internals` or
+`drefyn/no-raw-egress` fail the check, so fix the import instead. The rules are
+described in `scripts/lint-rules/README.md`.
 
 ## Tests
 

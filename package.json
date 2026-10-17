@@ -16,9 +16,11 @@
     "test": "turbo run test",
     "build": "turbo run build",
     "hygiene": "node scripts/hygiene/src/cli.ts",
+    "check:packages": "node scripts/lint-rules/src/check-packages.ts",
     "gate": "bash scripts/gate.sh"
   },
   "devDependencies": {
+    "@drefyn/lint-rules": "workspace:*",
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.1",
     "@vitest/coverage-v8": "5.0.3",

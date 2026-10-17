@@ -1,0 +1,9 @@
+{
+  "name": "@drefyn/z",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  }
+}

@@ -37,6 +37,9 @@ pnpm exec turbo run format:check
 step "lint"
 pnpm exec turbo run lint lint:root
 
+step "package manifests"
+pnpm check:packages
+
 step "typecheck"
 pnpm exec turbo run typecheck typecheck:root
 
