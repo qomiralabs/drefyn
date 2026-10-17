@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Proves the stack never reports healthy when its passwords are wrong, and never opens a
 # superuser TCP login on the way: each bad first start stops, and the server the container
-# restarts into still refuses the superuser and replication over TCP. A password in the
-# environment that no longer matches the database makes restart fail with the role named,
-# and the documented way to change a password works. The bootstrap refuses to run where it
-# cannot keep passwords out of the server log. Runs its own throwaway project.
+# restarts into still refuses the superuser and replication over TCP, even when init stopped
+# before the bootstrap script ran. A password in the environment that no longer matches the
+# database makes restart fail with the role named, and the documented way to change a
+# password works. A harmless server warning never turns the stack unhealthy. The bootstrap
+# refuses to run where it cannot keep passwords out of the server log. Runs its own
+# throwaway project from a scratch copy of the checkout, so the real deploy/.env is untouched.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="${DREFYN_PASSWORD_TEST_PROJECT:-drefyn-password-test-$$}"
 if [ "$project" = drefyn ]; then
   echo "password test: refusing to run in project drefyn" >&2
@@ -17,7 +19,12 @@ export COMPOSE_PROJECT_NAME="$project"
 export DREFYN_POSTGRES_PORT="${DREFYN_PASSWORD_TEST_PORT:-55438}"
 # Failures are expected here, so do not wait the full first start budget for each one.
 export DREFYN_SELFHOST_WAIT_SECONDS="${DREFYN_PASSWORD_TEST_WAIT_SECONDS:-25}"
-compose=(docker compose -f "$root/deploy/compose.yaml")
+scratch="$(mktemp -d)"
+root="$scratch/checkout"
+mkdir -p "$root"
+cp -R "$src/scripts" "$src/deploy" "$root/"
+rm -f "$root/deploy/.env"
+compose=(docker compose -p "$project" -f "$root/deploy/compose.yaml")
 
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
@@ -29,18 +36,19 @@ fail() {
 
 cleanup() {
   "${compose[@]}" down --volumes --timeout 5 >/dev/null 2>&1 || true
+  rm -rf "$scratch"
 }
 trap cleanup EXIT
 
 reset_stack() {
   local out
-  if ! out="$(bash "$root/scripts/selfhost.sh" reset --yes 2>&1)"; then
-    fail "reset --yes removes the stack between cases" "$out"
+  if ! out="$("${compose[@]}" down --volumes --timeout 5 2>&1)"; then
+    fail "the stack is removed between cases" "$out"
   fi
 }
 
 secret() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
-# Values in the shell win over deploy/.env, so the test never edits the real file.
+# Values in the shell win over deploy/.env.
 export DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
   DREFYN_PUBLIC_READER_PASSWORD
 DREFYN_STACK_ID="$(secret)"
@@ -86,10 +94,11 @@ expect_superuser_closed() {
   fi
 }
 
-# bad_start <case name> <expected log line>: up must fail, say why in the logs, and leave
-# the superuser closed.
+# bad_start <case name> <expected log line> <expected text in up's output> [listens]
+# up must fail, say why, and leave the superuser closed. Pass "silent" as the last argument
+# when the server never starts listening, so there is nothing to probe.
 bad_start() {
-  local case_name="$1" expected="$2" out logs
+  local case_name="$1" expected="$2" advice="$3" listens="${4:-listens}" out logs
   if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
     fail "$case_name stops the first start" "up succeeded: $out"
   else
@@ -104,30 +113,100 @@ bad_start() {
     else
       fail "after $case_name, up points at the postgres logs" "$out"
     fi
+    # The reason line must say something after the colon.
+    if grep -Eq 'not healthy after [0-9]+s: *$' <<<"$out"; then
+      fail "after $case_name, up gives a reason" "$out"
+    elif [[ "$out" == *"$advice"* ]]; then
+      pass "after $case_name, up gives a reason and says what to do"
+    else
+      fail "after $case_name, up gives a reason and says what to do" "no [$advice] in: $out"
+    fi
   fi
-  expect_superuser_closed "$case_name" "$DREFYN_POSTGRES_PASSWORD"
+  if [ "$listens" = listens ]; then
+    expect_superuser_closed "$case_name" "$DREFYN_POSTGRES_PASSWORD"
+  fi
   reset_stack
 }
 
-DREFYN_POSTGRES_PASSWORD=short-superuser
 DREFYN_OWNER_PASSWORD="$(secret)"
 DREFYN_APP_PASSWORD="$(secret)"
 DREFYN_PUBLIC_READER_PASSWORD="$(secret)"
-bad_start "a 15 character superuser password" "postgres_password must be at least 16 characters"
+
+DREFYN_POSTGRES_PASSWORD=""
+bad_start "an empty superuser password" "superuser password is not specified" "container is" silent
+
+DREFYN_POSTGRES_PASSWORD=short-superuser
+bad_start "a 15 character superuser password" "postgres_password must be at least 16 characters" \
+  "fix deploy/.env"
 
 DREFYN_POSTGRES_PASSWORD="$good_superuser"
 DREFYN_OWNER_PASSWORD=""
-bad_start "an empty owner password" "secret drefyn_owner_password is missing or empty"
+bad_start "an empty owner password" "secret drefyn_owner_password is missing or empty" \
+  "fix deploy/.env"
 
 DREFYN_OWNER_PASSWORD="$(secret)"
 DREFYN_APP_PASSWORD=short-app
-bad_start "a short app password" "each role password must be at least 16 characters"
-
+bad_start "a short app password" "each role password must be at least 16 characters" \
+  "fix deploy/.env"
 DREFYN_APP_PASSWORD="$(secret)"
+
+# Init can also stop before the bootstrap script runs at all: a crash, an out of memory kill, or
+# here an init script that fails first. The server the container restarts into must still
+# refuse the superuser over TCP, so that refusal cannot depend on init finishing.
+mkdir -p "$scratch/initdb"
+printf '#!/bin/sh\necho "password test: stopping init before the bootstrap" >&2\nexit 1\n' \
+  >"$scratch/initdb/05-stop.sh"
+cp "$root/deploy/postgres/initdb/10-bootstrap.sh" "$scratch/initdb/"
+cat >"$scratch/override.yaml" <<YAML
+services:
+  postgres:
+    volumes:
+      - $scratch/initdb:/docker-entrypoint-initdb.d:ro
+YAML
+if out="$(docker compose -p "$project" -f "$root/deploy/compose.yaml" -f "$scratch/override.yaml" \
+  up -d 2>&1)"; then
+  expect_superuser_closed "init stopping before the bootstrap script" "$DREFYN_POSTGRES_PASSWORD"
+else
+  fail "a stack whose init stops early still starts a container" "$out"
+fi
+reset_stack
+
 if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
   pass "the stack comes up with good passwords"
 else
   fail "the stack comes up with good passwords" "$out"
+fi
+
+superuser_sql() {
+  "${compose[@]}" exec -T postgres psql --no-psqlrc -v ON_ERROR_STOP=1 -q --username postgres "$@"
+}
+
+# A server warning at connect time, here a collation version mismatch as a new base image
+# brings, must not make a healthy stack unhealthy or advise deleting it.
+if ! out="$(superuser_sql --dbname postgres -c \
+  "update pg_database set datcollversion = '0.1' where datname = 'drefyn'" 2>&1)"; then
+  fail "the test can force a collation version mismatch" "$out"
+fi
+warning="$(superuser_sql --dbname drefyn -c 'select 1' 2>&1 >/dev/null || true)"
+if [[ "$warning" == *"collation version mismatch"* ]]; then
+  pass "a forced collation mismatch makes the server warn at connect"
+else
+  fail "a forced collation mismatch makes the server warn at connect" "$warning"
+fi
+if out="$("${compose[@]}" exec -T postgres sh /etc/drefyn/healthcheck.sh 2>&1)"; then
+  pass "the healthcheck passes despite the warning"
+else
+  fail "the healthcheck passes despite the warning" "$out"
+fi
+if out="$(bash "$root/scripts/selfhost.sh" restart 2>&1)"; then
+  pass "restart is healthy despite the warning"
+elif [[ "$out" == *"reset --yes"* ]]; then
+  fail "restart is healthy despite the warning" "it advised reset: $out"
+else
+  fail "restart is healthy despite the warning" "$out"
+fi
+if ! out="$(superuser_sql --dbname drefyn -c 'alter database drefyn refresh collation version' 2>&1)"; then
+  fail "the collation version can be refreshed again" "$out"
 fi
 
 # Editing the password the stack reads, without changing the database, must not look healthy.
@@ -163,15 +242,17 @@ else
   fail "after the documented change, restart is healthy again" "$out"
 fi
 
-# A managed database's master user cannot turn off statement logging for its session. Stand
-# one in: a role without the privilege, with log_statement = all for its logins. The bootstrap
-# must stop before the first statement that carries a password, unless the operator opts in.
+# A managed database's master user cannot change log settings for its session but can read
+# them. Stand one in: a role without the SET privilege, with pg_read_all_settings, and log
+# settings applied to its logins. The bootstrap must stop before the first statement that
+# carries a password unless the server already logs nothing, or the operator opts in.
 master_password="$(secret)"
 if ! out="$("${compose[@]}" exec -T -e MASTER_PASSWORD="$master_password" postgres \
   psql --no-psqlrc -v ON_ERROR_STOP=1 -q --username postgres --dbname drefyn 2>&1 <<'SQL'
 set log_statement = 'none';
 \getenv master_password MASTER_PASSWORD
 create role password_test_master login createrole password :'master_password';
+grant pg_read_all_settings to password_test_master;
 alter role password_test_master set log_statement = 'all';
 grant connect on database drefyn to password_test_master;
 SQL
@@ -185,20 +266,52 @@ run_as_master() {
     psql --no-psqlrc --host 127.0.0.1 --username password_test_master --dbname drefyn \
     --file /etc/drefyn/bootstrap.sql 2>&1
 }
-if out="$(run_as_master)"; then
-  fail "the bootstrap stops when it cannot turn off statement logging" "it exited 0: $out"
-elif [[ "$out" == *"DREFYN_BOOTSTRAP_LOG_CHECKED=yes"* ]]; then
-  pass "the bootstrap stops when it cannot turn off statement logging"
-else
-  fail "the bootstrap stops when it cannot turn off statement logging" "$out"
-fi
+set_master() {
+  superuser_sql --dbname drefyn -c "alter role password_test_master set $1" >/dev/null
+}
+# expect_bootstrap_stops <why>: no opt in, so the bootstrap must refuse.
+expect_bootstrap_stops() {
+  local out
+  if out="$(run_as_master)"; then
+    fail "the bootstrap stops when $1" "it exited 0: $out"
+  elif [[ "$out" == *"DREFYN_BOOTSTRAP_LOG_CHECKED=yes"* ]]; then
+    pass "the bootstrap stops when $1"
+  else
+    fail "the bootstrap stops when $1" "$out"
+  fi
+}
+expect_bootstrap_stops "statements are logged"
+set_master "log_statement = 'none'"
+expect_bootstrap_stops "a failed statement would be logged"
+
+# docker collects the log on its own schedule, so wait for a marker logged after the runs.
+marker="pwtestmarker$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+superuser_sql --dbname drefyn -c "do \$\$ begin raise log '%', '$marker'; end \$\$" >/dev/null
 container="$("${compose[@]}" ps -q postgres)"
-if docker logs "$container" 2>&1 | grep -q "$canary"; then
+server_log=""
+for _ in $(seq 1 20); do
+  server_log="$(docker logs "$container" 2>&1)"
+  if [[ "$server_log" == *"$marker"* ]]; then break; fi
+  sleep 0.5
+done
+if [[ "$server_log" != *"$marker"* ]]; then
+  fail "the stopped bootstrap logged no password" "marker $marker did not reach docker logs"
+elif [[ "$server_log" == *"$canary"* ]]; then
   fail "the stopped bootstrap logged no password" "the canary is in docker logs"
 else
   pass "the stopped bootstrap logged no password"
 fi
-# Opting in carries on to the next check, which refuses because the bootstrap already ran.
+
+# A server that logs nothing, failed statements included, needs no opt in. The next check then
+# refuses because the bootstrap already ran.
+set_master "log_min_error_statement = 'panic'"
+out="$(run_as_master || true)"
+if [[ "$out" == *"the bootstrap has already run"* ]]; then
+  pass "the bootstrap carries on without an opt in when nothing is logged"
+else
+  fail "the bootstrap carries on without an opt in when nothing is logged" "$out"
+fi
+set_master "log_statement = 'all'"
 out="$(run_as_master -e DREFYN_BOOTSTRAP_LOG_CHECKED=yes || true)"
 if [[ "$out" == *"the bootstrap has already run"* ]]; then
   pass "DREFYN_BOOTSTRAP_LOG_CHECKED=yes lets the bootstrap carry on"

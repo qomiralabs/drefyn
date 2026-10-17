@@ -129,6 +129,22 @@ else
   fail "server is at least version $min_server_version_num" "server is ${version#*|}"
 fi
 
+# Login rules come from a read only file the compose stack mounts, not from the data directory,
+# so they hold from the first start whether or not init finished.
+hba_file="$(superuser_sql <<<"select current_setting('hba_file');")"
+expect_rows "the server reads its login rules from the mounted read only file" \
+  "/etc/drefyn/pg_hba.conf" "$hba_file"
+hba_rules="$(superuser_sql <<'SQL'
+select type, array_to_string(database, ','), array_to_string(user_name, ','), auth_method
+from pg_hba_file_rules order by rule_number;
+SQL
+)"
+expect_rows "login rules: peer on the socket, no superuser or replication over TCP, scram otherwise" \
+  "local|all|all|peer
+host|all|postgres|reject
+host|replication|all|reject
+host|all|all|scram-sha-256" "$hba_rules"
+
 # Role attributes. Columns: name, super, bypassrls, createrole, createdb, inherit, login.
 roles="$(superuser_sql <<'SQL'
 select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolinherit, rolcanlogin

@@ -4,28 +4,35 @@
 # other checkout, runs every command against them, and checks each one stops without
 # changing what was planted or starting anything. The last part starts real stacks to prove
 # plain docker compose and the scripts describe the data volume the same way, since newer
-# Compose offers to recreate a volume whose labels changed.
+# Compose offers to recreate a volume whose labels changed. Everything runs from a scratch copy
+# of the checkout, so the real deploy/.env is never read or written.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image="$(sed -n 's/^ *image: *//p' "$root/deploy/compose.yaml" | head -n 1)"
+src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+image="$(sed -n 's/^ *image: *//p' "$src/deploy/compose.yaml" | head -n 1)"
 # A dedicated variable, so an exported COMPOSE_PROJECT_NAME can never point this at a real stack.
 base="${DREFYN_GUARD_TEST_PROJECT:-drefyn-guard-test-$$}"
 if [ "$base" = drefyn ]; then
   echo "guard test: refusing to plant containers in project drefyn" >&2
   exit 64
 fi
-# Keep clear of any stack already on the default port in case the guard fails open.
-export DREFYN_POSTGRES_PORT=55439
+# Keep clear of any stack already on the default port in case the guard fails open, and let
+# two runs at once use different ports.
+export DREFYN_POSTGRES_PORT="${DREFYN_GUARD_TEST_PORT:-55439}"
 # Values in the shell win over deploy/.env, so the real file is never read or changed.
 export DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
   DREFYN_PUBLIC_READER_PASSWORD
 for var in DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
   DREFYN_PUBLIC_READER_PASSWORD; do
-  printf -v "$var" '%s' "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  value="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  printf -v "$var" '%s' "$value"
 done
 real_docker="$(command -v docker)"
 scratch="$(mktemp -d)"
+root="$scratch/checkout"
+mkdir -p "$root"
+cp -R "$src/scripts" "$src/deploy" "$root/"
+rm -f "$root/deploy/.env"
 commands=("selfhost.sh up" "selfhost.sh restart" "selfhost.sh down" "selfhost.sh reset --yes"
   "selfhost-smoke.sh" "selfhost-smoke.sh --teardown")
 
@@ -180,7 +187,7 @@ project="$base-comma"
 projects+=("$project")
 copy="$scratch/with,comma"
 mkdir -p "$copy"
-cp -R "$root/scripts" "$root/deploy" "$copy/"
+cp -R "$src/scripts" "$src/deploy" "$copy/"
 rm -f "$copy/deploy/.env"
 plant_container "$project" "$copy/deploy/compose.yaml,/elsewhere/override.yml" >/dev/null
 if out="$(COMPOSE_PROJECT_NAME="$project" bash "$copy/scripts/selfhost.sh" down 2>&1)"; then
@@ -188,6 +195,44 @@ if out="$(COMPOSE_PROJECT_NAME="$project" bash "$copy/scripts/selfhost.sh" down 
 else
   fail "selfhost.sh down accepts its own compose file under a path with a comma" "$out"
 fi
+
+# A first up writes deploy/.env. If that step fails, as its closing echo does when stdout is
+# closed, the script must stop rather than skip the guard and start the stack.
+for kind in container volume; do
+  project="$base-closed-$kind"
+  projects+=("$project")
+  rm -f "$root/deploy/.env"
+  planted=""
+  if [ "$kind" = container ]; then
+    planted="$(plant_container "$project" /elsewhere/docker-compose.yml)"
+    before="$(state "$planted")"
+  else
+    docker volume create --label "com.docker.compose.project=$project" \
+      --label "com.docker.compose.volume=pgdata" \
+      --label "com.drefyn.selfhost.stack-id=someone-else" "${project}_pgdata" >/dev/null
+    before="$(volume_state "${project}_pgdata")"
+  fi
+  if COMPOSE_PROJECT_NAME="$project" bash "$root/scripts/selfhost.sh" up >&- 2>"$scratch/closed.err"; then
+    fail "selfhost.sh up with stdout closed stops before a foreign $kind" "it exited 0"
+  else
+    pass "selfhost.sh up with stdout closed stops before a foreign $kind"
+  fi
+  nothing_started "$project" "$planted" "selfhost.sh up with stdout closed and a foreign $kind"
+  if [ "$kind" = container ]; then
+    after="$(state "$planted" 2>&1 || true)"
+  else
+    after="$(volume_state "${project}_pgdata" 2>&1 || true)"
+  fi
+  if [ "$after" != "$before" ]; then
+    fail "selfhost.sh up with stdout closed leaves the foreign $kind alone" \
+      "before [$before], after [$after]"
+  fi
+  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$project")"
+  if [ "$kind" = container ] && [ -n "$volumes" ]; then
+    fail "selfhost.sh up with stdout closed creates no volume" "$volumes"
+  fi
+done
+rm -f "$root/deploy/.env"
 
 # A volume labelled by an earlier build of this stack, with the compose file path and no stack
 # ID. Only reset may touch it; anything that would mount it must refuse and say how to recover.
@@ -243,9 +288,9 @@ for order in scripts-first plain-first; do
   export COMPOSE_PROJECT_NAME="$project"
   if [ "$order" = scripts-first ]; then
     first=(bash "$root/scripts/selfhost.sh" up)
-    second=(docker compose -f "$root/deploy/compose.yaml" up -d --wait)
+    second=(docker compose -p "$project" -f "$root/deploy/compose.yaml" up -d --wait)
   else
-    first=(docker compose -f "$root/deploy/compose.yaml" up -d --wait)
+    first=(docker compose -p "$project" -f "$root/deploy/compose.yaml" up -d --wait)
     second=(bash "$root/scripts/selfhost.sh" up)
   fi
   if ! out="$("${first[@]}" 2>&1)"; then
@@ -263,7 +308,8 @@ for order in scripts-first plain-first; do
       "before [$before], after [$after]"
   fi
   expect_same_volume "$project" "$order: plain docker compose and the scripts label the volume alike"
-  docker compose -f "$root/deploy/compose.yaml" down --volumes --timeout 5 >/dev/null 2>&1 || true
+  docker compose -p "$project" -f "$root/deploy/compose.yaml" down --volumes --timeout 5 \
+    >/dev/null 2>&1 || true
   unset COMPOSE_PROJECT_NAME
 done
 
