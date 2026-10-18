@@ -40,6 +40,7 @@ describe('package manifest', () => {
         'colorOf',
         'composite',
         'contrast',
+        'decorativeRoles',
         'disabledCeiling',
         'disabledPairs',
         'echartsThemes',
@@ -54,6 +55,7 @@ describe('package manifest', () => {
         'themeScript',
         'themeStorageKey',
         'tokens',
+        'washBackdrops',
       ].sort(),
     );
   });

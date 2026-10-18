@@ -9,8 +9,14 @@ type Leaves<T, P extends string = ''> = {
 }[keyof T & string];
 
 export type ColorRole = Leaves<typeof tokens.color>;
-// The selection wash is translucent, so it is measured where it lands: over the ground.
-export type Backdrop = ColorRole | 'accent.wash';
+// The selection wash is translucent, so it is measured over each surface it can land on.
+export const washBackdrops = [
+  'accent.wash@ground',
+  'accent.wash@raised',
+  'accent.wash@sunken',
+] as const;
+export type WashBackdrop = (typeof washBackdrops)[number];
+export type Backdrop = ColorRole | WashBackdrop;
 export type PairKind = 'text' | 'non-text';
 
 export const minimum = { text: 4.5, 'non-text': 3 } as const satisfies Record<PairKind, number>;
@@ -64,10 +70,10 @@ export const requiredPairs: readonly PairGroup[] = [
   },
   {
     fg: ['text.ink', 'text.body', 'text.secondary', 'accent.ink'],
-    bg: ['accent.wash'],
+    bg: washBackdrops,
     kind: 'text',
     modes: BOTH,
-    why: 'Selected rows and text selection',
+    why: 'Selected rows and text selection, on any surface',
   },
   {
     fg: ['accent.on'],
@@ -85,7 +91,7 @@ export const requiredPairs: readonly PairGroup[] = [
   },
   {
     fg: ['focus.ring'],
-    bg: [...SURFACES, 'accent.wash'],
+    bg: [...SURFACES, ...washBackdrops],
     kind: 'non-text',
     modes: BOTH,
     why: 'Focus is visible wherever it lands',
@@ -132,16 +138,23 @@ export const forbiddenPairs: readonly PairGroup[] = [
   },
   {
     fg: ['state.fresh.text', 'state.stale.text', 'text.subtle'],
-    bg: ['accent.wash'],
+    bg: washBackdrops,
     kind: 'text',
     modes: ['light'],
     why: 'A selected row shows state with its icon and ink text, never coloured text',
   },
   {
     fg: ['border.control'],
-    bg: ['accent.wash'],
+    bg: washBackdrops,
     kind: 'non-text',
     modes: ['light'],
+    why: 'A selected row draws its edge from the rule token',
+  },
+  {
+    fg: ['border.control'],
+    bg: ['accent.wash@sunken'],
+    kind: 'non-text',
+    modes: ['dark'],
     why: 'A selected row draws its edge from the rule token',
   },
 ];
@@ -151,7 +164,7 @@ export const forbiddenPairs: readonly PairGroup[] = [
 export const ruledOutPairs: readonly PairGroup[] = [
   {
     fg: ['state.broken.text', 'state.neutral.text'],
-    bg: ['accent.wash'],
+    bg: washBackdrops,
     kind: 'text',
     modes: ['light'],
     why: 'A selected row shows state with its icon and ink text, never coloured text',
@@ -164,14 +177,14 @@ export const ruledOutPairs: readonly PairGroup[] = [
       'state.neutral.text',
       'text.subtle',
     ],
-    bg: ['accent.wash'],
+    bg: washBackdrops,
     kind: 'text',
     modes: ['dark'],
     why: 'A selected row shows state with its icon and ink text, never coloured text',
   },
   {
     fg: ['border.control'],
-    bg: ['accent.wash'],
+    bg: ['accent.wash@ground', 'accent.wash@raised'],
     kind: 'non-text',
     modes: ['dark'],
     why: 'A selected row draws its edge from the rule token',
@@ -207,6 +220,19 @@ export const disabledPairs: readonly DisabledGroup[] = [
   },
 ];
 
+// Roles that never carry meaning on their own, so no contrast minimum applies. Anything else
+// must appear in a pair group above; a test holds both lists to the tokens.
+export const decorativeRoles: readonly { role: ColorRole; why: string }[] = [
+  {
+    role: 'border.rule',
+    why: 'Hairlines that group content; the content carries its own contrast',
+  },
+  {
+    role: 'border.ruleStrong',
+    why: 'Chart grid and card borders; an input edge that must be found uses border.control',
+  },
+];
+
 export function expandPairs(groups: readonly PairGroup[]): Pair[] {
   return groups.flatMap((g) =>
     g.modes.flatMap((mode) =>
@@ -216,9 +242,10 @@ export function expandPairs(groups: readonly PairGroup[]): Pair[] {
 }
 
 export function colorOf(role: Backdrop, mode: Mode): Hex {
-  if (role === 'accent.wash') {
+  if (role.startsWith('accent.wash@')) {
     const wash = tokens.wash[mode];
-    return composite(wash.base, wash.alpha, tokens.color.surface.ground[mode]);
+    const under = role.slice('accent.wash@'.length) as keyof typeof tokens.color.surface;
+    return composite(wash.base, wash.alpha, tokens.color.surface[under][mode]);
   }
   let node: unknown = tokens.color;
   for (const part of role.split('.')) node = (node as Record<string, unknown>)[part];

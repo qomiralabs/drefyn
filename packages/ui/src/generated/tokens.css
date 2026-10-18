@@ -161,7 +161,7 @@
     --dr-accent-ink: #818CF8;
     --dr-accent-press: #A5B4FC;
     --dr-accent-on: #141210;
-    --dr-accent-wash: rgb(129 140 248 / 0.16);
+    --dr-accent-wash: rgb(129 140 248 / 0.1);
     --dr-signal-mark: #14B8A6;
     --dr-signal-text: #14B8A6;
     --dr-state-fresh-mark: #4ADE80;
@@ -196,7 +196,7 @@
   --dr-accent-ink: #818CF8;
   --dr-accent-press: #A5B4FC;
   --dr-accent-on: #141210;
-  --dr-accent-wash: rgb(129 140 248 / 0.16);
+  --dr-accent-wash: rgb(129 140 248 / 0.1);
   --dr-signal-mark: #14B8A6;
   --dr-signal-text: #14B8A6;
   --dr-state-fresh-mark: #4ADE80;

@@ -90,7 +90,9 @@ const color = {
 
 const wash = {
   light: { base: '#4F46E5', alpha: 0.08 },
-  dark: { base: '#818CF8', alpha: 0.16 },
+  // 0.16 left accent.ink at 4.21 where the wash lands on sunken. At 0.10 every reading pair
+  // passes on every surface and the wash still sits 1.13 off its surface.
+  dark: { base: '#818CF8', alpha: 0.1 },
 } as const satisfies Wash;
 
 // Shadows are drawn in ink. Dark mode has none: floating things use the raised surface and a

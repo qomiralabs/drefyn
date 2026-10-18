@@ -284,6 +284,10 @@ tbody th {
   font: var(--dr-type-caption);
 }
 
+.ruled-out .verdict {
+  color: var(--dr-text-secondary);
+}
+
 .other-pairs li {
   display: flex;
   justify-content: space-between;

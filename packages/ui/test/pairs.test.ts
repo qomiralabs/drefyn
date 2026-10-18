@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { contrast, floor2 } from '../src/tokens/contrast.ts';
+import { tokens } from '../src/tokens/tokens.ts';
 import {
   colorOf,
+  decorativeRoles,
   disabledCeiling,
   disabledPairs,
   expandPairs,
@@ -47,10 +50,6 @@ const required = [
   ['light', 'state.neutral.text', 'surface.ground', 'text', 7.25],
   ['light', 'state.neutral.text', 'surface.raised', 'text', 6.94],
   ['light', 'state.neutral.text', 'surface.sunken', 'text', 6.94],
-  ['light', 'text.ink', 'accent.wash', 'text', 16.05],
-  ['light', 'text.body', 'accent.wash', 'text', 12.47],
-  ['light', 'text.secondary', 'accent.wash', 'text', 6.46],
-  ['light', 'accent.ink', 'accent.wash', 'text', 5.36],
   ['light', 'accent.on', 'accent.ink', 'text', 6.28],
   ['light', 'accent.on', 'accent.press', 'text', 7.9],
   // Light, marks and controls
@@ -60,7 +59,6 @@ const required = [
   ['light', 'focus.ring', 'surface.ground', 'non-text', 6.02],
   ['light', 'focus.ring', 'surface.raised', 'non-text', 5.76],
   ['light', 'focus.ring', 'surface.sunken', 'non-text', 5.76],
-  ['light', 'focus.ring', 'accent.wash', 'non-text', 5.36],
   ['light', 'state.fresh.mark', 'surface.ground', 'non-text', 3.15],
   ['light', 'state.fresh.mark', 'surface.raised', 'non-text', 3.02],
   ['light', 'state.fresh.mark', 'surface.sunken', 'non-text', 3.02],
@@ -68,6 +66,22 @@ const required = [
   ['light', 'state.broken.mark', 'surface.raised', 'non-text', 4.42],
   ['light', 'state.broken.mark', 'surface.sunken', 'non-text', 4.42],
   ['light', 'state.neutral.text', 'state.neutral.mark', 'non-text', 5.08],
+  // Light, on the selection wash over each surface
+  ['light', 'text.ink', 'accent.wash@ground', 'text', 16.05],
+  ['light', 'text.ink', 'accent.wash@raised', 'text', 15.38],
+  ['light', 'text.ink', 'accent.wash@sunken', 'text', 15.38],
+  ['light', 'text.body', 'accent.wash@ground', 'text', 12.47],
+  ['light', 'text.body', 'accent.wash@raised', 'text', 11.95],
+  ['light', 'text.body', 'accent.wash@sunken', 'text', 11.95],
+  ['light', 'text.secondary', 'accent.wash@ground', 'text', 6.46],
+  ['light', 'text.secondary', 'accent.wash@raised', 'text', 6.19],
+  ['light', 'text.secondary', 'accent.wash@sunken', 'text', 6.19],
+  ['light', 'accent.ink', 'accent.wash@ground', 'text', 5.36],
+  ['light', 'accent.ink', 'accent.wash@raised', 'text', 5.13],
+  ['light', 'accent.ink', 'accent.wash@sunken', 'text', 5.13],
+  ['light', 'focus.ring', 'accent.wash@ground', 'non-text', 5.36],
+  ['light', 'focus.ring', 'accent.wash@raised', 'non-text', 5.13],
+  ['light', 'focus.ring', 'accent.wash@sunken', 'non-text', 5.13],
   // Dark, text
   ['dark', 'text.ink', 'surface.ground', 'text', 17.89],
   ['dark', 'text.ink', 'surface.raised', 'text', 16.62],
@@ -102,10 +116,6 @@ const required = [
   ['dark', 'state.neutral.text', 'surface.ground', 'text', 7.4],
   ['dark', 'state.neutral.text', 'surface.raised', 'text', 6.88],
   ['dark', 'state.neutral.text', 'surface.sunken', 'text', 6.35],
-  ['dark', 'text.ink', 'accent.wash', 'text', 14.28],
-  ['dark', 'text.body', 'accent.wash', 'text', 10.01],
-  ['dark', 'text.secondary', 'accent.wash', 'text', 5.91],
-  ['dark', 'accent.ink', 'accent.wash', 'text', 5.0],
   ['dark', 'accent.on', 'accent.ink', 'text', 6.26],
   ['dark', 'accent.on', 'accent.press', 'text', 9.37],
   // Dark, marks and controls
@@ -115,7 +125,6 @@ const required = [
   ['dark', 'focus.ring', 'surface.ground', 'non-text', 6.26],
   ['dark', 'focus.ring', 'surface.raised', 'non-text', 5.82],
   ['dark', 'focus.ring', 'surface.sunken', 'non-text', 5.37],
-  ['dark', 'focus.ring', 'accent.wash', 'non-text', 5.0],
   ['dark', 'signal.mark', 'surface.ground', 'non-text', 7.5],
   ['dark', 'signal.mark', 'surface.raised', 'non-text', 6.97],
   ['dark', 'signal.mark', 'surface.sunken', 'non-text', 6.43],
@@ -129,6 +138,22 @@ const required = [
   ['dark', 'state.broken.mark', 'surface.raised', 'non-text', 6.27],
   ['dark', 'state.broken.mark', 'surface.sunken', 'non-text', 5.79],
   ['dark', 'state.neutral.text', 'state.neutral.mark', 'non-text', 4.07],
+  // Dark, on the selection wash over each surface
+  ['dark', 'text.ink', 'accent.wash@ground', 'text', 15.79],
+  ['dark', 'text.ink', 'accent.wash@raised', 'text', 14.5],
+  ['dark', 'text.ink', 'accent.wash@sunken', 'text', 13.23],
+  ['dark', 'text.body', 'accent.wash@ground', 'text', 11.07],
+  ['dark', 'text.body', 'accent.wash@raised', 'text', 10.16],
+  ['dark', 'text.body', 'accent.wash@sunken', 'text', 9.27],
+  ['dark', 'text.secondary', 'accent.wash@ground', 'text', 6.53],
+  ['dark', 'text.secondary', 'accent.wash@raised', 'text', 6],
+  ['dark', 'text.secondary', 'accent.wash@sunken', 'text', 5.47],
+  ['dark', 'accent.ink', 'accent.wash@ground', 'text', 5.52],
+  ['dark', 'accent.ink', 'accent.wash@raised', 'text', 5.07],
+  ['dark', 'accent.ink', 'accent.wash@sunken', 'text', 4.63],
+  ['dark', 'focus.ring', 'accent.wash@ground', 'non-text', 5.52],
+  ['dark', 'focus.ring', 'accent.wash@raised', 'non-text', 5.07],
+  ['dark', 'focus.ring', 'accent.wash@sunken', 'non-text', 4.63],
 ] as const;
 
 // Rules that come out of the numbers. Each must keep failing, so nobody "fixes" the table by
@@ -142,23 +167,47 @@ const forbidden = [
   ['light', 'signal.mark', 'surface.ground', 'non-text', 2.38],
   // State words and captions never sit on the selection wash, and selected rows draw their
   // edge from the rule token, not the control border.
-  ['light', 'state.fresh.text', 'accent.wash', 'text', 4.27],
-  ['light', 'state.stale.text', 'accent.wash', 'text', 4.28],
-  ['light', 'text.subtle', 'accent.wash', 'text', 4.05],
-  ['light', 'border.control', 'accent.wash', 'non-text', 2.94],
+  ['light', 'state.fresh.text', 'accent.wash@ground', 'text', 4.27],
+  ['light', 'state.fresh.text', 'accent.wash@raised', 'text', 4.09],
+  ['light', 'state.fresh.text', 'accent.wash@sunken', 'text', 4.09],
+  ['light', 'state.stale.text', 'accent.wash@ground', 'text', 4.28],
+  ['light', 'state.stale.text', 'accent.wash@raised', 'text', 4.1],
+  ['light', 'state.stale.text', 'accent.wash@sunken', 'text', 4.1],
+  ['light', 'text.subtle', 'accent.wash@ground', 'text', 4.05],
+  ['light', 'text.subtle', 'accent.wash@raised', 'text', 3.88],
+  ['light', 'text.subtle', 'accent.wash@sunken', 'text', 3.88],
+  ['light', 'border.control', 'accent.wash@ground', 'non-text', 2.94],
+  ['light', 'border.control', 'accent.wash@raised', 'non-text', 2.82],
+  ['light', 'border.control', 'accent.wash@sunken', 'non-text', 2.82],
+  ['dark', 'border.control', 'accent.wash@sunken', 'non-text', 2.88],
 ] as const;
 
 // Ruled out by design even where the ratio passes, so the rule reads the same in both modes:
 // a selected row shows state with its icon and ink text, never coloured text.
 const ruledOut = [
-  ['light', 'state.broken.text', 'accent.wash', 'text', 5.51],
-  ['light', 'state.neutral.text', 'accent.wash', 'text', 6.46],
-  ['dark', 'state.fresh.text', 'accent.wash', 'text', 8.56],
-  ['dark', 'state.stale.text', 'accent.wash', 'text', 8.93],
-  ['dark', 'state.broken.text', 'accent.wash', 'text', 5.39],
-  ['dark', 'state.neutral.text', 'accent.wash', 'text', 5.91],
-  ['dark', 'text.subtle', 'accent.wash', 'text', 5.91],
-  ['dark', 'border.control', 'accent.wash', 'non-text', 3.11],
+  ['light', 'state.broken.text', 'accent.wash@ground', 'text', 5.51],
+  ['light', 'state.broken.text', 'accent.wash@raised', 'text', 5.28],
+  ['light', 'state.broken.text', 'accent.wash@sunken', 'text', 5.28],
+  ['light', 'state.neutral.text', 'accent.wash@ground', 'text', 6.46],
+  ['light', 'state.neutral.text', 'accent.wash@raised', 'text', 6.19],
+  ['light', 'state.neutral.text', 'accent.wash@sunken', 'text', 6.19],
+  ['dark', 'state.fresh.text', 'accent.wash@ground', 'text', 9.46],
+  ['dark', 'state.fresh.text', 'accent.wash@raised', 'text', 8.69],
+  ['dark', 'state.fresh.text', 'accent.wash@sunken', 'text', 7.93],
+  ['dark', 'state.stale.text', 'accent.wash@ground', 'text', 9.87],
+  ['dark', 'state.stale.text', 'accent.wash@raised', 'text', 9.07],
+  ['dark', 'state.stale.text', 'accent.wash@sunken', 'text', 8.27],
+  ['dark', 'state.broken.text', 'accent.wash@ground', 'text', 5.96],
+  ['dark', 'state.broken.text', 'accent.wash@raised', 'text', 5.47],
+  ['dark', 'state.broken.text', 'accent.wash@sunken', 'text', 4.99],
+  ['dark', 'state.neutral.text', 'accent.wash@ground', 'text', 6.53],
+  ['dark', 'state.neutral.text', 'accent.wash@raised', 'text', 6],
+  ['dark', 'state.neutral.text', 'accent.wash@sunken', 'text', 5.47],
+  ['dark', 'text.subtle', 'accent.wash@ground', 'text', 6.53],
+  ['dark', 'text.subtle', 'accent.wash@raised', 'text', 6],
+  ['dark', 'text.subtle', 'accent.wash@sunken', 'text', 5.47],
+  ['dark', 'border.control', 'accent.wash@ground', 'non-text', 3.43],
+  ['dark', 'border.control', 'accent.wash@raised', 'non-text', 3.15],
 ] as const;
 
 // Disabled controls are drawn with their own colours, never with opacity, so every value they
@@ -292,13 +341,64 @@ describe('disabled pairs', () => {
 });
 
 describe('colorOf', () => {
-  it('composites the wash over the ground of the same mode', () => {
-    expect(colorOf('accent.wash', 'light')).toBe('#ECECF7');
-    expect(colorOf('accent.wash', 'dark')).toBe('#252635');
+  it('composites the wash over the surface it lands on, in the same mode', () => {
+    expect(colorOf('accent.wash@ground', 'light')).toBe('#ECECF7');
+    expect(colorOf('accent.wash@sunken', 'light')).toBe('#E8E7F3');
+    expect(colorOf('accent.wash@ground', 'dark')).toBe('#1F1E27');
+    expect(colorOf('accent.wash@raised', 'dark')).toBe('#26252E');
+    expect(colorOf('accent.wash@sunken', 'dark')).toBe('#2D2C33');
   });
 
   it('reads a role for the mode', () => {
     expect(colorOf('surface.ground', 'dark')).toBe('#141210');
     expect(colorOf('state.broken.text', 'light')).toBe('#B91C1C');
+  });
+});
+
+describe('coverage', () => {
+  const roles: string[] = [];
+  const walk = (node: object, path: string[]) => {
+    for (const [key, child] of Object.entries(node)) {
+      if (typeof (child as { light?: unknown }).light === 'string') {
+        roles.push([...path, key].join('.'));
+      } else walk(child as object, [...path, key]);
+    }
+  };
+  walk(tokens.color, []);
+
+  it('measures every colour role somewhere, or lists it as decorative with a reason', () => {
+    const groups = [...requiredPairs, ...forbiddenPairs, ...ruledOutPairs, ...disabledPairs];
+    const used = new Set(groups.flatMap((g) => [...g.fg, ...g.bg]));
+    const decorative = new Set(decorativeRoles.map((d) => d.role));
+    for (const role of roles) {
+      expect(used.has(role as never) || decorative.has(role as never), role).toBe(true);
+    }
+    for (const d of decorativeRoles) {
+      expect(roles, d.role).toContain(d.role);
+      expect(d.why.length, d.role).toBeGreaterThan(10);
+    }
+  });
+
+  it('writes every colour as six digit upper case hex, which the generator assumes', () => {
+    const hexes: string[] = [tokens.wash.light.base, tokens.wash.dark.base];
+    const walkHex = (node: object) => {
+      for (const child of Object.values(node)) {
+        if (typeof child === 'string') hexes.push(child);
+        else walkHex(child as object);
+      }
+    };
+    walkHex(tokens.color);
+    for (const hex of hexes) expect(hex).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('keeps the selection wash visible on every surface it lands on', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      for (const s of ['ground', 'raised', 'sunken'] as const) {
+        const off = floor2(
+          contrast(colorOf(`accent.wash@${s}`, mode), colorOf(`surface.${s}`, mode)),
+        );
+        expect(off, `${mode} ${s}`).toBeGreaterThanOrEqual(1.1);
+      }
+    }
   });
 });

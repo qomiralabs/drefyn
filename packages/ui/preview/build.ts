@@ -17,6 +17,7 @@ import {
   minimum,
   requiredPairs,
   ruledOutPairs,
+  washBackdrops,
   type Backdrop,
   type ColorRole,
   type Pair,
@@ -61,13 +62,20 @@ function colorSection(): string {
     </section>`;
 }
 
-const BACKDROPS: Backdrop[] = ['surface.ground', 'surface.raised', 'surface.sunken', 'accent.wash'];
+const BACKDROPS: Backdrop[] = [
+  'surface.ground',
+  'surface.raised',
+  'surface.sunken',
+  ...washBackdrops,
+];
+const backdropLabel = (b: Backdrop) =>
+  b.startsWith('accent.wash@') ? `wash on ${b.split('@')[1] ?? ''}` : (b.split('.')[1] ?? b);
 
 function pairMatrix(mode: Mode): string {
   const required = expandPairs(requiredPairs).filter((p) => p.mode === mode);
-  const forbidden = expandPairs([...forbiddenPairs, ...ruledOutPairs]).filter(
-    (p) => p.mode === mode,
-  );
+  const failing = expandPairs(forbiddenPairs).filter((p) => p.mode === mode);
+  const ruledOut = expandPairs(ruledOutPairs).filter((p) => p.mode === mode);
+  const forbidden = [...failing, ...ruledOut];
   const onSurfaces = (p: Pair) => BACKDROPS.includes(p.bg);
   const fgs = [...new Set([...required, ...forbidden].filter(onSurfaces).map((p) => p.fg))];
   const cell = (fg: ColorRole, bg: Backdrop) => {
@@ -82,10 +90,16 @@ function pairMatrix(mode: Mode): string {
       ok !== undefined && pair.kind === 'text'
         ? `<span class="sample" style="${colors}" aria-hidden="true">Aa</span>`
         : `<span class="sample sample-mark" style="${colors}" aria-hidden="true"></span>`;
-    const verdict = ok === undefined ? '<span class="verdict">not allowed</span>' : '';
-    return `<td class="${ok === undefined ? 'fail' : 'pass'}">${sample}<span class="ratio">${ratio(r)}</span>${verdict}</td>`;
+    // Red is kept for real failures; a pair that passes but is ruled out reads as a rule.
+    const isRuledOut = ruledOut.some((p) => p.fg === fg && p.bg === bg);
+    const state = ok !== undefined ? 'pass' : isRuledOut ? 'ruled-out' : 'fail';
+    const verdict =
+      ok !== undefined
+        ? ''
+        : `<span class="verdict">${isRuledOut ? 'ruled out' : 'fails, not allowed'}</span>`;
+    return `<td class="${state}">${sample}<span class="ratio">${ratio(r)}</span>${verdict}</td>`;
   };
-  const head = BACKDROPS.map((b) => `<th scope="col">${b.split('.')[1] ?? b}</th>`).join('');
+  const head = BACKDROPS.map((b) => `<th scope="col">${backdropLabel(b)}</th>`).join('');
   const body = fgs
     .map(
       (fg) => `<tr><th scope="row">${fg}</th>${BACKDROPS.map((bg) => cell(fg, bg)).join('')}</tr>`,
@@ -116,8 +130,9 @@ function pairsSection(): string {
     <section aria-labelledby="contrast">
       <h2 id="contrast">Contrast</h2>
       <p class="lede">Measured from the tokens and floored to two decimals. Text needs ${minimum.text}:1,
-      marks and control edges need ${minimum['non-text']}:1. Pairs marked not allowed are never used:
-      most fail, and the rest are ruled out so a rule reads the same in both modes.</p>
+      marks and control edges need ${minimum['non-text']}:1. The selection wash is translucent, so it is
+      measured over each surface. Pairs that fail are never used, and pairs marked ruled out pass but
+      are never used either, so a rule reads the same in both modes.</p>
       <div class="matrices">${pairMatrix('light')}${pairMatrix('dark')}</div>
     </section>`;
 }
