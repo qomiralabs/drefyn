@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
-    "bench": "vitest bench --run --reporter=verbose"
+    "bench": "vitest bench --run --reporter=verbose && node bench/native.ts"
   },
   "devDependencies": {
     "fast-check": "4.10.2"

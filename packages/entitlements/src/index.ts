@@ -204,25 +204,50 @@ function atLeastAsGenerous(direction: 'max' | 'min', a: LimitValue, b: LimitValu
   return direction === 'max' ? a >= b : a <= b;
 }
 
+// A Map, array, Date or class instance keeps its entries where Object.keys cannot see
+// them, so reading one as "no overrides" would quietly drop a customer's raises. Only a
+// plain record, from a literal, JSON or Object.create(null), is accepted.
+function isPlainRecord(value: unknown): value is object {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+const NO_OPTIONS: CheckOptions = Object.freeze({});
+
+function toOptions(options: unknown): CheckOptions {
+  if (options === undefined) return NO_OPTIONS;
+  if (!isPlainRecord(options)) throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
+  return options;
+}
+
 // Checks the whole map on every call, so one bad entry fails every check for that
-// organization instead of being silently skipped while the others apply. Own enumerable
-// keys only; nothing is written back to the caller's object.
+// organization instead of being silently skipped while the others apply. Every own key
+// counts, hidden or symbol keyed too, and only plain data entries are read, so what was
+// validated is what applies. Nothing is written back to the caller's object.
 function resolveOverrides(tier: Tier, overrides: unknown): ReadonlyMap<LimitKey, LimitValue> {
   const applied = new Map<LimitKey, LimitValue>();
   if (overrides === undefined) return applied;
-  if (typeof overrides !== 'object' || overrides === null) {
-    throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
-  }
-  for (const name of Object.keys(overrides)) {
-    const entry = LIMIT_TABLE.get(name);
+  if (!isPlainRecord(overrides)) throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
+  for (const name of Reflect.ownKeys(overrides)) {
+    const entry = typeof name === 'string' ? LIMIT_TABLE.get(name) : undefined;
     // An unknown name is never attached to the error: it is caller data, not a key.
     if (entry === undefined) throw new EntitlementError('ENTITLEMENT_UNKNOWN_LIMIT');
     const { key, direction } = entry.info;
-    const raw: unknown = (overrides as Readonly<Record<string, unknown>>)[name];
+    const field = Object.getOwnPropertyDescriptor(overrides, name);
+    if (field?.enumerable !== true || !('value' in field)) {
+      throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
+    }
+    const raw: unknown = field.value;
     let value: LimitValue;
     if (raw === UNLIMITED) value = UNLIMITED;
     else if (isCount(raw)) value = raw + 0;
     else throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
+    // A floor of 0 means no floor at all; a contract has to say that with UNLIMITED, so a
+    // stray 0 in a record cannot turn monitors into a request flood.
+    if (direction === 'min' && value === 0) {
+      throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
+    }
     const base = entry.values[tier];
     if (!atLeastAsGenerous(direction, value, base)) {
       throw new EntitlementError('ENTITLEMENT_OVERRIDE_LOWERS_LIMIT', key);
@@ -263,7 +288,8 @@ export function limitFor(
   options?: Pick<CheckOptions, 'overrides'>,
 ): LimitValue {
   const known = toTier(tier);
-  return effectiveLimit(known, limitEntry(key), options?.overrides);
+  const entry = limitEntry(key);
+  return effectiveLimit(known, entry, toOptions(options).overrides);
 }
 
 export function graceAllowance(
@@ -273,7 +299,7 @@ export function graceAllowance(
 ): LimitValue {
   const known = toTier(tier);
   const entry = limitEntry(key);
-  return graceFor(entry.info, effectiveLimit(known, entry, options?.overrides));
+  return graceFor(entry.info, effectiveLimit(known, entry, toOptions(options).overrides));
 }
 
 // usage is the amount in use with the checked action included: the third project, the
@@ -286,13 +312,15 @@ export function checkLimit(
 ): CheckResult {
   const known = toTier(tier);
   const entry = limitEntry(key);
-  const limit = effectiveLimit(known, entry, options?.overrides);
+  const opts = toOptions(options);
+  const limit = effectiveLimit(known, entry, opts.overrides);
   const used = toUsage(usage);
+  const eligible = opts.graceEligible === true;
   const { info } = entry;
 
   const base = { tier: known, key: info.key, usage: used };
   if (limit === UNLIMITED) {
-    const grace = options?.graceEligible === true ? graceFor(info, limit) : 0;
+    const grace = eligible ? graceFor(info, limit) : 0;
     return Object.freeze({ ...base, limit, grace, status: 'allowed' });
   }
 
@@ -308,7 +336,7 @@ export function checkLimit(
     });
   }
 
-  const grace = options?.graceEligible === true && info.grace ? graceOf(limit) : 0;
+  const grace = eligible && info.grace ? graceOf(limit) : 0;
   if (limit === 0 && used > 0) {
     return Object.freeze({ ...base, limit, grace, status: 'not_entitled', access: 'read_only' });
   }

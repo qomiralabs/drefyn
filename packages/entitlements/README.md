@@ -25,7 +25,10 @@ Options:
 
 - `overrides` is an already resolved map of limit key to value, for contract and add on
   raises. A value may only make a limit more generous. The whole map is validated on every
-  call and one bad entry fails the call; nothing is partly applied.
+  call and one bad entry fails the call; nothing is partly applied. It must be a plain
+  object (a literal, parsed JSON or `Object.create(null)`) holding plain data entries; a
+  `Map`, array or class instance is refused, not read as "no overrides". Only `UNLIMITED`
+  removes the check interval floor; an override of 0 there is refused.
 - `graceEligible` widens a monthly send cap by `floor(cap * 25 / 100)`. Only the send meter
   or notifier sets it, after deciding the send may use grace.
 
@@ -42,3 +45,6 @@ is a floor, so a smaller override is a raise.
 pnpm --filter @drefyn/entitlements test
 pnpm --filter @drefyn/entitlements bench
 ```
+
+The bench runs the vitest benchmark and then `bench/native.ts`, which times the same calls
+in plain Node without the test runner's import overhead.

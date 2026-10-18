@@ -163,8 +163,9 @@ export const FEATURES = {
   'studio.integrations': feature('studio', 'scale'),
 
   'status.statuspage_importer': feature('status', 'free'),
-  // These channels cost us nothing per send, so they stay free on every plan.
+  // Email is on for every plan; what it costs is bounded by the monthly email send cap.
   'status.notify_email': feature('status', 'free'),
+  // These channels cost us nothing per send, so they stay free on every plan.
   'status.notify_rss': feature('status', 'free'),
   'status.notify_slack': feature('status', 'free'),
   'status.notify_webhook': feature('status', 'free'),
