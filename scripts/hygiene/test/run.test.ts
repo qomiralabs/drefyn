@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type * as gitModule from '../src/git.ts';
 import { readBlobs } from '../src/git.ts';
 import { checkCommits, checkPullRequest, checkTrackedFiles } from '../src/run.ts';
 import { CO_AUTHOR, EM_DASH, EN_DASH, makeRepo, type TempRepo } from './helpers.ts';
@@ -10,7 +11,7 @@ import { CO_AUTHOR, EM_DASH, EN_DASH, makeRepo, type TempRepo } from './helpers.
 // The real reader stays in place; one test swaps in a result with a blob missing,
 // which real git cannot be made to produce.
 vi.mock('../src/git.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/git.ts')>();
+  const actual = await importOriginal<typeof gitModule>();
   return { ...actual, readBlobs: vi.fn(actual.readBlobs) };
 });
 

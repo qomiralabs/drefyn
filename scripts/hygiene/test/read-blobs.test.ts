@@ -8,7 +8,9 @@ class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
   stdin = new Writable({
-    write: (_chunk, _encoding, callback) => callback(),
+    write: (_chunk, _encoding, callback) => {
+      callback();
+    },
   });
 
   constructor(output: Buffer) {
