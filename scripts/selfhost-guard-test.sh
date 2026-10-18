@@ -65,7 +65,7 @@ cleanup() {
     ids="$("$real_docker" ps -aq --filter "label=com.docker.compose.project=$p" 2>/dev/null || true)"
     # One ID per line; splitting is the point.
     # shellcheck disable=SC2086
-    if [ -n "$ids" ]; then "$real_docker" rm -f $ids >/dev/null 2>&1 || true; fi
+    if [ -n "$ids" ]; then "$real_docker" rm -f -v $ids >/dev/null 2>&1 || true; fi
     vols="$("$real_docker" volume ls -q --filter "label=com.docker.compose.project=$p" 2>/dev/null || true)"
     # shellcheck disable=SC2086
     if [ -n "$vols" ]; then "$real_docker" volume rm -f $vols >/dev/null 2>&1 || true; fi
@@ -122,7 +122,7 @@ nothing_started() {
   if [ -n "$others" ]; then
     fail "$3 starts nothing" "new containers: $others"
     # shellcheck disable=SC2086
-    docker rm -f $others >/dev/null 2>&1 || true
+    docker rm -f -v $others >/dev/null 2>&1 || true
   fi
 }
 
@@ -245,6 +245,45 @@ for kind in container volume; do
     fail "selfhost.sh up with stdout closed creates no volume" "$volumes"
   fi
 done
+rm -f "$root/deploy/.env"
+
+# Without deploy/.env.example there is nothing to build deploy/.env from. up must stop rather
+# than write an empty file that claims generated passwords.
+project="$base-noexample"
+projects+=("$project")
+noexample="$scratch/noexample"
+mkdir -p "$noexample"
+cp -R "$src/scripts" "$src/deploy" "$noexample/"
+rm -f "$noexample/deploy/.env" "$noexample/deploy/.env.example"
+if out="$(COMPOSE_PROJECT_NAME="$project" bash "$noexample/scripts/selfhost.sh" up 2>&1)"; then
+  fail "up without deploy/.env.example stops" "it exited 0: $out"
+elif [ -e "$noexample/deploy/.env" ]; then
+  fail "up without deploy/.env.example writes no deploy/.env" "$(wc -c <"$noexample/deploy/.env") bytes written"
+elif [[ "$out" == *"wrote"* ]]; then
+  fail "up without deploy/.env.example claims nothing" "$out"
+else
+  pass "up without deploy/.env.example stops and writes nothing"
+fi
+nothing_started "$project" "" "up without deploy/.env.example"
+
+# Two first ups at once must not both write deploy/.env, or one stack would start with
+# passwords the file no longer holds. A planted foreign container makes each stop right after.
+project="$base-race"
+projects+=("$project")
+rm -f "$root/deploy/.env"
+planted="$(plant_container "$project" /elsewhere/docker-compose.yml)"
+pids=()
+for n in 1 2 3 4 5; do
+  COMPOSE_PROJECT_NAME="$project" bash "$root/scripts/selfhost.sh" up >"$scratch/race.$n" 2>&1 &
+  pids+=("$!")
+done
+for pid in "${pids[@]}"; do wait "$pid" || true; done
+writers="$(cat "$scratch"/race.* | grep -c 'wrote .*deploy/.env' || true)"
+if [ "$writers" = 1 ] && grep -q '^DREFYN_STACK_ID=.' "$root/deploy/.env"; then
+  pass "five concurrent first ups write deploy/.env exactly once"
+else
+  fail "five concurrent first ups write deploy/.env exactly once" "$writers wrote it"
+fi
 rm -f "$root/deploy/.env"
 
 # A volume labelled by an earlier build of this stack, with the compose file path and no stack

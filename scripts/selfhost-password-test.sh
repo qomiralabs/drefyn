@@ -105,8 +105,9 @@ expect_superuser_closed() {
 
 # bad_start <case name> <expected log line> <expected text in up's output> [listens]
 # up must fail, say why, and leave the superuser closed. The advice comes from the server log,
-# not the healthcheck, because compose may give up before the healthcheck ever runs. Pass "silent" as the last argument
-# when the server never starts listening, so there is nothing to probe.
+# not the healthcheck, because compose may give up before the healthcheck ever runs. Pass
+# "silent" as the last argument when the server never starts listening, so there is nothing
+# to probe.
 bad_start() {
   local case_name="$1" expected="$2" advice="$3" listens="${4:-listens}" out logs
   if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
@@ -168,6 +169,10 @@ real_docker="$(command -v docker)"
 mkdir -p "$scratch/shim"
 cat >"$scratch/shim/docker" <<SHIM
 #!/usr/bin/env bash
+if [ "\$1" = inspect ] && [ -n "\${SHIM_FAIL_INSPECT:-}" ]; then
+  echo "shim: inspect failed" >&2
+  exit 1
+fi
 if [ "\$1" = compose ]; then
   args=()
   skip=false
@@ -198,7 +203,134 @@ else
   fail "up fails when compose reports success but postgres is not healthy" "$out"
 fi
 reset_stack
+# When compose says it started the stack but docker cannot say how it is, the message must say
+# that, not point at a compose error that was never printed.
+if out="$(PATH="$scratch/shim:$PATH" SHIM_FAIL_INSPECT=1 bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+  fail "up fails when docker inspect fails" "it exited 0: $out"
+elif [[ "$out" == *"could not inspect"* ]] && [[ "$out" != *"its error is above"* ]]; then
+  pass "up fails when docker inspect fails and says so"
+else
+  fail "up fails when docker inspect fails and says so" "$out"
+fi
+reset_stack
 DREFYN_OWNER_PASSWORD="$(secret)"
+
+# The copy's compose file is edited for the next cases and put back after each one.
+cp "$root/deploy/compose.yaml" "$scratch/compose.pristine.yaml"
+hba_command='    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]'
+set_command() {
+  local line="$1"
+  awk -v want="$hba_command" -v line="$line" '$0 == want { print line; next } { print }' \
+    "$scratch/compose.pristine.yaml" >"$root/deploy/compose.yaml"
+  if ! grep -qF -- "$line" "$root/deploy/compose.yaml"; then
+    fail "the test can change the compose command" "$line"
+  fi
+}
+restore_compose() { cp "$scratch/compose.pristine.yaml" "$root/deploy/compose.yaml"; }
+
+# A compose override that drops hba_file falls back to the data directory's rules, which let
+# the superuser in over TCP. That must never look healthy.
+set_command '    command: [postgres]'
+if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+  fail "a server that ignores the mounted login rules is never healthy" "up succeeded: $out"
+elif [[ "$out" == *"hba_file"* ]]; then
+  pass "a server that ignores the mounted login rules is never healthy, and says why"
+else
+  fail "a server that ignores the mounted login rules is never healthy, and says why" "$out"
+fi
+reset_stack
+restore_compose
+
+# A slow first start is not a failed one: no advice to fix deploy/.env or reset. The script is
+# executable with an interpreter line: Docker Desktop reports a mode 644 file as executable, so
+# the image's entrypoint runs it instead of sourcing it, and the run is refused.
+mkdir -p "$scratch/initdb-slow"
+printf '#!/bin/sh\nsleep 40\n' >"$scratch/initdb-slow/05-slow.sh"
+chmod 755 "$scratch/initdb-slow/05-slow.sh"
+cp "$root/deploy/postgres/initdb/10-bootstrap.sh" "$scratch/initdb-slow/"
+awk -v dir="$scratch/initdb-slow" \
+  '$0 == "      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro" {
+     print "      - " dir ":/docker-entrypoint-initdb.d:ro"; next } { print }' \
+  "$scratch/compose.pristine.yaml" >"$root/deploy/compose.yaml"
+if ! grep -qF "$scratch/initdb-slow:" "$root/deploy/compose.yaml"; then
+  fail "the test can point init at the slow scripts"
+fi
+if out="$(DREFYN_SELFHOST_WAIT_SECONDS=8 bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+  fail "a slow first start says it is still running" "up succeeded within 8 s: $out"
+elif [[ "$out" == *"still running"* ]] && [[ "$out" != *"reset"* ]]; then
+  pass "a slow first start says it is still running and does not advise a reset"
+else
+  fail "a slow first start says it is still running and does not advise a reset" "$out"
+fi
+reset_stack
+restore_compose
+
+# pg_stat_statements keeps utility statements, create role ... password included, even after a
+# rollback. The bootstrap must turn that off for its session or refuse.
+pgss_command='    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf,'
+pgss_command+=' -c, shared_preload_libraries=pg_stat_statements]'
+set_command "$pgss_command"
+if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+  pass "the stack comes up with pg_stat_statements preloaded"
+else
+  fail "the stack comes up with pg_stat_statements preloaded" "$out"
+fi
+pgss_sql() {
+  "${compose[@]}" exec -T postgres psql --no-psqlrc -v ON_ERROR_STOP=1 -qtA --username postgres \
+    --dbname drefyn "$@"
+}
+if ! out="$(pgss_sql -c 'create extension if not exists pg_stat_statements' 2>&1)"; then
+  fail "the test can read pg_stat_statements" "$out"
+fi
+leaked=0
+for value in "$DREFYN_OWNER_PASSWORD" "$DREFYN_APP_PASSWORD" "$DREFYN_PUBLIC_READER_PASSWORD"; do
+  # The value goes in as a psql variable, so this query's own text never holds it.
+  # psql only substitutes variables in input it reads, not in -c.
+  count="$(pgss_sql -v needle="$value" 2>&1 \
+    <<<"select count(*) from pg_stat_statements where position(:'needle' in query) > 0;" || true)"
+  if [ "$count" != 0 ]; then leaked=$((leaked + 1)); fi
+done
+if [ "$leaked" = 0 ]; then
+  pass "pg_stat_statements holds none of the role passwords after the first start"
+else
+  fail "pg_stat_statements holds none of the role passwords after the first start" \
+    "$leaked of 3 passwords found"
+fi
+# A master user that cannot change pg_stat_statements.track_utility must stop, even when the
+# server logs nothing.
+pgss_master_password="$(secret)"
+if ! out="$("${compose[@]}" exec -T -e MASTER_PASSWORD="$pgss_master_password" postgres \
+  psql --no-psqlrc -v ON_ERROR_STOP=1 -q --username postgres --dbname drefyn 2>&1 <<'SQL'
+\getenv master_password MASTER_PASSWORD
+create role pgss_master login createrole password :'master_password';
+grant pg_read_all_settings to pgss_master;
+alter role pgss_master set log_min_error_statement = 'panic';
+grant connect on database drefyn to pgss_master;
+SQL
+)"; then
+  fail "a stand in master user can be created on the pg_stat_statements stack" "$out"
+fi
+pgss_canary="pgsscanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+if out="$("${compose[@]}" exec -T -e PGPASSWORD="$pgss_master_password" \
+  -e DREFYN_OWNER_PASSWORD="$pgss_canary" -e DREFYN_APP_PASSWORD="$pgss_canary" \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$pgss_canary" postgres \
+  psql --no-psqlrc --host 127.0.0.1 --username pgss_master --dbname drefyn \
+  --file /etc/drefyn/bootstrap.sql 2>&1)"; then
+  fail "the bootstrap stops when pg_stat_statements would keep the passwords" "it exited 0: $out"
+elif [[ "$out" == *"pg_stat_statements"* ]] && [[ "$out" == *"DREFYN_BOOTSTRAP_LOG_CHECKED=yes"* ]]; then
+  pass "the bootstrap stops when pg_stat_statements would keep the passwords"
+else
+  fail "the bootstrap stops when pg_stat_statements would keep the passwords" "$out"
+fi
+count="$(pgss_sql -v needle="$pgss_canary" 2>&1 \
+  <<<"select count(*) from pg_stat_statements where position(:'needle' in query) > 0;" || true)"
+if [ "$count" = 0 ]; then
+  pass "the stopped bootstrap left no canary in pg_stat_statements"
+else
+  fail "the stopped bootstrap left no canary in pg_stat_statements" "$count statements hold it"
+fi
+reset_stack
+restore_compose
 
 # Init can also stop before the bootstrap script runs at all: a crash, an out of memory kill, or
 # here an init script that fails first. The server the container restarts into must still
@@ -206,6 +338,7 @@ DREFYN_OWNER_PASSWORD="$(secret)"
 mkdir -p "$scratch/initdb"
 printf '#!/bin/sh\necho "password test: stopping init before the bootstrap" >&2\nexit 1\n' \
   >"$scratch/initdb/05-stop.sh"
+chmod 755 "$scratch/initdb/05-stop.sh"
 cp "$root/deploy/postgres/initdb/10-bootstrap.sh" "$scratch/initdb/"
 cat >"$scratch/override.yaml" <<YAML
 services:
@@ -216,6 +349,35 @@ YAML
 if out="$(docker compose -p "$project" -f "$root/deploy/compose.yaml" -f "$scratch/override.yaml" \
   up -d 2>&1)"; then
   expect_superuser_closed "init stopping before the bootstrap script" "$DREFYN_POSTGRES_PASSWORD"
+  # This server has no roles yet, so a bootstrap run by hand reaches create role. With the
+  # debug_print settings forced on for the session, the parse tree of each create role holds
+  # its password; the file must turn them off before it gets there.
+  debug_canary="pwtestdebug$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  if ! out="$("${compose[@]}" exec -T \
+    -e PGOPTIONS='-c debug_print_parse=on -c debug_print_rewritten=on -c debug_print_plan=on' \
+    -e DREFYN_OWNER_PASSWORD="$debug_canary" -e DREFYN_APP_PASSWORD="$debug_canary" \
+    -e DREFYN_PUBLIC_READER_PASSWORD="$debug_canary" postgres \
+    psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1)"; then
+    fail "a bootstrap run by hand with debug_print settings on completes" "$out"
+  fi
+  marker="pwtestmarker$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  "${compose[@]}" exec -T postgres psql --no-psqlrc -q --username postgres --dbname drefyn \
+    -c "do \$\$ begin raise log '%', '$marker'; end \$\$" >/dev/null 2>&1 || true
+  debug_container="$("${compose[@]}" ps -q postgres)"
+  server_log=""
+  for _ in $(seq 1 20); do
+    server_log="$(docker logs "$debug_container" 2>&1)"
+    if [[ "$server_log" == *"$marker"* ]]; then break; fi
+    sleep 0.5
+  done
+  if [[ "$server_log" != *"$marker"* ]]; then
+    fail "debug_print settings log no password" "marker $marker did not reach docker logs"
+  elif [[ "$server_log" == *"$debug_canary"* ]]; then
+    fail "debug_print settings log no password" \
+      "$(grep -c "$debug_canary" <<<"$server_log") log line(s) hold the canary"
+  else
+    pass "debug_print settings log no password, even when create role runs"
+  fi
 else
   fail "a stack whose init stops early still starts a container" "$out"
 fi
@@ -361,12 +523,50 @@ if [[ "$out" == *"the bootstrap has already run"* ]]; then
 else
   fail "the bootstrap carries on without an opt in when nothing is logged" "$out"
 fi
+# auto_explain logs query text, password checks included.
+set_master "session_preload_libraries = 'auto_explain'"
+expect_bootstrap_stops "auto_explain is loaded for the session"
+superuser_sql --dbname drefyn -c \
+  "alter role password_test_master reset session_preload_libraries" >/dev/null
+# A master that cannot read the preload lists cannot know, so it stops.
+superuser_sql --dbname drefyn -c "revoke pg_read_all_settings from password_test_master" >/dev/null
+expect_bootstrap_stops "the preload lists cannot be read"
+superuser_sql --dbname drefyn -c "grant pg_read_all_settings to password_test_master" >/dev/null
+
 set_master "log_statement = 'all'"
 out="$(run_as_master -e DREFYN_BOOTSTRAP_LOG_CHECKED=yes || true)"
 if [[ "$out" == *"the bootstrap has already run"* ]]; then
   pass "DREFYN_BOOTSTRAP_LOG_CHECKED=yes lets the bootstrap carry on"
 else
   fail "DREFYN_BOOTSTRAP_LOG_CHECKED=yes lets the bootstrap carry on" "$out"
+fi
+
+healthcheck() { "${compose[@]}" exec -T postgres sh /etc/drefyn/healthcheck.sh 2>&1; }
+
+# A role renamed on a stack that holds data is not a failed first start: no reset advice.
+superuser_sql --dbname drefyn -c "alter role drefyn_public_reader rename to password_test_reader" \
+  >/dev/null 2>&1
+if out="$(healthcheck)"; then
+  fail "a renamed role makes the healthcheck fail" "it passed"
+elif [[ "$out" == *"reset"* ]]; then
+  fail "a renamed role gets no reset advice" "$out"
+elif [[ "$out" == *"drefyn_public_reader"* ]]; then
+  pass "a renamed role fails the healthcheck, names the role and gives no reset advice"
+else
+  fail "a renamed role fails the healthcheck, names the role and gives no reset advice" "$out"
+fi
+superuser_sql --dbname drefyn -c "alter role password_test_reader rename to drefyn_public_reader" \
+  >/dev/null 2>&1
+
+# An init interrupted before the database was created leaves "database drefyn does not exist".
+# That is a failed first start, so the reset advice applies.
+superuser_sql --dbname postgres -c "drop database drefyn with (force)" >/dev/null 2>&1
+if out="$(healthcheck)"; then
+  fail "a missing drefyn database makes the healthcheck fail" "it passed"
+elif [[ "$out" == *"reset --yes"* ]]; then
+  pass "a missing drefyn database fails the healthcheck with the reset advice"
+else
+  fail "a missing drefyn database fails the healthcheck with the reset advice" "$out"
 fi
 
 if [ "$failures" -gt 0 ]; then
