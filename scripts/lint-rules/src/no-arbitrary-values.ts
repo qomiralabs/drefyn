@@ -1,25 +1,43 @@
 import type { Rule } from 'eslint';
 
 // Tailwind's reset removes the default scales, but brackets, variable shorthands, bare
-// numbers (durations, delays, line widths, opacity) and opacity modifiers still mint values
-// that are not tokens. This rule closes
-// those doors in any string, so a class list built in a variable is caught as well as one
-// written in className.
+// numbers (durations, delays, line widths, opacity, filters, stacking) and opacity modifiers
+// still mint values that are not tokens. This rule closes those doors in any string, so a
+// class list built in a variable is caught as well as one written in className.
 
-// Arbitrary variants that select state are fine; the ones that invent a breakpoint are not.
-const VALUE_VARIANT = /^@?(min|max)-[[(]/;
+// Arbitrary variants that select state are fine. The ones that invent a breakpoint, a
+// container query or any other at rule are not.
+const VALUE_VARIANT = /^(@?(min|max)-[[(]|\[@)/;
 const ARBITRARY = /^[a-z][a-z0-9-]*-(\[[^\s]+\]|\([^\s]+\))(\/.+)?$/;
 const ARBITRARY_MODIFIER = /^[a-z][a-z0-9-]*\/(\[[^\s]+\]|\([^\s]+\))$/;
 const ARBITRARY_PROPERTY = /^\[[a-z-]+:[^\s]+\]$/;
-// Bare numbers outside a scale. Zero is allowed: it removes a line or a delay, it is not a size.
-const BARE_DURATION = /^duration-[1-9]\d*$/;
-const BARE_DELAY = /^delay-[1-9]\d*$/;
-const BARE_STROKE =
-  /^(border(-[xytrblse])?|divide-[xy]|outline|outline-offset|ring|ring-offset|inset-ring)-[1-9]\d*$/;
-// Full opacity and none are the measured colour or nothing; anything between is not measured.
-const BARE_OPACITY = /^(backdrop-)?opacity-([1-9]\d?)$/;
+// Every bare number pattern takes decimals too, because Tailwind compiles opacity-2.5.
+const NUMBER = String.raw`(?<n>\d+(\.\d+)?)`;
+const bare = (prefix: string) => new RegExp(`^(${prefix})-${NUMBER}$`);
+// Zero is allowed for lengths and delays: it removes a line or a delay, it is not a size.
+const BARE_DURATION = bare('duration');
+const BARE_DELAY = bare('delay');
+const BARE_STROKE = bare(
+  'border(-[xytrblse])?|divide-[xy]|outline|ring|inset-ring|decoration|underline-offset|stroke',
+);
+const BARE_OFFSET = bare('outline-offset|ring-offset');
+const BARE_OPACITY = bare('(backdrop-)?opacity');
 // A colour with an opacity modifier: bg-ink/50. Fractions such as w-1/2 end in a digit.
-const COLOR_OPACITY = /^[a-z]+(-[a-z]+)+\/\d+$/;
+const COLOR_OPACITY = new RegExp(`^[a-z]+(-[a-z]+)+\\/${NUMBER}$`);
+// Filters that change colour. Each has one identity value that leaves the colour alone.
+const FILTER = new RegExp(
+  `^(backdrop-)?(?<name>brightness|contrast|saturate|grayscale|invert|sepia|hue-rotate)(-${NUMBER})?$`,
+);
+const FILTER_IDENTITY: Record<string, number> = {
+  brightness: 100,
+  contrast: 100,
+  saturate: 100,
+  grayscale: 0,
+  invert: 0,
+  sepia: 0,
+  'hue-rotate': 0,
+};
+const BARE_LAYER = bare('z');
 
 // Splits on ":" outside brackets and parentheses, so data-[state=open]:p-4 keeps its variant.
 function parts(token: string): string[] {
@@ -40,7 +58,11 @@ function parts(token: string): string[] {
   return out;
 }
 
-export type Problem = 'arbitrary' | 'duration' | 'delay' | 'stroke' | 'opacity';
+export type Problem =
+  'arbitrary' | 'duration' | 'delay' | 'stroke' | 'offset' | 'opacity' | 'filter' | 'layer';
+
+const value = (match: RegExpExecArray | null) =>
+  match?.groups?.['n'] === undefined ? null : Number(match.groups['n']);
 
 export function classify(token: string): Problem | null {
   const segments = parts(token);
@@ -48,11 +70,25 @@ export function classify(token: string): Problem | null {
   if (segments.some((v) => VALUE_VARIANT.test(v))) return 'arbitrary';
   if (ARBITRARY_PROPERTY.test(utility)) return 'arbitrary';
   if (ARBITRARY.test(utility) || ARBITRARY_MODIFIER.test(utility)) return 'arbitrary';
-  if (BARE_DURATION.test(utility)) return 'duration';
-  if (BARE_DELAY.test(utility)) return 'delay';
-  if (BARE_STROKE.test(utility)) return 'stroke';
-  if (BARE_OPACITY.test(utility)) return 'opacity';
-  if (COLOR_OPACITY.test(utility)) return 'opacity';
+  const nonZero = (pattern: RegExp) => {
+    const n = value(pattern.exec(utility));
+    return n !== null && n !== 0;
+  };
+  if (nonZero(BARE_DURATION)) return 'duration';
+  if (nonZero(BARE_DELAY)) return 'delay';
+  if (nonZero(BARE_STROKE)) return 'stroke';
+  if (nonZero(BARE_OFFSET)) return 'offset';
+  // Full opacity and none are the measured colour or nothing; anything between is not measured.
+  const opacity = value(BARE_OPACITY.exec(utility)) ?? value(COLOR_OPACITY.exec(utility));
+  if (opacity !== null && opacity !== 0 && opacity !== 100) return 'opacity';
+  const filter = FILTER.exec(utility);
+  if (filter !== null) {
+    const name = filter.groups?.['name'] ?? '';
+    // A bare grayscale or invert is the full effect.
+    const amount = value(filter) ?? 100;
+    if (amount !== FILTER_IDENTITY[name]) return 'filter';
+  }
+  if (BARE_LAYER.test(utility)) return 'layer';
   return null;
 }
 
@@ -69,9 +105,13 @@ export const noArbitraryValues: Rule.RuleModule = {
       delay:
         "'{{token}}' is a raw delay outside the motion tokens. Sequence with duration tokens, or add a token.",
       stroke:
-        "'{{token}}' is a raw line width. Use border or outline, which read the stroke tokens.",
+        "'{{token}}' is a raw line width. Use border or outline, which read the stroke tokens; icons draw with --dr-stroke-icon.",
+      offset: "'{{token}}' is a raw focus offset. Use focus-ring, which reads the focus tokens.",
       opacity:
-        "'{{token}}' makes a colour the contrast tests never measured. Use a colour role as it is.",
+        "'{{token}}' makes a colour the contrast tests never measured. Use a colour role as it is. Disabled controls use the disabled colours.",
+      filter:
+        "'{{token}}' changes colours the contrast tests never measured. Use a colour role as it is.",
+      layer: "'{{token}}' is a raw stacking order. Use z-base, z-raised, z-overlay or z-toast.",
     },
   },
   create(context) {

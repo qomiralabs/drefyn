@@ -31,6 +31,10 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     // Zero is not a size, and full or no opacity is the measured colour or nothing.
     `const c = 'border-0 outline-0 opacity-0 opacity-100 delay-0 duration-0';`,
     `const c = 'border border-rule outline outline-focus-ring ring-accent-ink';`,
+    // Full colour is the measured colour, and the identity filters change nothing.
+    `const c = 'bg-ink/100 text-ink/100 brightness-100 contrast-100 saturate-100 grayscale-0';`,
+    `const c = 'z-auto z-base z-overlay focus-visible:focus-ring stroke-0 decoration-0';`,
+    `const c = 'decoration-rule underline-offset-auto stroke-ink';`,
     // Plain prose and data are not class lists.
     `const s = 'Look at [this] and a-b';`,
     `const list = [1, 2, 3];`,
@@ -59,14 +63,58 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       'border-t-4',
       'divide-y-2',
       'outline-2',
-      'outline-offset-4',
       'ring-1',
-      'ring-offset-2',
+      'decoration-2',
+      'decoration-1.5',
+      'underline-offset-4',
+      'stroke-2',
+      'stroke-1.5',
     ].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'stroke' as const, data: { token } }],
     })),
-    ...['opacity-50', 'hover:opacity-80', 'backdrop-opacity-40'].map((token) => ({
+    ...['outline-offset-2', 'focus-visible:outline-offset-4', 'ring-offset-2'].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'offset' as const, data: { token } }],
+    })),
+    ...[
+      'brightness-50',
+      'contrast-125',
+      'saturate-50',
+      'backdrop-brightness-75',
+      'hue-rotate-15',
+      'grayscale-50',
+      'grayscale',
+      'invert',
+      'sepia-30',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'filter' as const, data: { token } }],
+    })),
+    ...['z-10', 'z-0', '-z-10', 'hover:z-50'].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'layer' as const, data: { token } }],
+    })),
+    ...[
+      '[@media(min-width:700px)]:p-4',
+      '[@container(min-width:30rem)]:p-4',
+      '[@supports(display:grid)]:grid',
+      '@min-[30rem]:p-4',
+      'max-[40rem]:p-4',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [arbitrary(token)],
+    })),
+    ...[
+      'opacity-50',
+      'hover:opacity-80',
+      'backdrop-opacity-40',
+      'opacity-2.5',
+      'opacity-12.5',
+      'bg-ink/12.5',
+      'bg-ink/50',
+      'text-state-broken-text/0.5',
+    ].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'opacity' as const, data: { token } }],
     })),
@@ -78,6 +126,15 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       code: `const c = 'duration-200';`,
       errors: [{ messageId: 'duration', data: { token: 'duration-200' } }],
     },
+    ...(
+      [
+        ['duration-150.5', 'duration'],
+        ['delay-7.5', 'delay'],
+      ] as const
+    ).map(([token, messageId]) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId, data: { token } }],
+    })),
   ],
 });
 
