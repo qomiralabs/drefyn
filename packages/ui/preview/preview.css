@@ -206,9 +206,10 @@ a:hover {
 
 /* Contrast */
 
+/* One mode per row: with the wash over three surfaces each table is seven columns wide. */
 .matrices {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 4)), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--dr-space-48);
 }
 
