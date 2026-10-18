@@ -28,7 +28,9 @@ export async function checkTrackedFiles(cwd: string): Promise<FilesResult> {
   let skippedBinary = 0;
   for (const entry of entries) {
     findings.push(...checkPath(entry.path));
-    const bytes = blobs.get(entry.oid) ?? new Uint8Array();
+    const bytes = blobs.get(entry.oid);
+    // Scanning a missing blob as empty would pass content that was never checked.
+    if (bytes === undefined) throw new Error(`no blob was read for ${entry.path} (${entry.oid})`);
     if (isBinary(bytes)) {
       skippedBinary += 1;
       continue;
