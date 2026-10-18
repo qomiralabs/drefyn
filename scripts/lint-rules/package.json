@@ -1,0 +1,15 @@
+{
+  "name": "@drefyn/lint-rules",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "vitest run --coverage"
+  }
+}

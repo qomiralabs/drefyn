@@ -10,7 +10,7 @@
   "rules": [
     {
       "reviewer": "security-reviewer",
-      "prefixes": [".github/", "scripts/", "deploy/"],
+      "prefixes": [".github/", "scripts/", "deploy/", "packages/egress/"],
       "names": [
         "renovate.json",
         "package.json",
@@ -22,6 +22,16 @@
         ".pnpmfile.cjs",
         "turbo.json",
         "eslint.config.js",
+        "eslint.config.mjs",
+        "eslint.config.cjs",
+        "eslint.config.ts",
+        "eslint.config.mts",
+        "eslint.config.cts",
+        "guard.config.js",
+        ".gitmodules",
+        ".gitattributes",
+        ".gitignore",
+        "LICENSE",
         "vitest.shared.ts",
         ".prettierrc.json",
         ".prettierignore"
