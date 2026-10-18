@@ -6,16 +6,19 @@ declare const cacheKeyBrand: unique symbol;
 
 export type CacheKey = string & { readonly [cacheKeyBrand]: true };
 
-export type CacheScope = 'page' | 'nav' | 'search' | 'retrieval' | 'render' | 'asset';
-
-const SCOPES: ReadonlySet<string> = new Set<CacheScope>([
+// One list for the type and the run time check, so they cannot drift apart.
+const CACHE_SCOPES = Object.freeze([
   'page',
   'nav',
   'search',
   'retrieval',
   'render',
   'asset',
-]);
+] as const);
+
+export type CacheScope = (typeof CACHE_SCOPES)[number];
+
+const SCOPES: ReadonlySet<string> = new Set(CACHE_SCOPES);
 
 // Different labels keep a cache key hash and a surrogate key hash apart for the same input.
 const CACHE_DOMAIN = 'drefyn cache key v1\u0000';
@@ -27,7 +30,11 @@ function tenantPrefix(tenant: unknown, scope: unknown): string {
   if (typeof tenant !== 'object' || tenant === null) {
     throw new TenancyError('TENANT_REF_INVALID');
   }
-  const { organizationId, projectId } = tenant as Partial<Record<keyof TenantRef, unknown>>;
+  // Own properties only: an id inherited from a polluted prototype must read as missing.
+  const own = (name: keyof TenantRef): unknown =>
+    Object.hasOwn(tenant, name) ? (tenant as Record<keyof TenantRef, unknown>)[name] : undefined;
+  const organizationId = own('organizationId');
+  const projectId = own('projectId');
   assertUuid(organizationId);
   assertUuid(projectId);
   if (typeof scope !== 'string' || !SCOPES.has(scope)) {

@@ -17,11 +17,12 @@ IDs:
 
 - `OrganizationId`, `ProjectId`: branded UUID strings. A plain string does not typecheck as
   either, and one does not typecheck as the other.
-- `organizationId(value)`, `projectId(value)`: the only way to brand a string. The input must
-  be a canonical lowercase UUID (`8-4-4-4-12` hex, any 128 bit value); anything else throws
-  `ID_MALFORMED`. Uppercase is rejected, not lowercased, so one tenant has one spelling.
-- `IdKind`, `ID_KINDS`, `IdOf<K>`, `idOf(kind, value)`: the same for every kind. The kind is
-  the public prefix: `org`, `prj`, `usr`, `mem`, `key`, `nod`, `ver`, `ast`, `cmp`, `inc`,
+- `organizationId(value)`, `projectId(value)`, `idOf(kind, value)`: the only ways to brand a
+  string, alongside `parsePublicId`. The input must be a canonical lowercase UUID
+  (`8-4-4-4-12` hex, any 128 bit value); anything else throws `ID_MALFORMED`. Uppercase is
+  rejected, not lowercased, so one tenant has one spelling.
+- `IdKind`, `ID_KINDS`, `IdOf<K>`: the kinds `idOf` accepts and the branded type for each. The
+  kind is the public prefix: `org`, `prj`, `usr`, `mem`, `key`, `nod`, `ver`, `ast`, `cmp`, `inc`,
   `sub`, `whk`, `evt`, `crd`. `ID_KINDS` is frozen. Renaming a prefix breaks the public API.
 
 Refs:
