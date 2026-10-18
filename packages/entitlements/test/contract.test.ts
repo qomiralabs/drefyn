@@ -13,7 +13,7 @@ import {
   limitFor,
   limitInfo,
 } from '../src/index.ts';
-import type { FeatureKey, LimitKey, LimitOverrides, Tier } from '../src/index.ts';
+import type { CheckOptions, FeatureKey, LimitKey, LimitOverrides, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
 import { RUNS, caughtCode, expectEntitlementError } from './support/assert.ts';
 
@@ -93,6 +93,87 @@ describe('the overrides argument itself', () => {
     });
   }
 
+  class Contract {
+    readonly 'status.monitors' = 5000;
+  }
+  for (const [label, make] of [
+    ['a Map', () => new Map([['status.email_sends_per_month', 1]])],
+    ['an empty Map', () => new Map()],
+    ['a Date', () => new Date(0)],
+    ['an empty array', () => []],
+    ['an array of entries', () => [['status.monitors', 5000]]],
+    ['a class instance', () => new Contract()],
+    ['a boxed number', (): unknown => Object(5)],
+    ['a regular expression', () => /status/],
+  ] as const) {
+    it(`refuses ${label} in place of a map instead of treating it as none`, () => {
+      const error = expectEntitlementError(
+        () =>
+          limitFor('enterprise', 'status.email_sends_per_month', { overrides: overrides(make()) }),
+        'ENTITLEMENT_INVALID_OVERRIDE',
+      );
+      expect(error.limitKey).toBeUndefined();
+    });
+  }
+
+  // A dictionary made with Object.create(null) has no prototype to inherit from, which is
+  // exactly what an override map wants.
+  it('accepts a null prototype map', () => {
+    const map = Object.create(null) as Record<string, unknown>;
+    map['status.monitors'] = 5000;
+    expect(limitFor('enterprise', 'status.monitors', { overrides: overrides(map) })).toBe(5000);
+  });
+
+  it('refuses an own non enumerable entry, naming a known key', () => {
+    const hidden = {};
+    Object.defineProperty(hidden, 'org.seats', { value: 0, enumerable: false });
+    const error = expectEntitlementError(
+      () => limitFor('growth', 'org.seats', { overrides: overrides(hidden) }),
+      'ENTITLEMENT_INVALID_OVERRIDE',
+    );
+    expect(error.limitKey).toBe('org.seats');
+  });
+
+  it('refuses an own non enumerable entry under an unknown name, naming nothing', () => {
+    const hidden = {};
+    Object.defineProperty(hidden, 'bogus', { value: 1, enumerable: false });
+    const error = expectEntitlementError(
+      () => limitFor('growth', 'org.seats', { overrides: overrides(hidden) }),
+      'ENTITLEMENT_UNKNOWN_LIMIT',
+    );
+    expect(error.limitKey).toBeUndefined();
+  });
+
+  it('refuses a symbol keyed entry, naming nothing', () => {
+    const error = expectEntitlementError(
+      () =>
+        limitFor('growth', 'org.seats', {
+          overrides: overrides({ [Symbol('org.seats')]: UNLIMITED }),
+        }),
+      'ENTITLEMENT_UNKNOWN_LIMIT',
+    );
+    expect(error.limitKey).toBeUndefined();
+  });
+
+  // A getter could answer one value when checked and another when used; plain data only.
+  it('refuses an accessor entry without calling it', () => {
+    let calls = 0;
+    const tricky = {};
+    Object.defineProperty(tricky, 'status.monitors', {
+      enumerable: true,
+      get: () => {
+        calls += 1;
+        return 5000;
+      },
+    });
+    const error = expectEntitlementError(
+      () => limitFor('enterprise', 'status.monitors', { overrides: overrides(tricky) }),
+      'ENTITLEMENT_INVALID_OVERRIDE',
+    );
+    expect(error.limitKey).toBe('status.monitors');
+    expect(calls).toBe(0);
+  });
+
   it('treats an explicit undefined map as no overrides', () => {
     expect(limitFor('growth', 'status.monitors', { overrides: overrides(undefined) })).toBe(200);
   });
@@ -117,7 +198,88 @@ describe('the overrides argument itself', () => {
   });
 });
 
+describe('the options argument itself', () => {
+  for (const [label, value] of [
+    ['null', null],
+    ['a string', 'graceEligible'],
+    ['a number', 1],
+    ['true', true],
+    ['an array', []],
+    ['a Map', new Map([['graceEligible', true]])],
+  ] as const) {
+    it(`refuses ${label} as options on every call that takes them`, () => {
+      const options = value as unknown as CheckOptions;
+      for (const run of [
+        () => checkLimit('free', 'org.seats', 1, options),
+        () => limitFor('free', 'org.seats', options),
+        () => graceAllowance('free', 'status.email_sends_per_month', options),
+      ]) {
+        const error = expectEntitlementError(run, 'ENTITLEMENT_INVALID_OVERRIDE');
+        expect(error.limitKey).toBeUndefined();
+      }
+    });
+  }
+
+  it('accepts a null prototype options object', () => {
+    const options = Object.create(null) as { graceEligible?: boolean };
+    options.graceEligible = true;
+    expect(checkLimit('free', 'status.email_sends_per_month', 2500, options).status).toBe(
+      'allowed',
+    );
+  });
+
+  it('checks options after the key and before the usage', () => {
+    const bad = null as unknown as { readonly graceEligible?: boolean };
+    expectEntitlementError(
+      () => checkLimit('free', key('nope'), 1, bad),
+      'ENTITLEMENT_UNKNOWN_LIMIT',
+    );
+    expectEntitlementError(
+      () => checkLimit('free', 'org.seats', -1, bad),
+      'ENTITLEMENT_INVALID_OVERRIDE',
+    );
+  });
+});
+
 describe('floors', () => {
+  it('refuses a floor override of 0, since only UNLIMITED may remove the floor', () => {
+    for (const t of pricing.TIERS) {
+      if (t === 'self_hosted') continue;
+      const error = expectEntitlementError(
+        () =>
+          limitFor(t, 'status.check_interval_seconds', {
+            overrides: overrides({ 'status.check_interval_seconds': 0 }),
+          }),
+        'ENTITLEMENT_INVALID_OVERRIDE',
+      );
+      expect(error.limitKey).toBe('status.check_interval_seconds');
+    }
+    expectEntitlementError(
+      () =>
+        checkLimit('scale', 'status.check_interval_seconds', 1, {
+          overrides: overrides({ 'status.check_interval_seconds': -0 }),
+        }),
+      'ENTITLEMENT_INVALID_OVERRIDE',
+    );
+  });
+
+  it('accepts a floor override of 1 second, the shortest finite floor', () => {
+    expect(
+      limitFor('scale', 'status.check_interval_seconds', {
+        overrides: overrides({ 'status.check_interval_seconds': 1 }),
+      }),
+    ).toBe(1);
+  });
+
+  it('has no floor of 0 anywhere in the table', () => {
+    for (const t of pricing.TIERS) {
+      for (const k of pricing.LIMIT_KEYS) {
+        if (limitInfo(k).direction !== 'min') continue;
+        expect(limitFor(t, k), `${t} ${k}`).not.toBe(0);
+      }
+    }
+  });
+
   it('measures excess on a min key as how far below the floor the usage is', () => {
     expect(checkLimit('free', 'status.check_interval_seconds', 30)).toMatchObject({
       status: 'over_limit',

@@ -13,7 +13,7 @@ import {
   limitFor,
   limitInfo,
 } from '../src/index.ts';
-import type { FeatureKey, LimitKey, Tier } from '../src/index.ts';
+import type { FeatureKey, LimitKey, LimitValue, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
 import { RUNS, atLeastAsGenerous, caughtCode, isLimitValue } from './support/assert.ts';
 
@@ -42,6 +42,42 @@ const usageArb = fc.oneof(
   fc.constantFrom(...nearLimits).chain((n) => fc.integer({ min: Math.max(0, n - 2), max: n + 2 })),
   fc.integer({ min: 0, max: 2_000_000 }),
   fc.constantFrom(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1),
+);
+
+// cap plus floor(cap * 25 / 100), in bigint so it stays exact past the safe integer range.
+const ceilingOf = (cap: number): bigint => BigInt(cap) + (BigInt(cap) * 25n) / 100n;
+
+// A send key with a valid contract raise: anything from the table value up to the largest
+// safe integer, or unlimited. Caps near the top are drawn often, because that is where
+// cap * 25 stops being exact.
+const raisedSendArb = fc.tuple(tierArb, sendKeyArb).chain(([t, k]) => {
+  const base = limitFor(t, k);
+  const cap: fc.Arbitrary<LimitValue> =
+    base === UNLIMITED
+      ? fc.constant(UNLIMITED)
+      : fc.oneof(
+          fc.constant(UNLIMITED),
+          fc.integer({ min: base, max: Number.MAX_SAFE_INTEGER }),
+          fc.integer({ min: base, max: base + 1_000_000 }),
+          fc.integer({ min: Number.MAX_SAFE_INTEGER - 1_000_000, max: Number.MAX_SAFE_INTEGER }),
+        );
+  return cap.map((value) => ({ t, k, cap: value }));
+});
+
+// Usage anywhere in range, or within a few sends of the cap or of cap plus grace.
+const usageNear = (cap: LimitValue): fc.Arbitrary<number> => {
+  const max = BigInt(Number.MAX_SAFE_INTEGER);
+  const clamp = (n: bigint) => Number(n < 0n ? 0n : n > max ? max : n);
+  if (cap === UNLIMITED) return fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER });
+  return fc.oneof(
+    fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+    fc.integer({ min: -3, max: 3 }).map((d) => clamp(BigInt(cap) + BigInt(d))),
+    fc.integer({ min: -3, max: 3 }).map((d) => clamp(ceilingOf(cap) + BigInt(d))),
+  );
+};
+
+const raisedSendUsageArb = raisedSendArb.chain((cell) =>
+  usageNear(cell.cap).map((usage) => ({ ...cell, usage })),
 );
 
 describe('every limit is a non negative safe integer or the unlimited value', () => {
@@ -264,7 +300,31 @@ describe('send caps never allow a send past cap plus grace', () => {
         const cap = limitFor(t, k);
         if (checkLimit(t, k, usage, { graceEligible: true }).status !== 'allowed') return true;
         if (cap === UNLIMITED) return true;
-        return usage <= cap + Math.floor((cap * 25) / 100);
+        return BigInt(usage) <= ceilingOf(cap);
+      }),
+      RUNS,
+    );
+  });
+
+  it('holds for a grace eligible send under any valid override', () => {
+    fc.assert(
+      fc.property(raisedSendUsageArb, ({ t, k, cap, usage }) => {
+        const options = { overrides: { [k]: cap }, graceEligible: true };
+        const allowed = checkLimit(t, k, usage, options).status === 'allowed';
+        if (cap === UNLIMITED) return allowed;
+        // Exactly the sends up to cap plus grace, so neither side can drift.
+        return allowed === BigInt(usage) <= ceilingOf(cap);
+      }),
+      RUNS,
+    );
+  });
+
+  it('holds under any valid override for a send that is not grace eligible', () => {
+    fc.assert(
+      fc.property(raisedSendUsageArb, ({ t, k, cap, usage }) => {
+        const allowed = checkLimit(t, k, usage, { overrides: { [k]: cap } }).status === 'allowed';
+        if (cap === UNLIMITED) return allowed;
+        return allowed === usage <= cap;
       }),
       RUNS,
     );
@@ -289,13 +349,37 @@ describe('send caps never allow a send past cap plus grace', () => {
         (t, k) => {
           const cap = limitFor(t, k);
           if (cap === UNLIMITED || cap === 0) return true;
-          const ceiling = cap + (graceAllowance(t, k) as number);
+          const ceiling = ceilingOf(cap);
+          expect(BigInt(cap) + BigInt(graceAllowance(t, k) as number)).toBe(ceiling);
+          const eligible = { graceEligible: true } as const;
           return (
-            checkLimit(t, k, ceiling, { graceEligible: true }).status === 'allowed' &&
-            checkLimit(t, k, ceiling + 1, { graceEligible: true }).status !== 'allowed'
+            checkLimit(t, k, Number(ceiling), eligible).status === 'allowed' &&
+            checkLimit(t, k, Number(ceiling + 1n), eligible).status !== 'allowed'
           );
         },
       ),
+      RUNS,
+    );
+  });
+
+  it('uses the whole grace and not one send more under any valid override', () => {
+    fc.assert(
+      fc.property(raisedSendArb, ({ t, k, cap }) => {
+        const options = { overrides: { [k]: cap }, graceEligible: true };
+        const grace = graceAllowance(t, k, { overrides: options.overrides });
+        if (cap === UNLIMITED) return grace === UNLIMITED;
+        const ceiling = ceilingOf(cap);
+        expect(BigInt(cap) + BigInt(grace as number)).toBe(ceiling);
+        const top = BigInt(Number.MAX_SAFE_INTEGER);
+        // Past the safe range every representable usage is within the ceiling.
+        if (ceiling >= top) {
+          return checkLimit(t, k, Number.MAX_SAFE_INTEGER, options).status === 'allowed';
+        }
+        return (
+          checkLimit(t, k, Number(ceiling), options).status === 'allowed' &&
+          checkLimit(t, k, Number(ceiling + 1n), options).status === 'over_limit'
+        );
+      }),
       RUNS,
     );
   });

@@ -168,11 +168,27 @@ describe('raise only overrides', () => {
     expect(error.limitKey).toBeUndefined();
   });
 
-  it('ignores keys inherited through the prototype chain', () => {
+  // A map whose prototype is anything but Object.prototype or null is not a plain record,
+  // so it is refused before any of its keys, own or inherited, are read.
+  it('refuses a map that inherits from another object', () => {
     const inherited = Object.create({ 'status.monitors': 5 }) as Record<string, unknown>;
-    expect(limitFor('enterprise', 'status.monitors', { overrides: overrides(inherited) })).toBe(
-      limitFor('enterprise', 'status.monitors'),
+    const error = expectEntitlementError(
+      () => limitFor('enterprise', 'status.monitors', { overrides: overrides(inherited) }),
+      'ENTITLEMENT_INVALID_OVERRIDE',
     );
+    expect(error.limitKey).toBeUndefined();
+  });
+
+  it('ignores keys inherited from a polluted Object.prototype', () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    proto['status.monitors'] = 5;
+    try {
+      expect(limitFor('enterprise', 'status.monitors', { overrides: overrides({}) })).toBe(
+        limitFor('enterprise', 'status.monitors'),
+      );
+    } finally {
+      delete proto['status.monitors'];
+    }
   });
 
   it('does not mutate the overrides it is given', () => {
@@ -214,6 +230,10 @@ describe('override properties', () => {
         const base = limitFor(t, k);
         const options = { overrides: overrides({ [k]: value }) };
         const code = caughtCode(() => limitFor(t, k, options));
+        // A floor of 0 would mean no floor; only UNLIMITED may say that.
+        if (limitInfo(k).direction === 'min' && value === 0) {
+          return code === 'ENTITLEMENT_INVALID_OVERRIDE';
+        }
         if (atLeastAsGenerous(limitInfo(k).direction, value, base)) {
           return code === undefined && limitFor(t, k, options) === value;
         }
