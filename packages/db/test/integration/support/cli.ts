@@ -1,7 +1,6 @@
 import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll } from 'vitest';
 import { defaultMigrationsDir } from '../../../src/constants.ts';
 import { start, type Finished, type Running } from './process.ts';
 import { packageRoot } from './stack.ts';
@@ -54,17 +53,11 @@ export function migration(up: string, down: string): string {
 }
 
 const dirs: string[] = [];
-let cleanup = false;
 
-// Registered on first use, because the global setup imports this module outside any file.
-function track(dir: string) {
-  if (!cleanup) {
-    cleanup = true;
-    afterAll(() => {
-      for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-    });
-  }
-  dirs.push(dir);
+// Called from the afterAll that databases() registers at the top of each file; a hook
+// registered from inside a test body would never run.
+export function removeFixtureDirs(): void {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
 // A copy of the shipped migrations plus fixture files, which sort after them.
@@ -73,7 +66,7 @@ export function fixtureMigrations(
   options: { shipped?: boolean } = {},
 ): string {
   const dir = mkdtempSync(join(tmpdir(), 'drefyn-db-it-'));
-  track(dir);
+  dirs.push(dir);
   if (options.shipped !== false && existsSync(defaultMigrationsDir)) {
     cpSync(defaultMigrationsDir, dir, { recursive: true });
   }

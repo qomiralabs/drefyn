@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, inject } from 'vitest';
+import { removeFixtureDirs } from './cli.ts';
 import { superuser, urlFor } from './stack.ts';
 
 // The bootstrapped database every template starts from.
@@ -68,6 +69,7 @@ export function newName(label: string): string {
 export function databases() {
   const created: string[] = [];
   afterAll(async () => {
+    removeFixtureDirs();
     for (const name of created.splice(0)) await dropDatabase(name);
   });
   return {
