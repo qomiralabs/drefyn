@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { finished } from 'node:stream';
 
 export interface IndexEntry {
   mode: string;
@@ -21,26 +22,46 @@ export function runGit(cwd: string, args: string[], input?: string): Promise<Buf
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
+    const name = args[0] ?? '';
+    let failed = false;
+    let exitCode: number | null | undefined;
+    // Stays false until stdin is flushed or has failed. When git exits, Node destroys
+    // stdin, and a write still pending then fails without an error event, so only
+    // finished() sees it. Settling on close or on an error listener would count a run
+    // where git dropped its input as a success.
+    let inputDone = input === undefined || child.stdin === null;
     let inputError: Error | undefined;
-    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk));
-    child.stderr?.on('data', (chunk: Buffer) => err.push(chunk));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      const name = args[0] ?? '';
-      if (code !== 0) {
+
+    const settle = (): void => {
+      if (failed || exitCode === undefined || !inputDone) return;
+      if (exitCode !== 0) {
         const stderr = Buffer.concat(err).toString('utf8').trim();
-        reject(new Error(`git ${name} failed (exit ${code ?? 'signal'}): ${stderr}`));
+        reject(new Error(`git ${name} failed (exit ${exitCode ?? 'signal'}): ${stderr}`));
       } else if (inputError !== undefined) {
         reject(new Error(`git ${name} closed its input early: ${inputError.message}`));
       } else {
         resolve(Buffer.concat(out));
       }
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr?.on('data', (chunk: Buffer) => err.push(chunk));
+    child.on('error', (error) => {
+      failed = true;
+      reject(error);
+    });
+    child.on('close', (code: number | null) => {
+      exitCode = code;
+      settle();
     });
     if (input !== undefined && child.stdin !== null) {
-      // git can exit before reading all of its input, for example on a bad argument. The
-      // exit code is the real result, so a broken pipe is recorded here, not thrown.
-      child.stdin.on('error', (error) => {
-        inputError = error;
+      // git can exit before reading all of its input, for example on a bad argument. A
+      // broken pipe, a write cancelled at exit or a premature close is recorded rather
+      // than thrown, so a non zero exit still reports git's own error.
+      finished(child.stdin, { readable: false }, (error) => {
+        inputError = error ?? undefined;
+        inputDone = true;
+        settle();
       });
       child.stdin.end(input);
     }
