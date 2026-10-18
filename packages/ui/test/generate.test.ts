@@ -95,9 +95,29 @@ describe('tokens.css', () => {
     expect(root.declarations.get('--dr-stroke-gutter')).toBe('4px');
     expect(root.declarations.get('--dr-page-max')).toBe('1200px');
     expect(root.declarations.get('--dr-gutter')).toBe('1.5rem');
-    expect(findRule(rules, ':root', '(max-width: 40rem)').declarations.get('--dr-gutter')).toBe(
+    // Strictly below, so at exactly 40rem the wide gutter and Tailwind's sm apply together.
+    expect(findRule(rules, ':root', '(width < 40rem)').declarations.get('--dr-gutter')).toBe(
       '1rem',
     );
+    expect(css).not.toContain('max-width: 40rem');
+  });
+
+  it('ships the focus offset, the stacking layers and the docs columns', () => {
+    expect(root.declarations.get('--dr-stroke-focus')).toBe('2px');
+    expect(root.declarations.get('--dr-stroke-focus-offset')).toBe('2px');
+    const layers = ['base', 'raised', 'overlay', 'toast'].map((k) =>
+      Number(root.declarations.get(`--dr-layer-${k}`)),
+    );
+    expect(layers).toEqual([...layers].sort((a, b) => a - b));
+    expect(new Set(layers).size).toBe(4);
+    expect(root.declarations.get('--dr-docs-nav')).toBe('240px');
+    expect(root.declarations.get('--dr-docs-content')).toBe('640px');
+    expect(root.declarations.get('--dr-docs-toc')).toBe('220px');
+  });
+
+  it('sets tabular figures on number elements without adding specificity', () => {
+    const base = findRule(rules, ':where(time, data, output, td, th, [data-numeric])');
+    expect(base.declarations.get('font-variant-numeric')).toBe('tabular-nums');
   });
 
   it('ships every family the source declares', () => {
@@ -188,6 +208,8 @@ describe('tokens.dtcg.json', () => {
     expect((byPath.get('dark.surface.ground')?.['$value'] as { hex: string }).hex).toBe('#141210');
     expect(byPath.get('space.16')?.['$value']).toEqual({ value: 1, unit: 'rem' });
     expect(byPath.get('duration.move-base')?.['$value']).toEqual({ value: 180, unit: 'ms' });
+    expect(byPath.get('layout.docs-content')?.['$value']).toEqual({ value: 640, unit: 'px' });
+    expect(byPath.get('layer.overlay')?.['$type']).toBe('number');
   });
 });
 
@@ -218,5 +240,12 @@ describe('ECharts themes', () => {
     expect(dark.valueAxis.axisLabel.color).toBe(tokens.color.text.secondary.dark);
     expect(dark.tooltip.backgroundColor).toBe(tokens.color.surface.raised.dark);
     expect(light.line.emphasis.lineStyle.color).toBe(tokens.color.accent.ink.light);
+  });
+
+  it('animates with the motion tokens instead of the ECharts defaults', () => {
+    for (const theme of [light, dark]) {
+      expect(theme.animationDuration).toBe(tokens.motion.duration.moveSlow.ms);
+      expect(theme.animationDurationUpdate).toBe(tokens.motion.duration.base.ms);
+    }
   });
 });

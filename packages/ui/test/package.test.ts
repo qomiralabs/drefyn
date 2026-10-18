@@ -37,7 +37,9 @@ describe('package manifest', () => {
   it('exposes the typed tokens, the contrast helpers, the head script and the chart themes', () => {
     expect(Object.keys(ui).sort()).toEqual(
       [
+        'chartMotion',
         'colorOf',
+        'cubicBezier',
         'composite',
         'contrast',
         'decorativeRoles',

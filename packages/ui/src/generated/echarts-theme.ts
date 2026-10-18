@@ -7,6 +7,10 @@ const light = {
     "#475569"
   ],
   "backgroundColor": "transparent",
+  "animationDuration": 240,
+  "animationDurationUpdate": 180,
+  "animationEasing": "cubicOut",
+  "animationEasingUpdate": "cubicOut",
   "textStyle": {
     "color": "#1E293B",
     "fontFamily": "\"Inter\", \"Inter fallback\", ui-sans-serif, system-ui, sans-serif"
@@ -202,6 +206,10 @@ const dark = {
     "#A8A29E"
   ],
   "backgroundColor": "transparent",
+  "animationDuration": 240,
+  "animationDurationUpdate": 180,
+  "animationEasing": "cubicOut",
+  "animationEasingUpdate": "cubicOut",
   "textStyle": {
     "color": "#D6D3D1",
     "fontFamily": "\"Inter\", \"Inter fallback\", ui-sans-serif, system-ui, sans-serif"

@@ -39,8 +39,9 @@ const hasRule = (css: string, cls: string) =>
 
 // The declarations of one class's rule, or undefined when Tailwind made no rule for it.
 function ruleBody(css: string, cls: string): string | undefined {
-  const match = new RegExp(`${escapeRegExp(selector(cls))}\\s*\\{([^}]*)\\}`).exec(css);
-  return match?.[1];
+  // A variant adds its pseudo class after the escaped name: .focus-visible\:x:focus-visible.
+  const pattern = `${escapeRegExp(selector(cls))}(:[a-z-]+)*\\s*\\{([^}]*)\\}`;
+  return new RegExp(pattern).exec(css)?.[2];
 }
 
 const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
@@ -122,6 +123,36 @@ describe('Tailwind theme', () => {
       expect(body, cls).toMatch(/(^|[^-])color:/);
       expect(body, cls).not.toMatch(/font-size:/);
     }
+  });
+
+  it('ships one focus-ring utility that reads the focus tokens', async () => {
+    const css = await build(['focus-visible:focus-ring']);
+    const body = ruleBody(css, 'focus-visible:focus-ring');
+    expect(body).toMatch(/outline: var\(--dr-stroke-focus\) solid var\(--dr-focus-ring\)/);
+    expect(body).toMatch(/outline-offset: var\(--dr-stroke-focus-offset\)/);
+  });
+
+  it('maps stacking and docs column utilities to the layout tokens', async () => {
+    const css = await build(['z-base', 'z-raised', 'z-overlay', 'z-toast', 'w-docs-content']);
+    for (const k of ['base', 'raised', 'overlay', 'toast']) {
+      expect(ruleBody(css, `z-${k}`)).toMatch(new RegExp(`z-index: var\\(--dr-layer-${k}\\)`));
+    }
+    expect(ruleBody(css, 'w-docs-content')).toMatch(/width: var\(--dr-docs-content\)/);
+  });
+
+  it('keeps plain transition utilities from moving things under reduced motion', async () => {
+    const css = await build(['transition', 'transition-all', 'transition-transform']);
+    const at = css.indexOf('@media (prefers-reduced-motion: reduce)');
+    expect(at).toBeGreaterThan(-1);
+    const block = css.slice(at, css.indexOf('}', css.indexOf('{', css.indexOf('{', at) + 1)));
+    expect(block).toMatch(/\.transition,\s*\.transition-all,\s*\.transition-transform/);
+    const props = /transition-property:([^;]*);/.exec(block)?.[1] ?? '';
+    expect(props).toMatch(/opacity/);
+    for (const moving of ['transform', 'translate', 'scale', 'rotate']) {
+      expect(props, moving).not.toMatch(new RegExp(`\\b${moving}\\b`));
+    }
+    // Unlayered, so it wins over Tailwind's utilities layer whatever the order.
+    expect(css.slice(0, at)).not.toMatch(/@layer[^{]*\{[^}]*$/);
   });
 
   it('still compiles bare numbers and brackets, which is why the lint rule rejects them', async () => {

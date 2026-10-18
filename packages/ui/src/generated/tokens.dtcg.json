@@ -1175,6 +1175,13 @@
         "unit": "px"
       }
     },
+    "focus-offset": {
+      "$type": "dimension",
+      "$value": {
+        "value": 2,
+        "unit": "px"
+      }
+    },
     "icon": {
       "$type": "dimension",
       "$value": {
@@ -1296,6 +1303,45 @@
       "$type": "number",
       "$description": "Characters per line",
       "$value": 66
+    },
+    "docs-nav": {
+      "$type": "dimension",
+      "$value": {
+        "value": 240,
+        "unit": "px"
+      }
+    },
+    "docs-content": {
+      "$type": "dimension",
+      "$value": {
+        "value": 640,
+        "unit": "px"
+      }
+    },
+    "docs-toc": {
+      "$type": "dimension",
+      "$value": {
+        "value": 220,
+        "unit": "px"
+      }
+    }
+  },
+  "layer": {
+    "base": {
+      "$type": "number",
+      "$value": 0
+    },
+    "raised": {
+      "$type": "number",
+      "$value": 10
+    },
+    "overlay": {
+      "$type": "number",
+      "$value": 20
+    },
+    "toast": {
+      "$type": "number",
+      "$value": 30
     }
   }
 }

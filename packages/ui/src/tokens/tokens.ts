@@ -157,7 +157,12 @@ const space = {
 
 // Pixels, not rem: corners and lines should not grow with text.
 const radius = { none: 0, xs: 2, sm: 4, md: 6, full: 9999 } as const;
-const stroke = { hairline: 1, focus: 2, icon: 1.5, gutter: 4 } as const;
+// The gutter is the status gutter beside a docs section, as wide as the brand's status rule.
+// The focus offset keeps the ring off the control's own edge.
+const stroke = { hairline: 1, focus: 2, focusOffset: 2, icon: 1.5, gutter: 4 } as const;
+
+// Stacking order, named by job. Gaps of ten leave room without renumbering.
+const layer = { base: 0, raised: 10, overlay: 20, toast: 30 } as const;
 
 export interface Duration {
   ms: number;
@@ -201,6 +206,8 @@ const layout = {
   // Below this width the gutter tightens. Tailwind's sm breakpoint is the same width.
   compactBelow: 640,
   measure: 66, // ch
+  // The docs site's three columns: navigation, reading, on this page.
+  docs: { nav: 240, content: 640, toc: 220 },
 } as const;
 
 export const tokens = {
@@ -213,6 +220,7 @@ export const tokens = {
   space,
   radius,
   stroke,
+  layer,
   motion,
   layout,
 } as const;

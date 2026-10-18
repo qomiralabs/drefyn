@@ -122,8 +122,13 @@
   --dr-radius-full: 9999px;
   --dr-stroke-hairline: 1px;
   --dr-stroke-focus: 2px;
+  --dr-stroke-focus-offset: 2px;
   --dr-stroke-icon: 1.5px;
   --dr-stroke-gutter: 4px;
+  --dr-layer-base: 0;
+  --dr-layer-raised: 10;
+  --dr-layer-overlay: 20;
+  --dr-layer-toast: 30;
   --dr-duration-fast: 120ms;
   --dr-duration-base: 180ms;
   --dr-duration-slow: 240ms;
@@ -135,9 +140,15 @@
   --dr-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --dr-distance-enter: 4px;
   --dr-page-max: 1200px;
+  --dr-docs-nav: 240px;
+  --dr-docs-content: 640px;
+  --dr-docs-toc: 220px;
   --dr-gutter: 1.5rem;
 }
-@media (max-width: 40rem) {
+:where(time, data, output, td, th, [data-numeric]) {
+  font-variant-numeric: tabular-nums;
+}
+@media (width < 40rem) {
   :root {
     --dr-gutter: 1rem;
   }

@@ -42,6 +42,19 @@ const GENERIC_FAMILIES = new Set([
 
 type Entry = [name: string, value: string];
 
+// What may still fade when the reader asks for reduced motion: colour, opacity and shadow.
+const REDUCED_TRANSITION = [
+  'color',
+  'background-color',
+  'border-color',
+  'outline-color',
+  'text-decoration-color',
+  'fill',
+  'stroke',
+  'opacity',
+  'box-shadow',
+];
+
 const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const rem = (px: number) => (px === 0 ? '0' : `${px / 16}rem`);
 const px = (n: number) => (n === 0 ? '0' : `${n}px`);
@@ -102,7 +115,8 @@ function sharedEntries(t: Tokens): Entry[] {
   entries.push(['--dr-measure', `${t.layout.measure}ch`]);
   for (const [k, v] of Object.entries(t.space)) entries.push([`--dr-space-${k}`, rem(v)]);
   for (const [k, v] of Object.entries(t.radius)) entries.push([`--dr-radius-${k}`, px(v)]);
-  for (const [k, v] of Object.entries(t.stroke)) entries.push([`--dr-stroke-${k}`, px(v)]);
+  for (const [k, v] of Object.entries(t.stroke)) entries.push([`--dr-stroke-${kebab(k)}`, px(v)]);
+  for (const [k, v] of Object.entries(t.layer)) entries.push([`--dr-layer-${k}`, String(v)]);
   for (const [k, d] of Object.entries(t.motion.duration)) {
     entries.push([`--dr-duration-${kebab(k)}`, `${d.ms}ms`]);
   }
@@ -113,6 +127,7 @@ function sharedEntries(t: Tokens): Entry[] {
     entries.push([`--dr-distance-${kebab(k)}`, `${v}px`]);
   }
   entries.push(['--dr-page-max', px(t.layout.pageMax)]);
+  for (const [k, v] of Object.entries(t.layout.docs)) entries.push([`--dr-docs-${k}`, px(v)]);
   entries.push(['--dr-gutter', rem(t.layout.gutter.wide)]);
   return entries;
 }
@@ -166,7 +181,12 @@ export function renderTokensCss(t: Tokens = source): string {
       ...declarations(modeEntries(t, 'light')),
       ...declarations(sharedEntries(t)),
     ]),
-    `@media (max-width: ${rem(t.layout.compactBelow)}) {\n`,
+    // Numbers line up in tables, times and counters. :where keeps it overridable.
+    block(':where(time, data, output, td, th, [data-numeric])', [
+      'font-variant-numeric: tabular-nums',
+    ]),
+    // Strictly below: Tailwind's sm starts at the same width, and both must not apply at once.
+    `@media (width < ${rem(t.layout.compactBelow)}) {\n`,
     block(':root', [`--dr-gutter: ${rem(t.layout.gutter.compact)}`], '  '),
     '}\n',
     // Written twice: the media block follows the system with JS off, the attribute lets a
@@ -206,6 +226,10 @@ export function renderTailwindCss(t: Tokens = source): string {
     );
   }
   for (const k of Object.keys(t.weight)) lines.push(`--font-weight-${k}: var(--dr-weight-${k})`);
+  for (const k of Object.keys(t.layer)) lines.push(`--z-index-${k}: var(--dr-layer-${k})`);
+  for (const k of Object.keys(t.layout.docs)) {
+    lines.push(`--container-docs-${k}: var(--dr-docs-${k})`);
+  }
   for (const k of Object.keys(t.shadow)) lines.push(`--shadow-${k}: var(--dr-shadow-${k})`);
   for (const k of Object.keys(t.motion.ease)) {
     lines.push(`--ease-${kebab(k)}: var(--dr-ease-${kebab(k)})`);
@@ -231,6 +255,21 @@ export function renderTailwindCss(t: Tokens = source): string {
     '   utilities exist. Utilities read the --dr variables, so dark mode needs no variants. */\n',
     block('@theme', ['--*: initial']),
     block('@theme inline', lines),
+    // The one way to draw focus, so no component types its own width or offset.
+    block('@utility focus-ring', [
+      'outline: var(--dr-stroke-focus) solid var(--dr-focus-ring)',
+      'outline-offset: var(--dr-stroke-focus-offset)',
+    ]),
+    // Tailwind's transition list includes transform, so a plain transition would still
+    // move things for the reduced fade time. Under reduced motion only colour and opacity
+    // fade. Left unlayered so it wins over the utilities layer.
+    '@media (prefers-reduced-motion: reduce) {\n',
+    block(
+      '.transition,\n  .transition-all,\n  .transition-transform',
+      [`transition-property: ${REDUCED_TRANSITION.join(', ')}`],
+      '  ',
+    ),
+    '}\n',
   ].join('');
 }
 
@@ -320,7 +359,11 @@ export function renderDtcg(t: Tokens = source): string {
       gutter: dimension(t.layout.gutter.wide / 16, 'rem'),
       'gutter-compact': dimension(t.layout.gutter.compact / 16, 'rem'),
       measure: { $type: 'number', $description: 'Characters per line', $value: t.layout.measure },
+      ...Object.fromEntries(
+        Object.entries(t.layout.docs).map(([k, v]) => [`docs-${k}`, dimension(v, 'px')]),
+      ),
     },
+    layer: map(t.layer, (v) => ({ $type: 'number', $value: v })),
   };
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
@@ -351,6 +394,12 @@ function echartsTheme(t: Tokens, mode: Mode) {
     // small multiples, never a categorical rainbow, so the palette stops at two.
     color: [c.text.ink[mode], c.text.secondary[mode]],
     backgroundColor: 'transparent',
+    // ECharts animates for a second by default. The theme is data, so the exact enter curve
+    // and the reduced motion switch come from chartMotion; cubicOut is the nearest built in.
+    animationDuration: t.motion.duration.moveSlow.ms,
+    animationDurationUpdate: t.motion.duration.base.ms,
+    animationEasing: 'cubicOut',
+    animationEasingUpdate: 'cubicOut',
     textStyle: { color: c.text.body[mode], fontFamily: sans },
     title: {
       textStyle: { color: c.text.ink[mode], fontFamily: sans, fontWeight: t.weight.strong },
