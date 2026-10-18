@@ -57,6 +57,19 @@ const nearValid = fc
   )
   .map(([expected, prefix, body]) => [expected, `${prefix}_${body}`] as const);
 
+// Valid bodies built from the alphabet itself, first symbol 0 to 7, with the expected kind
+// matching the prefix half the time, so the parse and the wrong type branches both run.
+const wellFormed = fc
+  .tuple(
+    fc.oneof(
+      kind.map((k) => [k, k] as const),
+      fc.tuple(kind, kind),
+    ),
+    fc.constantFrom(...Array.from(CROCKFORD.slice(0, 8))),
+    fc.string({ unit: fc.constantFrom(...Array.from(CROCKFORD)), minLength: 25, maxLength: 25 }),
+  )
+  .map(([[expected, prefix], first, rest]) => [expected, `${prefix}_${first}${rest}`] as const);
+
 describe('public ID codec (property)', () => {
   it('round trips every UUID for every kind and matches the public pattern', () => {
     fc.assert(
@@ -109,11 +122,18 @@ describe('public ID codec (property)', () => {
   });
 
   it('gives each id exactly one public form: whatever parses re-encodes to the same string', () => {
+    const seen = new Map<string, number>();
     fc.assert(
       fc.property(
-        fc.oneof(nearValid, fc.tuple(kind, fc.string({ unit: 'binary', maxLength: 40 })), mutated),
+        fc.oneof(
+          wellFormed,
+          nearValid,
+          fc.tuple(kind, fc.string({ unit: 'binary', maxLength: 40 })),
+          mutated,
+        ),
         ([k, value]) => {
           const code = codeOf(() => parsePublicId(k, value));
+          seen.set(code, (seen.get(code) ?? 0) + 1);
           if (code === 'no error') {
             expect(toPublicId(k, parsePublicId(k, value))).toBe(value);
           } else {
@@ -123,6 +143,10 @@ describe('public ID codec (property)', () => {
       ),
       runs,
     );
+    // Without these the property could pass by rejecting everything.
+    expect(seen.get('no error') ?? 0).toBeGreaterThan(0);
+    expect(seen.get('ID_WRONG_TYPE') ?? 0).toBeGreaterThan(0);
+    expect(seen.get('ID_MALFORMED') ?? 0).toBeGreaterThan(0);
   });
 
   it('never throws anything but a TenancyError on arbitrary input', () => {

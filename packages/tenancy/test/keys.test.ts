@@ -109,6 +109,17 @@ describe('cacheKey', () => {
     expectCode(() => cacheKey(orgOnly, 'page'), 'ID_MALFORMED');
   });
 
+  // An inherited id counts as missing, so a polluted prototype cannot fill in a tenant.
+  it('ignores ids inherited through the prototype', () => {
+    const inherited = Object.create(tenant()) as TenantRef;
+    expectCode(() => cacheKey(inherited, 'page'), 'ID_MALFORMED');
+    expectCode(() => surrogateKey(inherited, 'page'), 'ID_MALFORMED');
+    const halfInherited = Object.assign(Object.create({ projectId: projectId(PRJ) }) as object, {
+      organizationId: organizationId(ORG),
+    }) as TenantRef;
+    expectCode(() => cacheKey(halfInherited, 'page'), 'ID_MALFORMED');
+  });
+
   it.each([null, undefined, 'tenant', 42])('rejects a non object tenant %j', (value) => {
     expectCode(() => cacheKey(value as unknown as TenantRef, 'page'), 'TENANT_REF_INVALID');
     expectCode(() => surrogateKey(value as unknown as TenantRef, 'page'), 'TENANT_REF_INVALID');
@@ -146,12 +157,29 @@ describe('surrogateKey', () => {
     expect(cacheKey(tenant(), scope).startsWith(`${prefix}:`)).toBe(true);
   });
 
-  it('is safe in a Surrogate-Key header: visible ASCII, no spaces, at most 1024 bytes', () => {
+  it('is safe in a Surrogate-Key header: visible ASCII, no spaces, at most 130 bytes', () => {
     for (const id of [undefined, 'a b', 'a\tb\nc', '\u00e9\u{1f600}', 'x'.repeat(10_000), '']) {
       const key =
         id === undefined ? surrogateKey(tenant(), 'page') : surrogateKey(tenant(), 'page', id);
       expect(key).toMatch(/^[\x21-\x7e]+$/);
-      expect(Buffer.byteLength(key)).toBeLessThanOrEqual(1024);
+      expect(Buffer.byteLength(key)).toBeLessThanOrEqual(130);
+    }
+  });
+
+  const HASHED = /^v1:[0-9a-f-]{36}:[0-9a-f-]{36}:[a-z]+:([A-Za-z0-9_-]{43})$/;
+
+  it.each(SCOPES)('always hashes the id into 43 base64url characters for %s', (scope) => {
+    for (const id of ['', 'logo', 'docs/getting-started', 'a b', 'x'.repeat(10_000)]) {
+      const key = surrogateKey(tenant(), scope, id);
+      expect(key).toMatch(HASHED);
+      expect(Buffer.from(HASHED.exec(key)?.[1] ?? '', 'base64url')).toHaveLength(32);
+      expect(Buffer.byteLength(key)).toBeLessThanOrEqual(130);
+    }
+  });
+
+  it('never shows the id, even one that is already header safe', () => {
+    for (const id of ['docs/getting-started', 'getting-started', 'logo']) {
+      expect(surrogateKey(tenant(), 'page', id)).not.toContain(id);
     }
   });
 
