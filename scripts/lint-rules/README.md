@@ -59,18 +59,25 @@ string that holds a Tailwind class which mints a value outside the tokens:
 
 - arbitrary values and properties: `p-[13px]`, `text-[#ff0000]`, `p-(--x)`,
   `[mask-type:alpha]`
-- arbitrary breakpoints: `min-[700px]:p-16`
+- arbitrary breakpoints and at rule variants: `min-[700px]:p-16`,
+  `[@media(min-width:700px)]:p-4`, `[@container(min-width:30rem)]:p-4`
 - raw durations and delays, which skip reduced motion and the motion tokens:
   `duration-200`, `delay-150`
 - raw line widths, which skip the stroke tokens: `border-2`, `outline-2`, `ring-1`,
-  `outline-offset-4` (plain `border` and `outline` read the stroke tokens)
-- partial opacity, which makes colours nobody measured: `opacity-50`. Disabled
-  controls use the disabled colour tokens instead
-- colour opacity modifiers, for the same reason: `text-ink/60`
+  `decoration-2`, `underline-offset-4`, `stroke-2` (plain `border` and `outline` read the
+  stroke tokens)
+- raw focus offsets: `outline-offset-2`, `ring-offset-2`. Use `focus-ring`
+- partial opacity and colour opacity modifiers, which make colours nobody measured:
+  `opacity-50`, `opacity-2.5`, `text-ink/60`, `bg-ink/12.5`. Disabled controls use the
+  disabled colour tokens instead
+- colour changing filters: `brightness-50`, `saturate-50`, `grayscale`, `hue-rotate-15`
+- bare stacking orders: `z-10`. Use `z-base`, `z-raised`, `z-overlay` or `z-toast`
 
-Zero is allowed (`border-0`, `delay-0`), and so are `opacity-0` and `opacity-100`.
-State variants such as `data-[state=open]:` stay allowed. The guard step does not run
-this rule; it is a styling rule, not a boundary.
+Every bare number may have decimals. Zero is allowed for lengths and delays (`border-0`,
+`delay-0`), full or no opacity is allowed (`opacity-0`, `opacity-100`, `bg-ink/100`), and
+so are the identity filters (`brightness-100`, `grayscale-0`). State variants such as
+`data-[state=open]:` stay allowed. The guard step does not run this rule; it is a styling
+rule, not a boundary.
 
 ## Manifest checker
 
