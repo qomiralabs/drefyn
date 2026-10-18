@@ -1,0 +1,78 @@
+# Self host stack. Start it with scripts/selfhost.sh up; see deploy/README.md.
+name: drefyn
+
+services:
+  postgres:
+    # Same Postgres major as the hosted database on its newest patched minor, with a pgvector
+    # whose SQL matches what hosted ships, so a query that works here works there. The digest
+    # is the multi arch index, so amd64 and arm64 hosts get the same build.
+    image: pgvector/pgvector:0.8.7-pg18-bookworm@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+    # The image starts as root only to chown the data directory and drop to postgres. A
+    # fresh named volume already belongs to postgres, so start there and skip root.
+    user: postgres
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # A runaway query or connection storm should hit these before it takes the host down.
+    # Postgres needs a process per connection plus about ten of its own, so 512 leaves room.
+    pids_limit: 512
+    mem_limit: ${DREFYN_POSTGRES_MEMORY_LIMIT:-1g}
+    environment:
+      POSTGRES_DB: drefyn
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # postgres/pg_hba.conf names this user in its superuser reject line; change both together.
+      # The server reads its login rules from that file. These only make the data directory's
+      # copy ask for a password on TCP; that copy still lets the superuser in, which is why the
+      # healthcheck fails unless the server reads the mounted file.
+      POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
+    # The login rules come from a read only file rather than the data directory, so they hold
+    # from the first start even when init stops halfway. The image passes these arguments to
+    # the temporary init server too.
+    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]
+    # Passed as secrets so they show up as files in the container, not in docker inspect.
+    # Compose copies these into the container before start, which is why the root
+    # filesystem cannot be read only.
+    secrets:
+      - postgres_password
+      - drefyn_owner_password
+      - drefyn_app_password
+      - drefyn_public_reader_password
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/bootstrap.sql:/etc/drefyn/bootstrap.sql:ro
+      - ./postgres/healthcheck.sh:/etc/drefyn/healthcheck.sh:ro
+      - ./postgres/pg_hba.conf:/etc/drefyn/pg_hba.conf:ro
+    ports:
+      - 127.0.0.1:${DREFYN_POSTGRES_PORT:-55432}:5432
+    # Logs in as every role with its secret, so a failed bootstrap or a password that no
+    # longer matches the database never reports healthy.
+    healthcheck:
+      test: [CMD, sh, /etc/drefyn/healthcheck.sh]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    # Fast shutdown can take a while with a busy buffer cache; a kill means crash recovery.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+secrets:
+  postgres_password:
+    environment: DREFYN_POSTGRES_PASSWORD
+  drefyn_owner_password:
+    environment: DREFYN_OWNER_PASSWORD
+  drefyn_app_password:
+    environment: DREFYN_APP_PASSWORD
+  drefyn_public_reader_password:
+    environment: DREFYN_PUBLIC_READER_PASSWORD
+
+volumes:
+  pgdata:
+    # Lets the self host scripts tell this volume from one another checkout or an older stack
+    # left under the same project name. It comes from deploy/.env, so plain docker compose and
+    # the scripts always write the same label; newer Compose offers to recreate a volume whose
+    # labels changed, which would delete the data.
+    labels:
+      com.drefyn.selfhost.stack-id: ${DREFYN_STACK_ID:?add DREFYN_STACK_ID with any random value to deploy/.env; scripts/selfhost.sh up writes it in a new file}
