@@ -9,7 +9,7 @@ import {
   type ProjectId,
   type TenantRef,
 } from '../src/index.ts';
-import { SCOPES, codeOf, expectCode } from './support.ts';
+import { SCOPES, expectCode } from './support.ts';
 
 const ORG = '01928c3e-7a9b-7c3d-8e4f-0123456789ab';
 const PRJ = '01928c3e-7a9b-7c3d-8e4f-ba9876543210';
@@ -110,21 +110,29 @@ describe('cacheKey', () => {
   });
 
   it.each([null, undefined, 'tenant', 42])('rejects a non object tenant %j', (value) => {
-    const code = codeOf(() => cacheKey(value as unknown as TenantRef, 'page'));
-    expect(code).not.toBe('no error');
+    expectCode(() => cacheKey(value as unknown as TenantRef, 'page'), 'TENANT_REF_INVALID');
+    expectCode(() => surrogateKey(value as unknown as TenantRef, 'page'), 'TENANT_REF_INVALID');
   });
 
   it.each(['', 'Page', 'pages', 'page:evil', 'page ', '__proto__', 'toString'])(
     'rejects unknown scope %j at run time',
     (scope) => {
-      expect(codeOf(() => cacheKey(tenant(), scope as CacheScope))).not.toBe('no error');
+      expectCode(() => cacheKey(tenant(), scope as CacheScope), 'CACHE_SCOPE_UNKNOWN');
     },
   );
 
   const nonStrings: unknown[] = [42, null, undefined, {}, ['a']];
   it.each(nonStrings)('rejects a non string part %j', (part) => {
-    expect(codeOf(() => cacheKey(tenant(), 'page', part as string))).not.toBe('no error');
+    expectCode(() => cacheKey(tenant(), 'page', part as string), 'CACHE_PART_INVALID');
+    expectCode(() => cacheKey(tenant(), 'page', 'a', part as string), 'CACHE_PART_INVALID');
   });
+
+  it.each(nonStrings.filter((part) => part !== undefined))(
+    'rejects a non string surrogate id %j',
+    (id) => {
+      expectCode(() => surrogateKey(tenant(), 'page', id as string), 'CACHE_PART_INVALID');
+    },
+  );
 });
 
 describe('surrogateKey', () => {
@@ -144,6 +152,12 @@ describe('surrogateKey', () => {
         id === undefined ? surrogateKey(tenant(), 'page') : surrogateKey(tenant(), 'page', id);
       expect(key).toMatch(/^[\x21-\x7e]+$/);
       expect(Buffer.byteLength(key)).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('never equals the cache key built from the same id', () => {
+    for (const id of ['', 'logo', 'a b']) {
+      expect(surrogateKey(tenant(), 'page', id)).not.toBe(cacheKey(tenant(), 'page', id));
     }
   });
 
@@ -171,6 +185,6 @@ describe('surrogateKey', () => {
   });
 
   it.each(['', 'pages', 'page evil', 'page:x'])('rejects unknown scope %j', (scope) => {
-    expect(codeOf(() => surrogateKey(tenant(), scope as CacheScope))).not.toBe('no error');
+    expectCode(() => surrogateKey(tenant(), scope as CacheScope), 'CACHE_SCOPE_UNKNOWN');
   });
 });

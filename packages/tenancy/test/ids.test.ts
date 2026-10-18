@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ID_KINDS, TenancyError, idOf, organizationId, projectId } from '../src/index.ts';
-import { MAX_UUID, NIL_UUID, PREFIXES, codeOf, expectCode } from './support.ts';
+import { MAX_UUID, NIL_UUID, PREFIXES, expectCode } from './support.ts';
 
 const V7 = '01928c3e-7a9b-7c3d-8e4f-0123456789ab';
 const V4 = '9b2f6a1e-4c3d-4b8a-9f7e-6d5c4b3a2918';
@@ -111,8 +111,7 @@ describe('idOf', () => {
   it.each(['', 'ORG', 'organization', 'xyz', 'org_', '__proto__', 'constructor', 'toString'])(
     'refuses unknown kind %j at run time',
     (kind) => {
-      expect(codeOf(() => idOf(kind as 'org', V7))).not.toBe('no error');
-      expect(codeOf(() => idOf(kind as 'org', V7))).not.toBe('not a TenancyError');
+      expectCode(() => idOf(kind as 'org', V7), 'ID_KIND_UNKNOWN');
     },
   );
 });

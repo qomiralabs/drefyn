@@ -8,7 +8,7 @@ import {
   toPublicId,
   type OrganizationId,
 } from '../src/index.ts';
-import { MAX_UUID, NIL_UUID, PREFIXES, codeOf, expectCode } from './support.ts';
+import { MAX_UUID, NIL_UUID, PREFIXES, expectCode } from './support.ts';
 
 // The published ULID example and its UUID form; decoded with BigInt to cross check.
 const ULID_UUID = '01563e3a-b5d3-d676-4c61-efb99302bd5b';
@@ -39,9 +39,7 @@ describe('toPublicId', () => {
   });
 
   it.each(['', 'ORG', 'xyz', '__proto__', 'constructor'])('refuses unknown kind %j', (kind) => {
-    const code = codeOf(() => toPublicId(kind as 'org', org()));
-    expect(code).not.toBe('no error');
-    expect(code).not.toBe('not a TenancyError');
+    expectCode(() => toPublicId(kind as 'org', org()), 'ID_KIND_UNKNOWN');
   });
 });
 
@@ -132,8 +130,6 @@ describe('parsePublicId', () => {
   });
 
   it.each(['', 'ORG', 'xyz', '__proto__'])('refuses unknown kind %j', (kind) => {
-    const code = codeOf(() => parsePublicId(kind as 'org', valid));
-    expect(code).not.toBe('no error');
-    expect(code).not.toBe('not a TenancyError');
+    expectCode(() => parsePublicId(kind as 'org', valid), 'ID_KIND_UNKNOWN');
   });
 });
