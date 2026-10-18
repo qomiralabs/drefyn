@@ -29,8 +29,12 @@ async function build(candidates: string[]): Promise<string> {
   return compiler.build(candidates);
 }
 
+// The selector Tailwind writes for a class: every character outside a CSS identifier is
+// backslash escaped, the backslash included.
+const selector = (cls: string) => `.${cls.replace(/[^\w-]/g, '\\$&')}`;
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const hasRule = (css: string, cls: string) =>
-  new RegExp(`\\.${cls.replace(/[:]/g, '\\\\:')}\\s*\\{`).test(css);
+  new RegExp(`${escapeRegExp(selector(cls))}\\s*\\{`).test(css);
 
 describe('Tailwind theme', () => {
   it('is pinned to the version the reset was tested against', () => {
@@ -93,7 +97,7 @@ describe('Tailwind theme', () => {
       readFileSync(join(here, 'fixtures/tailwind-escapes.json'), 'utf8'),
     ) as string[];
     const css = await build(escapes);
-    for (const cls of escapes) expect(css, cls).toContain(`.${cls.replace(/[[\]/]/g, '\\$&')}`);
+    for (const cls of escapes) expect(css, cls).toContain(selector(cls));
   });
 
   it('generates nothing from the Tailwind defaults', async () => {
