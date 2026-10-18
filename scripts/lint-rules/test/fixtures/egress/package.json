@@ -1,0 +1,5 @@
+{
+  "name": "egress-fixture",
+  "private": true,
+  "type": "module"
+}

@@ -8,6 +8,12 @@
     },
     "lint": {
       "dependsOn": ["^typecheck"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eslint.config.js",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/lint-rules/src/**"
+      ],
       "outputs": []
     },
     "test": {

@@ -11,14 +11,17 @@
     "typecheck:root": "tsc -p tsconfig.json",
     "lint": "turbo run lint lint:root",
     "lint:root": "eslint --max-warnings 0 eslint.config.js vitest.shared.ts",
+    "lint:guard": "bash scripts/lint-rules/guard.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "turbo run test",
     "build": "turbo run build",
     "hygiene": "node scripts/hygiene/src/cli.ts",
+    "check:packages": "node scripts/lint-rules/src/check-packages.ts",
     "gate": "bash scripts/gate.sh"
   },
   "devDependencies": {
+    "@drefyn/lint-rules": "workspace:*",
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.1",
     "@vitest/coverage-v8": "5.0.3",

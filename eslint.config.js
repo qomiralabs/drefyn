@@ -1,7 +1,7 @@
 // @ts-check
 import js from '@eslint/js';
+import drefyn, { egressAllowList } from '@drefyn/lint-rules';
 import tseslint from 'typescript-eslint';
-import drefyn from './scripts/lint-rules/src/index.ts';
 
 export default tseslint.config(
   {
@@ -10,10 +10,8 @@ export default tseslint.config(
       '**/coverage/**',
       '**/dist/**',
       '**/.turbo/**',
-      // Lint fixtures are read by their tests with their own config.
-      '**/test/fixtures/**',
-      // Written by the token generator and checked against its source by a test.
-      'packages/ui/src/generated/**',
+      // Broken on purpose: the lint rule tests run ESLint on them with their own config.
+      'scripts/lint-rules/test/fixtures/**',
     ],
   },
   js.configs.recommended,
@@ -29,15 +27,17 @@ export default tseslint.config(
     linterOptions: {
       reportUnusedDisableDirectives: 'error',
     },
+    plugins: { drefyn },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
+      'drefyn/no-cross-package-internals': 'error',
+      'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
     },
   },
   {
     // Everything people see is styled from tokens only.
     files: ['packages/ui/**', 'apps/**'],
-    plugins: { drefyn },
     rules: { 'drefyn/no-arbitrary-values': 'error' },
   },
   {

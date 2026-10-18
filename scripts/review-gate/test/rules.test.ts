@@ -87,6 +87,21 @@ describe('the shipped rules file', () => {
     'tsconfig.base.json',
     'packages/core/tsconfig.build.json',
     'eslint.config.js',
+    'packages/web/src/sub/eslint.config.js',
+    'packages/web/eslint.config.mjs',
+    'apps/site/src/eslint.config.cjs',
+    'eslint.config.ts',
+    'packages/web/src/eslint.config.mts',
+    'packages/web/src/eslint.config.cts',
+    'scripts/lint-rules/guard.config.js',
+    'packages/egress/src/index.ts',
+    'packages/egress/package.json',
+    'packages/web/src/pnpm-workspace.yaml',
+    '.gitmodules',
+    '.gitignore',
+    'LICENSE',
+    '.gitattributes',
+    'packages/web/.gitattributes',
     'vitest.shared.ts',
     '.prettierrc.json',
     '.prettierignore',
@@ -99,10 +114,13 @@ describe('the shipped rules file', () => {
     expect(needsSecurity(file)).toBe(true);
   });
 
-  it.each(['README.md', 'docs/guide.md', 'apps/web/src/page.tsx', 'CONTRIBUTING.md'])(
-    'does not require it for %s',
-    (file) => {
-      expect(needsSecurity(file)).toBe(false);
-    },
-  );
+  it.each([
+    'README.md',
+    'docs/guide.md',
+    'apps/web/src/page.tsx',
+    'CONTRIBUTING.md',
+    'packages/egress-old/src/index.ts',
+  ])('does not require it for %s', (file) => {
+    expect(needsSecurity(file)).toBe(false);
+  });
 });
