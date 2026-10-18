@@ -132,7 +132,7 @@ describe('tokens.css', () => {
     expect(root.declarations.get('--dr-type-label')).toBe('500 0.75rem/1.2 var(--dr-font-mono)');
     expect(root.declarations.get('--dr-type-body-m-tracking')).toBe('0em');
     expect(root.declarations.get('--dr-weight-strong')).toBe('600');
-    expect(root.declarations.get('--dr-measure')).toBe('66ch');
+    expect(root.declarations.get('--dr-measure')).toBe('35em');
     expect(root.declarations.get('--dr-duration-move-base')).toBe('180ms');
     expect(root.declarations.get('--dr-ease-enter')).toBe('cubic-bezier(0.2, 0, 0, 1)');
     expect(root.declarations.get('--dr-shadow-2')).toBe('0 16px 48px rgb(11 17 32 / 0.16)');

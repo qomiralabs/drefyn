@@ -92,6 +92,11 @@ describe('self hosted fonts', () => {
     expect(family.startsWith(file.startsWith('inter') ? 'Inter' : 'JetBrains Mono')).toBe(true);
   });
 
+  it.each(woff2Files)('%s has the weight its file name claims', (file) => {
+    const weight = Number(/-(\d00)-normal\.woff2$/.exec(file)?.[1]);
+    expect(readWoff2(readFileSync(join(fontsDir, file))).weightClass).toBe(weight);
+  });
+
   it.each(woff2Files)('%s is the release ASSETS.md records', (file) => {
     const row = assetRows.get(file);
     expect(row, file).toBeDefined();

@@ -112,7 +112,7 @@ function sharedEntries(t: Tokens): Entry[] {
     entries.push([`${name}-tracking`, `${s.tracking}em`]);
   }
   for (const [k, v] of Object.entries(t.weight)) entries.push([`--dr-weight-${k}`, String(v)]);
-  entries.push(['--dr-measure', `${t.layout.measure}ch`]);
+  entries.push(['--dr-measure', `${t.layout.measure}em`]);
   for (const [k, v] of Object.entries(t.space)) entries.push([`--dr-space-${k}`, rem(v)]);
   for (const [k, v] of Object.entries(t.radius)) entries.push([`--dr-radius-${k}`, px(v)]);
   for (const [k, v] of Object.entries(t.stroke)) entries.push([`--dr-stroke-${kebab(k)}`, px(v)]);
@@ -358,7 +358,12 @@ export function renderDtcg(t: Tokens = source): string {
       'page-max': dimension(t.layout.pageMax, 'px'),
       gutter: dimension(t.layout.gutter.wide / 16, 'rem'),
       'gutter-compact': dimension(t.layout.gutter.compact / 16, 'rem'),
-      measure: { $type: 'number', $description: 'Characters per line', $value: t.layout.measure },
+      // DTCG dimensions are px or rem only, and the measure follows the text size.
+      measure: {
+        $type: 'number',
+        $description: 'Reading measure in em, about 70 characters of Inter',
+        $value: t.layout.measure,
+      },
       ...Object.fromEntries(
         Object.entries(t.layout.docs).map(([k, v]) => [`docs-${k}`, dimension(v, 'px')]),
       ),

@@ -1,8 +1,8 @@
 import { brotliDecompressSync } from 'node:zlib';
 
-// Reads the character map, family name and version string out of a WOFF2 file, enough to
-// prove what a subset covers and which release it came from without a font toolkit. Only the cmap and name tables are decoded; both are
-// stored untransformed in WOFF2, so their bytes sit as is in the decompressed stream.
+// Reads what the font tests need out of a WOFF2 file without a font toolkit: the character
+// map, family name, version string, weight class and advance widths. Only tables that WOFF2
+// stores untransformed are decoded, so their bytes sit as is in the decompressed stream.
 
 const KNOWN_TAGS = [
   'cmap',
@@ -74,6 +74,10 @@ export interface FontInfo {
   family: string;
   version: string;
   codePoints: number[];
+  weightClass: number;
+  unitsPerEm: number;
+  // Advance width in font units for each mapped code point.
+  advances: Map<number, number>;
 }
 
 export function readWoff2(bytes: Buffer): FontInfo {
@@ -90,7 +94,7 @@ export function readWoff2(bytes: Buffer): FontInfo {
     }
     throw new Error('bad UIntBase128');
   };
-  const tables = new Map<string, { offset: number; length: number }>();
+  const tables = new Map<string, { offset: number; length: number; transformed: boolean }>();
   let offset = 0;
   for (let i = 0; i < numTables; i++) {
     const flags = bytes.readUInt8(pos++);
@@ -106,20 +110,28 @@ export function readWoff2(bytes: Buffer): FontInfo {
     const origLength = readBase128();
     const transformed = tag === 'glyf' || tag === 'loca' ? version !== 3 : version !== 0;
     const length = transformed ? readBase128() : origLength;
-    tables.set(tag, { offset, length });
+    tables.set(tag, { offset, length, transformed });
     offset += length;
   }
   const data = brotliDecompressSync(bytes.subarray(pos, pos + compressedSize));
   const table = (tag: string) => {
     const t = tables.get(tag);
     if (t === undefined) throw new Error(`no ${tag} table`);
+    if (t.transformed) throw new Error(`${tag} is transformed; this reader only reads raw tables`);
     return data.subarray(t.offset, t.offset + t.length);
   };
   const names = table('name');
+  const glyphs = readCmap(table('cmap'));
+  const metrics = table('hmtx');
+  const longMetrics = table('hhea').readUInt16BE(34);
+  const advanceOf = (glyph: number) => metrics.readUInt16BE(Math.min(glyph, longMetrics - 1) * 4);
   return {
     family: readName(names, 1),
     version: readName(names, 5),
-    codePoints: readCmap(table('cmap')),
+    codePoints: [...glyphs.keys()],
+    weightClass: table('OS/2').readUInt16BE(4),
+    unitsPerEm: table('head').readUInt16BE(18),
+    advances: new Map([...glyphs].map(([c, g]) => [c, advanceOf(g)])),
   };
 }
 
@@ -141,7 +153,7 @@ function readName(name: Buffer, id: number): string {
   throw new Error(`no name ${id}`);
 }
 
-function readCmap(cmap: Buffer): number[] {
+function readCmap(cmap: Buffer): Map<number, number> {
   const count = cmap.readUInt16BE(2);
   const subtables = new Map<string, number>();
   for (let i = 0; i < count; i++) {
@@ -155,23 +167,25 @@ function readCmap(cmap: Buffer): number[] {
   return readFormat4(cmap, bmp);
 }
 
-function readFormat12(cmap: Buffer, at: number): number[] {
+function readFormat12(cmap: Buffer, at: number): Map<number, number> {
   const groups = cmap.readUInt32BE(at + 12);
-  const out: number[] = [];
+  const out = new Map<number, number>();
   for (let g = 0; g < groups; g++) {
     const r = at + 16 + g * 12;
-    for (let c = cmap.readUInt32BE(r); c <= cmap.readUInt32BE(r + 4); c++) out.push(c);
+    const start = cmap.readUInt32BE(r);
+    const first = cmap.readUInt32BE(r + 8);
+    for (let c = start; c <= cmap.readUInt32BE(r + 4); c++) out.set(c, first + c - start);
   }
   return out;
 }
 
-function readFormat4(cmap: Buffer, at: number): number[] {
+function readFormat4(cmap: Buffer, at: number): Map<number, number> {
   const segments = cmap.readUInt16BE(at + 6) / 2;
   const ends = at + 14;
   const starts = ends + segments * 2 + 2;
   const deltas = starts + segments * 2;
   const rangeOffsets = deltas + segments * 2;
-  const out: number[] = [];
+  const out = new Map<number, number>();
   for (let s = 0; s < segments; s++) {
     const end = cmap.readUInt16BE(ends + s * 2);
     const start = cmap.readUInt16BE(starts + s * 2);
@@ -184,7 +198,7 @@ function readFormat4(cmap: Buffer, at: number): number[] {
         const g = cmap.readUInt16BE(rangeOffsets + s * 2 + rangeOffset + (c - start) * 2);
         glyph = g === 0 ? 0 : (g + delta) & 0xffff;
       }
-      if (glyph !== 0) out.push(c);
+      if (glyph !== 0) out.set(c, glyph);
     }
   }
   return out;

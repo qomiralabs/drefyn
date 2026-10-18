@@ -205,7 +205,9 @@ const layout = {
   gutter: { wide: 24, compact: 16 },
   // Below this width the gutter tightens. Tailwind's sm breakpoint is the same width.
   compactBelow: 640,
-  measure: 66, // ch
+  // em, not ch: 66ch set 83 characters, because ch is the width of Inter's zero, and it
+  // changes with the fallback font. 35em sets about 70 characters of Inter at every size.
+  measure: 35, // em
   // The docs site's three columns: navigation, reading, on this page.
   docs: { nav: 240, content: 640, toc: 220 },
 } as const;

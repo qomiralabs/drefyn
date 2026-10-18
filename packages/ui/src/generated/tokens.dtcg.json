@@ -1301,8 +1301,8 @@
     },
     "measure": {
       "$type": "number",
-      "$description": "Characters per line",
-      "$value": 66
+      "$description": "Reading measure in em, about 70 characters of Inter",
+      "$value": 35
     },
     "docs-nav": {
       "$type": "dimension",
