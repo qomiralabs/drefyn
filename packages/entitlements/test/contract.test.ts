@@ -220,6 +220,73 @@ describe('the options argument itself', () => {
     });
   }
 
+  // A pollution bug elsewhere in the process must not become free grace or unlimited
+  // sends for every tenant, so options are read as own data only.
+  it('ignores a polluted Object.prototype, with no options and with empty options', () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    proto['overrides'] = { 'status.sms_sends_per_month': UNLIMITED };
+    proto['graceEligible'] = true;
+    try {
+      for (const options of [undefined, {}]) {
+        expect(checkLimit('free', 'status.sms_sends_per_month', 1000, options)).toMatchObject({
+          status: 'not_entitled',
+          limit: 0,
+          grace: 0,
+        });
+        expect(checkLimit('starter', 'status.email_sends_per_month', 5001, options)).toMatchObject({
+          status: 'over_limit',
+          limit: 5000,
+          grace: 0,
+          excess: 1,
+        });
+        expect(limitFor('free', 'status.sms_sends_per_month', options)).toBe(0);
+        expect(graceAllowance('starter', 'status.email_sends_per_month', options)).toBe(1250);
+      }
+    } finally {
+      delete proto['overrides'];
+      delete proto['graceEligible'];
+    }
+  });
+
+  it('refuses an accessor graceEligible without calling it', () => {
+    let calls = 0;
+    const options = {};
+    Object.defineProperty(options, 'graceEligible', {
+      enumerable: true,
+      get: () => {
+        calls += 1;
+        return true;
+      },
+    });
+    const error = expectEntitlementError(
+      () => checkLimit('free', 'status.email_sends_per_month', 2001, options),
+      'ENTITLEMENT_INVALID_OVERRIDE',
+    );
+    expect(error.limitKey).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
+  it('refuses an accessor or hidden overrides field without calling it', () => {
+    let calls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, 'overrides', {
+      enumerable: true,
+      get: () => {
+        calls += 1;
+        return {};
+      },
+    });
+    const hidden = {};
+    Object.defineProperty(hidden, 'overrides', { value: {}, enumerable: false });
+    for (const options of [accessor, hidden]) {
+      expectEntitlementError(
+        () => limitFor('free', 'org.seats', options),
+        'ENTITLEMENT_INVALID_OVERRIDE',
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
   it('accepts a null prototype options object', () => {
     const options = Object.create(null) as { graceEligible?: boolean };
     options.graceEligible = true;
