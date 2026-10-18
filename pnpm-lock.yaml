@@ -39,6 +39,19 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(@vitest/coverage-v8@5.0.3)(vite@8.3.3(@types/node@24.19.1))
 
+  packages/credits:
+    dependencies:
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+    devDependencies:
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/tenancy:
     devDependencies:
       fast-check:
