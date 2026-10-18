@@ -129,7 +129,7 @@ const type = {
   displayS: { size: 28, lineHeight: 1.2, tracking: -0.015, weight: 600, family: 'sans' },
   title: { size: 20, lineHeight: 1.3, tracking: -0.01, weight: 600, family: 'sans' },
   bodyL: { size: 18, lineHeight: 1.6, tracking: 0, weight: 400, family: 'sans' },
-  body: { size: 16, lineHeight: 1.6, tracking: 0, weight: 400, family: 'sans' },
+  bodyM: { size: 16, lineHeight: 1.6, tracking: 0, weight: 400, family: 'sans' },
   bodyS: { size: 14, lineHeight: 1.55, tracking: 0, weight: 400, family: 'sans' },
   code: { size: 14, lineHeight: 1.6, tracking: 0, weight: 400, family: 'mono' },
   caption: { size: 13, lineHeight: 1.45, tracking: 0, weight: 400, family: 'sans' },

@@ -110,7 +110,7 @@ describe('tokens.css', () => {
     );
     expect(root.declarations.get('--dr-type-display-xl-tracking')).toBe('-0.03em');
     expect(root.declarations.get('--dr-type-label')).toBe('500 0.75rem/1.2 var(--dr-font-mono)');
-    expect(root.declarations.get('--dr-type-body-tracking')).toBe('0em');
+    expect(root.declarations.get('--dr-type-body-m-tracking')).toBe('0em');
     expect(root.declarations.get('--dr-weight-strong')).toBe('600');
     expect(root.declarations.get('--dr-measure')).toBe('66ch');
     expect(root.declarations.get('--dr-duration-move-base')).toBe('180ms');

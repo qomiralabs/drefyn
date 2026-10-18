@@ -77,10 +77,10 @@
   --text-body-l--line-height: 1.6;
   --text-body-l--letter-spacing: 0em;
   --text-body-l--font-weight: 400;
-  --text-body: 1rem;
-  --text-body--line-height: 1.6;
-  --text-body--letter-spacing: 0em;
-  --text-body--font-weight: 400;
+  --text-body-m: 1rem;
+  --text-body-m--line-height: 1.6;
+  --text-body-m--letter-spacing: 0em;
+  --text-body-m--font-weight: 400;
   --text-body-s: 0.875rem;
   --text-body-s--line-height: 1.55;
   --text-body-s--letter-spacing: 0em;

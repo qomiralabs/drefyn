@@ -10,7 +10,7 @@ body {
   margin: 0;
   background: var(--dr-surface-ground);
   color: var(--dr-text-body);
-  font: var(--dr-type-body);
+  font: var(--dr-type-body-m);
   font-variant-numeric: tabular-nums;
 }
 

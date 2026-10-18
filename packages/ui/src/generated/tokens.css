@@ -89,8 +89,8 @@
   --dr-type-title-tracking: -0.01em;
   --dr-type-body-l: 400 1.125rem/1.6 var(--dr-font-sans);
   --dr-type-body-l-tracking: 0em;
-  --dr-type-body: 400 1rem/1.6 var(--dr-font-sans);
-  --dr-type-body-tracking: 0em;
+  --dr-type-body-m: 400 1rem/1.6 var(--dr-font-sans);
+  --dr-type-body-m-tracking: 0em;
   --dr-type-body-s: 400 0.875rem/1.55 var(--dr-font-sans);
   --dr-type-body-s-tracking: 0em;
   --dr-type-code: 400 0.875rem/1.6 var(--dr-font-mono);

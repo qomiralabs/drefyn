@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { compile } from 'tailwindcss';
 import { describe, expect, it } from 'vitest';
 import { renderTailwindCss } from '../src/tokens/generate.ts';
+import { tokens } from '../src/tokens/tokens.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -35,6 +36,14 @@ const selector = (cls: string) => `.${cls.replace(/[^\w-]/g, '\\$&')}`;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const hasRule = (css: string, cls: string) =>
   new RegExp(`${escapeRegExp(selector(cls))}\\s*\\{`).test(css);
+
+// The declarations of one class's rule, or undefined when Tailwind made no rule for it.
+function ruleBody(css: string, cls: string): string | undefined {
+  const match = new RegExp(`${escapeRegExp(selector(cls))}\\s*\\{([^}]*)\\}`).exec(css);
+  return match?.[1];
+}
+
+const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
 describe('Tailwind theme', () => {
   it('is pinned to the version the reset was tested against', () => {
@@ -89,6 +98,30 @@ describe('Tailwind theme', () => {
     expect(css).toMatch(/\.bg-disabled-fill\s*\{\s*background-color: var\(--dr-disabled-fill\)/);
     expect(css).toMatch(/\.border-disabled-edge\s*\{\s*border-color: var\(--dr-disabled-edge\)/);
     expect(css).toMatch(/\.text-disabled-text\s*\{\s*color: var\(--dr-disabled-text\)/);
+  });
+
+  // Colours and type steps share the text-* namespace. A clash makes Tailwind pick one and
+  // drop the other without a word, so every name is compiled and checked for what it sets.
+  it('gives every type step a text-* utility that sets the size and nothing else', async () => {
+    const classes = Object.keys(tokens.type).map((step) => `text-${kebab(step)}`);
+    const css = await build(classes);
+    for (const cls of classes) {
+      const body = ruleBody(css, cls);
+      expect(body, cls).toMatch(/font-size:/);
+      expect(body, cls).not.toMatch(/(^|[^-])color:/);
+    }
+  });
+
+  it('gives every colour role a text-* utility that sets the colour and nothing else', async () => {
+    const names = [...renderTailwindCss().matchAll(/--color-([a-z0-9-]+):/g)].map((m) => m[1]);
+    expect(names.length).toBeGreaterThan(20);
+    const classes = names.map((n) => `text-${n ?? ''}`);
+    const css = await build(classes);
+    for (const cls of classes) {
+      const body = ruleBody(css, cls);
+      expect(body, cls).toMatch(/(^|[^-])color:/);
+      expect(body, cls).not.toMatch(/font-size:/);
+    }
   });
 
   it('still compiles bare numbers and brackets, which is why the lint rule rejects them', async () => {

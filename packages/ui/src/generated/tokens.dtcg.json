@@ -956,7 +956,7 @@
         "lineHeight": 1.6
       }
     },
-    "body": {
+    "body-m": {
       "$type": "typography",
       "$value": {
         "fontFamily": "{font.sans}",
