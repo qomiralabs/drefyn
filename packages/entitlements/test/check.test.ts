@@ -287,6 +287,14 @@ describe('send caps and the grace for eligible sends', () => {
     });
   });
 
+  it('keeps components capped at 25 on Free and unlimited on every paid tier', () => {
+    expect(checkLimit('free', 'status.components', 26).status).toBe('over_limit');
+    for (const t of ['starter', 'growth', 'scale', 'enterprise'] as const) {
+      expect(limitFor(t, 'status.components')).toBe(UNLIMITED);
+      expect(checkLimit(t, 'status.components', Number.MAX_SAFE_INTEGER).status).toBe('allowed');
+    }
+  });
+
   it('keeps subscribers capped at 500 on Free and unlimited on every paid tier', () => {
     expect(checkLimit('free', 'status.subscribers', 501).status).toBe('over_limit');
     for (const t of ['starter', 'growth', 'scale', 'enterprise'] as const) {

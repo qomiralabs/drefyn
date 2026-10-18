@@ -173,15 +173,16 @@ export const LIMITS = {
       self_hosted: 'unlimited',
     },
   },
+  // A component is one content node and costs nothing material, so paid tiers have no cap.
   'status.components': {
     scope: 'status',
     direction: 'max',
     cells: {
       free: 25,
-      starter: open({ atLeast: 25 }),
-      growth: open({ atLeast: 25 }),
-      scale: open({ atLeast: 25 }),
-      enterprise: open({ atLeast: 25 }),
+      starter: 'unlimited',
+      growth: 'unlimited',
+      scale: 'unlimited',
+      enterprise: 'unlimited',
       self_hosted: 'unlimited',
     },
   },
