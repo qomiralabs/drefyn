@@ -11,6 +11,12 @@
 
 \set ON_ERROR_STOP on
 
+-- These print every parse tree and plan, password literals included, to the server log. Any
+-- session may turn them off, so no check is needed.
+set debug_print_parse = off;
+set debug_print_rewritten = off;
+set debug_print_plan = off;
+
 -- Keep passwords out of the server log. Statement logging, duration logging and sampling
 -- would record the statements below that carry one, and an error would record the statement
 -- that failed. This has to come before any of them.
@@ -27,9 +33,20 @@ select has_parameter_privilege('log_statement', 'SET')
   set log_transaction_sample_rate = 0;
 \endif
 
+-- pg_stat_statements keeps the text of utility statements, create role ... password included,
+-- as soon as each one completes, even if the transaction later rolls back, and monitoring
+-- roles can read it. Its setting only exists when the module is loaded.
+select current_setting('pg_stat_statements.track_utility', true) is not null as pgss_loaded \gset
+\if :pgss_loaded
+  select has_parameter_privilege('pg_stat_statements.track_utility', 'SET') as pgss_can_set \gset
+  \if :pgss_can_set
+    set pg_stat_statements.track_utility = off;
+  \endif
+\endif
+
 -- A managed database's master user may not be allowed to change these, and pgaudit and
--- auto_explain log whatever the session says. Stop unless this session really logs no
--- statements, failed ones included, or the operator has checked and says so. A library is
+-- auto_explain log whatever the session says. Stop unless this session really logs and keeps
+-- no statements, failed ones included, or the operator has checked and says so. A library is
 -- matched anywhere in the preload lists, so $libdir/pgaudit, pgaudit.so and quoted names
 -- count, and a list this role cannot read counts as unsafe.
 select current_setting('log_statement') = 'none'
@@ -37,6 +54,7 @@ select current_setting('log_statement') = 'none'
   and current_setting('log_min_duration_statement') = '-1'
   and current_setting('log_min_duration_sample') = '-1'
   and current_setting('log_transaction_sample_rate') = '0'
+  and coalesce(current_setting('pg_stat_statements.track_utility', true), 'off') = 'off'
   and coalesce((
     select count(*) = 3 and bool_and(setting !~* '(pgaudit|auto_explain)')
     from pg_settings
@@ -53,7 +71,7 @@ select current_setting('log_statement') = 'none'
   \if :log_checked_yes
     \echo 'bootstrap: DREFYN_BOOTSTRAP_LOG_CHECKED=yes, so running with the server log settings as they are'
   \else
-    do $$ begin raise exception 'bootstrap: statement logging, sampling or pgaudit may record the passwords this file sets, and this role cannot turn them off. Check them, then set DREFYN_BOOTSTRAP_LOG_CHECKED=yes to run anyway'; end $$;
+    do $$ begin raise exception 'bootstrap: statement logging, failed statement logging, duration logging or sampling, pgaudit, auto_explain or pg_stat_statements may record the passwords this file sets, and this role cannot turn them off. Check them, then set DREFYN_BOOTSTRAP_LOG_CHECKED=yes to run anyway'; end $$;
   \endif
 \endif
 

@@ -22,17 +22,18 @@ bash scripts/selfhost.sh reset --yes   # deletes the data volume
 ```
 
 `up` pulls the image first (about 150 MB), then waits until Postgres is healthy and prints
-how long that took: 2 to 6 seconds from an empty volume on an Apple silicon laptop, 1 to 2
-seconds on a restart. Like `restart`, `up` recreates the container when the stack is already
+how long that took: 2 to 6 seconds from an empty volume on an Apple silicon laptop, 2 to 4
+seconds on a restart, which recreates the container. Like `restart`, `up` recreates the
+container when the stack is already
 running, so Postgres is down for a few seconds.
 
 To write `deploy/.env` yourself, copy `deploy/.env.example`, set `DREFYN_STACK_ID` to any
 random value (it is not a secret, but it must never change after the first start and must not
-be copied to another checkout), and fill every password, including the superuser's, with at least 16 random
-characters. Empty or short passwords stop the first start on purpose, and the superuser
-stays closed to TCP even then. `deploy/.env` is gitignored; make it readable only by you
-(`chmod 600 deploy/.env`, which `up` warns about if you forget) and keep it out of backups
-that others can read.
+be copied to another checkout), and fill every password, including the superuser's, with at
+least 16 random characters. Empty or short passwords stop the first start on purpose, and the
+superuser stays closed to TCP even then. `deploy/.env` is gitignored; make it readable only by
+you (`chmod 600 deploy/.env`, which `up` warns about if you forget) and keep it out of backups
+that others can read. Two first `up` runs at once share one generated file.
 
 If `up` fails, it says whether compose could not start the container or the healthcheck
 failed, with the last healthcheck message, and prints the command that shows the server log.
@@ -156,6 +157,12 @@ before it reads any password unless the server already logs nothing. These recor
 - `pgaudit` loaded, whatever the session sets
 - `auto_explain` loaded, which with `auto_explain.log_min_duration` at 0 or more logs the
   query text, password checks included
+- `pg_stat_statements` loaded with `pg_stat_statements.track_utility` on (its default), which
+  keeps the text of every `create role ... password` even after a rollback, readable by
+  monitoring roles
+
+The file turns `debug_print_parse`, `debug_print_rewritten` and `debug_print_plan` off for its
+session itself, and `pg_stat_statements.track_utility` too where the master user may.
 
 The file checks all of these, and finds `pgaudit` and `auto_explain` in any of the three
 preload lists in any spelling. Turn them off for the run. If you have checked that nothing

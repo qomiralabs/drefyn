@@ -57,8 +57,8 @@ jobs:
       - name: Tear down
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove
-      # those stacks themselves. This covers the main stack. The ID only satisfies compose's
-      # interpolation when no deploy/.env was written; logs never reads it.
+      # those stacks themselves. This covers the main stack. The placeholder ID always wins
+      # over deploy/.env, and is only there so compose can interpolate; logs never uses it.
       - name: Logs
         if: failure()
         env:

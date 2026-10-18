@@ -20,8 +20,10 @@ services:
       POSTGRES_DB: drefyn
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      # The server reads its login rules from postgres/pg_hba.conf below. These keep the
-      # data directory's own copy strict as well, in case anyone points the server back at it.
+      # postgres/pg_hba.conf names this user in its superuser reject line; change both together.
+      # The server reads its login rules from that file. These only make the data directory's
+      # copy ask for a password on TCP; that copy still lets the superuser in, which is why the
+      # healthcheck fails unless the server reads the mounted file.
       POSTGRES_INITDB_ARGS: --auth-local=peer --auth-host=scram-sha-256
     # The login rules come from a read only file rather than the data directory, so they hold
     # from the first start even when init stops halfway. The image passes these arguments to

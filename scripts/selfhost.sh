@@ -30,7 +30,13 @@ random_secret() {
 # failure here stops the script before the guard and before compose.
 ensure_env() {
   if [ -f "$env_file" ]; then return; fi
-  local line key value
+  local line key value example="$deploy/.env.example"
+  # bash 3.2 carries on past a while loop whose input file is missing, which would write an
+  # empty deploy/.env and claim it holds passwords.
+  if [ ! -r "$example" ] || [ ! -s "$example" ]; then
+    say <<<"selfhost: $example is missing, unreadable or empty, so deploy/.env cannot be generated; nothing was written."
+    exit 1
+  fi
   env_tmp="$(mktemp "$deploy/.env.XXXXXX")"
   chmod 600 "$env_tmp"
   while IFS= read -r line || [ -n "$line" ]; do
@@ -47,10 +53,22 @@ ensure_env() {
     else
       printf '%s\n' "$line" >>"$env_tmp"
     fi
-  done <"$deploy/.env.example"
-  mv "$env_tmp" "$env_file"
-  env_tmp=""
-  echo "selfhost: wrote $env_file with generated passwords and a stack ID"
+  done <"$example"
+  if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
+    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 4 ]; then
+    say <<<"selfhost: $example does not list the stack ID and the four passwords; nothing was written."
+    exit 1
+  fi
+  # A hard link never replaces an existing file, so when two first ups race, the first one's
+  # file wins and the other uses it, rather than each starting with passwords the file lost.
+  if ln "$env_tmp" "$env_file" 2>/dev/null; then
+    echo "selfhost: wrote $env_file with generated passwords and a stack ID"
+  elif [ -f "$env_file" ]; then
+    say <<<"selfhost: $env_file appeared while this up was generating one; using the one already there"
+  else
+    say <<<"selfhost: could not create $env_file; nothing was written."
+    exit 1
+  fi
 }
 
 # A hand written .env gets the umask default, which is usually readable by everyone.
@@ -67,40 +85,48 @@ warn_env_mode() {
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
 wait_healthy() {
-  local start end container status first healthy=true
+  local start end compose_ok=true ids count state health status restarting problem="" first
   start="$(date +%s)"
   if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
-    healthy=false
+    compose_ok=false
   fi
   end="$(date +%s)"
-  container="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
   # Compose has returned success from up --wait at the timeout while the container was still
   # restarting after a failed init, so its exit code is not proof. Only docker's own health
   # status for exactly one running postgres container is.
-  if [ "$healthy" = true ] && [ "$(docker inspect --format \
-    '{{if .State.Health}}{{.State.Health.Status}}{{end}} {{.State.Status}} {{.State.Restarting}}' \
-    "$container" 2>/dev/null || true)" != "healthy running false" ]; then
-    healthy=false
+  ids="$("${compose[@]}" ps -aq postgres 2>/dev/null || true)"
+  count="$(grep -c . <<<"$ids" || true)"
+  health=""
+  status=""
+  restarting=""
+  if [ "$count" != 1 ]; then
+    problem="found $count postgres containers in project '$selfhost_project', expected one"
+  elif ! state="$(docker inspect --format \
+    '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.State.Status}} {{.State.Restarting}}' \
+    "$ids" 2>&1)"; then
+    problem="could not inspect container $ids: $(tail -n 1 <<<"$state")"
+  else
+    read -r health status restarting <<<"$state"
   fi
-  if [ "$healthy" = false ]; then
-    # Diagnostics only: the script exits 1 below whatever these return.
-    status=""
-    if [ -n "$container" ]; then
-      status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
-    fi
-    # A port clash or a name conflict fails at once and leaves the container never started, so
-    # say compose failed rather than blame health.
-    if [ -n "$status" ] && [ "$status" != created ]; then
-      say <<<"selfhost: postgres is not healthy after $((end - start))s: $(health_output "$container")"
-      first="$(first_start_failure "$container")"
-      if [ -n "$first" ]; then say <<<"selfhost: $first"; fi
-    else
-      say <<<"selfhost: compose could not start postgres ($((end - start))s); its error is above."
-    fi
-    say <<<"The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
-    exit 1
+  if [ "$compose_ok" = true ] && [ -z "$problem" ] &&
+    [ "$health $status $restarting" = "healthy running false" ]; then
+    echo "selfhost: healthy in $((end - start))s"
+    return
   fi
-  echo "selfhost: healthy in $((end - start))s"
+
+  # A port clash or a name conflict fails at once and leaves no started container, so say
+  # compose failed rather than blame health. Its own error is then the last thing it printed.
+  if [ "$compose_ok" = false ] && { [ "$count" = 0 ] || [ "$status" = created ]; }; then
+    say <<<"selfhost: compose could not start postgres ($((end - start))s); its error is above."
+  elif [ -n "$problem" ]; then
+    say <<<"selfhost: postgres is not healthy after $((end - start))s: $problem"
+  else
+    say <<<"selfhost: postgres is not healthy after $((end - start))s: $(health_output "$ids")"
+    first="$(first_start_failure "$ids")"
+    if [ -n "$first" ]; then say <<<"selfhost: $first"; fi
+  fi
+  say <<<"The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
+  exit 1
 }
 
 case "${1:-}" in

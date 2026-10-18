@@ -151,19 +151,31 @@ EOF
   fi
 }
 
-# first_start_failure <container>: prints advice when the server log shows the first start
-# failed, and nothing otherwise. Compose can give up before the healthcheck ever runs, so this
-# reads the log itself: init that began but never completed, or the image refusing to init.
-# Containers are recreated on every up, so a later failure never sees an old init's lines.
+# first_start_failure <container>: prints advice when the server log shows a first start, and
+# nothing otherwise. Compose can give up before the healthcheck ever runs, so this reads the log
+# and the container state itself. A first start counts as failed only when the image refused to
+# init, or init began and the container then exited or restarted. An init that is merely slow
+# is still running, and the advice then is to wait, never to reset. Containers are recreated on
+# every up, so a later failure never sees an old init's lines.
 first_start_failure() {
-  local logs reason
+  local logs reason state restarts status
   logs="$(docker logs "$1" 2>&1 | tail -n 300 || true)"
+  state="$(docker inspect --format '{{.RestartCount}} {{.State.Status}}' "$1" 2>/dev/null || true)"
+  restarts="${state%% *}"
+  status="${state#* }"
+  case "$restarts" in '' | *[!0-9]*) restarts=0 ;; esac
   if [[ "$logs" == *"Database is uninitialized"* ]] ||
-    { [[ "$logs" == *"/docker-entrypoint-initdb.d/"* ]] &&
-      [[ "$logs" != *"init process complete"* ]]; }; then
+    { [[ "$logs" == *"The files belonging to this database system"* ||
+      "$logs" == *"/docker-entrypoint-initdb.d/"* ]] &&
+      [[ "$logs" != *"init process complete"* ]] &&
+      { [ "$restarts" -gt 0 ] || [ "$status" != running ]; }; }; then
     reason="$(grep -E 'bootstrap:|ERROR:|Error:' <<<"$logs" | tail -n 1 || true)"
     printf 'the first start failed%s; fix deploy/.env first, then run %s reset --yes and up again' \
       "${reason:+ ($reason)}" "scripts/selfhost.sh"
+  elif [[ "$logs" == *"The files belonging to this database system"* ||
+    "$logs" == *"/docker-entrypoint-initdb.d/"* ]] &&
+    [[ "$logs" != *"init process complete"* ]]; then
+    printf '%s' "the first start is still running: initialising the database can take a while on a loaded machine; wait, then run up again, or raise DREFYN_SELFHOST_WAIT_SECONDS"
   fi
 }
 
