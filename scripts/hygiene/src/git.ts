@@ -87,19 +87,49 @@ export async function listIndex(cwd: string): Promise<IndexEntry[]> {
   return entries;
 }
 
+const SIZE = /^(0|[1-9][0-9]*)$/;
+
+// The gate must never pass content it did not read, so any reply that does not match
+// the request exactly, record by record, is an error rather than a partial result.
 export async function readBlobs(cwd: string, oids: string[]): Promise<Map<string, Buffer>> {
   const blobs = new Map<string, Buffer>();
   if (oids.length === 0) return blobs;
   const raw = await runGit(cwd, ['cat-file', '--batch'], oids.join('\n') + '\n');
   let offset = 0;
+  let index = 0;
   while (offset < raw.length) {
+    const requested = oids[index];
+    if (requested === undefined) {
+      throw new Error(`git cat-file returned more objects than the ${oids.length} requested`);
+    }
     const headerEnd = raw.indexOf(0x0a, offset);
-    const [oid = '', type = '', size = ''] = raw.subarray(offset, headerEnd).toString().split(' ');
+    if (headerEnd === -1) throw new Error(`git cat-file header for ${requested} has no newline`);
+    const fields = raw.subarray(offset, headerEnd).toString('utf8').split(' ');
+    const [oid = '', type = '', size = ''] = fields;
+    if (oid !== requested) {
+      throw new Error(`git cat-file returned ${oid || 'nothing'} where ${requested} was requested`);
+    }
+    // A missing object has no size or body, so it cannot be read as a short record.
+    if (fields.length === 2 && type === 'missing') {
+      throw new Error(`git cat-file reports ${oid} missing`);
+    }
+    if (fields.length !== 3) throw new Error(`git cat-file gave a malformed header for ${oid}`);
     if (type !== 'blob') throw new Error(`git cat-file returned ${type || 'nothing'} for ${oid}`);
+    if (!SIZE.test(size)) throw new Error(`git cat-file gave an invalid size for ${oid}: ${size}`);
     const start = headerEnd + 1;
     const end = start + Number(size);
+    if (!Number.isSafeInteger(end) || end > raw.length) {
+      throw new Error(`git cat-file body for ${oid} is truncated`);
+    }
+    if (raw[end] !== 0x0a) {
+      throw new Error(`git cat-file body for ${oid} is not followed by a newline`);
+    }
     blobs.set(oid, raw.subarray(start, end));
     offset = end + 1;
+    index += 1;
+  }
+  if (index !== oids.length) {
+    throw new Error(`git cat-file returned ${index} of ${oids.length} requested objects`);
   }
   return blobs;
 }
