@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   colorOf,
+  disabledCeiling,
+  disabledPairs,
   expandPairs,
   forbiddenPairs,
   measure,
@@ -135,9 +137,6 @@ const forbidden = [
   // Captions sit on ground only in light.
   ['light', 'text.subtle', 'surface.raised', 'text', 4.36],
   ['light', 'text.subtle', 'surface.sunken', 'text', 4.36],
-  // Disabled is never reading text.
-  ['light', 'text.disabled', 'surface.ground', 'text', 2.45],
-  ['dark', 'text.disabled', 'surface.ground', 'text', 3.89],
   // Amber and teal marks never stand alone on paper; they sit beside a word or a tick.
   ['light', 'state.stale.mark', 'surface.ground', 'non-text', 2.05],
   ['light', 'signal.mark', 'surface.ground', 'non-text', 2.38],
@@ -160,6 +159,29 @@ const ruledOut = [
   ['dark', 'state.neutral.text', 'accent.wash', 'text', 5.91],
   ['dark', 'text.subtle', 'accent.wash', 'text', 5.91],
   ['dark', 'border.control', 'accent.wash', 'non-text', 3.11],
+] as const;
+
+// Disabled controls are drawn with their own colours, never with opacity, so every value they
+// show is measured here. Each sits inside a band: a label above its floor can still be made
+// out, and nothing reaches 3:1, so a disabled control never reads as a live one. WCAG exempts
+// disabled controls; the band is ours.
+const disabled = [
+  ['light', 'disabled.text', 'disabled.fill', 'text', 2.35],
+  ['light', 'disabled.text', 'surface.ground', 'text', 2.45],
+  ['light', 'disabled.text', 'surface.raised', 'text', 2.35],
+  ['light', 'disabled.text', 'surface.sunken', 'text', 2.35],
+  ['light', 'disabled.edge', 'disabled.fill', 'non-text', 1.36],
+  ['light', 'disabled.edge', 'surface.ground', 'non-text', 1.42],
+  ['light', 'disabled.edge', 'surface.raised', 'non-text', 1.36],
+  ['light', 'disabled.edge', 'surface.sunken', 'non-text', 1.36],
+  ['dark', 'disabled.text', 'disabled.fill', 'text', 2.27],
+  ['dark', 'disabled.text', 'surface.ground', 'text', 2.44],
+  ['dark', 'disabled.text', 'surface.raised', 'text', 2.27],
+  ['dark', 'disabled.text', 'surface.sunken', 'text', 2.1],
+  ['dark', 'disabled.edge', 'disabled.fill', 'non-text', 1.69],
+  ['dark', 'disabled.edge', 'surface.ground', 'non-text', 1.81],
+  ['dark', 'disabled.edge', 'surface.raised', 'non-text', 1.69],
+  ['dark', 'disabled.edge', 'surface.sunken', 'non-text', 1.56],
 ] as const;
 
 const key = (row: readonly unknown[]) => row.slice(0, 4).join(' ');
@@ -206,8 +228,65 @@ describe('ruled out pairs', () => {
 
   it('never overlaps the required pairs', () => {
     const required = new Set(expandPairs(requiredPairs).map((p) => key([p.mode, p.fg, p.bg])));
-    for (const p of expandPairs([...forbiddenPairs, ...ruledOutPairs])) {
+    for (const p of expandPairs([...forbiddenPairs, ...ruledOutPairs, ...disabledPairs])) {
       expect(required.has(key([p.mode, p.fg, p.bg])), key([p.mode, p.fg, p.bg])).toBe(false);
+    }
+  });
+});
+
+describe('disabled pairs', () => {
+  const floorOf = (mode: string, fg: string, bg: string) => {
+    const group = disabledPairs.find(
+      (g) =>
+        g.modes.some((m) => m === mode) && g.fg.some((f) => f === fg) && g.bg.some((b) => b === bg),
+    );
+    if (group === undefined) throw new Error(`${mode} ${fg} on ${bg} is not declared`);
+    return group.floor;
+  };
+
+  it.each(disabled)(
+    '%s %s on %s (%s) measures %s, inside the band',
+    (mode, fg, bg, kind, ratio) => {
+      const measured = measure({ fg, bg, kind }, mode);
+      expect(measured).toBe(ratio);
+      expect(measured).toBeGreaterThanOrEqual(floorOf(mode, fg, bg));
+      expect(measured).toBeLessThan(disabledCeiling);
+    },
+  );
+
+  it('lists exactly the disabled pairs the tokens declare', () => {
+    const declared = expandPairs(disabledPairs).map((p) => key([p.mode, p.fg, p.bg, p.kind]));
+    expect(new Set(declared).size).toBe(declared.length);
+    expect(declared.sort()).toEqual(disabled.map(key).sort());
+  });
+
+  it('keeps the ceiling at the live floor for marks and control edges', () => {
+    expect(disabledCeiling).toBe(minimum['non-text']);
+  });
+
+  it('keeps a label floor that can still be made out', () => {
+    for (const g of disabledPairs) {
+      if (g.kind === 'text') expect(g.floor).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('reads weaker than the live control it stands in for, on every surface', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      for (const bg of ['surface.ground', 'surface.raised', 'surface.sunken'] as const) {
+        expect(measure({ fg: 'disabled.text', bg }, mode)).toBeLessThan(
+          measure({ fg: 'text.secondary', bg }, mode),
+        );
+        expect(measure({ fg: 'disabled.edge', bg }, mode)).toBeLessThan(
+          measure({ fg: 'border.control', bg }, mode),
+        );
+      }
+    }
+  });
+
+  it('never appears in a live pair', () => {
+    for (const p of expandPairs(requiredPairs)) {
+      expect(p.fg.startsWith('disabled.'), key([p.mode, p.fg, p.bg])).toBe(false);
+      expect(p.bg.startsWith('disabled.'), key([p.mode, p.fg, p.bg])).toBe(false);
     }
   });
 });

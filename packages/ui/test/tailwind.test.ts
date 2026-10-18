@@ -80,6 +80,13 @@ describe('Tailwind theme', () => {
     }
   });
 
+  it('styles a disabled control with the disabled tokens, so it never needs opacity', async () => {
+    const css = await build(['bg-disabled-fill', 'border-disabled-edge', 'text-disabled-text']);
+    expect(css).toMatch(/\.bg-disabled-fill\s*\{\s*background-color: var\(--dr-disabled-fill\)/);
+    expect(css).toMatch(/\.border-disabled-edge\s*\{\s*border-color: var\(--dr-disabled-edge\)/);
+    expect(css).toMatch(/\.text-disabled-text\s*\{\s*color: var\(--dr-disabled-text\)/);
+  });
+
   it('still compiles bare numbers and brackets, which is why the lint rule rejects them', async () => {
     // Kept in a fixture: the lint rule rightly rejects these anywhere in source.
     const escapes = JSON.parse(

@@ -42,8 +42,16 @@ const color = {
     secondary: { light: '#475569', dark: '#A8A29E' },
     // Light: on ground only. It measures 4.36 on raised and sunken.
     subtle: { light: '#64748B', dark: '#A8A29E' },
-    // Disabled controls only, never reading text.
-    disabled: { light: '#94A3B8', dark: '#78716C' },
+  },
+  // Disabled controls paint with these instead of dimming with opacity, so every colour a
+  // disabled control shows is one the contrast tests measured. The label stays legible but
+  // nothing reaches 3:1, so a disabled control never passes for a live one.
+  disabled: {
+    fill: { light: '#F5F5F4', dark: '#1C1A17' },
+    edge: { light: '#D6D3D1', dark: '#44403C' },
+    // Dark was #78716C, the live control edge colour, and measured 3.89. Matching the light
+    // band means one rule for both modes.
+    text: { light: '#94A3B8', dark: '#57534E' },
   },
   accent: {
     ink: { light: '#4F46E5', dark: '#818CF8' },

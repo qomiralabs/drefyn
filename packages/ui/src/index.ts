@@ -3,6 +3,8 @@ export { themeScript, themeStorageKey } from './theme-script.ts';
 export { composite, contrast, floor2, luminance } from './tokens/contrast.ts';
 export {
   colorOf,
+  disabledCeiling,
+  disabledPairs,
   forbiddenPairs,
   measure,
   minimum,
@@ -10,6 +12,7 @@ export {
   ruledOutPairs,
   type Backdrop,
   type ColorRole,
+  type DisabledGroup,
   type Pair,
   type PairGroup,
   type PairKind,

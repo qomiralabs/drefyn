@@ -535,3 +535,107 @@ button.quiet {
 button.quiet:hover {
   background: var(--dr-surface-raised);
 }
+
+/* Disabled. No opacity anywhere: each part has its own measured colour. */
+
+.disabled-demo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 2)), 1fr));
+  gap: var(--dr-space-32);
+  margin-block-end: var(--dr-space-32);
+}
+
+.controls h3 {
+  margin-block-start: 0;
+}
+
+.control-row,
+.field,
+.check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-12);
+  align-items: center;
+  margin: 0 0 var(--dr-space-16);
+}
+
+.field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--dr-space-4);
+  max-inline-size: calc(var(--dr-space-128) * 2);
+}
+
+.field label,
+.check label {
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+}
+
+.field input {
+  padding: var(--dr-space-8) var(--dr-space-12);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-ground);
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+}
+
+/* Drawn by hand: the native disabled checkbox fades itself, which is the opacity the tokens
+   are here to replace. */
+.check input {
+  display: grid;
+  place-content: center;
+  inline-size: var(--dr-space-16);
+  block-size: var(--dr-space-16);
+  margin: 0;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-xs);
+  background: var(--dr-surface-ground);
+  appearance: none;
+}
+
+.check input:checked {
+  border-color: var(--dr-accent-ink);
+  background: var(--dr-accent-ink);
+}
+
+.check input:checked::before {
+  content: '';
+  inline-size: var(--dr-space-8);
+  block-size: var(--dr-space-4);
+  margin-block-start: calc(var(--dr-stroke-icon) * -1);
+  border-block-end: var(--dr-stroke-focus) solid var(--dr-accent-on);
+  border-inline-start: var(--dr-stroke-focus) solid var(--dr-accent-on);
+  transform: rotate(-45deg);
+}
+
+button:disabled,
+button.quiet:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  color: var(--dr-disabled-text);
+  cursor: not-allowed;
+}
+
+.field input:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  color: var(--dr-disabled-text);
+  cursor: not-allowed;
+}
+
+.check input:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  cursor: not-allowed;
+}
+
+.check input:disabled::before {
+  border-color: var(--dr-disabled-text);
+}
+
+.field:has(input:disabled) label,
+.check:has(input:disabled) label {
+  color: var(--dr-disabled-text);
+}

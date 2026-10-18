@@ -65,10 +65,18 @@ describe('tokens.css', () => {
     expect([...chosen.declarations]).toEqual([...system.declarations]);
   });
 
+  it('draws disabled controls from their own opaque colours in both modes', () => {
+    const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
+    const names = ['--dr-disabled-fill', '--dr-disabled-edge', '--dr-disabled-text'];
+    expect(names.map((n) => root.declarations.get(n))).toEqual(['#F5F5F4', '#D6D3D1', '#94A3B8']);
+    expect(names.map((n) => system.declarations.get(n))).toEqual(['#1C1A17', '#44403C', '#57534E']);
+    expect(root.declarations.has('--dr-text-disabled')).toBe(false);
+  });
+
   it('redefines every colour role in dark and nothing that does not change', () => {
     const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
     const colorNames = [...root.declarations.keys()].filter((n) =>
-      /^--dr-(surface|border|text|accent|signal|state|focus|shadow)-/.test(n),
+      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|shadow)-/.test(n),
     );
     const darkNames = [...system.declarations.keys()].filter((n) => n !== 'color-scheme');
     expect(darkNames.sort()).toEqual(colorNames.sort());

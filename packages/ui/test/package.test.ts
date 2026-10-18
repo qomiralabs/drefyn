@@ -40,6 +40,8 @@ describe('package manifest', () => {
         'colorOf',
         'composite',
         'contrast',
+        'disabledCeiling',
+        'disabledPairs',
         'echartsThemes',
         'floor2',
         'forbiddenPairs',

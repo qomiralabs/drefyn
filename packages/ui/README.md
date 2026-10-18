@@ -20,8 +20,9 @@ The tests fail if they drift.
 ## Public API
 
 - `tokens`: the typed source, for example `tokens.color.state.broken.text.light`.
-- `requiredPairs`, `forbiddenPairs`, `measure`, `colorOf`, `minimum`: which colours may sit on
-  which, and the ratio each pair measures.
+- `requiredPairs`, `forbiddenPairs`, `ruledOutPairs`, `measure`, `colorOf`, `minimum`: which
+  colours may sit on which, and the ratio each pair measures.
+- `disabledPairs`, `disabledCeiling`: the band disabled controls are held to.
 - `contrast`, `luminance`, `composite`, `floor2`: WCAG 2.x contrast, floored so a failure never
   prints as a pass.
 - `themeScript`, `themeStorageKey`: the inline head script that applies a stored light or dark
@@ -35,6 +36,9 @@ The tests fail if they drift.
 - Nothing coloured sits on the selection wash. A selected row shows state with its icon and ink
   text, never state coloured text or subtle text, and draws its edge from `border.rule`, not
   `border.control`. The pairs that fail are must fail pairs; the rest are in `ruledOutPairs`.
+- Disabled controls paint with `disabled.fill`, `disabled.edge` and `disabled.text`, never with
+  opacity. Each pair measures at or above its floor (2:1 for labels, 1.3:1 for edges) and below
+  3:1 in both modes, so a disabled control is findable but never passes for a live one.
 - Under reduced motion nothing travels and no fade runs past 120 ms.
 - `tokens.css` stays under 2.5 KB gzipped.
 - Fonts are Latin subsets with their full OFL licences beside them in `src/fonts`. Each file has

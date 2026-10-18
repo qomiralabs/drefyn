@@ -16,7 +16,9 @@
   --color-body: var(--dr-text-body);
   --color-secondary: var(--dr-text-secondary);
   --color-subtle: var(--dr-text-subtle);
-  --color-disabled: var(--dr-text-disabled);
+  --color-disabled-fill: var(--dr-disabled-fill);
+  --color-disabled-edge: var(--dr-disabled-edge);
+  --color-disabled-text: var(--dr-disabled-text);
   --color-accent-ink: var(--dr-accent-ink);
   --color-accent-press: var(--dr-accent-press);
   --color-accent-on: var(--dr-accent-on);

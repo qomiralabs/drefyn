@@ -124,13 +124,6 @@ export const forbiddenPairs: readonly PairGroup[] = [
     why: 'Subtle text is for the ground only in light',
   },
   {
-    fg: ['text.disabled'],
-    bg: ['surface.ground'],
-    kind: 'text',
-    modes: BOTH,
-    why: 'Disabled is never reading text',
-  },
-  {
     fg: ['state.stale.mark', 'signal.mark'],
     bg: ['surface.ground'],
     kind: 'non-text',
@@ -182,6 +175,35 @@ export const ruledOutPairs: readonly PairGroup[] = [
     kind: 'non-text',
     modes: ['dark'],
     why: 'A selected row draws its edge from the rule token',
+  },
+];
+
+// Disabled controls are exempt from the WCAG minimums, but they still have to be findable and
+// must never pass for live ones. Each pair sits at or above its floor and below this ceiling,
+// which is the live minimum for marks and control edges.
+export const disabledCeiling = minimum['non-text'];
+
+export interface DisabledGroup extends PairGroup {
+  floor: number;
+}
+
+export const disabledPairs: readonly DisabledGroup[] = [
+  {
+    fg: ['disabled.text'],
+    bg: ['disabled.fill', ...SURFACES],
+    kind: 'text',
+    modes: BOTH,
+    floor: 2,
+    why: 'A disabled label can still be made out and never reads as live text',
+  },
+  {
+    fg: ['disabled.edge'],
+    bg: ['disabled.fill', ...SURFACES],
+    kind: 'non-text',
+    modes: BOTH,
+    // About what a strong rule shows on paper: the shape is there, the control is not live.
+    floor: 1.3,
+    why: 'A disabled input keeps its shape but never draws a live edge',
   },
 ];
 

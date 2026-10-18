@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { themeScript } from '../src/theme-script.ts';
 import {
   colorOf,
+  disabledCeiling,
+  disabledPairs,
   expandPairs,
   forbiddenPairs,
   measure,
@@ -117,6 +119,45 @@ function pairsSection(): string {
       marks and control edges need ${minimum['non-text']}:1. Pairs marked not allowed are never used:
       most fail, and the rest are ruled out so a rule reads the same in both modes.</p>
       <div class="matrices">${pairMatrix('light')}${pairMatrix('dark')}</div>
+    </section>`;
+}
+
+function controls(disabled: boolean): string {
+  const id = disabled ? 'off' : 'on';
+  const attr = disabled ? ' disabled' : '';
+  return `
+      <div class="controls">
+        <h3>${disabled ? 'Disabled' : 'Live'}</h3>
+        <p class="control-row"><button type="button"${attr}>Publish</button> <button type="button" class="quiet"${attr}>Save draft</button></p>
+        <p class="field"><label for="name-${id}">Page title</label><input id="name-${id}" type="text" value="Rate limits"${attr}></p>
+        <p class="check"><input id="notify-${id}" type="checkbox" checked${attr}><label for="notify-${id}">Notify subscribers</label></p>
+      </div>`;
+}
+
+function disabledSection(): string {
+  const rows = disabledPairs
+    .flatMap((g) =>
+      g.fg.flatMap((fg) => g.bg.map((bg) => ({ fg, bg, kind: g.kind, floor: g.floor }))),
+    )
+    .map((p) => {
+      const cells = (['light', 'dark'] as const)
+        .map((mode) => `<td class="numbers">${ratio(measure(p, mode))}</td>`)
+        .join('');
+      return `<tr><th scope="row">${p.fg} on ${p.bg}</th>${cells}<td class="numbers">${ratio(p.floor)}</td></tr>`;
+    })
+    .join('');
+  return `
+    <section aria-labelledby="disabled">
+      <h2 id="disabled">Disabled</h2>
+      <p class="lede">Disabled controls paint with their own fill, edge and label instead of fading, so every colour they show is measured.
+      A label stays above its floor and nothing reaches ${disabledCeiling}:1, so a disabled control never passes for a live one.</p>
+      <div class="disabled-demo">${controls(false)}${controls(true)}</div>
+      <div class="scroll" tabindex="0" role="region" aria-label="Disabled contrast">
+        <table>
+          <thead><tr><th scope="col">Pair</th><th scope="col">Light</th><th scope="col">Dark</th><th scope="col">Floor</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     </section>`;
 }
 
@@ -261,6 +302,7 @@ export function renderPreview(): string {
 <main>
 ${colorSection()}
 ${pairsSection()}
+${disabledSection()}
 ${stateSection()}
 ${typeSection()}
 ${scaleSection()}
