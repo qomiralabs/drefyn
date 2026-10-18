@@ -12,7 +12,6 @@ import {
   limitFor,
   limitInfo,
 } from '../src/index.ts';
-import type { FeatureKey, LimitKey, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
 import { isLimitValue } from './support/assert.ts';
 
@@ -74,7 +73,7 @@ describe('limit table, cell for cell', () => {
 
     const grace = (pricing.SEND_KEYS as readonly string[]).includes(key);
     it(`${key} has scope ${row.scope}, direction ${row.direction} and grace ${grace}`, () => {
-      expect(limitInfo(key as LimitKey)).toEqual({
+      expect(limitInfo(key)).toEqual({
         key,
         scope: row.scope,
         direction: row.direction,
@@ -86,16 +85,16 @@ describe('limit table, cell for cell', () => {
       const cell = row.cells[tier];
       if (cell === 'unlimited') {
         it(`${tier} ${key} is unlimited`, () => {
-          expect(limitFor(tier as Tier, key as LimitKey)).toBe(UNLIMITED);
+          expect(limitFor(tier, key)).toBe(UNLIMITED);
         });
       } else if (typeof cell === 'number') {
         it(`${tier} ${key} is ${cell}`, () => {
-          expect(limitFor(tier as Tier, key as LimitKey)).toBe(cell);
+          expect(limitFor(tier, key)).toBe(cell);
         });
       } else {
         const expected = cell.atLeast ?? cell.atMost ?? 0;
         it(`${tier} ${key} is a listed placeholder that resolves to ${expected}`, () => {
-          const value = limitFor(tier as Tier, key as LimitKey);
+          const value = limitFor(tier, key);
           expect(isLimitValue(value)).toBe(true);
           expect(UNCALIBRATED.some((entry) => entry.tier === tier && entry.key === key)).toBe(true);
           // The most generous value the pricing proves, and no more.
@@ -126,7 +125,7 @@ describe('send grace', () => {
     const sendKeys: readonly string[] = pricing.SEND_KEYS;
     for (const tier of pricing.TIERS) {
       for (const key of pricing.LIMIT_KEYS.filter((k) => !sendKeys.includes(k))) {
-        expect(graceAllowance(tier, key as LimitKey), `${tier} ${key}`).toBe(0);
+        expect(graceAllowance(tier, key), `${tier} ${key}`).toBe(0);
       }
     }
   });
@@ -138,7 +137,7 @@ describe('feature table, cell for cell', () => {
     const since = pricing.HOSTED_LADDER.indexOf(row.since);
 
     it(`${feature} has scope ${row.scope}, since ${row.since}, open core ${row.selfHosted}`, () => {
-      expect(featureInfo(feature as FeatureKey)).toEqual({
+      expect(featureInfo(feature)).toEqual({
         feature,
         scope: row.scope,
         since: row.since,
@@ -149,12 +148,12 @@ describe('feature table, cell for cell', () => {
     pricing.HOSTED_LADDER.forEach((tier, index) => {
       const expected = index >= since;
       it(`${tier} ${expected ? 'has' : 'does not have'} ${feature}`, () => {
-        expect(hasFeature(tier, feature as FeatureKey)).toBe(expected);
+        expect(hasFeature(tier, feature)).toBe(expected);
       });
     });
 
     it(`self_hosted ${row.selfHosted ? 'has' : 'does not have'} ${feature}`, () => {
-      expect(hasFeature('self_hosted', feature as FeatureKey)).toBe(row.selfHosted);
+      expect(hasFeature('self_hosted', feature)).toBe(row.selfHosted);
     });
   }
 });
@@ -171,7 +170,9 @@ describe('uncalibrated placeholders', () => {
   });
 
   it('never lists a self_hosted cell, which is unlimited by rule, not by guess', () => {
-    expect(UNCALIBRATED.filter((entry) => entry.tier === 'self_hosted')).toEqual([]);
+    // Widened to string: the type already rules self_hosted out, and this checks the data.
+    const tiers: readonly string[] = UNCALIBRATED.map((entry) => entry.tier);
+    expect(tiers).not.toContain('self_hosted');
   });
 
   it('freezes each entry', () => {
