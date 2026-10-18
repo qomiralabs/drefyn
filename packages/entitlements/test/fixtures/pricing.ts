@@ -14,9 +14,11 @@ export const PRODUCTS = ['docs', 'studio', 'status'] as const;
 // Storage and bandwidth are in bytes with decimal gigabytes, the way the pricing writes GB.
 export const GB = 1_000_000_000;
 
+// A cell the pricing leaves open. It resolves to the most generous value the pricing
+// proves and no more: its bound if it has one, otherwise 0 (not entitled until
+// calibrated), which is why hosted Studio caps are 0 today.
 export interface Placeholder {
   readonly placeholder: true;
-  // Bounds the pricing does fix, such as a value no lower than the tier below.
   readonly atLeast?: number;
   readonly atMost?: number;
 }
@@ -27,6 +29,8 @@ const open = (bounds: { atLeast?: number; atMost?: number } = {}): Placeholder =
   ...bounds,
 });
 
+// Every limit counts per organization. Scope names the product that owns the counter,
+// not the unit it is counted in.
 export interface LimitRow {
   readonly scope: 'org' | 'docs' | 'studio' | 'status';
   readonly direction: 'max' | 'min';
@@ -298,7 +302,7 @@ export const LIMITS = {
 export type FixtureLimitKey = keyof typeof LIMITS;
 export const LIMIT_KEYS = Object.keys(LIMITS) as FixtureLimitKey[];
 
-// Keys with the 25 percent grace for updates to an incident that is already open.
+// Keys with the 25 percent grace. Whether a send may use it is the send meter's call.
 export const SEND_KEYS = [
   'status.email_sends_per_month',
   'status.sms_sends_per_month',
@@ -340,8 +344,8 @@ export interface FeatureRow {
   readonly scope: 'org' | 'docs' | 'studio' | 'status';
   // The cheapest hosted tier that has it; every dearer hosted tier has it too.
   readonly since: HostedTier;
-  // true or false where the pricing settles it for self host; 'open' where it does not.
-  readonly selfHosted: boolean | 'open';
+  // Open core features are on for self host; only hosted service features are off.
+  readonly selfHosted: boolean;
 }
 
 const f = (
@@ -359,7 +363,7 @@ export const FEATURES = {
   'docs.openapi_reference': f('docs', 'starter'),
   'docs.staleness_basic': f('docs', 'starter'),
   'docs.analytics_basic': f('docs', 'starter'),
-  'docs.staleness_automatic': f('docs', 'growth', 'open'),
+  'docs.staleness_automatic': f('docs', 'growth'),
   'docs.versioning': f('docs', 'growth'),
   'docs.editorial_workflow': f('docs', 'growth'),
   'docs.widgets': f('docs', 'growth'),
@@ -369,20 +373,20 @@ export const FEATURES = {
   'docs.localization': f('docs', 'scale'),
   'docs.support_integrations': f('docs', 'scale'),
   'docs.advanced_roles': f('docs', 'scale'),
-  'docs.advanced_analytics': f('docs', 'scale', 'open'),
+  'docs.advanced_analytics': f('docs', 'scale'),
 
   'studio.schema_builder': f('studio', 'free'),
   'studio.rest_api': f('studio', 'free'),
   'studio.graphql_api': f('studio', 'free'),
   'studio.management_ui': f('studio', 'free'),
   'studio.custom_roles': f('studio', 'starter'),
-  'studio.realtime_collaboration': f('studio', 'growth', 'open'),
+  'studio.realtime_collaboration': f('studio', 'growth'),
   'studio.editorial_workflow': f('studio', 'growth'),
   'studio.retrieval_api': f('studio', 'growth'),
   'studio.mcp': f('studio', 'growth'),
   'studio.localization': f('studio', 'growth'),
   'studio.advanced_permissions': f('studio', 'scale'),
-  'studio.advanced_analytics': f('studio', 'scale', 'open'),
+  'studio.advanced_analytics': f('studio', 'scale'),
   'studio.integrations': f('studio', 'scale'),
 
   'status.statuspage_importer': f('status', 'free'),
@@ -417,13 +421,13 @@ export const FEATURES = {
   'status.per_customer_sla_reports': f('status', 'scale'),
   'status.escalation_policies': f('status', 'scale'),
   'status.advanced_roles': f('status', 'scale'),
-  'status.private_page_saml': f('status', 'enterprise', 'open'),
+  'status.private_page_saml': f('status', 'enterprise'),
   // Run by the hosted fleet and contract only; a self host has its own IPs and no SLA from us.
   'status.dedicated_probe_ips': f('status', 'enterprise', false),
   'status.contractual_sla': f('status', 'enterprise', false),
 
-  'org.sso_saml': f('org', 'enterprise', 'open'),
-  'org.audit_logs': f('org', 'enterprise', 'open'),
+  'org.sso_saml': f('org', 'enterprise'),
+  'org.audit_logs': f('org', 'enterprise'),
 } as const satisfies Record<string, FeatureRow>;
 
 export type FixtureFeatureKey = keyof typeof FEATURES;

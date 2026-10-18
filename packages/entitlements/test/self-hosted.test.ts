@@ -47,7 +47,7 @@ describe('self_hosted', () => {
   });
 
   it('counts every feature the pricing gives self host as open core', () => {
-    const settled = pricing.FEATURE_KEYS.filter((k) => pricing.FEATURES[k].selfHosted === true);
+    const settled = pricing.FEATURE_KEYS.filter((k) => pricing.FEATURES[k].selfHosted);
     for (const feature of settled) {
       expect(featureInfo(feature).openCore, feature).toBe(true);
     }

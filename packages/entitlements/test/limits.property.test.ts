@@ -69,8 +69,8 @@ describe('every limit is a non negative safe integer or the unlimited value', ()
 
   it('returns only integers in every check result', () => {
     fc.assert(
-      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, openIncident) => {
-        const result = checkLimit(t, k, usage, { openIncident }) as unknown as Record<
+      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, graceEligible) => {
+        const result = checkLimit(t, k, usage, { graceEligible }) as unknown as Record<
           string,
           unknown
         >;
@@ -89,10 +89,10 @@ describe('every limit is a non negative safe integer or the unlimited value', ()
 describe('one plan answers the same in every product', () => {
   it('gives the same check result through Docs, Studio and Status', () => {
     fc.assert(
-      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, openIncident) => {
-        const direct = checkLimit(t, k, usage, { openIncident });
+      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, graceEligible) => {
+        const direct = checkLimit(t, k, usage, { graceEligible });
         for (const product of PRODUCTS) {
-          expect(entitlementsFor(product).checkLimit(t, k, usage, { openIncident })).toEqual(
+          expect(entitlementsFor(product).checkLimit(t, k, usage, { graceEligible })).toEqual(
             direct,
           );
         }
@@ -230,8 +230,8 @@ describe('checks are consistent in usage', () => {
 
   it('marks every refusal read only and never throws for valid usage', () => {
     fc.assert(
-      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, openIncident) => {
-        const result = checkLimit(t, k, usage, { openIncident });
+      fc.property(tierArb, keyArb, usageArb, fc.boolean(), (t, k, usage, graceEligible) => {
+        const result = checkLimit(t, k, usage, { graceEligible });
         expect(['allowed', 'over_limit', 'not_entitled']).toContain(result.status);
         if (result.status !== 'allowed') {
           expect(result).toMatchObject({ access: 'read_only' });
@@ -245,10 +245,10 @@ describe('checks are consistent in usage', () => {
     const query = fc.tuple(tierArb, keyArb, usageArb, fc.boolean());
     fc.assert(
       fc.property(fc.array(query, { minLength: 1, maxLength: 30 }), (queries) => {
-        const first = queries.map(([t, k, u, o]) => checkLimit(t, k, u, { openIncident: o }));
+        const first = queries.map(([t, k, u, o]) => checkLimit(t, k, u, { graceEligible: o }));
         const again = [...queries]
           .reverse()
-          .map(([t, k, u, o]) => checkLimit(t, k, u, { openIncident: o }))
+          .map(([t, k, u, o]) => checkLimit(t, k, u, { graceEligible: o }))
           .reverse();
         expect(again).toEqual(first);
       }),
@@ -258,11 +258,11 @@ describe('checks are consistent in usage', () => {
 });
 
 describe('send caps never allow a send past cap plus grace', () => {
-  it('holds with an open incident', () => {
+  it('holds for a grace eligible send', () => {
     fc.assert(
       fc.property(tierArb, sendKeyArb, usageArb, (t, k, usage) => {
         const cap = limitFor(t, k);
-        if (checkLimit(t, k, usage, { openIncident: true }).status !== 'allowed') return true;
+        if (checkLimit(t, k, usage, { graceEligible: true }).status !== 'allowed') return true;
         if (cap === UNLIMITED) return true;
         return usage <= cap + Math.floor((cap * 25) / 100);
       }),
@@ -270,7 +270,7 @@ describe('send caps never allow a send past cap plus grace', () => {
     );
   });
 
-  it('holds with no open incident, where the cap itself is the ceiling', () => {
+  it('holds for a send that is not grace eligible, where the cap itself is the ceiling', () => {
     fc.assert(
       fc.property(tierArb, sendKeyArb, usageArb, (t, k, usage) => {
         const cap = limitFor(t, k);
@@ -291,8 +291,8 @@ describe('send caps never allow a send past cap plus grace', () => {
           if (cap === UNLIMITED || cap === 0) return true;
           const ceiling = cap + (graceAllowance(t, k) as number);
           return (
-            checkLimit(t, k, ceiling, { openIncident: true }).status === 'allowed' &&
-            checkLimit(t, k, ceiling + 1, { openIncident: true }).status !== 'allowed'
+            checkLimit(t, k, ceiling, { graceEligible: true }).status === 'allowed' &&
+            checkLimit(t, k, ceiling + 1, { graceEligible: true }).status !== 'allowed'
           );
         },
       ),
@@ -304,7 +304,7 @@ describe('send caps never allow a send past cap plus grace', () => {
     fc.assert(
       fc.property(tierArb, keyArb, usageArb, (t, k, usage) => {
         const plain = checkLimit(t, k, usage).status;
-        const open = checkLimit(t, k, usage, { openIncident: true }).status;
+        const open = checkLimit(t, k, usage, { graceEligible: true }).status;
         const sendKeys: readonly string[] = pricing.SEND_KEYS;
         if (!sendKeys.includes(k)) return plain === open;
         return plain !== 'allowed' || open === 'allowed';

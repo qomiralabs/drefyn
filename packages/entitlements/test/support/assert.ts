@@ -16,7 +16,10 @@ export type ErrorCode =
 
 // toThrow(SomeClass) passes on any throw when SomeClass is undefined, so the class and
 // the code are checked by hand.
-export function expectEntitlementError(run: () => unknown, code: ErrorCode): void {
+export function expectEntitlementError(
+  run: () => unknown,
+  code: ErrorCode,
+): { readonly code: string; readonly message: string; readonly limitKey?: unknown } {
   let caught: unknown = undefined;
   let threw = false;
   try {
@@ -31,6 +34,7 @@ export function expectEntitlementError(run: () => unknown, code: ErrorCode): voi
   expect(caught instanceof EntitlementError).toBe(true);
   expect((caught as { name?: unknown }).name).toBe('EntitlementError');
   expect((caught as { code?: unknown }).code).toBe(code);
+  return caught as { code: string; message: string; limitKey?: unknown };
 }
 
 export function caughtCode(run: () => unknown): string | undefined {

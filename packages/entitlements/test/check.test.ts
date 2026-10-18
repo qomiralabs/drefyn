@@ -3,6 +3,9 @@
 // A max limit allows usage up to and including the limit; a min limit (the check
 // interval floor) allows usage at or above it. A refusal never implies deletion: it
 // carries access 'read_only' so existing content stays and only stops being editable.
+// Grace widens a send cap by a quarter only when the caller marks the send grace
+// eligible; every result reports the grace it applied, and excess is measured past
+// limit plus grace.
 import { describe, expect, it } from 'vitest';
 import {
   FEATURE_KEYS,
@@ -36,6 +39,7 @@ describe('checkLimit at the boundary', () => {
       key: 'org.seats',
       limit: 2,
       usage: 2,
+      grace: 0,
     });
   });
 
@@ -46,6 +50,7 @@ describe('checkLimit at the boundary', () => {
       key: 'org.seats',
       limit: 2,
       usage: 3,
+      grace: 0,
       excess: 1,
       access: 'read_only',
     });
@@ -182,43 +187,104 @@ describe('downgrades never delete', () => {
   });
 });
 
-describe('send caps and the open incident grace', () => {
-  it('stops Free email at 2,000 without an open incident', () => {
+describe('send caps and the grace for eligible sends', () => {
+  it('stops Free email at 2,000 when the send is not grace eligible', () => {
     expect(checkLimit('free', 'status.email_sends_per_month', 2000).status).toBe('allowed');
     expect(checkLimit('free', 'status.email_sends_per_month', 2001).status).toBe('over_limit');
   });
 
-  it('lets an open incident run 25 percent past the Free email cap and no further', () => {
-    const open = { openIncident: true } as const;
-    expect(checkLimit('free', 'status.email_sends_per_month', 2500, open).status).toBe('allowed');
-    expect(checkLimit('free', 'status.email_sends_per_month', 2501, open)).toMatchObject({
+  it('lets a grace eligible send run 25 percent past the Free email cap and no further', () => {
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('free', 'status.email_sends_per_month', 2500, eligible).status).toBe(
+      'allowed',
+    );
+    expect(checkLimit('free', 'status.email_sends_per_month', 2501, eligible)).toMatchObject({
       status: 'over_limit',
+      limit: 2000,
+      grace: 500,
+      // Measured past limit plus grace, not past the bare cap.
+      excess: 1,
       access: 'read_only',
     });
   });
 
   it('rounds SMS grace down: Starter is 50 plus 12', () => {
-    const open = { openIncident: true } as const;
-    expect(checkLimit('starter', 'status.sms_sends_per_month', 62, open).status).toBe('allowed');
-    expect(checkLimit('starter', 'status.sms_sends_per_month', 63, open).status).toBe('over_limit');
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('starter', 'status.sms_sends_per_month', 62, eligible).status).toBe(
+      'allowed',
+    );
+    expect(checkLimit('starter', 'status.sms_sends_per_month', 63, eligible)).toMatchObject({
+      status: 'over_limit',
+      limit: 50,
+      grace: 12,
+      excess: 1,
+    });
   });
 
   it('gives no grace where the cap is zero', () => {
-    const open = { openIncident: true } as const;
-    expect(checkLimit('free', 'status.sms_sends_per_month', 1, open).status).toBe('not_entitled');
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('free', 'status.sms_sends_per_month', 1, eligible).status).toBe(
+      'not_entitled',
+    );
     expect(graceAllowance('starter', 'status.voice_minutes_per_month')).toBe(0);
   });
 
-  it('ignores the open incident option on limits that are not sends', () => {
-    const open = { openIncident: true } as const;
-    expect(checkLimit('free', 'org.seats', 3, open).status).toBe('over_limit');
-    expect(checkLimit('free', 'status.monitors', 11, open).status).toBe('over_limit');
+  it('ignores the grace option on limits that are not sends', () => {
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('free', 'org.seats', 3, eligible).status).toBe('over_limit');
+    expect(checkLimit('free', 'status.monitors', 11, eligible).status).toBe('over_limit');
   });
 
-  it('gives no grace when the incident flag is false', () => {
+  it('gives no grace when the grace flag is false', () => {
     expect(
-      checkLimit('free', 'status.email_sends_per_month', 2001, { openIncident: false }).status,
-    ).toBe('over_limit');
+      checkLimit('free', 'status.email_sends_per_month', 2001, { graceEligible: false }),
+    ).toMatchObject({ status: 'over_limit', limit: 2000, grace: 0, excess: 1 });
+  });
+
+  it('reports the grace it applied on every result', () => {
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('free', 'status.email_sends_per_month', 10)).toMatchObject({
+      status: 'allowed',
+      grace: 0,
+    });
+    expect(checkLimit('free', 'status.email_sends_per_month', 10, eligible)).toMatchObject({
+      status: 'allowed',
+      grace: 500,
+    });
+    expect(checkLimit('growth', 'status.voice_minutes_per_month', 37, eligible)).toMatchObject({
+      status: 'allowed',
+      limit: 30,
+      grace: 7,
+    });
+    expect(checkLimit('free', 'status.monitors', 10, eligible)).toMatchObject({
+      status: 'allowed',
+      grace: 0,
+    });
+    expect(checkLimit('free', 'status.sms_sends_per_month', 1, eligible)).toMatchObject({
+      status: 'not_entitled',
+      grace: 0,
+    });
+    expect(checkLimit('self_hosted', 'status.email_sends_per_month', 10, eligible)).toMatchObject({
+      status: 'allowed',
+      limit: UNLIMITED,
+      grace: UNLIMITED,
+    });
+  });
+
+  it('measures excess on a send key past limit plus grace', () => {
+    const eligible = { graceEligible: true } as const;
+    expect(checkLimit('scale', 'status.email_sends_per_month', 62_600, eligible)).toMatchObject({
+      status: 'over_limit',
+      limit: 50_000,
+      grace: 12_500,
+      excess: 100,
+    });
+    expect(checkLimit('scale', 'status.email_sends_per_month', 62_600)).toMatchObject({
+      status: 'over_limit',
+      limit: 50_000,
+      grace: 0,
+      excess: 12_600,
+    });
   });
 
   it('keeps subscribers capped at 500 on Free and unlimited on every paid tier', () => {
@@ -413,12 +479,37 @@ describe('unknown input fails closed with a typed error', () => {
   });
 
   it('keeps the error code on a readable property and the class name stable', () => {
-    try {
-      checkLimit(tier('pro'), 'org.seats', 1);
-      expect.fail('expected a throw');
-    } catch (error) {
-      expect(error).toMatchObject({ name: 'EntitlementError', code: 'ENTITLEMENT_UNKNOWN_TIER' });
-      expect((error as Error).message).not.toHaveLength(0);
+    const error = expectEntitlementError(
+      () => checkLimit(tier('pro'), 'org.seats', 1),
+      'ENTITLEMENT_UNKNOWN_TIER',
+    );
+    expect(error.message).not.toHaveLength(0);
+  });
+
+  // Inputs can come from a database row or a request, so messages never echo them.
+  it('does not put an unknown tier in the message', () => {
+    const error = expectEntitlementError(
+      () => checkLimit(tier('pro'), 'org.seats', 1),
+      'ENTITLEMENT_UNKNOWN_TIER',
+    );
+    expect(error.message).not.toContain('pro');
+  });
+
+  it('does not echo any rejected input in the message', () => {
+    const marker = 'zq7_marker';
+    const cases: [() => unknown, Parameters<typeof expectEntitlementError>[1]][] = [
+      [() => limitFor(tier(marker), 'org.seats'), 'ENTITLEMENT_UNKNOWN_TIER'],
+      [() => limitFor('free', key(marker)), 'ENTITLEMENT_UNKNOWN_LIMIT'],
+      [() => hasFeature('free', feature(marker)), 'ENTITLEMENT_UNKNOWN_FEATURE'],
+      [() => entitlementsFor(marker as Product), 'ENTITLEMENT_UNKNOWN_PRODUCT'],
+    ];
+    for (const [run, code] of cases) {
+      expect(expectEntitlementError(run, code).message).not.toContain(marker);
     }
+    const usage = expectEntitlementError(
+      () => checkLimit('free', 'org.seats', 7_654_321.5),
+      'ENTITLEMENT_INVALID_USAGE',
+    );
+    expect(usage.message).not.toContain('7654321');
   });
 });

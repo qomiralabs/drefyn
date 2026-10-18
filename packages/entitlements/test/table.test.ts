@@ -56,6 +56,10 @@ describe('the unlimited value', () => {
     expect(UNLIMITED).not.toBe(Infinity);
   });
 
+  it('is the string unlimited, the form stored overrides and API responses carry', () => {
+    expect(UNLIMITED).toBe('unlimited');
+  });
+
   it('survives a JSON round trip unchanged, unlike Infinity or a symbol', () => {
     // toEqual would let an undefined value vanish on both sides and pass.
     const roundTripped = JSON.parse(JSON.stringify({ limit: UNLIMITED })) as object;
@@ -68,10 +72,13 @@ describe('limit table, cell for cell', () => {
   for (const key of pricing.LIMIT_KEYS) {
     const row: pricing.LimitRow = pricing.LIMITS[key];
 
-    it(`${key} has scope ${row.scope} and direction ${row.direction}`, () => {
-      expect(limitInfo(key as LimitKey)).toMatchObject({
+    const grace = (pricing.SEND_KEYS as readonly string[]).includes(key);
+    it(`${key} has scope ${row.scope}, direction ${row.direction} and grace ${grace}`, () => {
+      expect(limitInfo(key as LimitKey)).toEqual({
+        key,
         scope: row.scope,
         direction: row.direction,
+        grace,
       });
     });
 
@@ -86,24 +93,20 @@ describe('limit table, cell for cell', () => {
           expect(limitFor(tier as Tier, key as LimitKey)).toBe(cell);
         });
       } else {
-        it(`${tier} ${key} is a listed placeholder within its bounds`, () => {
+        const expected = cell.atLeast ?? cell.atMost ?? 0;
+        it(`${tier} ${key} is a listed placeholder that resolves to ${expected}`, () => {
           const value = limitFor(tier as Tier, key as LimitKey);
           expect(isLimitValue(value)).toBe(true);
           expect(UNCALIBRATED.some((entry) => entry.tier === tier && entry.key === key)).toBe(true);
-          if (cell.atLeast !== undefined && value !== UNLIMITED) {
-            expect(value).toBeGreaterThanOrEqual(cell.atLeast);
-          }
-          if (cell.atMost !== undefined) {
-            expect(value).not.toBe(UNLIMITED);
-            expect(value).toBeLessThanOrEqual(cell.atMost);
-          }
+          // The most generous value the pricing proves, and no more.
+          expect(value).toBe(expected);
         });
       }
     }
   }
 });
 
-describe('send grace for an incident that is already open', () => {
+describe('send grace', () => {
   for (const tier of pricing.HOSTED_LADDER) {
     for (const key of pricing.SEND_KEYS) {
       const expected = pricing.GRACE[tier][key];
@@ -134,8 +137,13 @@ describe('feature table, cell for cell', () => {
     const row: pricing.FeatureRow = pricing.FEATURES[feature];
     const since = pricing.HOSTED_LADDER.indexOf(row.since);
 
-    it(`${feature} has scope ${row.scope}`, () => {
-      expect(featureInfo(feature as FeatureKey)).toMatchObject({ scope: row.scope });
+    it(`${feature} has scope ${row.scope}, since ${row.since}, open core ${row.selfHosted}`, () => {
+      expect(featureInfo(feature as FeatureKey)).toEqual({
+        feature,
+        scope: row.scope,
+        since: row.since,
+        openCore: row.selfHosted,
+      });
     });
 
     pricing.HOSTED_LADDER.forEach((tier, index) => {
@@ -145,13 +153,9 @@ describe('feature table, cell for cell', () => {
       });
     });
 
-    if (row.selfHosted !== 'open') {
-      const expected = row.selfHosted;
-      it(`self_hosted ${expected ? 'has' : 'does not have'} ${feature}`, () => {
-        expect(hasFeature('self_hosted', feature as FeatureKey)).toBe(expected);
-        expect(featureInfo(feature as FeatureKey).openCore).toBe(expected);
-      });
-    }
+    it(`self_hosted ${row.selfHosted ? 'has' : 'does not have'} ${feature}`, () => {
+      expect(hasFeature('self_hosted', feature as FeatureKey)).toBe(row.selfHosted);
+    });
   }
 });
 
@@ -178,6 +182,61 @@ describe('uncalibrated placeholders', () => {
     for (const entry of UNCALIBRATED) {
       expect(TIERS).toContain(entry.tier);
       expect(LIMIT_KEYS).toContain(entry.key);
+    }
+  });
+
+  it('carries the value limitFor returns today for each entry', () => {
+    expect(UNCALIBRATED.length).toBeGreaterThan(0);
+    for (const entry of UNCALIBRATED) {
+      expect(entry.value, id(entry)).toBe(limitFor(entry.tier, entry.key));
+    }
+  });
+
+  it('states the basis of each value, matching the bound the pricing gives', () => {
+    for (const cell of pricing.placeholderCells()) {
+      const row: pricing.LimitRow = pricing.LIMITS[cell.key];
+      const bounds = row.cells[cell.tier] as pricing.Placeholder;
+      const entry = UNCALIBRATED.find((e) => e.tier === cell.tier && e.key === cell.key);
+      expect(entry, id(cell)).toBeDefined();
+      const basis =
+        bounds.atLeast !== undefined
+          ? 'at_least'
+          : bounds.atMost !== undefined
+            ? 'at_most'
+            : 'unset';
+      expect(entry?.basis, id(cell)).toBe(basis);
+    }
+  });
+
+  it('resolves every unset entry to 0, so nothing runs on a forgotten guess', () => {
+    const unset = UNCALIBRATED.filter((entry) => entry.basis === 'unset');
+    expect(unset.map(id).sort()).toEqual(
+      pricing
+        .placeholderCells()
+        .filter((c) => {
+          const bounds = (pricing.LIMITS[c.key] as pricing.LimitRow).cells[
+            c.tier
+          ] as pricing.Placeholder;
+          return bounds.atLeast === undefined && bounds.atMost === undefined;
+        })
+        .map(id)
+        .sort(),
+    );
+    for (const entry of unset) {
+      expect(entry.value, id(entry)).toBe(0);
+      expect(limitFor(entry.tier, entry.key), id(entry)).toBe(0);
+    }
+  });
+
+  it('leaves hosted Studio caps at 0 until they are calibrated', () => {
+    for (const tier of pricing.HOSTED_LADDER) {
+      for (const key of [
+        'studio.items',
+        'studio.assets',
+        'studio.api_requests_per_month',
+      ] as const) {
+        expect(limitFor(tier, key), `${tier} ${key}`).toBe(0);
+      }
     }
   });
 });

@@ -39,10 +39,14 @@ describe('public types', () => {
     expectTypeOf(checkLimit).toBeCallableWith('free', 'org.seats', '1');
     // @ts-expect-error an unknown product
     expectTypeOf(entitlementsFor).toBeCallableWith('website');
+    // @ts-expect-error the grace option is graceEligible; the caller decides eligibility
+    expectTypeOf(checkLimit).toBeCallableWith('free', 'org.seats', 1, { openIncident: true });
+    expectTypeOf(checkLimit).toBeCallableWith('free', 'org.seats', 1, { graceEligible: true });
   });
 
   it('returns a result whose refusals say read only', () => {
     expectTypeOf(checkLimit('free', 'org.seats', 1)).toEqualTypeOf<CheckResult>();
+    expectTypeOf<CheckResult['grace']>().toEqualTypeOf<LimitValue>();
     expectTypeOf<CheckResult['status']>().toEqualTypeOf<
       'allowed' | 'over_limit' | 'not_entitled'
     >();
