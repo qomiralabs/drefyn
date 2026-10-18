@@ -213,12 +213,34 @@ function isPlainRecord(value: unknown): value is object {
   return proto === Object.prototype || proto === null;
 }
 
-const NO_OPTIONS: CheckOptions = Object.freeze({});
+// Reads one own data field and nothing else: an inherited value would let a polluted
+// Object.prototype change every answer, and a getter could say one thing when checked and
+// another when used. Absent is undefined; hidden or accessor fields are refused.
+function ownData(record: object, name: PropertyKey, key?: LimitKey): unknown {
+  const field = Object.getOwnPropertyDescriptor(record, name);
+  if (field === undefined) return undefined;
+  if (field.enumerable !== true || !('value' in field)) {
+    throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
+  }
+  return field.value;
+}
 
-function toOptions(options: unknown): CheckOptions {
+// Options as read once, with every field an own property, so nothing later in a call can
+// reach the prototype chain.
+interface ReadOptions {
+  readonly overrides: unknown;
+  readonly graceEligible: boolean;
+}
+
+const NO_OPTIONS: ReadOptions = Object.freeze({ overrides: undefined, graceEligible: false });
+
+function toOptions(options: unknown): ReadOptions {
   if (options === undefined) return NO_OPTIONS;
   if (!isPlainRecord(options)) throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
-  return options;
+  return {
+    overrides: ownData(options, 'overrides'),
+    graceEligible: ownData(options, 'graceEligible') === true,
+  };
 }
 
 // Checks the whole map on every call, so one bad entry fails every check for that
@@ -234,11 +256,8 @@ function resolveOverrides(tier: Tier, overrides: unknown): ReadonlyMap<LimitKey,
     // An unknown name is never attached to the error: it is caller data, not a key.
     if (entry === undefined) throw new EntitlementError('ENTITLEMENT_UNKNOWN_LIMIT');
     const { key, direction } = entry.info;
-    const field = Object.getOwnPropertyDescriptor(overrides, name);
-    if (field?.enumerable !== true || !('value' in field)) {
-      throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
-    }
-    const raw: unknown = field.value;
+    // Reflect.ownKeys listed it, so it is present; ownData refuses it if hidden or a getter.
+    const raw = ownData(overrides, name, key);
     let value: LimitValue;
     if (raw === UNLIMITED) value = UNLIMITED;
     else if (isCount(raw)) value = raw + 0;
@@ -315,7 +334,7 @@ export function checkLimit(
   const opts = toOptions(options);
   const limit = effectiveLimit(known, entry, opts.overrides);
   const used = toUsage(usage);
-  const eligible = opts.graceEligible === true;
+  const eligible = opts.graceEligible;
   const { info } = entry;
 
   const base = { tier: known, key: info.key, usage: used };
