@@ -375,9 +375,11 @@ describe('send caps never allow a send past cap plus grace', () => {
         if (ceiling >= top) {
           return checkLimit(t, k, Number.MAX_SAFE_INTEGER, options).status === 'allowed';
         }
+        // A cap of 0 has no grace, and any use past it is not_entitled rather than over.
+        const past = cap === 0 ? 'not_entitled' : 'over_limit';
         return (
           checkLimit(t, k, Number(ceiling), options).status === 'allowed' &&
-          checkLimit(t, k, Number(ceiling + 1n), options).status === 'over_limit'
+          checkLimit(t, k, Number(ceiling + 1n), options).status === past
         );
       }),
       {
