@@ -48,7 +48,9 @@ describe('carryOver: what carries', () => {
 
   it('carries an approval over one clean merge of the base branch', async () => {
     const H = repo.merge(X, D1);
-    expect(await carry(H)).toEqual({ carried: [X], stop: expect.stringMatching(/not a merge/) });
+    const result = await carry(H);
+    expect(result.carried).toEqual([X]);
+    expect(result.stop).toBe(`${X} is not a merge`);
   });
 
   it('carries over several clean merges in a row, naming every commit on the way', async () => {

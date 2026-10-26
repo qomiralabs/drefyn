@@ -103,7 +103,7 @@ function parseInput(raw: unknown): GateInput {
     labels,
     files,
     reviews: parsed,
-    ...(carry === undefined ? {} : { carry: carry as string[] }),
+    ...(carry === undefined ? {} : { carry }),
     ...(carryNote === undefined ? {} : { carryNote }),
   };
 }
