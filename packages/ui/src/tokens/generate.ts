@@ -70,8 +70,9 @@ function checked(hex: string): Hex {
 
 // Names become CSS custom properties, utility names and JSON keys once kebab cased.
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-// Letter spacing is the one number that may go below zero: display type is set tight.
-const SIGNED = /^type\.[^.]+\.tracking$/;
+// The only numbers that may go below zero: letter spacing, because display type is set
+// tight, and the inset focus offset, which pulls the ring inside an item's own edge.
+const SIGNED = /^(type\.[^.]+\.tracking|stroke\.focusInset)$/;
 
 // Walks the whole source once before anything is written, so a bad value fails the build
 // with its path instead of shipping NaNpx, a negative width or a name that breaks a rule.
