@@ -485,6 +485,23 @@ describe('numbers and names', () => {
     expect(() => generatedFiles()).not.toThrow();
   });
 
+  it('allows the inset focus offset below zero, and no other stroke', () => {
+    const withStroke = (key: string, v: number): Tokens => ({
+      ...tokens,
+      stroke: { ...tokens.stroke, [key]: v },
+    });
+    expect(tokens.stroke.focusInset).toBe(-2);
+    expect(() => renderTokensCss()).not.toThrow();
+    for (const [name, render] of Object.entries(renderers)) {
+      expect(() => render(withStroke('focusInset', -2)), name).not.toThrow();
+      expect(() => render(withStroke('focusOffset', -2)), name).toThrow(/stroke\.focusOffset/);
+      expect(() => render(withStroke('indicator', -2)), name).toThrow(/stroke\.indicator/);
+      expect(() => render(withStroke('focusInset', Number.NaN)), name).toThrow(
+        /stroke\.focusInset/,
+      );
+    }
+  });
+
   it('accepts camelCase role names, which become kebab case', () => {
     expect(renderTokensCss(withBorder('ruleFaint'))).toContain('--dr-border-rule-faint:');
   });
