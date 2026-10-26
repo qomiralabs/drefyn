@@ -11,7 +11,10 @@ import {
 // Fixed seed so a failure reproduces on every machine. Raise numRuns locally to hunt.
 export const runs = { seed: 12, numRuns: 300 } as const;
 
-// Every ledger test builds its ledger here, so the Postgres store can run the same suite.
+// The contract suites in test/contract take one of these, so the Postgres store can run
+// the same assertions as the in memory ledger.
+export type LedgerFactory = () => CreditLedger | Promise<CreditLedger>;
+
 export function newLedger(): CreditLedger {
   return createMemoryLedger();
 }
