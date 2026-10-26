@@ -10,11 +10,18 @@
 #   that reviewer in scripts/review-gate/rules.json. GraphQL returns bot logins without
 #   the [bot] suffix, so the type is checked too. Author association is not used: the
 #   Actions token cannot see private org membership and reports members as CONTRIBUTOR.
-# - An approval counts only for the head SHA. A changes_requested marker counts on any
-#   SHA when it is that reviewer's newest review, since the head needs a newer approval.
+# - An approval counts for the head SHA, or for an older commit the head reaches by first
+#   parents through merges of the base branch only, each with exactly two parents, the
+#   second already on the base branch, and a tree identical to git's own clean merge.
+#   Any other commit, a conflict, or any doubt (shallow history, missing objects, a git
+#   error) means nothing carries. A changes_requested marker counts on any SHA when it is
+#   that reviewer's newest review, since the head needs a newer approval.
+# - Reviewers come from the risk tier of the changed paths. The tier floors live in the
+#   gate script and the path lists in rules.json, both from the trusted ref.
 # - The gate script, its path rules and the allow list come from the PR base commit for
 #   PR and review events, and from the default branch for a dispatch, so editing them in
-#   a PR does not change how that PR is judged. This workflow never checks out PR code.
+#   a PR does not change how that PR is judged. This workflow never checks out PR code:
+#   it fetches the PR head objects so git can recompute merges, and runs nothing from them.
 #   If the trusted ref has no gate script, the run fails and posts an error status
 #   rather than pass or skip.
 # - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
@@ -70,6 +77,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
+          # Full history and every branch, so carry-over can walk merges and find the
+          # base branch tip.
+          fetch-depth: 0
       # A dispatch runs this file from the ref the caller picked, but the script always
       # comes from the default branch, named literally so the ref never comes from input.
       - name: Check out the default branch
@@ -78,6 +88,7 @@ jobs:
         with:
           ref: development
           persist-credentials: false
+          fetch-depth: 0
       # Without a trusted copy of the script there is nothing safe to run. Failing here
       # leaves no state output, so report posts an error status on the head.
       - name: Check for the gate script on the trusted ref
@@ -86,6 +97,19 @@ jobs:
             echo "::error::the gate script is missing on the trusted ref; refusing to evaluate"
             exit 1
           fi
+      # Objects only: nothing from the PR is checked out or run. If the fetch fails, the
+      # gate finds no head commit and simply carries no approvals over.
+      - name: Fetch the PR head objects
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to fetch"
+            exit 1
+          fi
+          git fetch --no-tags --no-recurse-submodules --quiet origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/review-gate/head" ||
+            echo "::warning::could not fetch the PR head; approvals will not carry over merges"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -96,6 +120,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          REVIEW_GATE_GIT_DIR: ${{ github.workspace }}
         run: >-
           node scripts/review-gate/src/cli.ts github
           --repo "$REPO" --pr "$PR_NUMBER"

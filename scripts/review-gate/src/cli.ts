@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { evaluate, formatReport, statusDescription, type Review, type GateInput } from './gate.ts';
 import { GitHubClient, loadGateInput } from './github.ts';
+import { carryOver } from './history.ts';
 import { DEFAULT_CONFIG_PATH, loadConfig } from './rules.ts';
 
 export interface Io {
@@ -19,7 +20,9 @@ const USAGE = `usage: review-gate evaluate --input <file.json> [--rules <file>] 
 
   evaluate  read head SHA, labels, changed files and reviews from a JSON file
   github    read them from the GitHub API using GITHUB_TOKEN
-            (and GITHUB_API_URL and GITHUB_GRAPHQL_URL if set)
+            (and GITHUB_API_URL and GITHUB_GRAPHQL_URL if set). With
+            REVIEW_GATE_GIT_DIR set to a full history checkout holding the PR
+            head, approvals carry over clean merges of origin/<base branch>
   --rules   path rules file, defaults to rules.json next to this package
 
 exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
@@ -27,7 +30,7 @@ exit codes: 0 gate passed, 1 gate failed, 2 usage, input or API error
 
 class InputError extends Error {}
 
-const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'reviews']);
+const INPUT_KEYS = new Set(['headSha', 'labels', 'files', 'reviews', 'carry', 'carryNote']);
 const REVIEW_KEYS = new Set([
   'author',
   'authorType',
@@ -49,7 +52,16 @@ function parseInput(raw: unknown): GateInput {
   if (typeof raw !== 'object' || raw === null) throw new InputError('input must be an object');
   const value = raw as Record<string, unknown>;
   rejectUnknownKeys(value, INPUT_KEYS, 'input');
-  const { headSha, labels, files, reviews } = value;
+  const { headSha, labels, files, reviews, carry, carryNote } = value;
+  if (
+    carry !== undefined &&
+    (!Array.isArray(carry) || !carry.every((c) => typeof c === 'string'))
+  ) {
+    throw new InputError('carry must be a list of commit SHAs');
+  }
+  if (carryNote !== undefined && typeof carryNote !== 'string') {
+    throw new InputError('carryNote must be a string');
+  }
   if (typeof headSha !== 'string') throw new InputError('headSha must be a string');
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
     throw new InputError('labels must be a list of strings');
@@ -86,7 +98,29 @@ function parseInput(raw: unknown): GateInput {
       ...(dismissed === undefined ? {} : { dismissed }),
     };
   });
-  return { headSha, labels, files, reviews: parsed };
+  return {
+    headSha,
+    labels,
+    files,
+    reviews: parsed,
+    ...(carry === undefined ? {} : { carry: carry as string[] }),
+    ...(carryNote === undefined ? {} : { carryNote }),
+  };
+}
+
+// An environment variable rather than a flag: on pull_request events the workflow file
+// comes from the PR while this script comes from the base, so a new flag would make an
+// older script on the base reject the whole run. An unknown variable is just ignored.
+async function carryFor(
+  env: NodeJS.ProcessEnv,
+  head: string,
+  baseRef: string | undefined,
+): Promise<Pick<GateInput, 'carry' | 'carryNote'>> {
+  const dir = env['REVIEW_GATE_GIT_DIR'] ?? '';
+  if (dir === '') return { carryNote: 'no git directory given' };
+  if (baseRef === undefined) return { carryNote: 'the PR names no base branch' };
+  const result = await carryOver({ cwd: dir, head, base: `refs/remotes/origin/${baseRef}` });
+  return { carry: result.carried, carryNote: result.stop };
 }
 
 export async function main(
@@ -148,7 +182,8 @@ export async function main(
         ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
         ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
       });
-      input = await loadGateInput(client, values.repo, Number(values.pr));
+      const { baseRef, ...pr } = await loadGateInput(client, values.repo, Number(values.pr));
+      input = { ...pr, ...(await carryFor(env, pr.headSha, baseRef)) };
     }
 
     const result = evaluate(input, config);
