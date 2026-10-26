@@ -27,4 +27,6 @@ test('every story iframe loads only from the static build', async ({ page }) => 
 test('a malformed path gets a 404, not a stuck request', async ({ page }) => {
   const response = await page.goto('/%E0%A4%A', { waitUntil: 'commit' });
   expect(response?.status()).toBe(404);
+  // Full Chrome shows its own error page for an empty 404 body.
+  expect(await response?.text()).toBe('Not found');
 });

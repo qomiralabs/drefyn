@@ -1,5 +1,5 @@
 import { currentPlace, insidePinnedImage } from '../scripts/in-container.ts';
-import { expect, MOBILE, openStory, storyIds, test, type Theme } from './fixtures.ts';
+import { expect, indexEntries, MOBILE, openPage, test, type Theme } from './fixtures.ts';
 
 const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
   { name: 'light', theme: 'light', mobile: false },
@@ -15,12 +15,14 @@ test.beforeAll(() => {
   }
 });
 
-for (const id of storyIds()) {
+// Stories and docs pages both, since docs pages are what readers of the published
+// Storybook see first.
+for (const entry of indexEntries()) {
   for (const variant of VARIANTS) {
-    test(`${id} looks the same in ${variant.name}`, async ({ page }) => {
+    test(`${entry.type} ${entry.id} looks the same in ${variant.name}`, async ({ page }) => {
       if (variant.mobile) await page.setViewportSize(MOBILE);
-      await openStory(page, id, variant.theme);
-      await expect(page).toHaveScreenshot(`${id}-${variant.name}.png`, { fullPage: true });
+      await openPage(page, entry, variant.theme);
+      await expect(page).toHaveScreenshot(`${entry.id}-${variant.name}.png`, { fullPage: true });
     });
   }
 }

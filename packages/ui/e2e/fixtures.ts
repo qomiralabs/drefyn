@@ -14,36 +14,49 @@ export const MOBILE = { width: 390, height: 844 };
 export type Theme = 'light' | 'dark';
 export const THEMES: readonly Theme[] = ['light', 'dark'];
 
-interface IndexEntry {
+export interface IndexEntry {
   id: string;
-  type: string;
+  type: 'story' | 'docs';
 }
 
-function entries(type: 'story' | 'docs'): string[] {
-  const index = join(STATIC, 'index.json');
-  if (!existsSync(index)) {
+export const INDEX = join(STATIC, 'index.json');
+
+// Every page the build lists, stories and docs, in a stable order.
+export function indexEntries(): IndexEntry[] {
+  if (!existsSync(INDEX)) {
     throw new Error('No static Storybook. Run pnpm --filter @drefyn/ui storybook:build first.');
   }
-  const { entries } = JSON.parse(readFileSync(index, 'utf8')) as {
-    entries: Record<string, IndexEntry>;
+  const { entries } = JSON.parse(readFileSync(INDEX, 'utf8')) as {
+    entries: Record<string, { id: string; type: string }>;
   };
   return Object.values(entries)
-    .filter((entry) => entry.type === type)
-    .map((entry) => entry.id)
-    .sort();
+    .filter((entry): entry is IndexEntry => entry.type === 'story' || entry.type === 'docs')
+    .map(({ id, type }) => ({ id, type }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-export const storyIds = (): string[] => entries('story');
-export const docsIds = (): string[] => entries('docs');
+export const storyIds = (): string[] =>
+  indexEntries()
+    .filter((entry) => entry.type === 'story')
+    .map((entry) => entry.id);
+export const docsIds = (): string[] =>
+  indexEntries()
+    .filter((entry) => entry.type === 'docs')
+    .map((entry) => entry.id);
 
-export async function openStory(page: Page, id: string, theme: Theme): Promise<void> {
-  await page.goto(`/iframe.html?id=${id}&viewMode=story&globals=theme:${theme}`);
-  await expect(page.locator('#storybook-root > *').first()).toBeVisible();
+export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
+  const mode = entry.type === 'docs' ? 'docs' : 'story';
+  await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);
+  const root = entry.type === 'docs' ? '#storybook-docs .sbdocs-wrapper' : '#storybook-root > *';
+  await expect(page.locator(root).first()).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
 }
+
+export const openStory = (page: Page, id: string, theme: Theme): Promise<void> =>
+  openPage(page, { id, type: 'story' }, theme);
 
 function fileFor(url: URL): string | undefined {
   let path: string;
