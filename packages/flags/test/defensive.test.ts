@@ -33,15 +33,15 @@ async function boot(fake: FakeProvider, deps: Partial<FlagClientDeps<Fixture>> =
   return client;
 }
 
-// Makes every OpenFeature client the package creates answer boolean calls with `answer`.
-function breakSdkClients(answer: () => unknown) {
+// Makes every OpenFeature client the package creates answer `prop` with `answer`.
+function breakSdkClients(prop: 'getBooleanDetails' | 'providerStatus', answer: () => unknown) {
   const getClient = OpenFeature.getClient.bind(OpenFeature) as (...args: unknown[]) => object;
   vi.spyOn(OpenFeature, 'getClient').mockImplementation(((...args: unknown[]) => {
     const client = getClient(...args);
     return new Proxy(client, {
-      get(target, prop) {
-        if (prop === 'getBooleanDetails') return answer;
-        const value: unknown = Reflect.get(target, prop, target);
+      get(target, key) {
+        if (key === prop) return prop === 'providerStatus' ? answer() : answer;
+        const value: unknown = Reflect.get(target, key, target);
         return typeof value === 'function'
           ? (value as (...a: unknown[]) => unknown).bind(target)
           : value;
@@ -58,24 +58,25 @@ beforeEach(() => {
 afterEach(async () => {
   for (const client of open.splice(0)) await client.close();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('an SDK client that misbehaves', () => {
-  it('keeps a release flag off when it throws synchronously', async () => {
-    breakSdkClients(() => {
+  it('keeps a release flag off when reading its provider status throws', async () => {
+    breakSdkClients('providerStatus', () => {
       throw new Error('sdk bug');
     });
     const client = await boot(new FakeProvider().set(RELEASE, { kind: 'value', value: true }));
     expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
       value: false,
       source: 'safe_value',
-      errorCode: 'FLAG_GENERAL',
+      errorCode: 'FLAG_PROVIDER_NOT_READY',
     });
     expect(await settle(client.isOn(RELEASE, ctx))).toBe(false);
   });
 
-  it('gives the safe value with FLAG_GENERAL when it throws synchronously', async () => {
-    breakSdkClients(() => {
+  it('gives a kill switch its safe value when reading its provider status throws', async () => {
+    breakSdkClients('providerStatus', () => {
       throw new Error('sdk bug');
     });
     const client = await boot(
@@ -84,17 +85,26 @@ describe('an SDK client that misbehaves', () => {
     expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual({
       value: true,
       source: 'safe_value',
-      errorCode: 'FLAG_GENERAL',
+      errorCode: 'FLAG_PROVIDER_NOT_READY',
     });
   });
 
-  it('gives the safe value with FLAG_GENERAL when it rejects', async () => {
-    breakSdkClients(() => Promise.reject(new Error('sdk bug')));
-    const client = await boot(new FakeProvider().set(RELEASE, { kind: 'value', value: true }));
+  // Its boolean methods run hooks, so evaluation never calls them.
+  it.each<[string, () => unknown]>([
+    [
+      'throws',
+      () => {
+        throw new Error('sdk bug');
+      },
+    ],
+    ['rejects', () => Promise.reject(new Error('sdk bug'))],
+    ['answers true', () => Promise.resolve({ value: true, flagKey: RELEASE, flagMetadata: {} })],
+  ])('is not on the evaluation path when getBooleanDetails %s', async (_label, answer) => {
+    breakSdkClients('getBooleanDetails', answer);
+    const client = await boot(new FakeProvider().set(RELEASE, { kind: 'value', value: false }));
     expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
       value: false,
-      source: 'safe_value',
-      errorCode: 'FLAG_GENERAL',
+      source: 'provider',
     });
   });
 });

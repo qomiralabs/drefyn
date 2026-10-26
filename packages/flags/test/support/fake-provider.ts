@@ -3,7 +3,9 @@ import {
   OpenFeatureEventEmitter,
   ProviderEvents,
   type EvaluationContext,
+  type Hook,
   type JsonValue,
+  type Logger,
   type Provider,
   type ResolutionDetails,
 } from '@openfeature/server-sdk';
@@ -12,6 +14,10 @@ import {
 // can hand back anything, and the client must not trust the type.
 export type Behaviour =
   | { readonly kind: 'value'; readonly value: unknown; readonly reason?: string }
+  // Answers from the context it was given, like a targeting rule.
+  | { readonly kind: 'rule'; readonly rule: (context: EvaluationContext) => unknown }
+  // Hands back this exact result, whatever its shape.
+  | { readonly kind: 'raw'; readonly resolution: () => unknown }
   | { readonly kind: 'throw'; readonly error: unknown }
   | { readonly kind: 'throw_sync'; readonly error: unknown }
   | { readonly kind: 'hang' }
@@ -25,6 +31,7 @@ export interface ResolveCall {
   readonly flagKey: string;
   readonly defaultValue: unknown;
   readonly context: EvaluationContext;
+  readonly logger: Logger | undefined;
 }
 
 const never = new Promise<never>(() => undefined);
@@ -40,6 +47,9 @@ export class FakeProvider implements Provider {
   readonly runsOn = 'server' as const;
   readonly events = new OpenFeatureEventEmitter();
   readonly calls: ResolveCall[] = [];
+  // Provider hooks, which the SDK runs after every other before hook. The real flagd
+  // provider adds one in sync mode.
+  hooks: Hook[] = [];
   closed = 0;
   initialized = 0;
   fallback: Behaviour = { kind: 'error_result', errorCode: ErrorCode.FLAG_NOT_FOUND, value: false };
@@ -98,8 +108,9 @@ export class FakeProvider implements Provider {
     flagKey: string,
     defaultValue: boolean,
     context: EvaluationContext,
+    logger?: Logger,
   ): Promise<ResolutionDetails<boolean>> {
-    this.calls.push({ flagKey, defaultValue, context });
+    this.calls.push({ flagKey, defaultValue, context, logger });
     const behaviour = this.behaviours.get(flagKey) ?? this.fallback;
     // The casts are the point: providers are not trusted to return booleans.
     const details = (value: unknown, reason = 'STATIC') =>
@@ -107,6 +118,10 @@ export class FakeProvider implements Provider {
     switch (behaviour.kind) {
       case 'value':
         return Promise.resolve(details(behaviour.value, behaviour.reason));
+      case 'rule':
+        return Promise.resolve(details(behaviour.rule(context), 'TARGETING_MATCH'));
+      case 'raw':
+        return Promise.resolve(behaviour.resolution() as ResolutionDetails<boolean>);
       case 'throw':
         return fail(behaviour.error);
       case 'throw_sync':
