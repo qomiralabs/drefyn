@@ -15,6 +15,7 @@ const IMAGE_BROWSERS = '/ms-playwright';
 
 export interface Where {
   platform: string;
+  arch: string;
   env: Readonly<Record<string, string | undefined>>;
   browsers: boolean;
 }
@@ -28,12 +29,18 @@ export interface Paths {
 }
 
 // The one test of being inside the pinned image, shared with the visual spec so a
-// marker set by hand on a host can neither compare nor write a baseline.
+// marker set by hand on a host can neither compare nor write a baseline. The digest names
+// an amd64 and an arm64 build with separate browser binaries, so only the amd64 build
+// that CI runners use counts.
 export const insidePinnedImage = (where: Where): boolean =>
-  where.env[MARKER] === IMAGE && where.platform === 'linux' && where.browsers;
+  where.env[MARKER] === IMAGE &&
+  where.platform === 'linux' &&
+  where.arch === 'x64' &&
+  where.browsers;
 
 export const currentPlace = (): Where => ({
   platform: process.platform,
+  arch: process.arch,
   env: process.env,
   browsers: existsSync(IMAGE_BROWSERS),
 });
@@ -55,6 +62,10 @@ export function plan(args: readonly string[], where: Where, paths: Paths): Plan 
         'docker',
         'run',
         '--rm',
+        // Apple Silicon runs the amd64 build under emulation, so a baseline made on a
+        // laptop matches the one CI compares against.
+        '--platform',
+        'linux/amd64',
         '--ipc=host',
         // Screenshots of a static build need no network, and none means none can leak.
         '--network',
