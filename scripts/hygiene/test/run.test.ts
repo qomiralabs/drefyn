@@ -143,7 +143,10 @@ describe('checkTrackedFiles', () => {
   });
 
   it('fails loudly outside a git repo', async () => {
-    await expect(checkTrackedFiles(notGit)).rejects.toThrow(/git ls-files/);
+    // The object format is read first, so that is the call that reports it.
+    await expect(checkTrackedFiles(notGit)).rejects.toThrow(
+      /git rev-parse failed \(exit 128\): fatal: not a git repository/,
+    );
   });
 });
 

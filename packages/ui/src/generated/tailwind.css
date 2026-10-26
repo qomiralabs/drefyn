@@ -162,10 +162,18 @@
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-inset);
 }
-@media (prefers-reduced-motion: reduce) {
-  .transition,
-  .transition-all,
-  .transition-transform {
+@utility transition {
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow;
+  }
+}
+@utility transition-all {
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow;
+  }
+}
+@utility transition-transform {
+  @media (prefers-reduced-motion: reduce) {
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow;
   }
 }

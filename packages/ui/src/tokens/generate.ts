@@ -68,6 +68,30 @@ function checked(hex: string): Hex {
   return hex as Hex;
 }
 
+// Names become CSS custom properties, utility names and JSON keys once kebab cased.
+const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// Letter spacing is the one number that may go below zero: display type is set tight.
+const SIGNED = /^type\.[^.]+\.tracking$/;
+
+// Walks the whole source once before anything is written, so a bad value fails the build
+// with its path instead of shipping NaNpx, a negative width or a name that breaks a rule.
+function validate(node: unknown, path: string[] = []): void {
+  const where = path.join('.');
+  if (typeof node === 'number') {
+    if (!Number.isFinite(node)) throw new Error(`${where} is ${node}, not a finite number`);
+    if (node < 0 && !SIGNED.test(where)) throw new Error(`${where} is ${node}, below zero`);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  const list = Array.isArray(node);
+  for (const [key, child] of Object.entries(node)) {
+    if (!list && !NAME.test(kebab(key))) {
+      throw new Error(`"${key}" at ${where || 'the top'} is not a valid token name`);
+    }
+    validate(child, [...path, key]);
+  }
+}
+
 function channels(hex: Hex): [number, number, number] {
   const n = parseInt(checked(hex).slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -178,6 +202,7 @@ function block(selector: string, lines: string[], indent = ''): string {
 const declarations = (entries: Entry[]) => entries.map(([n, v]) => `${n}: ${v}`);
 
 export function renderTokensCss(t: Tokens = source): string {
+  validate(t);
   const faces = fontFaces.map((f) =>
     block('@font-face', [
       `font-family: "${f.family}"`,
@@ -233,6 +258,7 @@ function utilityColorName(cssName: string): string {
 }
 
 export function renderTailwindCss(t: Tokens = source): string {
+  validate(t);
   const lines: string[] = [];
   for (const [name] of modeEntries(t, 'light')) {
     if (name.startsWith('--dr-shadow-')) continue;
@@ -307,19 +333,19 @@ export function renderTailwindCss(t: Tokens = source): string {
     ]),
     // Tailwind's transition list includes transform, so a plain transition would still
     // move things for the reduced fade time. Under reduced motion only colour and opacity
-    // fade. Left unlayered so it wins over the utilities layer.
-    '@media (prefers-reduced-motion: reduce) {\n',
-    block(
-      '.transition,\n  .transition-all,\n  .transition-transform',
-      [`transition-property: ${REDUCED_TRANSITION.join(', ')}`],
-      '  ',
+    // fade. Declared as the same utilities, so Tailwind sorts these into the utilities layer
+    // with every variant applied, and motion-reduce:transition-none still comes after them.
+    ...['transition', 'transition-all', 'transition-transform'].map(
+      (name) =>
+        `@utility ${name} {\n  @media (prefers-reduced-motion: reduce) {\n` +
+        `    transition-property: ${REDUCED_TRANSITION.join(', ')};\n  }\n}\n`,
     ),
-    '}\n',
   ].join('');
 }
 
 // W3C design tokens format, for design tools. One way: tokens.ts stays the source.
 export function renderDtcg(t: Tokens = source): string {
+  validate(t);
   const color = (hex: Hex, alpha?: number) => {
     const components = channels(hex).map((c) => Math.round((c / 255) * 10_000) / 10_000);
     return {
@@ -489,6 +515,7 @@ function echartsTheme(t: Tokens, mode: Mode) {
 }
 
 export function renderEchartsTheme(t: Tokens = source): string {
+  validate(t);
   const light = JSON.stringify(echartsTheme(t, 'light'), null, 2);
   const dark = JSON.stringify(echartsTheme(t, 'dark'), null, 2);
   return [

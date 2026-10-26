@@ -33,6 +33,19 @@ describe('cubicBezier', () => {
     expect(cubicBezier([0.25, 0.1, 0.25, 1])(0.5)).toBeCloseTo(0.8024, 3);
   });
 
+  // This curve is flat at its middle, so Newton's method stalls and the bisection fallback
+  // has to find t. Its x is 0.5 + 4(t - 0.5)^3 and its y is 3t^2 - 2t^3, so the exact answer
+  // comes from the cube root.
+  it('falls back to bisection where the curve is flat', () => {
+    const flat = cubicBezier([1, 0, 0, 1]);
+    const exact = (x: number) => {
+      const t = 0.5 + Math.cbrt((x - 0.5) / 4);
+      return 3 * t ** 2 - 2 * t ** 3;
+    };
+    expect(flat(0.5)).toBeCloseTo(0.5, 6);
+    for (const x of [0.49, 0.499, 0.501, 0.51]) expect(flat(x), String(x)).toBeCloseTo(exact(x), 5);
+  });
+
   it('never goes backwards on the token curves', () => {
     for (const points of Object.values(tokens.motion.ease)) {
       const ease = cubicBezier(points);

@@ -59,25 +59,40 @@ string that holds a Tailwind class which mints a value outside the tokens:
 
 - arbitrary values and properties: `p-[13px]`, `text-[#ff0000]`, `p-(--x)`,
   `[mask-type:alpha]`
-- arbitrary breakpoints and at rule variants: `min-[700px]:p-16`,
-  `[@media(min-width:700px)]:p-4`, `[@container(min-width:30rem)]:p-4`
+- arbitrary breakpoints and at rule variants, negated or not: `min-[700px]:p-16`,
+  `max-[40rem]:p-4`, `not-max-[600px]:p-4`, `not-min-[600px]:p-4`,
+  `[@media(min-width:700px)]:p-4`, `not-[@media(min-width:1px)]:p-4`,
+  `[@container(min-width:30rem)]:p-4`, `[@supports(display:grid)]:grid`
+- arbitrary container queries, negated or not: `@[500px]:p-4`, `@min-[30rem]:p-4`,
+  `@max-[400px]:p-4`, `not-@max-[400px]:p-4`, `not-@[500px]:p-4`
 - raw durations and delays, which skip reduced motion and the motion tokens:
   `duration-200`, `delay-150`
-- raw line widths, which skip the stroke tokens: `border-2`, `outline-2`, `ring-1`,
-  `decoration-2`, `underline-offset-4`, `stroke-2` (plain `border` and `outline` read the
-  stroke tokens)
+- raw line widths, which skip the stroke tokens: `border-2`, `border-bs-2`, `border-be-2`,
+  `outline-2`, `ring-1`, `decoration-2`, `underline-offset-4`, `stroke-2` (plain `border`
+  and `outline` read the stroke tokens)
 - raw focus offsets: `outline-offset-2`, `ring-offset-2`. Use `focus-ring`
 - partial opacity and colour opacity modifiers, which make colours nobody measured:
   `opacity-50`, `opacity-2.5`, `text-ink/60`, `bg-ink/12.5`. Disabled controls use the
   disabled colour tokens instead
-- colour changing filters: `brightness-50`, `saturate-50`, `grayscale`, `hue-rotate-15`
+- colour changing filters and coloured drop shadows: `brightness-50`, `saturate-50`,
+  `grayscale`, `hue-rotate-15`, `drop-shadow-ink`
+- blend modes, which make the shown colour depend on what is underneath:
+  `mix-blend-multiply`, `bg-blend-screen`
+- `transition`, `transition-all` and `transition-transform` behind a variant without
+  `motion-safe:`: `hover:transition`, `md:transition`, `group-hover:transition-all`. The
+  theme narrows these to colour and opacity fades under reduced motion, but a variant
+  outranks `motion-reduce:transition-none`, so the author's opt out would lose. Write
+  `motion-safe:hover:transition`, or use `transition-colors` or `transition-opacity`
 - bare stacking orders: `z-10`. Use `z-base`, `z-raised`, `z-overlay` or `z-toast`
 
 Every bare number may have decimals. Zero is allowed for lengths and delays (`border-0`,
-`delay-0`), full or no opacity is allowed (`opacity-0`, `opacity-100`, `bg-ink/100`), and
-so are the identity filters (`brightness-100`, `grayscale-0`). State variants such as
-`data-[state=open]:` stay allowed. The guard step does not run this rule; it is a styling
-rule, not a boundary.
+`border-bs-0`, `delay-0`), full or no opacity is allowed (`opacity-0`, `opacity-100`,
+`bg-ink/100`), and so are the identity values (`brightness-100`, `grayscale-0`,
+`mix-blend-normal`, `bg-blend-normal`, `drop-shadow-none`). A bare `transition` with no
+variant passes, as does `motion-safe:` anywhere in the variant chain. State variants such as
+`data-[state=open]:` and `not-hover:` stay allowed, and so do container queries on a token
+width (`@page:`). `supports-[...]:` is not checked. The guard step does not run this rule; it
+is a styling rule, not a boundary.
 
 ## Manifest checker
 
