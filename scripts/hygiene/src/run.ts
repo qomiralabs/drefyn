@@ -1,5 +1,5 @@
 import { checkFileContent, checkMessage, checkPath, isBinary, type Finding } from './checks.ts';
-import { listCommits, listIndex, readBlobs } from './git.ts';
+import { listCommits, listIndex, objectFormat, readBlobs } from './git.ts';
 
 export interface FilesResult {
   findings: Finding[];
@@ -18,10 +18,14 @@ export interface PullRequestText {
 }
 
 export async function checkTrackedFiles(cwd: string): Promise<FilesResult> {
-  const entries = await listIndex(cwd);
+  // Read once: it sets both the oid length the index must have and the hash each body
+  // is checked against.
+  const format = await objectFormat(cwd);
+  const entries = await listIndex(cwd, format);
   const blobs = await readBlobs(
     cwd,
     entries.map((entry) => entry.oid),
+    format,
   );
   const findings: Finding[] = [];
   let scanned = 0;
