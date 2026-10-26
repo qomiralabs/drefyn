@@ -26,6 +26,10 @@ The tests fail if they drift.
   `@sunken`. The wash is translucent, so it is measured where it lands.
 - `disabledPairs`, `disabledCeiling`: the band disabled controls are held to.
 - `decorativeRoles`: colour roles with no contrast minimum, each with its reason.
+- `supplementaryMarks`: state icons on the hover and pressed fills, which sit beside their word
+  and so carry no 3:1 minimum.
+- `fillBackdrops`, `fillFloor`: the surfaces the hover and pressed fills may sit on, and how far
+  off them they must be.
 - `aliasRoles`: colour roles that resolve to another role per mode (`surface.overlay`), so the
   pairs on that role cover them.
 - `contrast`, `luminance`, `composite`, `floor2`: WCAG 2.x contrast, floored so a failure never
@@ -47,9 +51,12 @@ The tests fail if they drift.
 - Focus: `focus-visible:focus-ring` draws the 2px ring with its 2px offset from the tokens.
   Items flush inside a container (menu items, options, rows, cells) use
   `focus-visible:focus-ring-inset`, which draws the ring 2px inside their edge.
-- Hover and pressed: `bg-hover` and `bg-pressed`. State words on anything that can be hovered,
-  pressed or selected are `text-body` beside the state icon; state text colours are for
-  sentences on ground and raised. Disabled items take neither fill. Do not paint `bg-rule` as a
+- Hover and pressed: `bg-hover` and `bg-pressed`, on items that sit on ground, raised or the
+  overlay. Interactive items never sit on sunken: in dark the hover fill is only 1.02 off it.
+  State words on anything that can be hovered, pressed or selected are `text-body` beside the
+  state icon, which keeps its mark colour; state text colours are for sentences on ground and
+  raised. A state mark with no word beside it never takes either fill. Disabled items take
+  neither fill. Do not paint `bg-rule` as a
   fill; it is a hairline colour that no contrast test measures under text.
 - Floating things: menus, popovers, tooltips, dialogs, the command bar and toasts sit on
   `bg-overlay` with `border-rule-strong` and `shadow-1` (`shadow-2` for the command bar and
@@ -57,10 +64,12 @@ The tests fail if they drift.
 - Scrim: `bg-overlay-scrim` behind dialogs and the command bar only, faded with `duration-base`.
   No blur.
 - Sizes: `h-control-sm`, `h-control-md` and `h-control-lg` (24, 32 and 40px), `size-icon-sm`,
-  `-md` and `-lg` (16, 20 and 24px), `h-row-compact` and `h-row-comfortable` (32 and 40px). The
-  space scale has no 40; it exists only as a size.
-- Selection: `border-l-indicator` or `border-b-indicator` in `border-accent-ink` marks the
-  selected row, the current nav item and the selected tab.
+  `-md` and `-lg` (16, 20 and 24px). Rows use `min-h-row-compact` and `min-h-row-comfortable`
+  (32 and 40px), so a row that wraps grows instead of clipping. The space scale has no 40; it
+  exists only as a size, and sizes never become padding, gaps or widths.
+- Selection: `border-l-indicator` or `border-b-indicator` marks the selected row, the current
+  nav item and the selected tab. Put the stroke on every item, `border-transparent` at rest and
+  `border-accent-ink` when selected, so labels do not jump when the selection moves.
 - Shell: `h-shell-bar`, `w-shell-nav` and `w-shell-nav-collapsed`.
 - Skeletons: `bg-skeleton-fill`, never under text, with no shimmer or pulse.
 - Timers: `tokens.timer` and `--dr-timer-*` hold the waits (tooltip 500 ms, skeleton reveal
@@ -87,8 +96,10 @@ The tests fail if they drift.
   text), or listed in `aliasRoles` with the hex of the role it resolves to.
 - The hover and pressed fills carry ink, body, secondary and accent ink text, the focus ring
   and, on hover, the control edge in both modes. Green and amber state text and subtle text fail
-  on them in light, and a pressed fill never draws a control edge. The hover fill sits at least
-  1.04 off ground and raised, and the pressed fill a step past it.
+  on them in light, and a pressed fill never draws a control edge. Both fills sit at least 1.04
+  off ground, raised and the overlay, and the pressed fill a step past the hover fill. Hover on
+  sunken is 1.02 in dark, so interactive items never sit on sunken. State marks on the fills
+  are pinned but carry no minimum, because the word beside them carries the meaning.
 - `text.subtle` sits on the ground only in light; amber and teal marks never stand alone.
 - The selection wash is measured over every surface. Ink, body, secondary and accent ink text
   and the focus ring pass on it everywhere. Nothing coloured sits on it: a selected row shows

@@ -126,9 +126,8 @@ export const requiredPairs: readonly PairGroup[] = [
     why: 'The indicator bar on a selected row, the current nav item and the selected tab',
   },
   // State words on anything that can be hovered or pressed are body text beside the state
-  // icon. Red and grey state text still pass, for the sentence that explains an error. The
-  // icon keeps its mark colour but is supplementary, because the word carries the meaning, so
-  // no 3:1 minimum applies to marks on these fills (light green measures 2.89 on hover).
+  // icon (see supplementaryMarks). Red and grey state text still pass, for the sentence that
+  // explains an error.
   {
     fg: [
       'text.ink',
@@ -287,6 +286,35 @@ export const ruledOutPairs: readonly PairGroup[] = [
     why: 'A hovered or pressed item shows state with its icon and body text, never coloured text',
   },
 ];
+
+// State icons on the hover and pressed fills. Each sits beside its state word in body text,
+// which carries the meaning, so the icon is supplementary and no 3:1 minimum applies; it keeps
+// its mark colour. Light green measures 2.89 on hover. A mark with no word beside it never
+// takes either fill. The ratios are pinned in the tests so a change is still seen in review.
+export const supplementaryMarks: readonly PairGroup[] = [
+  {
+    fg: ['state.fresh.mark', 'state.stale.mark', 'state.broken.mark', 'state.neutral.mark'],
+    bg: FILLS,
+    kind: 'non-text',
+    modes: BOTH,
+    why: 'A state icon beside its word on a hovered or pressed item',
+  },
+];
+
+// How far the hover and pressed fills must sit off the surface under them, and where they may
+// go. Light raised is the weakest allowed backdrop at 1.04. Dark sunken is 1.02, so interactive
+// items never sit on sunken, in either mode, so the rule reads the same wherever it is built.
+export const fillFloor = 1.04;
+
+export const fillBackdrops = {
+  allowed: ['surface.ground', 'surface.raised', 'surface.overlay'],
+  never: ['surface.sunken'],
+  why: 'Interactive items never sit on sunken: the dark hover fill is only 1.02 off it',
+} as const satisfies {
+  allowed: readonly ColorRole[];
+  never: readonly ColorRole[];
+  why: string;
+};
 
 // Disabled controls are exempt from the WCAG minimums, but they still have to be findable and
 // must never pass for live ones. Each pair sits at or above its floor and below this ceiling,

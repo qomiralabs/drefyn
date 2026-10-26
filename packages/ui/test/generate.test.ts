@@ -503,10 +503,8 @@ describe('numbers and names', () => {
   });
 
   it('keeps the inset focus offset at or below zero, so it can never push the ring out', () => {
-    const withInset = (v: number): Tokens => ({
-      ...tokens,
-      stroke: { ...tokens.stroke, focusInset: v },
-    });
+    const withInset = (v: number): Tokens =>
+      ({ ...tokens, stroke: { ...tokens.stroke, focusInset: v } }) as unknown as Tokens;
     for (const [name, render] of Object.entries(renderers)) {
       expect(() => render(withInset(0)), name).not.toThrow();
       expect(() => render(withInset(2)), name).toThrow(/stroke\.focusInset.*above zero/);

@@ -192,7 +192,7 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
   });
 
-  it('makes a shell utility for every shell key, so a new one cannot be left out', async () => {
+  it('makes a shell utility for every shell key, so a new one cannot be left out', () => {
     const theme = renderTailwindCss();
     for (const k of Object.keys(tokens.layout.shell)) {
       const name = `shell-${kebab(k)}`;

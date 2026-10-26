@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { themeScript } from '../src/theme-script.ts';
+import { renderTokensCss } from '../src/tokens/generate.ts';
 import {
   colorOf,
   disabledCeiling,
@@ -344,11 +345,27 @@ function sizeSection(): string {
     </section>`;
 }
 
+// What a reader who asks for reduced motion gets for one property: the value in the reduced
+// motion block when it is redefined there, the root value otherwise. Read from the stylesheet,
+// so the specimen shows what ships rather than what the source intends.
+export function reducedMotionValue(css: string, name: string): string {
+  const find = (block: string) =>
+    new RegExp(`${name}:\\s*([^;]+);`).exec(block)?.[1]?.trim() ?? undefined;
+  const at = css.indexOf('@media (prefers-reduced-motion: reduce)');
+  const reduced = at === -1 ? undefined : find(css.slice(at, css.indexOf('}', at)));
+  const root = find(css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root'))));
+  const value = reduced ?? root;
+  if (value === undefined) throw new Error(`${name} is not in the stylesheet`);
+  return value;
+}
+
+const reducedMs = (name: string) => parseInt(reducedMotionValue(renderTokensCss(), name), 10);
+
 function timerSection(): string {
   const rows = Object.entries(tokens.timer)
     .map(
       ([k, t]) =>
-        `<tr><th scope="row">${kebab(k)}</th><td class="numbers">${t.ms} ms</td><td class="numbers">${t.ms} ms</td></tr>`,
+        `<tr><th scope="row">${kebab(k)}</th><td class="numbers">${t.ms} ms</td><td class="numbers">${reducedMs(`--dr-timer-${kebab(k)}`)} ms</td></tr>`,
     )
     .join('');
   return `
@@ -367,7 +384,7 @@ function timerSection(): string {
 function motionSection(): string {
   const rows = Object.entries(tokens.motion.duration)
     .map(([k, d]) => {
-      const reduced = d.kind === 'move' ? 0 : Math.min(d.ms, reducedFadeCapMs);
+      const reduced = reducedMs(`--dr-duration-${kebab(k)}`);
       return `<tr><th scope="row">${kebab(k)}</th><td>${d.kind}</td><td class="numbers">${d.ms} ms</td><td class="numbers">${reduced} ms</td></tr>`;
     })
     .join('');

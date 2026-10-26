@@ -673,6 +673,8 @@ button.quiet:disabled {
   justify-content: space-between;
   min-block-size: var(--dr-size-control-md);
   padding-inline: var(--dr-space-8);
+  /* Reserved on every item so the label does not move when the selection does. */
+  border-inline-start: var(--dr-stroke-indicator) solid transparent;
   border-radius: var(--dr-radius-sm);
   color: var(--dr-text-body);
   font: var(--dr-type-body-s);
@@ -698,7 +700,7 @@ button.quiet:disabled {
 }
 
 .item.is-selected {
-  border-inline-start: var(--dr-stroke-indicator) solid var(--dr-accent-ink);
+  border-inline-start-color: var(--dr-accent-ink);
   border-start-start-radius: 0;
   border-end-start-radius: 0;
   background: var(--dr-accent-wash);

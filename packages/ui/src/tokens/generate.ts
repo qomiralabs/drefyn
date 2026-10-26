@@ -70,17 +70,29 @@ function checked(hex: string): Hex {
 
 // Names become CSS custom properties, utility names and JSON keys once kebab cased.
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-// The only numbers that may go below zero: letter spacing, because display type is set
-// tight, and the inset focus offset, which pulls the ring inside an item's own edge.
-const SIGNED = /^(type\.[^.]+\.tracking|stroke\.focusInset)$/;
+// Letter spacing may go either way: display type is set tight.
+const SIGNED = /^type\.[^.]+\.tracking$/;
+// The inset focus offset pulls the ring inside an item's own edge, so it is never above zero.
+const NOT_POSITIVE = /^stroke\.focusInset$/;
+// Alphas and timer waits must be numbers; a string would print into CSS as it stands.
+const NUMERIC_KEYS = new Set(['alpha', 'ms']);
 
 // Walks the whole source once before anything is written, so a bad value fails the build
 // with its path instead of shipping NaNpx, a negative width or a name that breaks a rule.
 function validate(node: unknown, path: string[] = []): void {
   const where = path.join('.');
+  const key = path.at(-1) ?? '';
+  if (NUMERIC_KEYS.has(key) && typeof node !== 'number') {
+    throw new Error(`${where} is ${String(node)}, not a number`);
+  }
   if (typeof node === 'number') {
     if (!Number.isFinite(node)) throw new Error(`${where} is ${node}, not a finite number`);
+    if (NOT_POSITIVE.test(where)) {
+      if (node > 0) throw new Error(`${where} is ${node}, above zero`);
+      return;
+    }
     if (node < 0 && !SIGNED.test(where)) throw new Error(`${where} is ${node}, below zero`);
+    if (key === 'alpha' && node > 1) throw new Error(`${where} is ${node}, above 1`);
     return;
   }
   if (typeof node !== 'object' || node === null) return;
@@ -258,6 +270,14 @@ function utilityColorName(cssName: string): string {
   return cssName.replace(/^--dr-(surface|border|text)-/, '').replace(/^--dr-/, '');
 }
 
+// Which way each shell measure runs. Typed against the tokens, so a new shell key does not
+// compile until it says whether it is a height or a width.
+const SHELL_AXIS: Record<keyof Tokens['layout']['shell'], 'height' | 'width'> = {
+  bar: 'height',
+  nav: 'width',
+  navCollapsed: 'width',
+};
+
 export function renderTailwindCss(t: Tokens = source): string {
   validate(t);
   const lines: string[] = [];
@@ -292,9 +312,11 @@ export function renderTailwindCss(t: Tokens = source): string {
   for (const k of Object.keys(t.layout.docs)) {
     lines.push(`--container-docs-${k}: var(--dr-docs-${k})`);
   }
-  lines.push('--height-shell-bar: var(--dr-shell-bar)');
-  for (const k of ['nav', 'navCollapsed'] as const satisfies (keyof Tokens['layout']['shell'])[]) {
-    lines.push(`--container-shell-${kebab(k)}: var(--dr-shell-${kebab(k)})`);
+  for (const k of Object.keys(t.layout.shell)) {
+    const axis = SHELL_AXIS[k as keyof typeof SHELL_AXIS] as 'height' | 'width' | undefined;
+    if (axis === undefined) throw new Error(`layout.shell.${k} has no utility axis`);
+    const name = `shell-${kebab(k)}`;
+    lines.push(`--${axis === 'height' ? 'height' : 'container'}-${name}: var(--dr-${name})`);
   }
   lines.push('--border-width-indicator: var(--dr-stroke-indicator)');
   for (const k of Object.keys(t.shadow)) lines.push(`--shadow-${k}: var(--dr-shadow-${k})`);
