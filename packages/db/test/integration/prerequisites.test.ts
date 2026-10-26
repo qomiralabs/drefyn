@@ -149,15 +149,18 @@ describeWithStack('prerequisite check on down and status', () => {
     const { db, dir } = await migratedWithoutVector();
     const state = await migrationState(db.owner);
     const dump = await schemaDump(db.name);
+    // The oid, not the printed name: the search_path drops the schema from regclass text.
+    const widgets = () =>
+      query<{ oid: string | null }>(db.owner, "select to_regclass('app.widgets')::oid as oid");
+    const before = await widgets();
+    expect(before[0]?.oid).not.toBeNull();
 
     const result = await migrate(args, { url: db.owner, migrationsDir: dir });
     expect(result.code, describeFailure(result)).toBe(4);
     expectNames(result.stderr, MISSING);
     expect(await migrationState(db.owner)).toEqual(state);
     expect(await schemaDump(db.name)).toBe(dump);
-    expect(await query(db.owner, "select to_regclass('app.widgets')::text as t")).toEqual([
-      { t: 'app.widgets' },
-    ]);
+    expect(await widgets()).toEqual(before);
     expect(await migrateLockRows(db.owner)).toEqual([]);
   });
 
