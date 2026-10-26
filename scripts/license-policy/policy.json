@@ -20,6 +20,34 @@
       "pattern": "^lightningcss-(darwin|linux|win32|freebsd|android)-(x64|arm64|arm|ia32)(-gnu|-musl|-msvc|-gnueabihf)?$",
       "license": "MPL-2.0",
       "reason": "Platform binaries of lightningcss, same reason."
+    },
+    {
+      "name": "axe-core",
+      "license": "MPL-2.0",
+      "devOnly": true,
+      "reason": "Dev only, never shipped. The accessibility engine behind @axe-core/playwright in the component checks."
+    },
+    {
+      "name": "@axe-core/playwright",
+      "license": "MPL-2.0",
+      "devOnly": true,
+      "reason": "Dev only, never shipped. Runs axe over Storybook stories in the component accessibility checks."
+    },
+    {
+      "name": "caniuse-lite",
+      "license": "CC-BY-4.0",
+      "devOnly": true,
+      "reason": "Dev only, never shipped. Browser support data read by browserslist, pulled in through @babel/core by eslint-plugin-react-hooks and Storybook docgen."
+    }
+  ],
+  "forbidden": [
+    {
+      "name": "sharp",
+      "reason": "Optional image dependency of Next.js; its prebuilt libvips binaries are LGPL-3.0-or-later. The dashboard serves images unoptimized instead."
+    },
+    {
+      "pattern": "^@img/.+$",
+      "reason": "Prebuilt sharp and libvips platform binaries, some LGPL-3.0-or-later."
     }
   ]
 }
