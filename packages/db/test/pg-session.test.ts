@@ -107,10 +107,11 @@ describe('the runner wiring', () => {
     expect(run[0]).toBe(
       'create index concurrently if not exists widgets_name_idx on app.widgets (id);',
     );
-    expect(run[1]).toMatch(
+    expect(run[1]).toMatch(/^do \$\$/);
+    expect(run[2]).toMatch(
       /^insert into app\.migration_checksums .* on conflict \(name\) do update set sha256 = excluded\.sha256/,
     );
-    expect(run[2]).toMatch(/^INSERT INTO "app"\."pgmigrations"/);
+    expect(run[3]).toMatch(/^INSERT INTO "app"\."pgmigrations"/);
     expect(r.err.text()).toMatch(/not wrapped in a transaction/);
   });
 
@@ -190,10 +191,11 @@ describe('the runner wiring', () => {
     await sessionFor(client).run(await request(dir, 'down', 1));
     const run = sent.slice(sent.indexOf('drop index concurrently if exists app.widgets_name_idx;'));
     expect(run[0]).toBe('drop index concurrently if exists app.widgets_name_idx;');
-    expect(run[1]).toMatch(
+    expect(run[1]).toMatch(/^do \$\$/);
+    expect(run[2]).toMatch(
       /^DELETE FROM "app"\."pgmigrations" WHERE name='1760000000002_widgets_name_idx'/,
     );
-    expect(run.slice(2)).toEqual([ORPHANS]);
+    expect(run.slice(3)).toEqual([ORPHANS]);
   });
 
   it('clears orphaned hashes after a run', async () => {
@@ -201,6 +203,76 @@ describe('the runner wiring', () => {
     const { client, sent } = fakeClient();
     await sessionFor(client).run(await request(dir, 'up'));
     expect(sent.at(-1)).toBe(ORPHANS);
+  });
+
+  // The check sits between a marked section and its bookkeeping, so a failed or skipped build
+  // can never be recorded as applied.
+  describe('the invalid index check after a marked section', () => {
+    const isCheck = (text: string) => text.includes('pg_index') && text.startsWith('do $$');
+
+    it('runs after the section and before the hash and the record', async () => {
+      const dir = migrationsDir({ [MARKED]: marked });
+      const { client, sent } = fakeClient();
+      await sessionFor(client).run(await request(dir, 'up'));
+      const run = fromFirstFile(sent);
+      expect(run[0]).toMatch(/^create index concurrently/);
+      expect(isCheck(run[1] ?? '')).toBe(true);
+      expect(run[2]).toMatch(/^insert into app\.migration_checksums/);
+      expect(run[3]).toMatch(/^INSERT INTO "app"\."pgmigrations"/);
+    });
+
+    it('runs after a marked down section, before the record is removed', async () => {
+      const dir = migrationsDir({ [MARKED]: marked });
+      const { client, sent } = fakeClient((text) =>
+        text.startsWith('SELECT name FROM "app"."pgmigrations"')
+          ? [{ name: '1760000000002_widgets_name_idx' }]
+          : undefined,
+      );
+      await sessionFor(client).run(await request(dir, 'down', 1));
+      const run = sent.slice(
+        sent.indexOf('drop index concurrently if exists app.widgets_name_idx;'),
+      );
+      expect(isCheck(run[1] ?? '')).toBe(true);
+      expect(run[2]).toMatch(/^DELETE FROM "app"\."pgmigrations"/);
+    });
+
+    it.each([
+      [
+        'finds invalid indexes',
+        new Error('invalid indexes in schema app: app.widgets_name_key on app.widgets'),
+      ],
+      ['itself fails', new Error('canceling statement due to user request')],
+    ])('writes neither hash nor record when the check %s', async (_, failure) => {
+      const dir = migrationsDir({ [MARKED]: marked });
+      const { client, sent } = fakeClient((text) => (isCheck(text) ? failure : undefined));
+      const error = await rejected(sessionFor(client).run(await request(dir, 'up')));
+      expect((error as MigrateError).message).toContain(failure.message);
+      expect(sent.some((t) => t.startsWith('insert into app.migration_checksums'))).toBe(false);
+      expect(sent.some((t) => t.startsWith('INSERT INTO "app"."pgmigrations"'))).toBe(false);
+    });
+
+    it('is not run after an unmarked file, whose failed build rolls back', async () => {
+      const dir = migrationsDir({ [PLAIN]: plain });
+      const { client, sent } = fakeClient();
+      await sessionFor(client).run(await request(dir, 'up'));
+      expect(sent.some(isCheck)).toBe(false);
+    });
+  });
+
+  describe('invalidIndexes', () => {
+    it('reads invalid indexes in app with whether a build is running', async () => {
+      const { client, sent } = fakeClient((text) =>
+        text.includes('indisvalid')
+          ? [{ index: 'widgets_name_key', table: 'widgets', building: true }]
+          : undefined,
+      );
+      expect(await sessionFor(client).invalidIndexes()).toEqual([
+        { index: 'widgets_name_key', table: 'widgets', building: true },
+      ]);
+      expect(sent[0]).toMatch(/nspname = 'app'/);
+      expect(sent[0]).toMatch(/not x\.indisvalid/);
+      expect(sent[0]).toMatch(/pg_stat_progress_create_index/);
+    });
   });
 
   it('names the file that failed', async () => {

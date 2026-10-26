@@ -4,6 +4,7 @@ import type { VectorExtension } from '../src/prerequisites.ts';
 import {
   runMigrate,
   type ConnectedRole,
+  type InvalidIndex,
   type MigrateSession,
   type Output,
   type RunRequest,
@@ -21,6 +22,7 @@ function capture(): Output & { text: () => string } {
 }
 
 interface FakeState {
+  invalid?: InvalidIndex[];
   role?: ConnectedRole;
   vector?: VectorExtension | undefined;
   lockFree?: boolean;
@@ -47,6 +49,10 @@ function fakeSession(state: FakeState = {}) {
       return Promise.resolve(
         'vector' in state ? state.vector : { schema: 'extensions', version: '0.8.7' },
       );
+    },
+    invalidIndexes: () => {
+      calls.push('indexes');
+      return Promise.resolve(state.invalid ?? []);
     },
     tryLock: () => {
       calls.push('lock');
@@ -119,6 +125,7 @@ describe('runMigrate order', () => {
     expect(r.calls).toEqual([
       'role',
       'prerequisites',
+      'indexes',
       'lock',
       'lock_timeout',
       'shape',
@@ -173,7 +180,7 @@ describe('runMigrate order', () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/another run holds the migration lock/);
     // Never held, so never released.
-    expect(r.calls).toEqual(['role', 'prerequisites', 'lock', 'close']);
+    expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'lock', 'close']);
   });
 
   it('exits 1 on a tracking table of the wrong shape and creates nothing', async () => {
@@ -234,6 +241,35 @@ describe('runMigrate order', () => {
   });
 });
 
+// An invalid index in app means a concurrent build failed or is still running; a marked file
+// that skipped it through if not exists would otherwise be recorded on top of it.
+describe('runMigrate with an invalid index in app', () => {
+  const invalid: InvalidIndex[] = [
+    { index: 'widgets_name_key', table: 'widgets', building: false },
+    { index: 'gadgets_name_idx_ccnew', table: 'gadgets', building: true },
+  ];
+
+  it.each([['up'], ['down'], ['status']])(
+    'exits 4 on %s before the lock, naming each',
+    async (command) => {
+      const r = await migrate(['migrate', command], { invalid });
+      expect(r.code).toBe(4);
+      expect(r.stderr).toContain('app.widgets_name_key on app.widgets');
+      expect(r.stderr).toContain(
+        'app.gadgets_name_idx_ccnew on app.gadgets (a build is still in progress)',
+      );
+      expect(r.stderr).toContain('drop index concurrently if exists app.<index>');
+      expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'close']);
+    },
+  );
+
+  it('checks the vector extension first', async () => {
+    const r = await migrate(['migrate', 'up'], { invalid, vector: undefined });
+    expect(r.code).toBe(4);
+    expect(r.calls).not.toContain('indexes');
+  });
+});
+
 describe('runMigrate status', () => {
   it('lists applied and pending files, and never locks or creates anything', async () => {
     const dir = folder();
@@ -245,7 +281,7 @@ describe('runMigrate status', () => {
     );
     expect(r.code).toBe(0);
     expect(r.stdout).toBe(`applied  ${A}\npending  ${B}\n`);
-    expect(r.calls).toEqual(['role', 'prerequisites', 'shape', 'history', 'close']);
+    expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'shape', 'history', 'close']);
   });
 
   it('marks each problem file in the report and exits 3', async () => {
