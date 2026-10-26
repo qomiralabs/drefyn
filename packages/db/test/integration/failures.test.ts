@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import { start } from './support/process.ts';
-import { migrationState, tableExists } from './support/sql.ts';
-import { packageRoot, stack, urlFor } from './support/stack.ts';
+import { describeWithStack } from './support/presence.ts';
+import { CHECKSUMS, migrateLockRows, migrationState, query, tableExists } from './support/sql.ts';
+import { packageRoot, schemaDump, stack, urlFor } from './support/stack.ts';
 import { join } from 'node:path';
 
 const dbs = databases();
@@ -78,5 +79,43 @@ describe('failures exit 1', () => {
     expect(result.code, describeFailure(result)).toBe(1);
     expect(result.stderr).toMatch(/database "drefyn_test_absent_db" does not exist/);
     expect(result.stdout + result.stderr).not.toContain(stack().passwords.owner);
+  });
+});
+
+// A plain node-pg-migrate run creates its table with run_on as timestamp without time zone.
+// The wrapper never alters a table it did not create; it stops and names the column.
+describeWithStack('a tracking table of the wrong shape', () => {
+  it.each(['timestamp', 'timestamp(3) without time zone', 'text'])(
+    'exits 1 naming run_on when it is %s, and changes nothing',
+    async (type) => {
+      const db = await dbs.fresh('base');
+      await query(
+        db.owner,
+        `create table app.pgmigrations (id serial primary key, name varchar(255) not null, run_on ${type} not null)`,
+      );
+      const dump = await schemaDump(db.name);
+      const rows = await query(db.owner, 'select * from app.pgmigrations');
+
+      const result = await migrate(['migrate', 'up'], { url: db.owner });
+      expect(result.code, describeFailure(result)).toBe(1);
+      expect(result.stderr).toContain('run_on');
+      expect(await schemaDump(db.name)).toBe(dump);
+      expect(await query(db.owner, 'select * from app.pgmigrations')).toEqual(rows);
+      expect(await tableExists(db.owner, CHECKSUMS)).toBe(false);
+      expect(await migrateLockRows(db.owner)).toEqual([]);
+    },
+  );
+
+  it('refuses the same table on down', async () => {
+    const db = await dbs.fresh('base');
+    await query(
+      db.owner,
+      'create table app.pgmigrations (id serial primary key, name varchar(255) not null, run_on timestamp not null)',
+    );
+    const dump = await schemaDump(db.name);
+    const result = await migrate(['migrate', 'down'], { url: db.owner });
+    expect(result.code, describeFailure(result)).toBe(1);
+    expect(result.stderr).toContain('run_on');
+    expect(await schemaDump(db.name)).toBe(dump);
   });
 });

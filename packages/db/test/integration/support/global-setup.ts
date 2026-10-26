@@ -1,11 +1,18 @@
 import type { TestProject } from 'vitest/node';
 import { migrate } from './cli.ts';
 import { BOOTSTRAPPED, cloneDatabase, dropDatabase, newName } from './databases.ts';
+import { stackAbsence } from './presence.ts';
 import { stack, urlFor } from './stack.ts';
 
 // Two templates per run: one straight from the bootstrap, one with the shipped migrations
 // applied by the real command. Test files clone whichever they need.
 export default async function setup(project: TestProject) {
+  const absent = await stackAbsence();
+  project.provide('stackAbsent', absent);
+  if (absent !== null) {
+    project.provide('templates', { base: '', migrated: '', migratedError: absent });
+    return;
+  }
   stack();
   const base = newName('base');
   const migrated = newName('migrated');

@@ -7,6 +7,7 @@ import {
   dropDatabase,
   newName,
 } from './support/databases.ts';
+import { describeWithStack } from './support/presence.ts';
 import { migrationState, query } from './support/sql.ts';
 import { superuser, urlFor } from './support/stack.ts';
 
@@ -75,5 +76,35 @@ describe('per file databases', () => {
     );
     expect(rows[0]?.v).toBeGreaterThanOrEqual(180006);
     expect(rows[0]?.ext).toBe('0.8.7');
+  });
+});
+
+// create database ... template fails while anyone is connected to the template, and a
+// backend lingers briefly after the CLI exits, so templates are closed once built.
+describeWithStack('templates', () => {
+  it('both refuse connections once built', async () => {
+    const { base, migrated } = inject('templates');
+    const rows = await superuser(
+      `select datname || '=' || datallowconn from pg_database
+        where datname in ('${base}', '${migrated}') order by datname;`,
+    );
+    expect(rows.trim().split('\n').sort()).toEqual([`${base}=false`, `${migrated}=false`].sort());
+  });
+
+  it('have no backend connected', async () => {
+    const { base, migrated } = inject('templates');
+    const count = await superuser(
+      `select count(*) from pg_stat_activity where datname in ('${base}', '${migrated}');`,
+    );
+    expect(count.trim()).toBe('0');
+  });
+
+  // Clones do not inherit allow_connections, so tests still reach their own databases.
+  it('hand out clones that accept connections', async () => {
+    const db = await dbs.fresh('migrated');
+    const rows = await superuser(
+      `select datallowconn from pg_database where datname = '${db.name}';`,
+    );
+    expect(rows.trim()).toBe('t');
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -206,5 +206,125 @@ describe('loadMigrationFiles', () => {
     });
     const error = await rejected(loadMigrationFiles(dir));
     expect((error as MigrateError).message).toContain('1760000000001');
+  });
+});
+
+// Finder and editors drop dot files beside migrations; reading one would break a laptop for
+// no reason, so they are skipped unread. Anything else that is not a migration is refused.
+describe('loadMigrationFiles and dot files', () => {
+  // Not UTF-8 and no sections, so parsing it would refuse the folder.
+  const junk = new Uint8Array([0x00, 0x00, 0x00, 0x01, 0x42, 0x75, 0x64, 0x31, 0xff, 0xfe]);
+
+  function unreadable(dir: string, name: string): void {
+    // On a non root runner a read now fails with EACCES, so a skip that reads is caught too.
+    chmodSync(join(dir, name), 0o000);
+  }
+
+  it('skips .DS_Store with a warning naming it, without reading it', async () => {
+    const dir = migrationsDir({
+      '1760000000001_a.sql': migrationText('select 1;', 'select 1;'),
+      '.DS_Store': junk,
+    });
+    unreadable(dir, '.DS_Store');
+    const warnings: string[] = [];
+    const files = await loadMigrationFiles(dir, { warn: (m) => void warnings.push(m) });
+    expect(files.map((f) => f.name)).toEqual(['1760000000001_a.sql']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('.DS_Store');
+  });
+
+  it('skips a dot file even when it is named like a migration', async () => {
+    const dir = migrationsDir({
+      '1760000000001_a.sql': migrationText('select 1;', 'select 1;'),
+      '.1760000000002_b.sql': migrationText('select 2;', 'select 2;'),
+    });
+    const warnings: string[] = [];
+    const files = await loadMigrationFiles(dir, { warn: (m) => void warnings.push(m) });
+    expect(files.map((f) => f.name)).toEqual(['1760000000001_a.sql']);
+    expect(warnings.join('\n')).toContain('.1760000000002_b.sql');
+  });
+
+  it('does not warn when there is nothing to skip', async () => {
+    const dir = migrationsDir({ '1760000000001_a.sql': migrationText('select 1;', 'select 1;') });
+    const warnings: string[] = [];
+    await loadMigrationFiles(dir, { warn: (m) => void warnings.push(m) });
+    expect(warnings).toEqual([]);
+  });
+
+  it.each(['README.md', 'notes'])(
+    'still refuses %s when a .DS_Store sits beside it',
+    async (stray) => {
+      const dir = migrationsDir({
+        '1760000000001_a.sql': migrationText('select 1;', 'select 1;'),
+        '.DS_Store': junk,
+        [stray]: '# notes\n',
+      });
+      const error = await rejected(loadMigrationFiles(dir, { warn: () => undefined }));
+      expect(error).toBeInstanceOf(MigrateError);
+      expect((error as MigrateError).outcome).toBe('failed');
+      expect((error as MigrateError).message).toContain(stray);
+    },
+  );
+});
+
+// node-pg-migrate hands any file it does not ignore to jiti, which runs it as code, and it
+// interpolates the recorded name into SQL. Only strict names may reach it.
+describe('loadMigrationFiles refuses anything but strictly named .sql files', () => {
+  it.each([
+    '1760000000003_c.js',
+    '1760000000003_c.cjs',
+    '1760000000003_c.mjs',
+    '1760000000003_c.ts',
+    '1760000000003_c.cts',
+    '1760000000003_c.mts',
+    '1760000000003_c.json',
+    '1760000000003_c.txt',
+    '1760000000003_c.sh',
+    '1760000000003_c.sql.js',
+    '1760000000003_c.sql.bak',
+    '1760000000003_c.SQL',
+    '1760000000003_c.Sql',
+    '1760000000003_c',
+    '176000000003_c.sql',
+    '17600000000033_c.sql',
+    '1760000000003_.sql',
+    '1760000000003_c_.sql',
+    '1760000000003__c.sql',
+    '1760000000003_c__d.sql',
+    '1760000000003_c-d.sql',
+    '1760000000003_C.sql',
+    '1760000000003_c d.sql',
+    "1760000000003_c');drop table app.x;--.sql",
+    '1760000000003_café.sql',
+    '1760000000003-c.sql',
+    'c_1760000000003.sql',
+    '_1760000000003_c.sql',
+  ])('refuses %j and names it', async (stray) => {
+    const dir = migrationsDir({
+      '1760000000001_a.sql': migrationText('select 1;', 'select 1;'),
+      [stray]: migrationText('select 3;', 'select 3;'),
+    });
+    const error = await rejected(loadMigrationFiles(dir, { warn: () => undefined }));
+    expect(error).toBeInstanceOf(MigrateError);
+    expect((error as MigrateError).outcome).toBe('failed');
+    expect((error as MigrateError).message).toContain(stray);
+  });
+
+  it('refuses a folder named like a migration', async () => {
+    const dir = migrationsDir({ '1760000000001_a.sql': migrationText('select 1;', 'select 1;') });
+    mkdirSync(join(dir, '1760000000002_b.sql'));
+    const error = await rejected(loadMigrationFiles(dir, { warn: () => undefined }));
+    expect((error as MigrateError).message).toContain('1760000000002_b.sql');
+  });
+
+  it.each([
+    '1760000000001_a.sql',
+    '1760000000001_create_widgets.sql',
+    '1760000000001_v2_widgets_2.sql',
+    '0000000000000_0.sql',
+  ])('accepts %s', async (name) => {
+    const dir = migrationsDir({ [name]: migrationText('select 1;', 'select 1;') });
+    const files = await loadMigrationFiles(dir, { warn: () => undefined });
+    expect(files.map((f) => f.name)).toEqual([name]);
   });
 });

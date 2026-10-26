@@ -4,6 +4,8 @@ import { evaluatePrerequisites } from '../src/prerequisites.ts';
 const COMPOSE_UPDATE =
   "docker compose -f deploy/compose.yaml exec -T postgres psql --no-psqlrc -U postgres -d drefyn -c 'alter extension vector update'";
 const MANAGED_UPDATE = "alter extension vector update to '<version>'";
+const COMPOSE_CREATE =
+  "docker compose -f deploy/compose.yaml exec -T postgres psql --no-psqlrc -U postgres -d drefyn -c 'create extension vector schema extensions'";
 
 function failure(result: ReturnType<typeof evaluatePrerequisites>) {
   if (result.ok) throw new Error('expected the prerequisite check to fail');
@@ -79,5 +81,51 @@ describe('evaluatePrerequisites', () => {
         'vector_wrong_schema',
       );
     }
+  });
+});
+
+// The bootstrap refuses to run on a database that already has the drefyn roles or schemas,
+// so the fix for a missing vector is one statement run by whoever owns schema extensions.
+describe('the missing vector message', () => {
+  const message = () => failure(evaluatePrerequisites(undefined)).message;
+
+  it('gives the compose command in full', () => {
+    expect(message()).toContain(COMPOSE_CREATE);
+  });
+
+  it('names the superuser for compose and the master user for managed Postgres', () => {
+    expect(message()).toMatch(/superuser/i);
+    expect(message()).toContain('master user');
+  });
+
+  it('says it must never be run as drefyn_owner', () => {
+    expect(message()).toMatch(/never[^.]*drefyn_owner/i);
+  });
+
+  it('says the bootstrap will not run again, and when a fresh bootstrap is needed', () => {
+    expect(message()).toContain('deploy/postgres/bootstrap.sql');
+    expect(message()).toMatch(/again|twice|rerun/i);
+    expect(message()).toMatch(/fresh database/i);
+  });
+
+  it('puts the problem first, then the statement, the compose form and the bootstrap note', () => {
+    const text = message();
+    const at = (needle: string | RegExp) => {
+      const index = typeof needle === 'string' ? text.indexOf(needle) : text.search(needle);
+      expect(index, String(needle)).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const problem = at(/not installed/i);
+    const statement = at('create extension vector schema extensions');
+    const compose = at('docker compose -f deploy/compose.yaml');
+    const bootstrap = at('deploy/postgres/bootstrap.sql');
+    expect(problem).toBeLessThan(statement);
+    expect(statement).toBeLessThan(compose);
+    expect(compose).toBeLessThan(bootstrap);
+  });
+
+  // The update command belongs to the too old case; here there is nothing to update.
+  it('does not offer the update command', () => {
+    expect(message()).not.toContain('alter extension vector update');
   });
 });

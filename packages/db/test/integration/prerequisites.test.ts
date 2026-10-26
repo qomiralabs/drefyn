@@ -8,6 +8,7 @@ import {
   migrationState,
   query,
 } from './support/sql.ts';
+import { describeWithStack } from './support/presence.ts';
 import { schemaDump, superuser } from './support/stack.ts';
 
 const dbs = databases();
@@ -118,4 +119,88 @@ describe('prerequisite check', () => {
       expect(result.code, describeFailure(result)).toBe(0);
     },
   );
+});
+
+// Down steps can recreate vector columns, so every command checks first; status exits 4 too,
+// so a health probe sees the problem. Neither may touch the migrate lock.
+describeWithStack('prerequisite check on down and status', () => {
+  // Cascade, so the case holds once a migration has a vector column.
+  const DROP_VECTOR = 'drop extension vector cascade;';
+  const MISSING = [/vector/, /not installed/i, /create extension vector schema extensions/];
+
+  async function migratedWithoutVector() {
+    const db = await dbs.fresh('migrated');
+    const dir = fixtureMigrations({
+      '9000000000001_widgets.sql': migration(
+        'create table app.widgets (id int);',
+        'drop table app.widgets;',
+      ),
+    });
+    const up = await migrate(['migrate', 'up'], { url: db.owner, migrationsDir: dir });
+    expect(up.code, describeFailure(up)).toBe(0);
+    await superuser(DROP_VECTOR, db.name);
+    return { db, dir };
+  }
+
+  it.each([
+    ['down', ['migrate', 'down']],
+    ['status', ['migrate', 'status']],
+  ] as const)('%s exits 4 with vector dropped and changes nothing', async (_, args) => {
+    const { db, dir } = await migratedWithoutVector();
+    const state = await migrationState(db.owner);
+    const dump = await schemaDump(db.name);
+
+    const result = await migrate(args, { url: db.owner, migrationsDir: dir });
+    expect(result.code, describeFailure(result)).toBe(4);
+    expectNames(result.stderr, MISSING);
+    expect(await migrationState(db.owner)).toEqual(state);
+    expect(await schemaDump(db.name)).toBe(dump);
+    expect(await query(db.owner, "select to_regclass('app.widgets')::text as t")).toEqual([
+      { t: 'app.widgets' },
+    ]);
+    expect(await migrateLockRows(db.owner)).toEqual([]);
+  });
+
+  // With the lock held elsewhere, a command that tried the lock first would exit 2.
+  it.each([
+    ['down', ['migrate', 'down']],
+    ['status', ['migrate', 'status']],
+  ] as const)('%s checks before the lock and never takes it', async (_, args) => {
+    const { db, dir } = await migratedWithoutVector();
+    const holder = await holdMigrateLock(db.owner);
+    try {
+      const result = await migrate(args, { url: db.owner, migrationsDir: dir });
+      expect(result.code, describeFailure(result)).toBe(4);
+      expectNames(result.stderr, MISSING);
+      const rows = await migrateLockRows(db.owner);
+      expect(rows.map((r) => r.pid)).toEqual([await backendPid(holder)]);
+    } finally {
+      await holder.end();
+    }
+  });
+
+  it('status exits 4 on a database it never migrated and creates nothing', async () => {
+    const db = await dbs.fresh('base');
+    await superuser(DROP_VECTOR, db.name);
+    const dump = await schemaDump(db.name);
+    const result = await migrate(['migrate', 'status'], { url: db.owner });
+    expect(result.code, describeFailure(result)).toBe(4);
+    expectNames(result.stderr, MISSING);
+    expect(await migrationState(db.owner)).toBeNull();
+    expect(await schemaDump(db.name)).toBe(dump);
+  });
+
+  // A diagnostic must be safe to run while a real migration holds the lock.
+  it('status succeeds while another session holds the lock', async () => {
+    const db = await dbs.fresh('migrated');
+    const holder = await holdMigrateLock(db.owner);
+    try {
+      const result = await migrate(['migrate', 'status'], { url: db.owner });
+      expect(result.code, describeFailure(result)).toBe(0);
+      const rows = await migrateLockRows(db.owner);
+      expect(rows.map((r) => r.pid)).toEqual([await backendPid(holder)]);
+    } finally {
+      await holder.end();
+    }
+  });
 });

@@ -75,6 +75,8 @@ export function databases() {
   return {
     created,
     async fresh(kind: 'base' | 'migrated'): Promise<TestDatabase> {
+      const absent = inject('stackAbsent');
+      if (absent !== null) throw new Error(`no compose stack to clone from: ${absent}`);
       const templates = inject('templates');
       if (kind === 'migrated' && templates.migratedError !== null) {
         throw new Error(templates.migratedError);

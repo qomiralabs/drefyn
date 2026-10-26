@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
+import { describeWithStack } from './support/presence.ts';
 import {
   CHECKSUMS,
   MIGRATIONS,
@@ -221,5 +222,119 @@ describe('migrations cannot create or change extensions', () => {
       '9000000000001_extension',
     );
     expect(await extensionState(db.owner)).toEqual(extensions);
+  });
+});
+
+// Default privileges from the first migration would hand drefyn_app any bookkeeping table
+// the owner creates later, so the wrapper revokes everything on every up and down.
+describeWithStack('migration bookkeeping stays owner only', () => {
+  const OTHERS = 'public, drefyn_app, drefyn_public_reader';
+
+  // Every grantee on the relation other than its owner; 'public' for the public pseudo role.
+  async function grantees(url: string, relation: string): Promise<string[]> {
+    const rows = await query<{ grantee: string }>(
+      url,
+      `select distinct case when a.grantee = 0 then 'public' else pg_get_userbyid(a.grantee) end as grantee
+         from pg_class c cross join lateral aclexplode(c.relacl) a
+        where c.oid = to_regclass($1) and a.grantee <> c.relowner
+        order by 1`,
+      [relation],
+    );
+    return rows.map((r) => r.grantee);
+  }
+
+  async function sequenceOf(url: string): Promise<string> {
+    const rows = await query<{ seq: string | null }>(
+      url,
+      `select pg_get_serial_sequence($1, 'id') as seq`,
+      [MIGRATIONS],
+    );
+    const seq = rows[0]?.seq;
+    if (seq == null) throw new Error(`${MIGRATIONS}.id has no sequence`);
+    return seq;
+  }
+
+  async function leak(url: string): Promise<void> {
+    await query(url, `grant select on ${MIGRATIONS}, ${CHECKSUMS} to drefyn_app`);
+    await query(
+      url,
+      `grant select, insert, update, delete, truncate on ${MIGRATIONS}, ${CHECKSUMS} to ${OTHERS}`,
+    );
+    await query(
+      url,
+      `grant usage, select, update on sequence ${await sequenceOf(url)} to ${OTHERS}`,
+    );
+  }
+
+  async function expectOwnerOnly(url: string): Promise<void> {
+    for (const relation of [MIGRATIONS, CHECKSUMS, await sequenceOf(url)]) {
+      expect(await grantees(url, relation), relation).toEqual([]);
+    }
+    for (const table of [MIGRATIONS, CHECKSUMS]) {
+      for (const privilege of ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) {
+        expect(
+          await query(url, `select has_table_privilege('drefyn_app', $1, $2) as p`, [
+            table,
+            privilege,
+          ]),
+          `${table} ${privilege}`,
+        ).toEqual([{ p: false }]);
+      }
+    }
+  }
+
+  it('leaves no privilege for others on a fresh up', async () => {
+    const db = await dbs.fresh('base');
+    const up = await migrate(['migrate', 'up'], { url: db.owner });
+    expect(up.code, describeFailure(up)).toBe(0);
+    await expectOwnerOnly(db.owner);
+  });
+
+  it('revokes grants the owner added by hand on the next up, even with nothing to apply', async () => {
+    const db = await dbs.fresh('migrated');
+    await leak(db.owner);
+    expect(await grantees(db.owner, MIGRATIONS)).toContain('drefyn_app');
+
+    const up = await migrate(['migrate', 'up'], { url: db.owner });
+    expect(up.code, describeFailure(up)).toBe(0);
+    await expectOwnerOnly(db.owner);
+  });
+
+  it('revokes them on down too', async () => {
+    const db = await dbs.fresh('migrated');
+    const dir = fixtureMigrations({
+      '9000000000001_widgets.sql': migration(
+        'create table app.widgets (id int);',
+        'drop table app.widgets;',
+      ),
+    });
+    expect((await migrate(['migrate', 'up'], { url: db.owner, migrationsDir: dir })).code).toBe(0);
+    await leak(db.owner);
+
+    const down = await migrate(['migrate', 'down'], { url: db.owner, migrationsDir: dir });
+    expect(down.code, describeFailure(down)).toBe(0);
+    await expectOwnerOnly(db.owner);
+  });
+
+  // Status is read only, so it reports and leaves even a bad grant for up or down to fix.
+  it('status changes no grant', async () => {
+    const db = await dbs.fresh('migrated');
+    await leak(db.owner);
+    const before = await grantees(db.owner, MIGRATIONS);
+    const status = await migrate(['migrate', 'status'], { url: db.owner });
+    expect(status.code, describeFailure(status)).toBe(0);
+    expect(await grantees(db.owner, MIGRATIONS)).toEqual(before);
+  });
+
+  it('records run_on as timestamp with time zone', async () => {
+    const db = await dbs.fresh('migrated');
+    expect(
+      await query(
+        db.owner,
+        `select format_type(atttypid, atttypmod) as type from pg_attribute
+          where attrelid = to_regclass($1) and attname = 'run_on' and not attisdropped`,
+        [MIGRATIONS],
+      ),
+    ).toEqual([{ type: 'timestamp with time zone' }]);
   });
 });

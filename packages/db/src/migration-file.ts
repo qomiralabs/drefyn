@@ -18,7 +18,15 @@ export function parseMigrationFile(name: string, contents: Uint8Array): Migratio
   return notImplemented('parseMigrationFile', name, contents);
 }
 
+export interface LoadOptions {
+  // Told about each skipped name that starts with a dot, such as .DS_Store.
+  readonly warn?: (message: string) => void;
+}
+
 // Every .sql file in the directory, parsed and in name order, before anything connects.
-export function loadMigrationFiles(dir: string): Promise<MigrationFile[]> {
-  return notImplemented('loadMigrationFiles', dir);
+export function loadMigrationFiles(
+  dir: string,
+  options: LoadOptions = {},
+): Promise<MigrationFile[]> {
+  return notImplemented('loadMigrationFiles', dir, options);
 }

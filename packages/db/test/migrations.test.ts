@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { defaultMigrationsDir } from '../src/constants.ts';
@@ -47,5 +47,32 @@ describe('shipped migrations', () => {
       expect(sql, name).not.toMatch(/\bpassword\b/);
       expect(sql, name).not.toMatch(/\bbypassrls\b/);
     }
+  });
+});
+
+// This folder is the one path the migration tool reads in production, and anything it does
+// not ignore it may run as code. Only strictly named, regular .sql files belong in it.
+describe('the shipped migrations folder', () => {
+  const STRICT_NAME = /^[0-9]{13}_[a-z0-9]+(_[a-z0-9]+)*\.sql$/;
+  // Dot files are skipped by the loader; a laptop's .DS_Store is not part of the release.
+  const entries = () => readdirSync(defaultMigrationsDir).filter((name) => !name.startsWith('.'));
+
+  it('holds only regular files with strict migration names', () => {
+    expect(entries().length).toBeGreaterThan(0);
+    for (const name of entries()) {
+      expect(name).toMatch(STRICT_NAME);
+      const stat = lstatSync(join(defaultMigrationsDir, name));
+      expect(stat.isFile() && !stat.isSymbolicLink(), name).toBe(true);
+    }
+  });
+
+  it('gives every file its own 13 digit prefix', () => {
+    const prefixes = entries().map((name) => name.slice(0, 13));
+    expect(new Set(prefixes).size).toBe(prefixes.length);
+  });
+
+  it('loads exactly the files on disk, in name order', async () => {
+    const files = await loadMigrationFiles(defaultMigrationsDir, { warn: () => undefined });
+    expect(files.map((f) => f.name)).toEqual([...entries()].sort());
   });
 });

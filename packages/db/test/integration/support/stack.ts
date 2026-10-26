@@ -4,7 +4,7 @@ import { run } from './process.ts';
 
 export const repoRoot = resolve(import.meta.dirname, '..', '..', '..', '..', '..');
 export const packageRoot = resolve(import.meta.dirname, '..', '..', '..');
-const composeFile = join(repoRoot, 'deploy', 'compose.yaml');
+export const composeFile = join(repoRoot, 'deploy', 'compose.yaml');
 
 export interface Stack {
   readonly project: string;

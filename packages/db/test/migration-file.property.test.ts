@@ -87,3 +87,54 @@ describe('migration file properties', () => {
     );
   });
 });
+
+// The recorded name is interpolated into SQL by the migration tool, so the name rule is a
+// security rule: a name is accepted exactly when it matches it, and nothing near it passes.
+const STRICT_NAME = /^[0-9]{13}_[a-z0-9]+(_[a-z0-9]+)*\.sql$/;
+
+const nearName = fc
+  .tuple(
+    fc.stringMatching(/^[0-9]{11,15}$/),
+    fc.constantFrom('_', '-', '__', ''),
+    fc.stringMatching(/^[a-zA-Z0-9_' ;.-]{0,16}$/),
+    fc.constantFrom('.sql', '.SQL', '.sql.js', '.js', '.ts', '.mjs', '.cjs', '.json', ''),
+  )
+  .map(([digits, sep, words, ext]) => `${digits}${sep}${words}${ext}`);
+
+const anyName = fc.oneof(
+  nearName,
+  fc.string({ maxLength: 40 }).map((s) => `${s}.sql`),
+  fc.string({ unit: 'grapheme', maxLength: 40 }),
+);
+
+describe('migration file name properties', () => {
+  it('accepts a name exactly when it matches the strict rule', () => {
+    const text = utf8(migrationText('select 1;', 'select 1;'));
+    fc.assert(
+      fc.property(anyName, (name) => {
+        if (STRICT_NAME.test(name)) {
+          expect(parseMigrationFile(name, text).name).toBe(name);
+        } else {
+          expect(() => parseMigrationFile(name, text)).toThrow(MigrateError);
+        }
+      }),
+      { seed: 1414, numRuns: 1000 },
+    );
+  });
+
+  it('accepts every name the rule allows', () => {
+    const strict = fc
+      .tuple(
+        fc.stringMatching(/^[0-9]{13}$/),
+        fc.array(fc.stringMatching(/^[a-z0-9]{1,8}$/), { minLength: 1, maxLength: 4 }),
+      )
+      .map(([digits, words]) => `${digits}_${words.join('_')}.sql`);
+    const text = utf8(migrationText('select 1;', 'select 1;'));
+    fc.assert(
+      fc.property(strict, (name) => {
+        expect(parseMigrationFile(name, text).name).toBe(name);
+      }),
+      params,
+    );
+  });
+});
