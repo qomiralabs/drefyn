@@ -37,6 +37,7 @@ describe('package manifest', () => {
   it('exposes the typed tokens, the contrast helpers, the head script and the chart themes', () => {
     expect(Object.keys(ui).sort()).toEqual(
       [
+        'aliasRoles',
         'chartMotion',
         'colorOf',
         'cubicBezier',
@@ -46,6 +47,8 @@ describe('package manifest', () => {
         'disabledCeiling',
         'disabledPairs',
         'echartsThemes',
+        'fillBackdrops',
+        'fillFloor',
         'floor2',
         'forbiddenPairs',
         'luminance',
@@ -54,6 +57,7 @@ describe('package manifest', () => {
         'reducedFadeCapMs',
         'requiredPairs',
         'ruledOutPairs',
+        'supplementaryMarks',
         'themeScript',
         'themeStorageKey',
         'tokens',

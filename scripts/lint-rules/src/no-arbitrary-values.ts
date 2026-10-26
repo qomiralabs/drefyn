@@ -135,7 +135,7 @@ export const noArbitraryValues: Rule.RuleModule = {
       blend:
         "'{{token}}' blends with whatever is underneath, so the colour shown is one the contrast tests never measured. Use a colour role as it is.",
       motion:
-        "'{{token}}' transitions movement behind a variant. Write motion-safe: before it, or use transition-colors or transition-opacity.",
+        "'{{token}}' transitions movement behind a variant. Put transition or transition-colors on the element itself and only the colour behind the variant (transition-colors hover:bg-hover). Use motion-safe: only for a transition that really is scoped, such as motion-safe:sm:transition.",
       layer: "'{{token}}' is a raw stacking order. Use z-base, z-raised, z-overlay or z-toast.",
     },
   },
