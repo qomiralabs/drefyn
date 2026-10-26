@@ -3,6 +3,7 @@ export { echartsThemes } from './generated/echarts-theme.ts';
 export { themeScript, themeStorageKey } from './theme-script.ts';
 export { composite, contrast, floor2, luminance } from './tokens/contrast.ts';
 export {
+  aliasRoles,
   colorOf,
   decorativeRoles,
   disabledCeiling,

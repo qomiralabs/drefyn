@@ -33,7 +33,7 @@ const light = {
     }
   },
   "tooltip": {
-    "backgroundColor": "#F5F5F4",
+    "backgroundColor": "#FAFAF9",
     "borderColor": "#D6D3D1",
     "borderWidth": 1,
     "textStyle": {

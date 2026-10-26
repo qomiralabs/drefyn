@@ -26,6 +26,8 @@ The tests fail if they drift.
   `@sunken`. The wash is translucent, so it is measured where it lands.
 - `disabledPairs`, `disabledCeiling`: the band disabled controls are held to.
 - `decorativeRoles`: colour roles with no contrast minimum, each with its reason.
+- `aliasRoles`: colour roles that resolve to another role per mode (`surface.overlay`), so the
+  pairs on that role cover them.
 - `contrast`, `luminance`, `composite`, `floor2`: WCAG 2.x contrast, floored so a failure never
   prints as a pass.
 - `themeScript`, `themeStorageKey`: the inline head script that applies a stored light or dark
@@ -43,8 +45,27 @@ The tests fail if they drift.
 - Reading width: `max-w-measure` (35em) sets about 70 characters of Inter at any body size, and
   fits the 640px docs reading column at `body-l`.
 - Focus: `focus-visible:focus-ring` draws the 2px ring with its 2px offset from the tokens.
-- Hover fills: there is no neutral hover fill yet (#60). Do not paint `bg-rule` as a fill; it is
-  a hairline colour that no contrast test measures under text.
+  Items flush inside a container (menu items, options, rows, cells) use
+  `focus-visible:focus-ring-inset`, which draws the ring 2px inside their edge.
+- Hover and pressed: `bg-hover` and `bg-pressed`. State words on anything that can be hovered,
+  pressed or selected are `text-body` beside the state icon; state text colours are for
+  sentences on ground and raised. Disabled items take neither fill. Do not paint `bg-rule` as a
+  fill; it is a hairline colour that no contrast test measures under text.
+- Floating things: menus, popovers, tooltips, dialogs, the command bar and toasts sit on
+  `bg-overlay` with `border-rule-strong` and `shadow-1` (`shadow-2` for the command bar and
+  dialogs). It is paper in light and raised in dark, where shadows do not show.
+- Scrim: `bg-overlay-scrim` behind dialogs and the command bar only, faded with `duration-base`.
+  No blur.
+- Sizes: `h-control-sm`, `h-control-md` and `h-control-lg` (24, 32 and 40px), `size-icon-sm`,
+  `-md` and `-lg` (16, 20 and 24px), `h-row-compact` and `h-row-comfortable` (32 and 40px). The
+  space scale has no 40; it exists only as a size.
+- Selection: `border-l-indicator` or `border-b-indicator` in `border-accent-ink` marks the
+  selected row, the current nav item and the selected tab.
+- Shell: `h-shell-bar`, `w-shell-nav` and `w-shell-nav-collapsed`.
+- Skeletons: `bg-skeleton-fill`, never under text, with no shimmer or pulse.
+- Timers: `tokens.timer` and `--dr-timer-*` hold the waits (tooltip 500 ms, skeleton reveal
+  200 ms, toast 6 s, toast with Undo 10 s). They are not Tailwind utilities and reduced motion
+  never shortens them.
 - Stacking: `z-base`, `z-raised`, `z-overlay` and `z-toast`. Bare `z-N` is rejected.
 - Motion: under reduced motion, plain `transition`, `transition-all` and `transition-transform`
   fade colour and opacity only, so nothing travels. Use `duration-move-*` for movement. The
@@ -56,8 +77,13 @@ The tests fail if they drift.
 ## Rules the tests hold
 
 - Text pairs reach 4.5:1 and marks and control edges reach 3:1, in both modes.
-- Every colour role is measured in at least one pair, or listed in `decorativeRoles` with a
-  reason (`border.rule` and `border.rule-strong` are hairlines).
+- Every colour role is measured in at least one pair, listed in `decorativeRoles` with a
+  reason (`border.rule` and `border.rule-strong` are hairlines, `skeleton.fill` carries no
+  text), or listed in `aliasRoles` with the hex of the role it resolves to.
+- The hover and pressed fills carry ink, body, secondary and accent ink text, the focus ring
+  and, on hover, the control edge in both modes. Green and amber state text and subtle text fail
+  on them in light, and a pressed fill never draws a control edge. The hover fill sits at least
+  1.04 off ground and raised, and the pressed fill a step past it.
 - `text.subtle` sits on the ground only in light; amber and teal marks never stand alone.
 - The selection wash is measured over every surface. Ink, body, secondary and accent ink text
   and the focus ring pass on it everywhere. Nothing coloured sits on it: a selected row shows
@@ -69,7 +95,7 @@ The tests fail if they drift.
   3:1 in both modes, so a disabled control is findable but never passes for a live one.
 - The reading measure sets 68 to 72 characters per line on average, and no line over 78,
   measured with the shipped Inter.
-- Under reduced motion nothing travels and no fade runs past 120 ms.
+- Under reduced motion nothing travels and no fade runs past 120 ms. Timers are untouched.
 - `tokens.css` stays under 2.5 KB gzipped.
 - Fonts are Latin subsets with their full OFL licences beside them in `src/fonts`. Each file has
   its source tarball, version and SHA-256 in `ASSETS.md`, and the tests check all three, plus

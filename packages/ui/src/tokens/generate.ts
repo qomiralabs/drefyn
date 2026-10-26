@@ -107,6 +107,9 @@ function modeEntries(t: Tokens, mode: Mode): Entry[] {
     }
   };
   walk(t.color, []);
+  for (const [k, w] of Object.entries(t.overlay)) {
+    entries.push([`--dr-overlay-${kebab(k)}`, rgb(w[mode].base, w[mode].alpha)]);
+  }
   for (const [level, layers] of Object.entries(t.shadow)) {
     entries.push([`--dr-shadow-${level}`, shadow(layers[mode], t.color.text.ink.light)]);
   }
@@ -126,6 +129,11 @@ function sharedEntries(t: Tokens): Entry[] {
   for (const [k, v] of Object.entries(t.weight)) entries.push([`--dr-weight-${k}`, String(v)]);
   entries.push(['--dr-measure', `${t.layout.measure}em`]);
   for (const [k, v] of Object.entries(t.space)) entries.push([`--dr-space-${k}`, rem(v)]);
+  for (const [group, steps] of Object.entries(t.size)) {
+    for (const [k, v] of Object.entries(steps)) {
+      entries.push([`--dr-size-${group}-${kebab(k)}`, rem(v)]);
+    }
+  }
   for (const [k, v] of Object.entries(t.radius)) entries.push([`--dr-radius-${k}`, px(v)]);
   for (const [k, v] of Object.entries(t.stroke)) entries.push([`--dr-stroke-${kebab(k)}`, px(v)]);
   for (const [k, v] of Object.entries(t.layer)) entries.push([`--dr-layer-${k}`, String(v)]);
@@ -138,8 +146,13 @@ function sharedEntries(t: Tokens): Entry[] {
   for (const [k, v] of Object.entries(t.motion.distance)) {
     entries.push([`--dr-distance-${kebab(k)}`, `${v}px`]);
   }
+  for (const [k, v] of Object.entries(t.timer))
+    entries.push([`--dr-timer-${kebab(k)}`, `${v.ms}ms`]);
   entries.push(['--dr-page-max', px(t.layout.pageMax)]);
   for (const [k, v] of Object.entries(t.layout.docs)) entries.push([`--dr-docs-${k}`, px(v)]);
+  for (const [k, v] of Object.entries(t.layout.shell)) {
+    entries.push([`--dr-shell-${kebab(k)}`, rem(v)]);
+  }
   entries.push(['--dr-gutter', rem(t.layout.gutter.wide)]);
   return entries;
 }
@@ -226,6 +239,16 @@ export function renderTailwindCss(t: Tokens = source): string {
     lines.push(`--color-${utilityColorName(name)}: var(${name})`);
   }
   for (const k of Object.keys(t.space)) lines.push(`--spacing-${k}: var(--dr-space-${k})`);
+  // Sizes are heights and squares only, never padding or gaps: h-control-md, size-icon-sm.
+  for (const [group, steps] of Object.entries(t.size)) {
+    for (const k of Object.keys(steps)) {
+      const name = `${group}-${kebab(k)}`;
+      lines.push(
+        `--height-${name}: var(--dr-size-${name})`,
+        `--size-${name}: var(--dr-size-${name})`,
+      );
+    }
+  }
   for (const k of Object.keys(t.radius)) lines.push(`--radius-${k}: var(--dr-radius-${k})`);
   lines.push('--font-sans: var(--dr-font-sans)', '--font-mono: var(--dr-font-mono)');
   for (const [step, s] of Object.entries(t.type)) {
@@ -242,6 +265,11 @@ export function renderTailwindCss(t: Tokens = source): string {
   for (const k of Object.keys(t.layout.docs)) {
     lines.push(`--container-docs-${k}: var(--dr-docs-${k})`);
   }
+  lines.push('--height-shell-bar: var(--dr-shell-bar)');
+  for (const k of ['nav', 'navCollapsed'] as const satisfies (keyof Tokens['layout']['shell'])[]) {
+    lines.push(`--container-shell-${kebab(k)}: var(--dr-shell-${kebab(k)})`);
+  }
+  lines.push('--border-width-indicator: var(--dr-stroke-indicator)');
   for (const k of Object.keys(t.shadow)) lines.push(`--shadow-${k}: var(--dr-shadow-${k})`);
   for (const k of Object.keys(t.motion.ease)) {
     lines.push(`--ease-${kebab(k)}: var(--dr-ease-${kebab(k)})`);
@@ -271,6 +299,11 @@ export function renderTailwindCss(t: Tokens = source): string {
     block('@utility focus-ring', [
       'outline: var(--dr-stroke-focus) solid var(--dr-focus-ring)',
       'outline-offset: var(--dr-stroke-focus-offset)',
+    ]),
+    // Inside the item's own edge, for items flush in a container that would clip the ring.
+    block('@utility focus-ring-inset', [
+      'outline: var(--dr-stroke-focus) solid var(--dr-focus-ring)',
+      'outline-offset: var(--dr-stroke-focus-inset)',
     ]),
     // Tailwind's transition list includes transform, so a plain transition would still
     // move things for the reduced fade time. Under reduced motion only colour and opacity
@@ -316,6 +349,9 @@ export function renderDtcg(t: Tokens = source): string {
       t.wash[mode].base,
       t.wash[mode].alpha,
     );
+    group['overlay'] = Object.fromEntries(
+      Object.entries(t.overlay).map(([k, w]) => [kebab(k), color(w[mode].base, w[mode].alpha)]),
+    );
     group['shadow'] = Object.fromEntries(
       Object.entries(t.shadow)
         .filter(([, layers]) => layers[mode].length > 0)
@@ -355,6 +391,7 @@ export function renderDtcg(t: Tokens = source): string {
       },
     })),
     space: map(t.space, (v) => dimension(v / 16, 'rem')),
+    size: map(t.size, (steps) => map(steps, (v) => dimension(v / 16, 'rem'))),
     radius: map(t.radius, (v) => dimension(v, 'px')),
     stroke: map(t.stroke, (v) => dimension(v, 'px')),
     duration: map(t.motion.duration, (d) => ({
@@ -362,6 +399,7 @@ export function renderDtcg(t: Tokens = source): string {
       $value: { value: d.ms, unit: 'ms' },
     })),
     ease: map(t.motion.ease, (v) => ({ $type: 'cubicBezier', $value: [...v] })),
+    timer: map(t.timer, (d) => ({ $type: 'duration', $value: { value: d.ms, unit: 'ms' } })),
     distance: map(t.motion.distance, (v) => dimension(v, 'px')),
     layout: {
       'page-max': dimension(t.layout.pageMax, 'px'),
@@ -375,6 +413,12 @@ export function renderDtcg(t: Tokens = source): string {
       },
       ...Object.fromEntries(
         Object.entries(t.layout.docs).map(([k, v]) => [`docs-${k}`, dimension(v, 'px')]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(t.layout.shell).map(([k, v]) => [
+          `shell-${kebab(k)}`,
+          dimension(v / 16, 'rem'),
+        ]),
       ),
     },
     layer: map(t.layer, (v) => ({ $type: 'number', $value: v })),
@@ -421,7 +465,7 @@ function echartsTheme(t: Tokens, mode: Mode) {
     },
     legend: { textStyle: { color: c.text.secondary[mode], fontFamily: sans } },
     tooltip: {
-      backgroundColor: c.surface.raised[mode],
+      backgroundColor: c.surface.overlay[mode],
       borderColor: c.border.ruleStrong[mode],
       borderWidth: t.stroke.hairline,
       textStyle: { color: c.text.body[mode], fontFamily: sans },
