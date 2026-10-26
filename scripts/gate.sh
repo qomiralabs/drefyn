@@ -51,7 +51,11 @@ pnpm exec turbo run test
 
 step "licenses"
 pnpm licenses list --json > "$scratch/licenses.json"
-node scripts/license-policy/src/cli.ts --input "$scratch/licenses.json"
+# The production listing proves dev only exceptions stay out of what ships; the lockfile
+# covers platform binaries this machine never installed.
+pnpm licenses list --prod --json > "$scratch/licenses-prod.json"
+node scripts/license-policy/src/cli.ts --input "$scratch/licenses.json" \
+  --prod-input "$scratch/licenses-prod.json" --lockfile pnpm-lock.yaml
 
 step "hygiene"
 # Commit messages are checked against development when it is known locally; CI checks

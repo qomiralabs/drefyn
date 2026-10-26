@@ -54,7 +54,8 @@ pnpm gate
 
 It runs a frozen lockfile install, format check, lint with zero warnings, the boundary
 guard, the package manifest check, strict typecheck, tests with coverage (85 percent
-lines at least), the dependency license policy, the hygiene check on tracked files and
+lines at least), the dependency license policy (forbidden packages such as sharp are
+refused from the lockfile too), the hygiene check on tracked files and
 on commit messages since `origin/development` and, when it is installed, gitleaks.
 
 Single steps while you work:
