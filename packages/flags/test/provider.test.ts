@@ -43,33 +43,79 @@ const only = (): Options => {
 
 // What the flagd provider's own env reader produces when every FLAGD_* variable is set,
 // as a stray variable on a host or in a base image would. The provider spreads this under
-// the options it is given, so any option the client leaves out comes from the host.
+// the options it is given, so any option the client leaves out comes from the host. All 18
+// options it reads are here, each with a value that would change behaviour.
 const HOSTILE_ENV: Options = {
   resolverType: 'rpc',
   offlineFlagSourcePath: '/tmp/someone-elses-flags.json',
   host: 'evil.example',
   port: 1,
   socketPath: '/tmp/evil.sock',
+  tls: true,
+  certPath: '/tmp/evil.crt',
+  selector: 'someone-elses-scope',
+  defaultAuthority: 'evil.example',
+  deadlineMs: 1,
+  streamDeadlineMs: 1,
+  keepAliveTime: 1,
+  retryBackoffMs: 1,
+  retryBackoffMaxMs: 1,
+  retryGracePeriod: 100_000,
+  fatalStatusCodes: ['UNAVAILABLE'],
+  cache: 'lru',
+  maxCacheSize: 1,
+};
+
+// Everything except where flags come from is the same in both modes.
+const PINNED: Options = {
+  resolverType: 'in-process',
+  socketPath: undefined,
+  tls: false,
+  certPath: undefined,
+  selector: '',
+  defaultAuthority: undefined,
+  deadlineMs: 500,
+  streamDeadlineMs: 600_000,
+  keepAliveTime: 0,
+  retryBackoffMs: 1000,
+  retryBackoffMaxMs: 5000,
+  retryGracePeriod: 10,
+  fatalStatusCodes: [],
+  cache: 'disabled',
+  maxCacheSize: 1000,
 };
 
 describe('the flagd provider', () => {
-  it('is built in process reading the file in file mode', async () => {
+  it('pins every option the provider reads from FLAGD_* variables', () => {
+    expect(Object.keys(HOSTILE_ENV)).toHaveLength(18);
+  });
+
+  it('is built in process reading the file in file mode, every option pinned', async () => {
     await start(fileConfig);
-    expect(only()).toMatchObject({
-      resolverType: 'in-process',
+    expect(only()).toStrictEqual({
+      ...PINNED,
+      host: 'localhost',
+      port: 8015,
       offlineFlagSourcePath: '/etc/drefyn/flags.json',
     });
   });
 
-  it('is built in process syncing from flagd in flagd mode', async () => {
+  it('is built in process syncing from flagd in flagd mode, every option pinned', async () => {
     await start(flagdConfig);
-    const options = only();
-    expect(options).toMatchObject({
-      resolverType: 'in-process',
+    expect(only()).toStrictEqual({
+      ...PINNED,
       host: 'flagd.internal',
       port: 8015,
+      offlineFlagSourcePath: undefined,
     });
-    expect(options['offlineFlagSourcePath']).toBeUndefined();
+  });
+
+  it('sets every option explicitly, undefined included, so none falls through to the host', async () => {
+    for (const config of [fileConfig, flagdConfig]) {
+      reset();
+      await start(config);
+      expect(Object.keys(only()).sort()).toEqual(Object.keys(HOSTILE_ENV).sort());
+    }
   });
 
   it('stays in process when a caller smuggles a resolver into the config object', async () => {
@@ -82,19 +128,21 @@ describe('the flagd provider', () => {
     expect(flagd.options).toHaveLength(1);
   });
 
-  it('in file mode cannot be pointed at another file or switched to RPC by FLAGD_* variables', async () => {
+  it('in file mode keeps no hostile value at all', async () => {
     await start(fileConfig);
     const effective = { ...HOSTILE_ENV, ...only() };
-    expect(effective['resolverType']).toBe('in-process');
+    for (const [key, value] of Object.entries(HOSTILE_ENV)) {
+      expect(effective[key], key).not.toEqual(value);
+    }
     expect(effective['offlineFlagSourcePath']).toBe('/etc/drefyn/flags.json');
   });
 
-  it('in flagd mode cannot be redirected to a file, socket or host by FLAGD_* variables', async () => {
+  it('in flagd mode keeps no hostile value at all', async () => {
     await start(flagdConfig);
     const effective = { ...HOSTILE_ENV, ...only() };
-    expect(effective['resolverType']).toBe('in-process');
-    expect(effective['offlineFlagSourcePath']).toBeUndefined();
-    expect(effective['socketPath']).toBeUndefined();
+    for (const [key, value] of Object.entries(HOSTILE_ENV)) {
+      expect(effective[key], key).not.toEqual(value);
+    }
     expect(effective['host']).toBe('flagd.internal');
     expect(effective['port']).toBe(8015);
   });

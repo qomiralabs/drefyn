@@ -77,13 +77,33 @@ describe('offline file mode with the real provider', { timeout: 15_000 }, () => 
     expect(kill.source).toBe('safe_value');
   });
 
-  it('ignores FLAGD_* variables that would switch to RPC or another file', async () => {
+  it('ignores every FLAGD_* variable, including ones that would switch to RPC or another file', async () => {
     const ours = stateFile('flags.json', { [RELEASE]: false, [KILL_SAFE_ON]: false });
     const theirs = stateFile('theirs.json', { [RELEASE]: true, [KILL_SAFE_ON]: true });
-    vi.stubEnv('FLAGD_RESOLVER', 'rpc');
-    vi.stubEnv('FLAGD_OFFLINE_FLAG_SOURCE_PATH', theirs);
-    vi.stubEnv('FLAGD_HOST', '127.0.0.1');
-    vi.stubEnv('FLAGD_PORT', '1');
+    // All 19 variables the provider reads.
+    const hostile: Record<string, string> = {
+      FLAGD_HOST: '127.0.0.1',
+      FLAGD_PORT: '1',
+      FLAGD_SYNC_PORT: '1',
+      FLAGD_DEADLINE_MS: '1',
+      FLAGD_STREAM_DEADLINE_MS: '1',
+      FLAGD_TLS: 'true',
+      FLAGD_SOCKET_PATH: join(dir, 'evil.sock'),
+      FLAGD_SERVER_CERT_PATH: join(dir, 'evil.crt'),
+      FLAGD_CACHE: 'lru',
+      FLAGD_MAX_CACHE_SIZE: '1',
+      FLAGD_SOURCE_SELECTOR: 'someone-elses-scope',
+      FLAGD_RESOLVER: 'rpc',
+      FLAGD_OFFLINE_FLAG_SOURCE_PATH: theirs,
+      FLAGD_DEFAULT_AUTHORITY: 'evil.example',
+      FLAGD_RETRY_BACKOFF_MS: '1',
+      FLAGD_RETRY_BACKOFF_MAX_MS: '1',
+      FLAGD_KEEP_ALIVE_TIME_MS: '1',
+      FLAGD_FATAL_STATUS_CODES: 'UNAVAILABLE',
+      FLAGD_RETRY_GRACE_PERIOD: '1',
+    };
+    expect(Object.keys(hostile)).toHaveLength(19);
+    for (const [key, value] of Object.entries(hostile)) vi.stubEnv(key, value);
     const client = await start(ours);
     // From our file: not theirs (true, provider) and not an RPC failure (safe value true).
     expect(await client.evaluate(RELEASE, ctx)).toEqual({ value: false, source: 'provider' });
