@@ -43,9 +43,13 @@ The tests fail if they drift.
 - Reading width: `max-w-measure` (35em) sets about 70 characters of Inter at any body size, and
   fits the 640px docs reading column at `body-l`.
 - Focus: `focus-visible:focus-ring` draws the 2px ring with its 2px offset from the tokens.
+- Hover fills: there is no neutral hover fill yet (#60). Do not paint `bg-rule` as a fill; it is
+  a hairline colour that no contrast test measures under text.
 - Stacking: `z-base`, `z-raised`, `z-overlay` and `z-toast`. Bare `z-N` is rejected.
 - Motion: under reduced motion, plain `transition`, `transition-all` and `transition-transform`
-  fade colour and opacity only, so nothing travels. Use `duration-move-*` for movement.
+  fade colour and opacity only, so nothing travels. Use `duration-move-*` for movement. The
+  override matches the plain class names only, so write `transition` without a variant, or put
+  movement behind `motion-safe:`.
 - Numbers: `time`, `data`, `output`, table cells and `[data-numeric]` get tabular figures from
   `tokens.css`.
 
