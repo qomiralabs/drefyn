@@ -14,4 +14,4 @@ ignoredBuiltDependencies: [protobufjs]
 # The flagd provider's gRPC sync kept reconnecting after close and held the process open;
 # the patch adds a closed guard. Drop it once a provider release stops on close.
 patchedDependencies:
-  '@openfeature/flagd-provider@0.17.0': patches/@openfeature__flagd-provider@0.17.0.patch
+  '@openfeature/flagd-provider@0.17.0': scripts/patches/@openfeature__flagd-provider@0.17.0.patch

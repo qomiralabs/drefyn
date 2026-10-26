@@ -51,7 +51,7 @@ await client.close();
   `FLAG_PROVIDER_NOT_READY` without calling it. An invalid config rejects with
   `FLAG_CONFIG_INVALID`. `deps.registry` replaces the package registry, for tests.
 - `close()` stops the provider. The flagd provider is patched (see
-  `patches/@openfeature__flagd-provider@0.17.0.patch`) so that its gRPC sync stops
+  `scripts/patches/@openfeature__flagd-provider@0.17.0.patch`) so that its gRPC sync stops
   reconnecting once closed; without it a closed client kept retrying and held the process
   open.
 - The context always sends `internal` (false unless the caller says true), so a global
