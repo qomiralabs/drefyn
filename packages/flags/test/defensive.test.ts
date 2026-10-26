@@ -1,6 +1,6 @@
 // Failures outside the provider: the SDK client itself, the injected sinks and the
 // entitlements reader can all misbehave, and none of them may break an evaluation.
-import { OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
+import { OpenFeature, ProviderEvents, ProviderStatus } from '@openfeature/server-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFlagClient, type FlagClient, type FlagClientDeps } from '../src/index.ts';
 import { createTestFlagClient } from '../src/testing.ts';
@@ -106,6 +106,136 @@ describe('an SDK client that misbehaves', () => {
       value: false,
       source: 'provider',
     });
+  });
+});
+
+describe('the provider status check', () => {
+  // A status added by a future SDK must be looked at before it can serve flags.
+  it('knows every status the SDK has', () => {
+    expect(Object.values(ProviderStatus).sort()).toEqual([
+      'ERROR',
+      'FATAL',
+      'NOT_READY',
+      'READY',
+      'STALE',
+    ]);
+  });
+
+  // Stale and error keep answering: the in process provider serves its last synced values.
+  it.each<[string, unknown, boolean]>([
+    ['READY', ProviderStatus.READY, true],
+    ['STALE', ProviderStatus.STALE, true],
+    ['ERROR', ProviderStatus.ERROR, true],
+    ['NOT_READY', ProviderStatus.NOT_READY, false],
+    ['FATAL', ProviderStatus.FATAL, false],
+    ['an unknown status', 'RECONCILING', false],
+    ['undefined', undefined, false],
+  ])('uses the provider only when it is %s and allowed', async (_label, status, usable) => {
+    breakSdkClients('providerStatus', () => status);
+    const fake = new FakeProvider()
+      .set(RELEASE, { kind: 'value', value: true })
+      .set(KILL_SAFE_ON, { kind: 'value', value: false });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual(
+      usable
+        ? { value: true, source: 'provider' }
+        : { value: false, source: 'safe_value', errorCode: 'FLAG_PROVIDER_NOT_READY' },
+    );
+    expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual(
+      usable
+        ? { value: false, source: 'provider' }
+        : { value: true, source: 'safe_value', errorCode: 'FLAG_PROVIDER_NOT_READY' },
+    );
+    expect(fake.calls).toHaveLength(usable ? 2 : 0);
+  });
+});
+
+describe('an error whose code cannot be read', () => {
+  const hostileErrors: [string, () => unknown][] = [
+    [
+      'a code getter that throws',
+      () =>
+        Object.defineProperty(new Error('boom'), 'code', {
+          get() {
+            throw new Error('getter');
+          },
+        }),
+    ],
+    [
+      'a proxy whose has trap throws',
+      () =>
+        new Proxy(
+          {},
+          {
+            has() {
+              throw new Error('trap');
+            },
+          },
+        ),
+    ],
+  ];
+
+  describe.each(hostileErrors)('%s', (_label, error) => {
+    it.each(['throw', 'throw_sync'] as const)(
+      'gives the safe value with FLAG_GENERAL when the provider uses %s',
+      async (kind) => {
+        const client = await boot(
+          new FakeProvider()
+            .set(RELEASE, { kind, error: error() })
+            .set(KILL_SAFE_ON, { kind, error: error() }),
+        );
+        expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+          value: false,
+          source: 'safe_value',
+          errorCode: 'FLAG_GENERAL',
+        });
+        expect(await settle(client.isOn(KILL_SAFE_ON, ctx))).toBe(true);
+      },
+    );
+  });
+});
+
+describe('a domain that no longer points at the client provider', () => {
+  afterEach(async () => {
+    await OpenFeature.clearProviders();
+  });
+
+  it.each<[string, (domain: string, other: FakeProvider) => Promise<void>]>([
+    [
+      'cleared, with a ready default provider',
+      async (_domain, other) => {
+        await OpenFeature.clearProviders();
+        await OpenFeature.setProviderAndWait(other);
+      },
+    ],
+    [
+      'rebound to another ready provider',
+      async (domain, other) => {
+        await OpenFeature.setProviderAndWait(domain, other);
+      },
+    ],
+  ])('fails closed when %s', async (_label, rebind) => {
+    const getClient = vi.spyOn(OpenFeature, 'getClient');
+    const fake = new FakeProvider()
+      .set(RELEASE, { kind: 'value', value: true })
+      .set(KILL_SAFE_ON, { kind: 'value', value: false });
+    const client = await boot(fake);
+    const domain = getClient.mock.calls[0]?.[0];
+    if (typeof domain !== 'string') throw new Error('the client was not built for a domain');
+    const other = new FakeProvider().setAll({ kind: 'value', value: true });
+    await rebind(domain, other);
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+      value: false,
+      source: 'safe_value',
+      errorCode: 'FLAG_PROVIDER_NOT_READY',
+    });
+    expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual({
+      value: true,
+      source: 'safe_value',
+      errorCode: 'FLAG_PROVIDER_NOT_READY',
+    });
+    expect(fake.calls).toHaveLength(0);
+    expect(other.calls).toHaveLength(0);
   });
 });
 
