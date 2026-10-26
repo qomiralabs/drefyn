@@ -9,7 +9,7 @@ import {
   renderEchartsTheme,
   renderTokensCss,
 } from '../src/tokens/generate.ts';
-import { tokens } from '../src/tokens/tokens.ts';
+import { tokens, type Tokens } from '../src/tokens/tokens.ts';
 import { findRule, parseRules } from './css.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -247,5 +247,40 @@ describe('ECharts themes', () => {
       expect(theme.animationDuration).toBe(tokens.motion.duration.moveSlow.ms);
       expect(theme.animationDurationUpdate).toBe(tokens.motion.duration.base.ms);
     }
+  });
+});
+
+// The generator writes colours straight into CSS and splits them into channels, so anything
+// that is not #RRGGBB must stop the build rather than ship a wrong or broken value.
+describe('colour values', () => {
+  const withInk = (light: string): Tokens =>
+    ({
+      ...tokens,
+      color: {
+        ...tokens.color,
+        text: { ...tokens.color.text, ink: { ...tokens.color.text.ink, light } },
+      },
+    }) as unknown as Tokens;
+  const withWash = (base: string): Tokens =>
+    ({
+      ...tokens,
+      wash: { ...tokens.wash, dark: { ...tokens.wash.dark, base } },
+    }) as unknown as Tokens;
+
+  it.each(['#fff', '#FFFFFFFF', 'red', '#00000G', '#000; } body { color: red'])(
+    'rejects %s in a colour role',
+    (value) => {
+      expect(() => renderTokensCss(withInk(value))).toThrow(/#RRGGBB/);
+      expect(() => renderDtcg(withInk(value))).toThrow(/#RRGGBB/);
+    },
+  );
+
+  it('rejects a three digit wash base', () => {
+    expect(() => renderTokensCss(withWash('#fff'))).toThrow(/#RRGGBB/);
+    expect(() => renderDtcg(withWash('#fff'))).toThrow(/#RRGGBB/);
+  });
+
+  it('accepts lower case six digit hex', () => {
+    expect(renderTokensCss(withInk('#0b1120'))).toContain('--dr-text-ink: #0b1120;');
   });
 });

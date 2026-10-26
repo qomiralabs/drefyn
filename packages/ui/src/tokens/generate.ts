@@ -61,9 +61,21 @@ const px = (n: number) => (n === 0 ? '0' : `${n}px`);
 const isModeColor = (v: unknown): v is ModeColor =>
   typeof v === 'object' && v !== null && 'light' in v && typeof v.light === 'string';
 
+// Colours go straight into CSS and are split into channels below, so a short or malformed
+// hex would ship a wrong colour or break out of its declaration. Reject, never repair.
+function checked(hex: string): Hex {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) throw new Error(`${hex} is not a #RRGGBB colour`);
+  return hex as Hex;
+}
+
+function channels(hex: Hex): [number, number, number] {
+  const n = parseInt(checked(hex).slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function rgb(hex: Hex, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgb(${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255} / ${alpha})`;
+  const [r, g, b] = channels(hex);
+  return `rgb(${r} ${g} ${b} / ${alpha})`;
 }
 
 function family(names: readonly string[]): string {
@@ -84,7 +96,7 @@ function modeEntries(t: Tokens, mode: Mode): Entry[] {
   const entries: Entry[] = [];
   const walk = (node: unknown, path: string[]) => {
     if (isModeColor(node)) {
-      entries.push([`--dr-${path.map(kebab).join('-')}`, node[mode]]);
+      entries.push([`--dr-${path.map(kebab).join('-')}`, checked(node[mode])]);
       return;
     }
     for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
@@ -276,10 +288,7 @@ export function renderTailwindCss(t: Tokens = source): string {
 // W3C design tokens format, for design tools. One way: tokens.ts stays the source.
 export function renderDtcg(t: Tokens = source): string {
   const color = (hex: Hex, alpha?: number) => {
-    const n = parseInt(hex.slice(1), 16);
-    const components = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(
-      (c) => Math.round((c / 255) * 10_000) / 10_000,
-    );
+    const components = channels(hex).map((c) => Math.round((c / 255) * 10_000) / 10_000);
     return {
       $type: 'color',
       $value: {
