@@ -1,8 +1,26 @@
 import { expect } from 'vitest';
 import { EntitlementError, UNLIMITED } from '../../src/index.ts';
 
-// One seed for every property run so a failure replays the same way on every machine.
-export const SEED = 1108;
+// FC_SEED replays every property under another seed without editing a file. Unset, every
+// machine runs the same seed, so a failure reproduces anywhere. fast-check truncates a seed
+// to 32 bits, so anything wider is refused rather than quietly run as a different seed.
+function seedFrom(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const seed = Number(raw);
+  if (!/^-?[0-9]+$/.test(raw) || seed !== (seed | 0)) {
+    throw new Error('FC_SEED must be a 32 bit integer');
+  }
+  return seed;
+}
+
+// The first draw from the 'binary' string unit makes fast-check build a reverse lookup over
+// every code point, about a million entries, to vet its bias strings. It is cached after
+// that, so the property that triggers it pays for all of it: about 0.2 s on a laptop, 1.1 to
+// 4.5 s on loaded CI runners with coverage on, and once past the 5 s default. Only that
+// property carries this timeout, so move it if the test order changes.
+export const FIRST_BINARY_PROPERTY_TIMEOUT_MS = 30_000;
+
+export const SEED = seedFrom(process.env['FC_SEED'], 1108);
 export const RUNS = { seed: SEED, numRuns: 400 } as const;
 
 export type ErrorCode =

@@ -15,7 +15,13 @@ import {
 } from '../src/index.ts';
 import type { FeatureKey, LimitKey, LimitValue, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
-import { RUNS, atLeastAsGenerous, caughtCode, isLimitValue } from './support/assert.ts';
+import {
+  FIRST_BINARY_PROPERTY_TIMEOUT_MS,
+  RUNS,
+  atLeastAsGenerous,
+  caughtCode,
+  isLimitValue,
+} from './support/assert.ts';
 
 // Arbitraries come from the fixture, not the package, so an empty or wrong export list
 // cannot make a property pass by giving it nothing to check.
@@ -375,12 +381,23 @@ describe('send caps never allow a send past cap plus grace', () => {
         if (ceiling >= top) {
           return checkLimit(t, k, Number.MAX_SAFE_INTEGER, options).status === 'allowed';
         }
+        // A cap of 0 has no grace, and any use past it is not_entitled rather than over.
+        const past = cap === 0 ? 'not_entitled' : 'over_limit';
         return (
           checkLimit(t, k, Number(ceiling), options).status === 'allowed' &&
-          checkLimit(t, k, Number(ceiling + 1n), options).status === 'over_limit'
+          checkLimit(t, k, Number(ceiling + 1n), options).status === past
         );
       }),
-      RUNS,
+      {
+        ...RUNS,
+        // A plan can leave a send key at 0 and a contract can keep it there. Pinned here
+        // because a random draw lands on cap 0 only under some seeds.
+        examples: [
+          [{ t: 'free', k: 'status.voice_minutes_per_month', cap: 0 }],
+          [{ t: 'free', k: 'status.sms_sends_per_month', cap: 0 }],
+          [{ t: 'starter', k: 'status.voice_minutes_per_month', cap: 0 }],
+        ],
+      },
     );
   });
 
@@ -403,7 +420,7 @@ describe('fuzzed input fails closed', () => {
   const knownKeys: readonly string[] = pricing.LIMIT_KEYS;
   const knownFeatures: readonly string[] = pricing.FEATURE_KEYS;
 
-  it('rejects any string that is not a tier', () => {
+  it('rejects any string that is not a tier', { timeout: FIRST_BINARY_PROPERTY_TIMEOUT_MS }, () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary' }), (t) => {
         fc.pre(!knownTiers.includes(t));
