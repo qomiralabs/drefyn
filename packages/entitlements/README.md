@@ -34,7 +34,9 @@ Options:
 
 Bad input (unknown tier, key, feature or product, bad usage, bad overrides) throws an
 `EntitlementError` with a stable `code`. Messages never contain the input. Map it to a
-server error, never to a free tier or to "allowed".
+server error, never to a free tier or to "allowed". If reading the options or overrides
+throws, as a `Proxy` trap can, the call fails with `ENTITLEMENT_INVALID_OVERRIDE` and the
+original error is dropped.
 
 Every limit counts per organization. Byte limits use decimal gigabytes. The check interval
 is a floor, so a smaller override is a raise.

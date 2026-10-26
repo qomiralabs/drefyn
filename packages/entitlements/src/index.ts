@@ -204,22 +204,35 @@ function atLeastAsGenerous(direction: 'max' | 'min', a: LimitValue, b: LimitValu
   return direction === 'max' ? a >= b : a <= b;
 }
 
+// Options and overrides may be Proxies, whose traps run caller code. Whatever a trap
+// throws is replaced with a fresh refusal, so its message, which may carry caller data,
+// never reaches a log, and a forged EntitlementError cannot pass through as ours.
+function guarded<T>(read: () => T): T {
+  try {
+    return read();
+  } catch {
+    throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
+  }
+}
+
 // A Map, array, Date or class instance keeps its entries where Object.keys cannot see
 // them, so reading one as "no overrides" would quietly drop a customer's raises. Only a
 // plain record, from a literal, JSON or Object.create(null), is accepted.
 function isPlainRecord(value: unknown): value is object {
   if (typeof value !== 'object' || value === null) return false;
-  const proto: unknown = Object.getPrototypeOf(value);
+  const proto: unknown = guarded((): unknown => Object.getPrototypeOf(value));
   return proto === Object.prototype || proto === null;
 }
 
 // Reads one own data field and nothing else: an inherited value would let a polluted
 // Object.prototype change every answer, and a getter could say one thing when checked and
-// another when used. Absent is undefined; hidden or accessor fields are refused.
+// another when used. Absent is undefined; hidden or accessor fields are refused. The value
+// field is checked as an own key: `in` would also find one planted on Object.prototype and
+// take an accessor for data.
 function ownData(record: object, name: PropertyKey, key?: LimitKey): unknown {
-  const field = Object.getOwnPropertyDescriptor(record, name);
+  const field = guarded(() => Object.getOwnPropertyDescriptor(record, name));
   if (field === undefined) return undefined;
-  if (field.enumerable !== true || !('value' in field)) {
+  if (field.enumerable !== true || !Object.hasOwn(field, 'value')) {
     throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE', key);
   }
   return field.value;
@@ -251,7 +264,7 @@ function resolveOverrides(tier: Tier, overrides: unknown): ReadonlyMap<LimitKey,
   const applied = new Map<LimitKey, LimitValue>();
   if (overrides === undefined) return applied;
   if (!isPlainRecord(overrides)) throw new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
-  for (const name of Reflect.ownKeys(overrides)) {
+  for (const name of guarded(() => Reflect.ownKeys(overrides))) {
     const entry = typeof name === 'string' ? LIMIT_TABLE.get(name) : undefined;
     // An unknown name is never attached to the error: it is caller data, not a key.
     if (entry === undefined) throw new EntitlementError('ENTITLEMENT_UNKNOWN_LIMIT');

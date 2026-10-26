@@ -1,7 +1,15 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { idOf, parsePublicId, toPublicId, type IdKind } from '../src/index.ts';
-import { CROCKFORD, PREFIXES, anyUuid, codeOf, oracleBody, runs } from './support.ts';
+import {
+  CROCKFORD,
+  FIRST_BINARY_PROPERTY_TIMEOUT_MS,
+  PREFIXES,
+  anyUuid,
+  codeOf,
+  oracleBody,
+  runs,
+} from './support.ts';
 
 // The literal list, not ID_KINDS, so this file fails per test rather than at load.
 const kind: fc.Arbitrary<IdKind> = fc.constantFrom(...PREFIXES);
@@ -121,33 +129,39 @@ describe('public ID codec (property)', () => {
     );
   });
 
-  it('gives each id exactly one public form: whatever parses re-encodes to the same string', () => {
-    const seen = new Map<string, number>();
-    fc.assert(
-      fc.property(
-        fc.oneof(
-          wellFormed,
-          nearValid,
-          fc.tuple(kind, fc.string({ unit: 'binary', maxLength: 40 })),
-          mutated,
+  it(
+    'gives each id exactly one public form: whatever parses re-encodes to the same string',
+    {
+      timeout: FIRST_BINARY_PROPERTY_TIMEOUT_MS,
+    },
+    () => {
+      const seen = new Map<string, number>();
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            wellFormed,
+            nearValid,
+            fc.tuple(kind, fc.string({ unit: 'binary', maxLength: 40 })),
+            mutated,
+          ),
+          ([k, value]) => {
+            const code = codeOf(() => parsePublicId(k, value));
+            seen.set(code, (seen.get(code) ?? 0) + 1);
+            if (code === 'no error') {
+              expect(toPublicId(k, parsePublicId(k, value))).toBe(value);
+            } else {
+              expect(['ID_MALFORMED', 'ID_WRONG_TYPE']).toContain(code);
+            }
+          },
         ),
-        ([k, value]) => {
-          const code = codeOf(() => parsePublicId(k, value));
-          seen.set(code, (seen.get(code) ?? 0) + 1);
-          if (code === 'no error') {
-            expect(toPublicId(k, parsePublicId(k, value))).toBe(value);
-          } else {
-            expect(['ID_MALFORMED', 'ID_WRONG_TYPE']).toContain(code);
-          }
-        },
-      ),
-      runs,
-    );
-    // Without these the property could pass by rejecting everything.
-    expect(seen.get('no error') ?? 0).toBeGreaterThan(0);
-    expect(seen.get('ID_WRONG_TYPE') ?? 0).toBeGreaterThan(0);
-    expect(seen.get('ID_MALFORMED') ?? 0).toBeGreaterThan(0);
-  });
+        runs,
+      );
+      // Without these the property could pass by rejecting everything.
+      expect(seen.get('no error') ?? 0).toBeGreaterThan(0);
+      expect(seen.get('ID_WRONG_TYPE') ?? 0).toBeGreaterThan(0);
+      expect(seen.get('ID_MALFORMED') ?? 0).toBeGreaterThan(0);
+    },
+  );
 
   it('never throws anything but a TenancyError on arbitrary input', () => {
     fc.assert(
