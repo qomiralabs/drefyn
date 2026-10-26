@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { finished } from 'node:stream';
 
 export interface IndexEntry {
@@ -12,12 +13,27 @@ export interface Commit {
   message: string;
 }
 
+export type ObjectFormat = 'sha1' | 'sha256';
+
 const SUBMODULE_MODE = '160000';
+
+const OID: Record<ObjectFormat, RegExp> = {
+  sha1: /^[0-9a-f]{40}$/,
+  sha256: /^[0-9a-f]{64}$/,
+};
+
+// A replace ref makes git hand back a different object under the oid that was asked
+// for, so hygiene would scan the replacement. GIT_NO_REPLACE_OBJECTS and
+// --no-replace-objects both lose to core.useReplaceRefs=true in the repository's own
+// config, and a command line -c outranks every config file. The variable stays as well
+// so any git that git itself starts inherits it.
+const REPLACE_OBJECTS_OFF = ['-c', 'core.useReplaceRefs=false'];
 
 export function runGit(cwd: string, args: string[], input?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, {
+    const child = spawn('git', [...REPLACE_OBJECTS_OFF, ...args], {
       cwd,
+      env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     const out: Buffer[] = [];
@@ -68,17 +84,40 @@ export function runGit(cwd: string, args: string[], input?: string): Promise<Buf
   });
 }
 
+export async function objectFormat(cwd: string): Promise<ObjectFormat> {
+  const format = (await runGit(cwd, ['rev-parse', '--show-object-format'])).toString('utf8').trim();
+  // A git too old for the option prints it back, which must not be taken as sha1.
+  if (format !== 'sha1' && format !== 'sha256') {
+    throw new Error('git rev-parse gave an unsupported object format');
+  }
+  return format;
+}
+
+const MODE = /^[0-7]{6}$/;
+const STAGE = /^[0-3]$/;
+
 // Reads the index rather than the working tree, so a pre-commit run sees exactly what
-// is about to be committed and CI sees exactly what was pushed.
-export async function listIndex(cwd: string): Promise<IndexEntry[]> {
+// is about to be committed and CI sees exactly what was pushed. Errors name the record
+// by position only, because the path is repository content.
+export async function listIndex(cwd: string, format: ObjectFormat): Promise<IndexEntry[]> {
   const raw = (await runGit(cwd, ['ls-files', '--stage', '-z'])).toString('utf8');
   const seen = new Set<string>();
   const entries: IndexEntry[] = [];
+  let position = 0;
   for (const record of raw.split('\0')) {
     if (record === '') continue;
+    position += 1;
+    const where = `git ls-files record ${position}`;
     const tab = record.indexOf('\t');
-    const [mode = '', oid = ''] = record.slice(0, tab).split(' ');
+    if (tab === -1) throw new Error(`${where} has no tab before the path`);
+    const fields = record.slice(0, tab).split(' ');
+    const [mode = '', oid = '', stage = ''] = fields;
     const path = record.slice(tab + 1);
+    if (fields.length !== 3) throw new Error(`${where} does not have three fields`);
+    if (!MODE.test(mode)) throw new Error(`${where} has an invalid mode`);
+    if (!OID[format].test(oid)) throw new Error(`${where} has an invalid oid`);
+    if (!STAGE.test(stage)) throw new Error(`${where} has an invalid stage`);
+    if (path === '') throw new Error(`${where} has no path`);
     // During a merge conflict the same path appears once per stage.
     if (mode === SUBMODULE_MODE || seen.has(path)) continue;
     seen.add(path);
@@ -87,19 +126,80 @@ export async function listIndex(cwd: string): Promise<IndexEntry[]> {
   return entries;
 }
 
-export async function readBlobs(cwd: string, oids: string[]): Promise<Map<string, Buffer>> {
+const SIZE = /^(0|[1-9][0-9]*)$/;
+const TYPE = /^[a-z]{1,16}$/;
+
+// Header fields are echoed only when they have the shape git gives them. Anything else
+// may be body bytes from a misframed stream, and bodies can hold secrets that would
+// end up in CI logs.
+function shown(value: string, shape: RegExp, fallback: string): string {
+  return shape.test(value) ? value : fallback;
+}
+
+function hashBlob(format: ObjectFormat, body: Buffer): string {
+  return createHash(format).update(`blob ${body.length}\0`).update(body).digest('hex');
+}
+
+// The gate must never pass content it did not read, so any reply that does not match
+// the request exactly, record by record, is an error rather than a partial result. The
+// oid is the hash of the content, so hashing each body proves it is the object that
+// was asked for, whatever made git send something else.
+export async function readBlobs(
+  cwd: string,
+  oids: string[],
+  format: ObjectFormat,
+): Promise<Map<string, Buffer>> {
   const blobs = new Map<string, Buffer>();
   if (oids.length === 0) return blobs;
   const raw = await runGit(cwd, ['cat-file', '--batch'], oids.join('\n') + '\n');
   let offset = 0;
+  let index = 0;
   while (offset < raw.length) {
+    const requested = oids[index];
+    if (requested === undefined) {
+      throw new Error(`git cat-file returned more objects than the ${oids.length} requested`);
+    }
     const headerEnd = raw.indexOf(0x0a, offset);
-    const [oid = '', type = '', size = ''] = raw.subarray(offset, headerEnd).toString().split(' ');
-    if (type !== 'blob') throw new Error(`git cat-file returned ${type || 'nothing'} for ${oid}`);
+    if (headerEnd === -1) throw new Error(`git cat-file header for ${requested} has no newline`);
+    const fields = raw.subarray(offset, headerEnd).toString('utf8').split(' ');
+    const [oid = '', type = '', size = ''] = fields;
+    if (oid !== requested) {
+      const got = oid === '' ? 'nothing' : shown(oid, OID[format], 'an invalid oid');
+      throw new Error(`git cat-file returned ${got} where ${requested} was requested`);
+    }
+    // A missing object has no size or body, so it cannot be read as a short record.
+    if (fields.length === 2 && type === 'missing') {
+      throw new Error(`git cat-file reports ${oid} missing`);
+    }
+    if (fields.length !== 3) throw new Error(`git cat-file gave a malformed header for ${oid}`);
+    if (type !== 'blob') {
+      const got = type === '' ? 'nothing' : shown(type, TYPE, 'an invalid type');
+      throw new Error(`git cat-file returned ${got} for ${oid}`);
+    }
+    // A size past the safe integer range would be rounded, so it is as invalid as a
+    // malformed one rather than a sign that the body was cut short.
+    const length = Number(size);
+    if (!SIZE.test(size) || !Number.isSafeInteger(length)) {
+      throw new Error(`git cat-file gave an invalid size for ${oid}`);
+    }
     const start = headerEnd + 1;
-    const end = start + Number(size);
-    blobs.set(oid, raw.subarray(start, end));
+    const end = start + length;
+    if (!Number.isSafeInteger(end) || end > raw.length) {
+      throw new Error(`git cat-file body for ${oid} is truncated`);
+    }
+    if (raw[end] !== 0x0a) {
+      throw new Error(`git cat-file body for ${oid} is not followed by a newline`);
+    }
+    const body = raw.subarray(start, end);
+    if (hashBlob(format, body) !== oid) {
+      throw new Error(`git cat-file body for ${oid} does not match its oid`);
+    }
+    blobs.set(oid, body);
     offset = end + 1;
+    index += 1;
+  }
+  if (index !== oids.length) {
+    throw new Error(`git cat-file returned ${index} of ${oids.length} requested objects`);
   }
   return blobs;
 }

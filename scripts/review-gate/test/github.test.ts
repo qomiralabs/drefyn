@@ -95,6 +95,37 @@ function routes(overrides: {
 }
 
 describe('loadGateInput', () => {
+  it('returns the base branch name when the PR has one', async () => {
+    const { client: gh } = client(
+      routes({ pr: () => json({ ...pr, base: { ref: 'development' } }) }),
+    );
+    expect((await loadGateInput(gh, 'o/r', 7)).baseRef).toBe('development');
+  });
+
+  it.each([
+    ['no base', {}],
+    ['a base with no ref', { base: { sha: HEAD } }],
+  ])('leaves the base branch out for %s', async (_name, extra) => {
+    const { client: gh } = client(routes({ pr: () => json({ ...pr, ...extra }) }));
+    expect(await loadGateInput(gh, 'o/r', 7)).not.toHaveProperty('baseRef');
+  });
+
+  it.each([
+    '-x',
+    '--upload-pack=evil',
+    'a..b',
+    'a b',
+    '',
+    'feat/',
+    '/x',
+    'x.lock',
+    'a//b',
+    'a@{1}',
+  ])('rejects the base branch name %j', async (ref) => {
+    const { client: gh } = client(routes({ pr: () => json({ ...pr, base: { ref } }) }));
+    await expect(loadGateInput(gh, 'o/r', 7)).rejects.toThrow(/base branch/);
+  });
+
   it('collects head SHA, labels, files and reviews with edit and dismiss flags', async () => {
     const { client: gh, calls } = client(
       routes({

@@ -1,5 +1,5 @@
 import { checkFileContent, checkMessage, checkPath, isBinary, type Finding } from './checks.ts';
-import { listCommits, listIndex, readBlobs } from './git.ts';
+import { listCommits, listIndex, objectFormat, readBlobs } from './git.ts';
 
 export interface FilesResult {
   findings: Finding[];
@@ -18,17 +18,23 @@ export interface PullRequestText {
 }
 
 export async function checkTrackedFiles(cwd: string): Promise<FilesResult> {
-  const entries = await listIndex(cwd);
+  // Read once: it sets both the oid length the index must have and the hash each body
+  // is checked against.
+  const format = await objectFormat(cwd);
+  const entries = await listIndex(cwd, format);
   const blobs = await readBlobs(
     cwd,
     entries.map((entry) => entry.oid),
+    format,
   );
   const findings: Finding[] = [];
   let scanned = 0;
   let skippedBinary = 0;
   for (const entry of entries) {
     findings.push(...checkPath(entry.path));
-    const bytes = blobs.get(entry.oid) ?? new Uint8Array();
+    const bytes = blobs.get(entry.oid);
+    // Scanning a missing blob as empty would pass content that was never checked.
+    if (bytes === undefined) throw new Error(`no blob was read for ${entry.path} (${entry.oid})`);
     if (isBinary(bytes)) {
       skippedBinary += 1;
       continue;

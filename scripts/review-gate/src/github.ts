@@ -163,6 +163,21 @@ export class GitHubClient {
 }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const BRANCH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+
+// The name ends up in a git ref, so anything git could read as an option, a range or a
+// reflog lookup is refused rather than passed on. GitHub never sends such a name.
+function validBranch(name: string): boolean {
+  return (
+    name.split('/').every((part) => BRANCH_SEGMENT.test(part) && !part.endsWith('.lock')) &&
+    !name.includes('..')
+  );
+}
+
+export interface PullRequestInput extends GateInput {
+  // The branch the PR merges into, when the payload names one.
+  baseRef?: string;
+}
 const MAX_LISTED_FILES = 3000;
 
 // Markers come only from submitted reviews: a review cannot be deleted, while an issue
@@ -223,7 +238,7 @@ export async function loadGateInput(
   client: GitHubClient,
   repo: string,
   prNumber: number,
-): Promise<GateInput> {
+): Promise<PullRequestInput> {
   if (!REPO.test(repo) || repo.split('/').some((part) => part === '.' || part === '..')) {
     throw new Error(`invalid repo: ${repo}`);
   }
@@ -235,6 +250,10 @@ export async function loadGateInput(
   const pr = await client.getJson(`/repos/${repo}/pulls/${prNumber}`);
   const head = isRecord(pr) && isRecord(pr['head']) ? str(pr['head']['sha']) : undefined;
   if (head === undefined) throw new Error(`PR ${prNumber} payload has no head SHA`);
+  const base = isRecord(pr) && isRecord(pr['base']) ? str(pr['base']['ref']) : undefined;
+  if (base !== undefined && !validBranch(base)) {
+    throw new Error(`PR ${prNumber} has an unusable base branch name`);
+  }
   const rawLabels = isRecord(pr) && Array.isArray(pr['labels']) ? (pr['labels'] as unknown[]) : [];
   const labels = rawLabels.flatMap((label) => {
     const labelName = isRecord(label) ? str(label['name']) : undefined;
@@ -270,5 +289,11 @@ export async function loadGateInput(
     if (isRecord(node) && node['state'] === 'PENDING') continue;
     reviews.push(toReview(node));
   }
-  return { headSha: head, labels, files, reviews };
+  return {
+    headSha: head,
+    labels,
+    files,
+    reviews,
+    ...(base === undefined ? {} : { baseRef: base }),
+  };
 }

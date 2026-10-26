@@ -54,7 +54,8 @@ pnpm gate
 
 It runs a frozen lockfile install, format check, lint with zero warnings, the boundary
 guard, the package manifest check, strict typecheck, tests with coverage (85 percent
-lines at least), the dependency license policy, the hygiene check on tracked files and
+lines at least), the dependency license policy (forbidden packages such as sharp are
+refused from the lockfile too), the hygiene check on tracked files and
 on commit messages since `origin/development` and, when it is installed, gitleaks.
 
 Single steps while you work:
@@ -118,8 +119,52 @@ without the fix. Flaky tests count as failures.
 
 ## Review
 
-A PR merges when CI is green and the required reviewers have approved the exact
-head commit. Pushing a new commit after approval needs a new review.
+A PR merges when CI is green and every reviewer its risk tier requires has approved
+the head commit, or an earlier commit the approval carries over from.
+
+### Risk tiers
+
+The gate reads the changed paths (both names of a renamed file) and takes the highest
+tier any of them reaches. The path lists live in `scripts/review-gate/rules.json` on the
+base branch, so a PR cannot change the rules it is judged by.
+
+| Tier | Paths                                                                                                                                                                                                                                                                                                                                                                                                         | Reviewers                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| A    | Security sensitive: `.github/`, `scripts/`, `deploy/`, `docker/`, database migrations, anything with auth, tenancy, billing, credits, entitlements or publish in its path, package manifests and the lockfile, TypeScript, ESLint and Vitest configs (every `vitest.config.*` too, since coverage thresholds live there), Dockerfiles, compose and Terraform files, git hooks, CODEOWNERS and scanner configs | code-reviewer, security-reviewer, qa-verifier                           |
+| B    | Everything else                                                                                                                                                                                                                                                                                                                                                                                               | code-reviewer, qa-verifier, plus design-reviewer when a UI path changes |
+| C    | Only tests and docs                                                                                                                                                                                                                                                                                                                                                                                           | code-reviewer                                                           |
+
+- A test is a file with a test suffix (`.test.ts`, `.spec.ts` and the like) anywhere,
+  or any file in a `test/`, `tests/`, `__tests__/` or `e2e/` directory directly under a
+  package root such as `packages/engine/test/`. A directory with one of those names
+  deeper inside `src/` or `app/` is product code, since it can ship.
+- Docs are Markdown files outside `.github/`. Markdown inside a front end is copy a user
+  reads, so it counts as UI.
+- UI paths are `apps/`, `packages/ui/`, `packages/email/`, `packages/editor/`,
+  `packages/site/`, and `.tsx`, `.jsx`, `.css`, `.scss`, `.svg`, `.html` and `.mdx` files
+  anywhere.
+- A PR with no changed files is treated as tier A.
+- The labels `needs-security`, `needs-perf` and `needs-design` add a reviewer on top of
+  the tier. Removing a label never removes a reviewer the paths require.
+
+### When an approval carries over
+
+An approval on an earlier commit still counts for the head when every commit since then
+is a merge of the base branch that git itself would have made: two parents, the second
+already on the base branch, no conflicts, and a result identical to a clean automatic
+merge. The "Update branch" button produces exactly that. Anything else needs a new
+review on the head:
+
+- any commit of your own, even an empty one
+- a merge that resolves a conflict, by hand or with a strategy option
+- a merge with extra edits, or one that drops changes from either side
+- a merge of any branch other than the base, or an octopus merge
+- a rebase or force push that removes the approved commit from the branch
+
+If the gate cannot check the history (for example a fork PR refreshed by hand), nothing
+carries over and the report says why.
+
+### Review markers
 
 Approval is recorded as a marker on the last line of a submitted PR review, posted
 with `gh pr review <number> --comment --body-file <file>` or from the review screen:
@@ -134,9 +179,9 @@ with `gh pr review <number> --comment --body-file <file>` or from the review scr
   listed for that reviewer in `scripts/review-gate/rules.json` on the base branch.
   GitHub's author association is not used, because the Actions token cannot see
   private org membership.
-- An approval counts only for the current head SHA. A `changes_requested` marker
-  blocks whatever SHA it names, as long as it is the newest counted review for that
-  reviewer. To lift it, post a newer approval for the head.
+- An approval counts for the head SHA or for an earlier commit it carries over from. A
+  `changes_requested` marker blocks whatever SHA it names, as long as it is the newest
+  counted review for that reviewer. To lift it, post a newer approval for the head.
 - Editing a review after you submit it blocks every reviewer your login may sign for,
   whatever the review says now, until you post a fresh review with a valid marker for
   each of them. To change your mind, post a new review instead of editing.
