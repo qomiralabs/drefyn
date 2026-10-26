@@ -239,3 +239,12 @@ describe('fixture', () => {
     expect(relative(repoRoot, here)).toBe('scripts/lint-rules/test');
   });
 });
+
+describe('no-arbitrary-values messages', () => {
+  it('points a variant transition at the element, and motion-safe: at scoped transitions only', () => {
+    const message = noArbitraryValues.meta?.messages?.['motion'] ?? '';
+    expect(message).toMatch(/on the element/);
+    expect(message).toMatch(/motion-safe:sm:transition/);
+    expect(message).not.toMatch(/Write motion-safe: before it/);
+  });
+});

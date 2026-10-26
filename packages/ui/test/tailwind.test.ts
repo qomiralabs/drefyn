@@ -192,6 +192,19 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
   });
 
+  it('makes a shell utility for every shell key, so a new one cannot be left out', async () => {
+    const theme = renderTailwindCss();
+    for (const k of Object.keys(tokens.layout.shell)) {
+      const name = `shell-${kebab(k)}`;
+      expect(theme, k).toMatch(new RegExp(`--(height|container)-${name}: var\\(--dr-${name}\\)`));
+    }
+    const extra = {
+      ...tokens,
+      layout: { ...tokens.layout, shell: { ...tokens.layout.shell, inspector: 320 } },
+    } as unknown as typeof tokens;
+    expect(() => renderTailwindCss(extra)).toThrow(/shell\.inspector/);
+  });
+
   it('makes no utility from a timer', async () => {
     const candidates = [
       'duration-toast',
@@ -318,6 +331,11 @@ describe('Tailwind theme', () => {
       'size-5',
       'p-40',
       'gap-40',
+      // Sizes are heights and squares, never spacing or widths.
+      'p-control-md',
+      'gap-row-comfortable',
+      'm-icon-sm',
+      'w-control-md',
     ];
     const css = await build(offScale);
     for (const cls of offScale) expect(hasRule(css, cls), cls).toBe(false);

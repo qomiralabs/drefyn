@@ -502,6 +502,41 @@ describe('numbers and names', () => {
     }
   });
 
+  it('keeps the inset focus offset at or below zero, so it can never push the ring out', () => {
+    const withInset = (v: number): Tokens => ({
+      ...tokens,
+      stroke: { ...tokens.stroke, focusInset: v },
+    });
+    for (const [name, render] of Object.entries(renderers)) {
+      expect(() => render(withInset(0)), name).not.toThrow();
+      expect(() => render(withInset(2)), name).toThrow(/stroke\.focusInset.*above zero/);
+    }
+  });
+
+  it('refuses an alpha that is not a number or lies outside 0 to 1', () => {
+    const withScrim = (alpha: unknown): Tokens =>
+      ({
+        ...tokens,
+        overlay: { scrim: { ...tokens.overlay.scrim, dark: { base: '#000000', alpha } } },
+      }) as unknown as Tokens;
+    for (const [name, render] of Object.entries(renderers)) {
+      expect(() => render(withScrim('0.5')), name).toThrow(/overlay\.scrim\.dark\.alpha/);
+      expect(() => render(withScrim(undefined)), name).toThrow(/overlay\.scrim\.dark\.alpha/);
+      expect(() => render(withScrim(1.5)), name).toThrow(/overlay\.scrim\.dark\.alpha.*above 1/);
+      expect(() => render(withScrim(1)), name).not.toThrow();
+    }
+    expect(() => renderTokensCss(withAlpha(2))).toThrow(/wash\.light\.alpha/);
+  });
+
+  it('refuses a timer whose ms is not a number', () => {
+    const withTimer = (ms: unknown): Tokens =>
+      ({ ...tokens, timer: { ...tokens.timer, toast: { ms } } }) as unknown as Tokens;
+    for (const [name, render] of Object.entries(renderers)) {
+      expect(() => render(withTimer('6000')), name).toThrow(/timer\.toast\.ms/);
+      expect(() => render(withTimer(null)), name).toThrow(/timer\.toast\.ms/);
+    }
+  });
+
   it('accepts camelCase role names, which become kebab case', () => {
     expect(renderTokensCss(withBorder('ruleFaint'))).toContain('--dr-border-rule-faint:');
   });

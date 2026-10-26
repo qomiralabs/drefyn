@@ -8,11 +8,14 @@ import {
   disabledCeiling,
   disabledPairs,
   expandPairs,
+  fillBackdrops,
+  fillFloor,
   forbiddenPairs,
   measure,
   minimum,
   requiredPairs,
   ruledOutPairs,
+  supplementaryMarks,
 } from '../src/tokens/pairs.ts';
 
 // Every required pair with the ratio it measures today, floored to two decimals. A token change
@@ -308,6 +311,28 @@ const disabled = [
   ['dark', 'disabled.edge', 'surface.sunken', 'non-text', 1.56],
 ] as const;
 
+// State icons beside a state word on a hovered or pressed item. The word, in body text, carries
+// the meaning, so the icon is supplementary and no 3:1 minimum applies. Pinned so a change to a
+// mark or a fill is still seen in review.
+const supplementary = [
+  ['light', 'state.fresh.mark', 'surface.hover', 'non-text', 2.89],
+  ['light', 'state.stale.mark', 'surface.hover', 'non-text', 1.88],
+  ['light', 'state.broken.mark', 'surface.hover', 'non-text', 4.24],
+  ['light', 'state.neutral.mark', 'surface.hover', 'non-text', 1.3],
+  ['light', 'state.fresh.mark', 'surface.pressed', 'non-text', 2.72],
+  ['light', 'state.stale.mark', 'surface.pressed', 'non-text', 1.77],
+  ['light', 'state.broken.mark', 'surface.pressed', 'non-text', 3.98],
+  ['light', 'state.neutral.mark', 'surface.pressed', 'non-text', 1.23],
+  ['dark', 'state.fresh.mark', 'surface.hover', 'non-text', 8.96],
+  ['dark', 'state.stale.mark', 'surface.hover', 'non-text', 9.36],
+  ['dark', 'state.broken.mark', 'surface.hover', 'non-text', 5.64],
+  ['dark', 'state.neutral.mark', 'surface.hover', 'non-text', 1.52],
+  ['dark', 'state.fresh.mark', 'surface.pressed', 'non-text', 8.16],
+  ['dark', 'state.stale.mark', 'surface.pressed', 'non-text', 8.52],
+  ['dark', 'state.broken.mark', 'surface.pressed', 'non-text', 5.14],
+  ['dark', 'state.neutral.mark', 'surface.pressed', 'non-text', 1.38],
+] as const;
+
 const key = (row: readonly unknown[]) => row.slice(0, 4).join(' ');
 
 describe('required contrast pairs', () => {
@@ -352,8 +377,30 @@ describe('ruled out pairs', () => {
 
   it('never overlaps the required pairs', () => {
     const required = new Set(expandPairs(requiredPairs).map((p) => key([p.mode, p.fg, p.bg])));
-    for (const p of expandPairs([...forbiddenPairs, ...ruledOutPairs, ...disabledPairs])) {
+    const others = [...forbiddenPairs, ...ruledOutPairs, ...disabledPairs, ...supplementaryMarks];
+    for (const p of expandPairs(others)) {
       expect(required.has(key([p.mode, p.fg, p.bg])), key([p.mode, p.fg, p.bg])).toBe(false);
+    }
+  });
+});
+
+describe('supplementary state marks', () => {
+  it.each(supplementary)(
+    '%s %s on %s (%s) measures %s, beside a state word',
+    (mode, fg, bg, kind, ratio) => {
+      expect(measure({ fg, bg, kind }, mode)).toBe(ratio);
+    },
+  );
+
+  it('lists exactly the supplementary marks the tokens declare', () => {
+    const declared = expandPairs(supplementaryMarks).map((p) => key([p.mode, p.fg, p.bg, p.kind]));
+    expect(declared.sort()).toEqual(supplementary.map(key).sort());
+  });
+
+  it('always has a body text word that passes on the same fill', () => {
+    const required = new Set(expandPairs(requiredPairs).map((p) => key([p.mode, p.fg, p.bg])));
+    for (const p of expandPairs(supplementaryMarks)) {
+      expect(required.has(key([p.mode, 'text.body', p.bg])), key([p.mode, p.bg])).toBe(true);
     }
   });
 });
@@ -446,9 +493,12 @@ describe('coverage', () => {
     const used = new Set(groups.flatMap((g) => [...g.fg, ...g.bg]));
     const decorative = new Set(decorativeRoles.map((d) => d.role));
     // An alias is measured through the roles it resolves to, which must themselves be covered.
+    // Required pairs only: a role that only appears in forbidden or ruled out pairs has no
+    // approved text on it, so an alias of it would be covered by nothing.
+    const measured = new Set(expandPairs(requiredPairs).flatMap((p) => [p.fg, p.bg]));
     const aliased = new Set(
       aliasRoles
-        .filter((a) => (['light', 'dark'] as const).every((m) => used.has(a.resolves[m])))
+        .filter((a) => (['light', 'dark'] as const).every((m) => measured.has(a.resolves[m])))
         .map((a) => a.role),
     );
     for (const role of roles) {
@@ -485,22 +535,46 @@ describe('coverage', () => {
   });
 
   // Light raised is only 1.04 off the hover fill, which is why floating things sit on ground
-  // in light. Every place a menu or list can put the fill clears the same floor as the wash.
-  it('keeps the hover fill visible on the surfaces it lands on', () => {
-    const off = (mode: 'light' | 'dark', bg: 'surface.ground' | 'surface.raised') =>
-      floor2(contrast(colorOf('surface.hover', mode), colorOf(bg, mode)));
-    expect([off('light', 'surface.ground'), off('light', 'surface.raised')]).toEqual([1.09, 1.04]);
-    expect([off('dark', 'surface.ground'), off('dark', 'surface.raised')]).toEqual([1.19, 1.11]);
+  // in light. Ground, raised and the overlay clear the floor in both modes; sunken does not in
+  // dark (1.02), so interactive items never sit on sunken, in either mode.
+  it('keeps the hover and pressed fills visible on the surfaces they may land on', () => {
+    const off = (fill: 'surface.hover' | 'surface.pressed', mode: 'light' | 'dark', bg: string) =>
+      floor2(contrast(colorOf(fill, mode), colorOf(bg as 'surface.ground', mode)));
+    expect([
+      off('surface.hover', 'light', 'surface.ground'),
+      off('surface.hover', 'light', 'surface.raised'),
+    ]).toEqual([1.09, 1.04]);
+    expect([
+      off('surface.hover', 'dark', 'surface.ground'),
+      off('surface.hover', 'dark', 'surface.raised'),
+    ]).toEqual([1.19, 1.11]);
+    expect(fillFloor).toBe(1.04);
+    expect(fillBackdrops.allowed).toEqual(['surface.ground', 'surface.raised', 'surface.overlay']);
     for (const mode of ['light', 'dark'] as const) {
-      for (const bg of ['surface.ground', 'surface.raised', 'surface.overlay'] as const) {
-        const ratio = floor2(contrast(colorOf('surface.hover', mode), colorOf(bg, mode)));
-        expect(ratio, `${mode} ${bg}`).toBeGreaterThanOrEqual(1.04);
+      for (const bg of fillBackdrops.allowed) {
+        for (const fill of ['surface.hover', 'surface.pressed'] as const) {
+          expect(off(fill, mode, bg), `${mode} ${fill} on ${bg}`).toBeGreaterThanOrEqual(fillFloor);
+        }
       }
-      const onOverlay = floor2(
-        contrast(colorOf('surface.hover', mode), colorOf('surface.overlay', mode)),
-      );
-      expect(onOverlay, `${mode} overlay`).toBeGreaterThanOrEqual(1.09);
+      expect(
+        off('surface.hover', mode, 'surface.overlay'),
+        `${mode} overlay`,
+      ).toBeGreaterThanOrEqual(1.09);
     }
+  });
+
+  it('keeps interactive items off sunken, where the hover fill disappears in dark', () => {
+    const off = (mode: 'light' | 'dark') =>
+      floor2(contrast(colorOf('surface.hover', mode), colorOf('surface.sunken', mode)));
+    expect(fillBackdrops.never).toEqual(['surface.sunken']);
+    expect([off('light'), off('dark')]).toEqual([1.04, 1.02]);
+    // Dark fails the floor outright. Light only meets it because sunken and raised share a hex
+    // there; the rule holds in both modes so it reads the same wherever someone builds.
+    expect(off('dark')).toBeLessThan(fillFloor);
+    for (const bg of fillBackdrops.never) {
+      expect(fillBackdrops.allowed as readonly string[]).not.toContain(bg);
+    }
+    expect(fillBackdrops.why.length).toBeGreaterThan(10);
   });
 
   it('keeps the pressed fill a step past the hover fill', () => {
