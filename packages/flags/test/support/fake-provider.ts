@@ -16,6 +16,8 @@ export type Behaviour =
   | { readonly kind: 'value'; readonly value: unknown; readonly reason?: string }
   // Answers from the context it was given, like a targeting rule.
   | { readonly kind: 'rule'; readonly rule: (context: EvaluationContext) => unknown }
+  // A result that is not wrapped in a promise, which the Provider type does not forbid.
+  | { readonly kind: 'plain'; readonly value: unknown }
   // Hands back this exact result, whatever its shape.
   | { readonly kind: 'raw'; readonly resolution: () => unknown }
   | { readonly kind: 'throw'; readonly error: unknown }
@@ -120,6 +122,8 @@ export class FakeProvider implements Provider {
         return Promise.resolve(details(behaviour.value, behaviour.reason));
       case 'rule':
         return Promise.resolve(details(behaviour.rule(context), 'TARGETING_MATCH'));
+      case 'plain':
+        return details(behaviour.value) as unknown as Promise<ResolutionDetails<boolean>>;
       case 'raw':
         return Promise.resolve(behaviour.resolution() as ResolutionDetails<boolean>);
       case 'throw':

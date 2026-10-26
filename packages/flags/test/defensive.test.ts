@@ -1,7 +1,7 @@
 // Failures outside the provider: the SDK client itself, the injected sinks and the
 // entitlements reader can all misbehave, and none of them may break an evaluation.
 import { OpenFeature, ProviderEvents, ProviderStatus } from '@openfeature/server-sdk';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createFlagClient, type FlagClient, type FlagClientDeps } from '../src/index.ts';
 import { createTestFlagClient } from '../src/testing.ts';
 import { FakeProvider } from './support/fake-provider.ts';
@@ -179,6 +179,11 @@ describe('an error whose code cannot be read', () => {
     it.each(['throw', 'throw_sync'] as const)(
       'gives the safe value with FLAG_GENERAL when the provider uses %s',
       async (kind) => {
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        onTestFinished(() => {
+          process.off('unhandledRejection', unhandled);
+        });
         const client = await boot(
           new FakeProvider()
             .set(RELEASE, { kind, error: error() })
@@ -190,6 +195,8 @@ describe('an error whose code cannot be read', () => {
           errorCode: 'FLAG_GENERAL',
         });
         expect(await settle(client.isOn(KILL_SAFE_ON, ctx))).toBe(true);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(unhandled).not.toHaveBeenCalled();
       },
     );
   });

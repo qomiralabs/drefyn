@@ -1,6 +1,8 @@
 import {
+  AsyncLocalStorageTransactionContextPropagator,
   ErrorCode,
   FlagNotFoundError,
+  NOOP_TRANSACTION_CONTEXT_PROPAGATOR,
   GeneralError,
   OpenFeature,
   ParseError,
@@ -634,18 +636,48 @@ describe('evaluation context', () => {
     expect(second).toMatchObject({ internal: false });
   });
 
-  it('cannot be turned internal by a global OpenFeature context', async () => {
-    OpenFeature.setContext({ internal: true, targetingKey: 'someone-else' });
+  // Keys the caller never set, such as plan, must not reach a targeting rule either.
+  const OUTSIDE = {
+    internal: true,
+    targetingKey: 'someone-else',
+    organizationId: 'someone-else',
+    plan: 'enterprise',
+    projectId: 'someone-else',
+  };
+  const EXACT = { targetingKey: OTHER_ORG, organizationId: OTHER_ORG, internal: false };
+
+  it('leaves the global OpenFeature context out entirely', async () => {
+    OpenFeature.setContext(OUTSIDE);
     try {
       const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
       const client = await boot(fake);
       await client.evaluate(RELEASE, { organizationId: OTHER_ORG });
       await client.evaluate(RELEASE, { organizationId: OTHER_ORG, internal: false });
-      for (const call of fake.callsFor(RELEASE)) {
-        expect(call.context).toMatchObject({ internal: false, targetingKey: OTHER_ORG });
-      }
+      expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([EXACT, EXACT]);
     } finally {
       OpenFeature.setContext({});
+    }
+  });
+
+  it('leaves the transaction context out entirely', async () => {
+    OpenFeature.setTransactionContextPropagator(
+      new AsyncLocalStorageTransactionContextPropagator(),
+    );
+    try {
+      const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+      const client = await boot(fake);
+      await new Promise<void>((resolve, reject) => {
+        OpenFeature.setTransactionContext(OUTSIDE, () => {
+          // Proves the propagator really carries the context inside the callback.
+          expect(OpenFeature.getTransactionContext()).toEqual(OUTSIDE);
+          client.evaluate(RELEASE, { organizationId: OTHER_ORG }).then(() => {
+            resolve();
+          }, reject);
+        });
+      });
+      expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([EXACT]);
+    } finally {
+      OpenFeature.setTransactionContextPropagator(NOOP_TRANSACTION_CONTEXT_PROPAGATOR);
     }
   });
 });
@@ -671,6 +703,28 @@ describe('provider results of the wrong shape', () => {
       value: false,
       source: 'safe_value',
       errorCode: code,
+    });
+  });
+
+  it('a plain result, not a promise, is used like a resolved one', async () => {
+    const fake = new FakeProvider().set(RELEASE, { kind: 'plain', value: true });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+      value: true,
+      source: 'provider',
+    });
+  });
+
+  it('a synchronous FlagNotFoundError keeps its code', async () => {
+    const fake = new FakeProvider().set(KILL_SAFE_ON, {
+      kind: 'throw_sync',
+      error: new FlagNotFoundError('x'),
+    });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual({
+      value: true,
+      source: 'safe_value',
+      errorCode: 'FLAG_NOT_FOUND',
     });
   });
 
@@ -701,6 +755,7 @@ describe('what the provider is handed', () => {
     const client = await boot(fake);
     await client.evaluate(RELEASE, fullCtx);
     const logger = fake.callsFor(RELEASE)[0]?.logger;
+    expect(logger).toBeDefined();
     const consoleSpies = (['error', 'warn', 'info', 'debug', 'log'] as const).map((method) =>
       vi.spyOn(console, method).mockImplementation(() => undefined),
     );
