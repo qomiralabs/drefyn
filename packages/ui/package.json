@@ -1,0 +1,27 @@
+{
+  "name": "@drefyn/ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/generated/tokens.css",
+    "./tailwind.css": "./src/generated/tailwind.css",
+    "./tokens.dtcg.json": "./src/generated/tokens.dtcg.json",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "tokens": "node src/tokens/cli.ts",
+    "preview": "node preview/build.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "tailwindcss": "4.3.3"
+  }
+}

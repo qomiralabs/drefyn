@@ -509,10 +509,10 @@ describe('the reviewed set matches the review gate', () => {
   it('I2: every reviewed prefix and root file asks for security review and has a code owner', () => {
     const rules = JSON.parse(
       readFileSync(join(repoRoot, 'scripts/review-gate/rules.json'), 'utf8'),
-    ) as { rules: { reviewer: string; prefixes: string[]; names: string[] }[] };
-    const security = rules.rules.find((rule) => rule.reviewer === 'security-reviewer');
-    expect(security?.prefixes).toEqual(expect.arrayContaining([...REVIEWED_PREFIXES]));
-    expect(security?.names).toEqual(expect.arrayContaining([...REVIEWED_ROOT_FILES]));
+    ) as { paths: { security: { prefixes: string[]; names: string[] } } };
+    const security = rules.paths.security;
+    expect(security.prefixes).toEqual(expect.arrayContaining([...REVIEWED_PREFIXES]));
+    expect(security.names).toEqual(expect.arrayContaining([...REVIEWED_ROOT_FILES]));
     const owners = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8')
       .split('\n')
       .filter((line) => line.trim() !== '' && !line.startsWith('#'))
@@ -528,9 +528,8 @@ describe('migrations need security review', () => {
   it('I2: packages/db/migrations/ asks for security review and has a code owner', () => {
     const rules = JSON.parse(
       readFileSync(join(repoRoot, 'scripts/review-gate/rules.json'), 'utf8'),
-    ) as { rules: { reviewer: string; prefixes: string[] }[] };
-    const security = rules.rules.find((rule) => rule.reviewer === 'security-reviewer');
-    expect(security?.prefixes).toContain('packages/db/migrations/');
+    ) as { paths: { security: { prefixes: string[] } } };
+    expect(rules.paths.security.prefixes).toContain('packages/db/migrations/');
     const owners = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8')
       .split('\n')
       .filter((line) => line.trim() !== '' && !line.startsWith('#'))

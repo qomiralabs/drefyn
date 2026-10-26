@@ -2,20 +2,22 @@
   "reviewers": {
     "code-reviewer": ["Divine572"],
     "qa-verifier": ["Divine572"],
-    "hygiene-auditor": ["Divine572"],
     "security-reviewer": ["Divine572"],
     "performance-reviewer": ["Divine572"],
     "design-reviewer": ["Divine572"]
   },
-  "rules": [
-    {
-      "reviewer": "security-reviewer",
+  "paths": {
+    "security": {
       "prefixes": [
         ".github/",
         "scripts/",
         "deploy/",
+        "docker/",
+        ".changeset/",
         "packages/egress/",
-        "packages/db/migrations/"
+        "packages/db/migrations/",
+        ".husky/",
+        ".githooks/"
       ],
       "names": [
         "renovate.json",
@@ -40,9 +42,78 @@
         "LICENSE",
         "vitest.shared.ts",
         ".prettierrc.json",
-        ".prettierignore"
+        ".prettierignore",
+        "Dockerfile",
+        ".dockerignore",
+        ".gitleaks.toml",
+        ".gitleaksignore",
+        "osv-scanner.toml",
+        ".trivyignore",
+        ".semgrepignore",
+        "CODEOWNERS",
+        "compose.yaml",
+        "compose.yml",
+        "compose.override.yaml",
+        "compose.override.yml"
       ],
-      "contains": ["auth", "tenancy", "billing", "credits", "entitlements", "tsconfig"]
+      "contains": [
+        "auth",
+        "tenancy",
+        "billing",
+        "credits",
+        "entitlements",
+        "publish",
+        "tsconfig",
+        "vitest.config",
+        "dockerfile",
+        "docker-compose"
+      ],
+      "suffixes": [".tf", ".tfvars"]
+    },
+    "tests": {
+      "prefixes": [
+        "packages/*/test/",
+        "packages/*/tests/",
+        "packages/*/__tests__/",
+        "packages/*/e2e/",
+        "apps/*/test/",
+        "apps/*/tests/",
+        "apps/*/__tests__/",
+        "apps/*/e2e/",
+        "templates/*/test/",
+        "templates/*/tests/",
+        "templates/*/__tests__/",
+        "templates/*/e2e/"
+      ],
+      "names": [],
+      "contains": [],
+      "suffixes": [
+        ".test.ts",
+        ".test.tsx",
+        ".test.js",
+        ".test.mjs",
+        ".test-d.ts",
+        ".spec.ts",
+        ".spec.tsx"
+      ]
+    },
+    "ui": {
+      "prefixes": [
+        "apps/",
+        "packages/ui/",
+        "packages/email/",
+        "packages/editor/",
+        "packages/site/"
+      ],
+      "names": [],
+      "contains": [],
+      "suffixes": [".tsx", ".jsx", ".css", ".scss", ".svg", ".html", ".mdx"]
+    },
+    "docs": {
+      "prefixes": [],
+      "names": [],
+      "contains": [],
+      "suffixes": [".md"]
     }
-  ]
+  }
 }

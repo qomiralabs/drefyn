@@ -1,0 +1,829 @@
+/* Specimen page styles. Token values only: every length, colour and duration is a --dr variable. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--dr-surface-ground);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-m);
+  font-variant-numeric: tabular-nums;
+}
+
+.masthead,
+main {
+  max-inline-size: var(--dr-page-max);
+  margin-inline: auto;
+  padding-inline: var(--dr-gutter);
+}
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-24);
+  align-items: end;
+  justify-content: space-between;
+  padding-block: var(--dr-space-64) var(--dr-space-48);
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+
+h1 {
+  margin: var(--dr-space-8) 0 var(--dr-space-12);
+  color: var(--dr-text-ink);
+  font: var(--dr-type-display-m);
+  letter-spacing: var(--dr-type-display-m-tracking);
+}
+
+h2 {
+  margin: 0 0 var(--dr-space-8);
+  color: var(--dr-text-ink);
+  font: var(--dr-type-display-s);
+  letter-spacing: var(--dr-type-display-s-tracking);
+}
+
+h3 {
+  margin: var(--dr-space-24) 0 var(--dr-space-12);
+  color: var(--dr-text-ink);
+  font: var(--dr-type-title);
+  letter-spacing: var(--dr-type-title-tracking);
+}
+
+.standfirst {
+  max-inline-size: var(--dr-measure);
+  margin: 0;
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-body-l);
+}
+
+.lede {
+  max-inline-size: var(--dr-measure);
+  margin: 0 0 var(--dr-space-24);
+  color: var(--dr-text-secondary);
+}
+
+.label,
+.mode,
+figcaption,
+legend,
+th {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-label);
+  letter-spacing: var(--dr-type-label-tracking);
+  text-transform: uppercase;
+}
+
+code,
+.numbers,
+.ratio {
+  font: var(--dr-type-code);
+}
+
+section {
+  padding-block: var(--dr-space-48);
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--dr-accent-ink);
+  text-underline-offset: var(--dr-space-4);
+}
+
+a:hover {
+  color: var(--dr-accent-press);
+}
+
+:focus-visible {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+  border-radius: var(--dr-radius-xs);
+}
+
+::selection {
+  background: var(--dr-accent-wash);
+}
+
+/* Theme control */
+
+.theme {
+  position: relative;
+  display: flex;
+  gap: var(--dr-space-4);
+  margin: 0;
+  padding: var(--dr-space-4);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+}
+
+.theme legend {
+  position: absolute;
+  inline-size: var(--dr-stroke-hairline);
+  block-size: var(--dr-stroke-hairline);
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.theme label {
+  position: relative;
+  padding: var(--dr-space-4) var(--dr-space-12);
+  border-radius: var(--dr-radius-xs);
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-body-s);
+  cursor: pointer;
+  transition: background-color var(--dr-duration-fast) var(--dr-ease-enter);
+}
+
+.theme input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.theme label:has(input:checked) {
+  background: var(--dr-surface-raised);
+  color: var(--dr-text-ink);
+  box-shadow: inset 0 0 0 var(--dr-stroke-hairline) var(--dr-border-rule-strong);
+}
+
+.theme label:has(input:focus-visible) {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+
+/* Colour roles */
+
+.roles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--dr-space-128) * 3)), 1fr));
+  gap: 0 var(--dr-space-32);
+}
+
+.role {
+  display: grid;
+  grid-template-columns: var(--dr-space-32) 1fr auto auto;
+  gap: var(--dr-space-12);
+  align-items: center;
+  padding-block: var(--dr-space-8);
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+
+.swatch {
+  inline-size: var(--dr-space-32);
+  block-size: var(--dr-space-32);
+  border-radius: var(--dr-radius-xs);
+  box-shadow: inset 0 0 0 var(--dr-stroke-hairline) var(--dr-border-rule-strong);
+}
+
+.role-name {
+  display: grid;
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+}
+
+.role-name code {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+}
+
+.role-value {
+  display: grid;
+  color: var(--dr-text-body);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+}
+
+/* Contrast */
+
+/* One mode per row: with the wash over three surfaces each table is seven columns wide. */
+.matrices {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--dr-space-48);
+}
+
+.matrix {
+  margin: 0;
+}
+
+/* Grid items default to their content width, which would let a wide table push the page. */
+.matrices > *,
+.motion > *,
+.scales > * {
+  min-inline-size: 0;
+}
+
+figcaption {
+  margin-block-end: var(--dr-space-12);
+}
+
+.scroll {
+  position: relative; /* keeps visually hidden cells inside the scroll box */
+  overflow-x: auto;
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font: var(--dr-type-body-s);
+}
+
+th,
+td {
+  padding: var(--dr-space-8) var(--dr-space-8) var(--dr-space-8) 0;
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  text-align: start;
+  white-space: nowrap;
+}
+
+tbody th {
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+  letter-spacing: var(--dr-type-body-s-tracking);
+  text-transform: none;
+}
+
+.sample {
+  display: inline-grid;
+  place-items: center;
+  inline-size: var(--dr-space-24);
+  block-size: var(--dr-space-24);
+  margin-inline-end: var(--dr-space-8);
+  border-radius: var(--dr-radius-xs);
+  box-shadow: inset 0 0 0 var(--dr-stroke-hairline) var(--dr-border-rule);
+  font: var(--dr-type-caption);
+  font-weight: var(--dr-weight-strong);
+  vertical-align: middle;
+}
+
+/* Marks and failing pairs are drawn, not lettered, so the page itself carries no failing text. */
+.sample-mark::after {
+  content: '';
+  inline-size: var(--dr-space-12);
+  block-size: var(--dr-space-4);
+  background: var(--fg);
+}
+
+.fail .ratio {
+  color: var(--dr-state-broken-text);
+}
+
+.verdict {
+  display: block;
+  color: var(--dr-state-broken-text);
+  font: var(--dr-type-caption);
+}
+
+.ruled-out .verdict {
+  color: var(--dr-text-secondary);
+}
+
+.other-pairs li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dr-space-16);
+  padding-block: var(--dr-space-8);
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  font: var(--dr-type-body-s);
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: var(--dr-stroke-hairline);
+  block-size: var(--dr-stroke-hairline);
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* State */
+
+.states {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 2)), 1fr));
+  gap: var(--dr-space-24);
+}
+
+.state {
+  display: grid;
+  gap: var(--dr-space-12);
+}
+
+.band {
+  position: relative;
+  block-size: var(--dr-space-12);
+  background: var(--mark);
+}
+
+/* The tick that keeps a light mark visible against paper and readable without colour. */
+.band::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--dr-stroke-focus);
+  background: var(--text);
+}
+
+.state-words {
+  display: grid;
+  color: var(--text);
+}
+
+.state-words span {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-body-s);
+}
+
+.state-fresh {
+  --mark: var(--dr-state-fresh-mark);
+  --text: var(--dr-state-fresh-text);
+}
+
+.state-stale {
+  --mark: var(--dr-state-stale-mark);
+  --text: var(--dr-state-stale-text);
+}
+
+.state-broken {
+  --mark: var(--dr-state-broken-mark);
+  --text: var(--dr-state-broken-text);
+}
+
+.state-neutral {
+  --mark: var(--dr-state-neutral-mark);
+  --text: var(--dr-state-neutral-text);
+}
+
+.state-neutral .band {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--dr-state-neutral-mark) 0 var(--dr-space-4),
+    var(--dr-state-neutral-text) var(--dr-space-4)
+      calc(var(--dr-space-4) + var(--dr-stroke-hairline))
+  );
+}
+
+/* Type */
+
+.type-row {
+  display: grid;
+  grid-template-columns: minmax(0, calc(var(--dr-space-128) * 1.5)) minmax(0, 1fr);
+  gap: var(--dr-space-24);
+  align-items: baseline;
+  padding-block: var(--dr-space-16);
+  border-block-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+
+.type-row .label {
+  display: grid;
+  gap: var(--dr-space-4);
+}
+
+.type-row .numbers {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+  letter-spacing: var(--dr-type-caption-tracking);
+  text-transform: none;
+}
+
+.type-sample {
+  color: var(--dr-text-ink);
+  overflow-wrap: break-word;
+}
+
+/* Media queries cannot read custom properties; 40rem is the compact width from the tokens. */
+@media (max-width: 40rem) {
+  .type-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--dr-space-8);
+  }
+}
+
+/* Space, radius, stroke */
+
+.scales {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 3)), 1fr));
+  gap: var(--dr-space-48);
+}
+
+.space li {
+  display: grid;
+  grid-template-columns: var(--dr-space-48) minmax(0, 1fr) var(--dr-space-64);
+  gap: var(--dr-space-12);
+  align-items: center;
+  padding-block: var(--dr-space-4);
+}
+
+.bar {
+  block-size: var(--dr-space-8);
+  background: var(--dr-text-ink);
+}
+
+.space .numbers {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+  text-align: end;
+}
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-24);
+}
+
+.tiles li {
+  display: grid;
+  gap: var(--dr-space-4);
+  justify-items: start;
+}
+
+.tiles .numbers {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+}
+
+.corner {
+  inline-size: var(--dr-space-48);
+  block-size: var(--dr-space-48);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  background: var(--dr-surface-raised);
+}
+
+.line {
+  inline-size: var(--dr-space-64);
+  background: var(--dr-text-ink);
+}
+
+/* Motion and depth */
+
+.motion {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 3)), 1fr));
+  gap: var(--dr-space-48);
+}
+
+.motion td {
+  color: var(--dr-text-body);
+}
+
+.elevation {
+  display: grid;
+  gap: var(--dr-space-16);
+}
+
+.card {
+  display: grid;
+  gap: var(--dr-space-4);
+  padding: var(--dr-space-16);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-raised);
+  color: var(--dr-text-body);
+}
+
+.shadow-1 {
+  border-color: var(--dr-border-rule-strong);
+  box-shadow: var(--dr-shadow-1);
+}
+
+.shadow-2 {
+  border-color: var(--dr-border-rule-strong);
+  box-shadow: var(--dr-shadow-2);
+}
+
+.focus-demo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-16);
+  align-items: center;
+  margin: var(--dr-space-32) 0 0;
+}
+
+button {
+  padding: var(--dr-space-8) var(--dr-space-16);
+  border: var(--dr-stroke-hairline) solid var(--dr-accent-ink);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-accent-ink);
+  color: var(--dr-accent-on);
+  font: var(--dr-type-body-s);
+  font-weight: var(--dr-weight-medium);
+  cursor: pointer;
+  transition: background-color var(--dr-duration-fast) var(--dr-ease-enter);
+}
+
+button:hover {
+  border-color: var(--dr-accent-press);
+  background: var(--dr-accent-press);
+}
+
+button.quiet {
+  border-color: var(--dr-border-control);
+  background: transparent;
+  color: var(--dr-text-ink);
+}
+
+button.quiet:hover {
+  background: var(--dr-surface-hover);
+}
+
+/* Disabled. No opacity anywhere: each part has its own measured colour. */
+
+.disabled-demo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 2)), 1fr));
+  gap: var(--dr-space-32);
+  margin-block-end: var(--dr-space-32);
+}
+
+.controls h3 {
+  margin-block-start: 0;
+}
+
+.control-row,
+.field,
+.check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-12);
+  align-items: center;
+  margin: 0 0 var(--dr-space-16);
+}
+
+.field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--dr-space-4);
+  max-inline-size: calc(var(--dr-space-128) * 2);
+}
+
+.field label,
+.check label {
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+}
+
+.field input {
+  padding: var(--dr-space-8) var(--dr-space-12);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-ground);
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-s);
+}
+
+/* Drawn by hand: the native disabled checkbox fades itself, which is the opacity the tokens
+   are here to replace. */
+.check input {
+  display: grid;
+  place-content: center;
+  inline-size: var(--dr-space-16);
+  block-size: var(--dr-space-16);
+  margin: 0;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-xs);
+  background: var(--dr-surface-ground);
+  appearance: none;
+}
+
+.check input:checked {
+  border-color: var(--dr-accent-ink);
+  background: var(--dr-accent-ink);
+}
+
+.check input:checked::before {
+  content: '';
+  inline-size: var(--dr-space-8);
+  block-size: var(--dr-space-4);
+  margin-block-start: calc(var(--dr-stroke-icon) * -1);
+  border-block-end: var(--dr-stroke-focus) solid var(--dr-accent-on);
+  border-inline-start: var(--dr-stroke-focus) solid var(--dr-accent-on);
+  transform: rotate(-45deg);
+}
+
+button:disabled,
+button.quiet:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  color: var(--dr-disabled-text);
+  cursor: not-allowed;
+}
+
+.field input:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  color: var(--dr-disabled-text);
+  cursor: not-allowed;
+}
+
+.check input:disabled {
+  border-color: var(--dr-disabled-edge);
+  background: var(--dr-disabled-fill);
+  cursor: not-allowed;
+}
+
+.check input:disabled::before {
+  border-color: var(--dr-disabled-text);
+}
+
+.field:has(input:disabled) label,
+.check:has(input:disabled) label {
+  color: var(--dr-disabled-text);
+}
+
+/* Fills and floating surfaces */
+
+.floating {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 2.5)), 1fr));
+  gap: var(--dr-space-32);
+  align-items: start;
+}
+
+.specimen {
+  margin: 0;
+}
+
+.menu {
+  padding: var(--dr-space-4);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-overlay);
+  box-shadow: var(--dr-shadow-1);
+}
+
+.item {
+  display: flex;
+  gap: var(--dr-space-12);
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--dr-size-control-md);
+  padding-inline: var(--dr-space-8);
+  /* Reserved on every item so the label does not move when the selection does. */
+  border-inline-start: var(--dr-stroke-indicator) solid transparent;
+  border-radius: var(--dr-radius-sm);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-s);
+}
+
+.item-state {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+}
+
+.item.is-hover {
+  background: var(--dr-surface-hover);
+}
+
+.item.is-pressed {
+  background: var(--dr-surface-pressed);
+}
+
+.item.is-focus {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-inset);
+}
+
+.item.is-selected {
+  border-inline-start-color: var(--dr-accent-ink);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  background: var(--dr-accent-wash);
+  color: var(--dr-text-ink);
+}
+
+.item.is-disabled {
+  color: var(--dr-disabled-text);
+}
+
+.status {
+  display: inline-flex;
+  gap: var(--dr-space-8);
+  align-items: center;
+}
+
+.pip {
+  position: relative;
+  inline-size: var(--dr-space-8);
+  block-size: var(--dr-space-8);
+  background: var(--mark);
+}
+
+.pip::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--dr-stroke-focus);
+  background: var(--text);
+}
+
+.scrim-demo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-block-size: calc(var(--dr-space-128) * 1.5);
+  overflow: hidden;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-ground);
+}
+
+.page-behind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--dr-space-12);
+  padding: var(--dr-space-16);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--dr-overlay-scrim);
+}
+
+.dialog {
+  position: relative;
+  max-inline-size: calc(100% - var(--dr-space-48));
+  padding: var(--dr-space-16) var(--dr-space-24);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-overlay);
+  box-shadow: var(--dr-shadow-2);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-s);
+}
+
+.dialog p {
+  margin: 0;
+}
+
+.dialog-title {
+  margin-block-end: var(--dr-space-4);
+  color: var(--dr-text-ink);
+  font-weight: var(--dr-weight-strong);
+}
+
+/* Sizes, shell and skeletons */
+
+.sizes {
+  align-items: end;
+}
+
+.size-box {
+  display: block;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-raised);
+}
+
+.size-row {
+  inline-size: calc(var(--dr-space-128) + var(--dr-space-32));
+  border-inline: 0;
+  border-radius: 0;
+}
+
+.shell li {
+  grid-template-columns: calc(var(--dr-space-64) + var(--dr-space-32)) minmax(0, 1fr) var(
+      --dr-space-64
+    );
+}
+
+.shell .bar {
+  max-inline-size: 100%;
+}
+
+.skeleton-demo {
+  display: grid;
+  gap: var(--dr-space-12);
+  max-inline-size: calc(var(--dr-space-128) * 3);
+}
+
+.skeleton {
+  display: block;
+  block-size: var(--dr-space-12);
+  border-radius: var(--dr-radius-xs);
+  background: var(--dr-skeleton-fill);
+}
+
+.skeleton.short {
+  inline-size: calc(var(--dr-space-128) * 1.5);
+  max-inline-size: 100%;
+}

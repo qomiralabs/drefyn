@@ -2,6 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { ObjectFormat } from './oid.ts';
+
+export { blobOid, type ObjectFormat } from './oid.ts';
 
 // Built from code points so the test sources never hold the characters they hunt for.
 export const EN_DASH = String.fromCodePoint(0x2013);
@@ -43,9 +46,9 @@ export interface TempRepo {
   cleanup: () => void;
 }
 
-export function makeRepo(): TempRepo {
+export function makeRepo(format: ObjectFormat = 'sha1'): TempRepo {
   const dir = mkdtempSync(join(tmpdir(), 'hygiene-test-'));
-  git(dir, ['init', '-q', '-b', 'main']);
+  git(dir, ['init', '-q', '-b', 'main', `--object-format=${format}`]);
   let head: string | undefined;
   return {
     dir,
@@ -69,4 +72,21 @@ export function makeRepo(): TempRepo {
       rmSync(dir, { recursive: true, force: true });
     },
   };
+}
+
+// Some older git builds cannot create sha256 repositories at all.
+export function supportsSha256(): boolean {
+  const dir = mkdtempSync(join(tmpdir(), 'hygiene-sha256-probe-'));
+  try {
+    execFileSync('git', ['init', '-q', '--object-format=sha256'], {
+      cwd: dir,
+      env: gitEnv,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

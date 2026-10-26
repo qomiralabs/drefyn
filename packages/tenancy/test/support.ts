@@ -2,8 +2,27 @@ import fc from 'fast-check';
 import { expect } from 'vitest';
 import { TenancyError, type TenancyErrorCode } from '../src/index.ts';
 
-// Fixed seed so a failure reproduces on every machine. Raise numRuns locally to hunt.
-export const runs = { seed: 20, numRuns: 500 } as const;
+// FC_SEED replays every property under another seed without editing a file. Unset, every
+// machine runs the same seed, so a failure reproduces anywhere. fast-check truncates a seed
+// to 32 bits, so anything wider is refused rather than quietly run as a different seed.
+function seedFrom(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const seed = Number(raw);
+  if (!/^-?[0-9]+$/.test(raw) || seed !== (seed | 0)) {
+    throw new Error('FC_SEED must be a 32 bit integer');
+  }
+  return seed;
+}
+
+// The first draw from the 'binary' string unit makes fast-check build a reverse lookup over
+// every code point, about a million entries, to vet its bias strings. It is cached after
+// that, so the property that triggers it pays for all of it: about 0.2 s on a laptop, 1.1 to
+// 4.5 s on loaded CI runners with coverage on, and once past the 5 s default. Only that
+// property carries this timeout, so move it if the test order changes.
+export const FIRST_BINARY_PROPERTY_TIMEOUT_MS = 30_000;
+
+// Raise numRuns locally to hunt.
+export const runs = { seed: seedFrom(process.env['FC_SEED'], 20), numRuns: 500 } as const;
 
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

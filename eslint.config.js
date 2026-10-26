@@ -36,6 +36,11 @@ export default tseslint.config(
     },
   },
   {
+    // Everything people see is styled from tokens only.
+    files: ['packages/ui/**', 'apps/**'],
+    rules: { 'drefyn/no-arbitrary-values': 'error' },
+  },
+  {
     files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
   },
