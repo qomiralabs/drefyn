@@ -6,3 +6,7 @@ packages:
 # Minutes. A version must be three days old before pnpm resolves it, which covers hand
 # added packages and lockfile maintenance, not only Renovate PRs.
 minimumReleaseAge: 4320
+
+# protobufjs (under the flagd provider) has a postinstall that only prints a version hint;
+# nothing needs it, and listing it here keeps installs warning free.
+ignoredBuiltDependencies: [protobufjs]
