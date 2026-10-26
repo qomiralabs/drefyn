@@ -121,20 +121,15 @@ describe('near misses of the exact name exceptions', () => {
 
 describe('forbidden packages in the licence list', () => {
   it.each([
-    ['sharp', 'Apache-2.0'],
-    ['@img/sharp-libvips-darwin-arm64', 'LGPL-3.0-or-later'],
-    ['@img/sharp-linux-x64', 'Apache-2.0'],
-    ['@img/sharp-wasm32', 'Apache-2.0 AND LGPL-3.0-or-later AND MIT'],
-  ])('refuses %s whatever its licence (%s)', (name, license) => {
+    ['sharp', 'Apache-2.0', 0],
+    ['@img/sharp-libvips-darwin-arm64', 'LGPL-3.0-or-later', 1],
+    ['@img/sharp-linux-x64', 'Apache-2.0', 1],
+    ['@img/sharp-wasm32', 'Apache-2.0 AND LGPL-3.0-or-later AND MIT', 1],
+  ])('refuses %s whatever its licence (%s)', (name, license, entry) => {
     const result = checkLicenses(withExtra(pkg(name, license, '0.34.4')), real);
-    expect(result.violations).toEqual([
-      {
-        name,
-        versions: ['0.34.4'],
-        license,
-        forbidden: expect.stringMatching(/\S/),
-      },
-    ]);
+    const reason = real.forbidden[entry]?.reason;
+    expect(reason).toMatch(/\S/);
+    expect(result.violations).toEqual([{ name, versions: ['0.34.4'], license, forbidden: reason }]);
   });
 
   it.each(['sharpen', 'sharp-cli', '@img', 'img/sharp', '@imgix/js-core', '@image/sharp'])(
@@ -275,6 +270,11 @@ describe('forbidden packages in pnpm-lock.yaml', () => {
     const hit = checkLockfile(text, real).find((v) => v.name === name);
     expect(hit?.versions).toEqual([version]);
     expect(hit?.forbidden).toMatch(/\S/);
+  });
+
+  it('finds a snapshot written as an empty inline map', () => {
+    const text = `lockfileVersion: '9.0'\n\nsnapshots:\n\n  '@img/sharp-darwin-arm64@0.34.4': {}\n`;
+    expect(checkLockfile(text, real).map((v) => v.name)).toEqual(['@img/sharp-darwin-arm64']);
   });
 
   it('finds a platform binary that no machine here would install', () => {
