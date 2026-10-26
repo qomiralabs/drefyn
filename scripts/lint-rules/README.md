@@ -89,7 +89,7 @@ files `.gitignore`, `.npmrc`, `.nvmrc`, `.prettierignore`, `LICENSE`,
 `pnpm-lock.yaml` and `pnpm-workspace.yaml`:
 
 - I1. Every tree entry outside the reviewed set has a source extension or one of
-  `.json`, `.css`, `.md`, `.txt`, `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`,
+  `.json`, `.css`, `.md`, `.txt`, `.sql`, `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`,
   `.avif`, `.ico`, `.woff`, `.woff2`, `.ttf`, `.otf`. No extension (dotfiles included)
   is refused.
 - I2. Every reviewed prefix and root file asks for security review and has a code

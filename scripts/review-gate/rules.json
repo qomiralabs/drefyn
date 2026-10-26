@@ -10,7 +10,13 @@
   "rules": [
     {
       "reviewer": "security-reviewer",
-      "prefixes": [".github/", "scripts/", "deploy/", "packages/egress/"],
+      "prefixes": [
+        ".github/",
+        "scripts/",
+        "deploy/",
+        "packages/egress/",
+        "packages/db/migrations/"
+      ],
       "names": [
         "renovate.json",
         "package.json",
