@@ -43,12 +43,19 @@ await client.close();
 ```
 
 - `createFlagClient(config, deps)` builds one flagd provider in process: offline file mode
-  for source `file`, in process sync for source `flagd`. There is no RPC option, and the
-  provider's own `FLAGD_*` variables cannot change the resolver, the file or the host. It
-  never throws when the provider is unreachable: it waits at most the init timeout, logs
-  `flags.provider_not_ready` and serves safe values until the provider is ready. An invalid
-  config rejects with `FLAG_CONFIG_INVALID`. `deps.registry` replaces the package registry,
-  for tests.
+  for source `file`, in process sync for source `flagd`. There is no RPC option. Every
+  provider option is set explicitly, so the provider's own `FLAGD_*` variables cannot change
+  the resolver, the file, the host, the selector or anything else. It never throws when the
+  provider is unreachable: it waits at most the init timeout, logs
+  `flags.provider_not_ready` and, until the provider first syncs, answers safe values with
+  `FLAG_PROVIDER_NOT_READY` without calling it. An invalid config rejects with
+  `FLAG_CONFIG_INVALID`. `deps.registry` replaces the package registry, for tests.
+- `close()` stops the provider. The flagd provider is patched (see
+  `patches/@openfeature__flagd-provider@0.17.0.patch`) so that its gRPC sync stops
+  reconnecting once closed; without it a closed client kept retrying and held the process
+  open.
+- The context always sends `internal` (false unless the caller says true), so a global
+  OpenFeature context cannot turn an internal rollout on for everyone.
 - `isOn(name, ctx)` returns a boolean. Plan flags are left out by type.
 - `evaluate(name, ctx)` returns `{ value, source, errorCode? }`. `source` is `provider`,
   `safe_value`, `test_override` or `entitlements`. `errorCode` is `FLAG_TIMEOUT`,
@@ -95,15 +102,17 @@ Emitted through the injected sink:
 - `flags_last_sync_age_seconds` (gauge): 0 while in sync; otherwise seconds since sync was
   lost, or since the client started if the provider never synced. Both gauges are pushed on
   every change of sync state and every 15 seconds while the client is open, so the age
-  keeps rising in a push sink; alert on it at 5 minutes. In file mode the provider never
-  loses sync, so the age stays 0.
+  keeps rising in a push sink; alert on it at 5 minutes. In file mode the provider reports
+  no loss once the file has been read: if the file later becomes unreadable it keeps the
+  last values and the age stays 0. A file that is missing at start counts from client start.
 - `flags_evaluation_ms` (histogram): one per evaluation, labelled with the flag name (or
   `unregistered`), the `source` and the `error` code when there is one.
 
 Gauges carry only the `source` label (`file` or `flagd`). Metric labels never carry
 organization, project or user IDs, and logs never carry user IDs. The one log event is
 `flags.provider_not_ready`, logged once when the provider is not ready at the end of the
-init wait, with the source, the reason (`timeout` or `failed`) and the time waited. A sink
+init wait, with the source, the reason (`timeout` or `failed`, decided by how the start
+ended, not by errors reported during it) and the time waited. A sink
 that throws is ignored.
 
 ### Test helpers: `@drefyn/flags/testing`
