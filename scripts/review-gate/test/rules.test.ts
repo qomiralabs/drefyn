@@ -129,6 +129,8 @@ describe('the shipped rules file', () => {
     'packages/web/src/eslint.config.cts',
     'scripts/lint-rules/guard.config.js',
     'packages/egress/src/index.ts',
+    'packages/db/migrations/0001_init.up.sql',
+    'packages/db/migrations/test/0001.test.ts',
     'packages/egress/package.json',
     'packages/web/src/pnpm-workspace.yaml',
     '.gitmodules',

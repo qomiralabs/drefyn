@@ -8,7 +8,15 @@
   },
   "paths": {
     "security": {
-      "prefixes": [".github/", "scripts/", "deploy/", "docker/", ".changeset/", "packages/egress/"],
+      "prefixes": [
+        ".github/",
+        "scripts/",
+        "deploy/",
+        "docker/",
+        ".changeset/",
+        "packages/egress/",
+        "packages/db/migrations/"
+      ],
       "names": [
         "renovate.json",
         "package.json",
