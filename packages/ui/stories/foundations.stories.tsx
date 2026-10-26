@@ -95,7 +95,7 @@ function Foundations() {
   return (
     <main className="mx-auto max-w-page px-24 py-48 sm:px-48 sm:py-64">
       <p className="font-mono text-label text-secondary uppercase">Foundations</p>
-      <h1 className="mt-8 pt-px text-display-s text-ink sm:text-display-m">Type and surfaces</h1>
+      <h1 className="mt-8 text-display-s text-ink sm:text-display-m">Type and surfaces</h1>
       <p className="mt-16 max-w-measure text-body-l text-body">
         Every Drefyn surface is set from these steps and grounds. The values come from the token
         source, so this page changes when the tokens do.
