@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import {
   describeFailure,
   fixtureMigrations,
@@ -7,6 +7,7 @@ import {
   recordedName,
   shippedMigrations,
 } from './support/cli.ts';
+import { describeWithStack } from './support/presence.ts';
 import { databases } from './support/databases.ts';
 import { CHECKSUMS, MIGRATIONS, extensionState, migrationState, query } from './support/sql.ts';
 import { schemaDump } from './support/stack.ts';
@@ -14,7 +15,7 @@ import { schemaDump } from './support/stack.ts';
 const dbs = databases();
 const bookkeeping = [`${MIGRATIONS}*`, `${CHECKSUMS}*`];
 
-describe('up, down, up', () => {
+describeWithStack('up, down, up', () => {
   it('leaves an identical schema dump and returns to the bootstrap schema on the way down', async () => {
     const db = await dbs.fresh('base');
     const shipped = shippedMigrations();

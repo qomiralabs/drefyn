@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import {
   describeFailure,
   fixtureMigrations,
@@ -6,6 +6,7 @@ import {
   migration,
   startMigrate,
 } from './support/cli.ts';
+import { describeWithStack } from './support/presence.ts';
 import { databases } from './support/databases.ts';
 import { until } from './support/process.ts';
 import {
@@ -23,7 +24,7 @@ const HELD = /another run holds the (migration )?lock/i;
 // A key of the test's own that the gate fixture waits on.
 const GATE = 1414;
 
-describe('advisory lock', () => {
+describeWithStack('advisory lock', () => {
   it('exits 2 and applies nothing while another session holds the lock', async () => {
     const db = await dbs.fresh('base');
     const holder = await holdMigrateLock(db.owner);
@@ -115,7 +116,7 @@ describe('advisory lock', () => {
   });
 });
 
-describe('lock_timeout inside migrations', () => {
+describeWithStack('lock_timeout inside migrations', () => {
   it('is 2 s while a migration runs', async () => {
     const db = await dbs.fresh('base');
     const dir = fixtureMigrations({

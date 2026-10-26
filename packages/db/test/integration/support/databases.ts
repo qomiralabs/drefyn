@@ -94,3 +94,41 @@ export function databases() {
     },
   };
 }
+
+// Every database a run creates starts with this, and nothing else on the stack does.
+export const TEST_PREFIX = 'drefyn_test_';
+
+// Drops every database whose name starts with the prefix. The prefix is required, so a test
+// can sweep its own names without touching the clones other files hold right now; only the
+// global setup sweeps the bare TEST_PREFIX, while it holds the run lock and before any file runs.
+export async function sweepDatabases(prefix: string): Promise<string[]> {
+  if (!prefix.startsWith(TEST_PREFIX) || !/^[a-z0-9_]+$/.test(prefix)) {
+    throw new Error(`refusing to sweep databases outside ${TEST_PREFIX}: ${prefix}`);
+  }
+  const names = (await superuser('select datname from pg_database order by datname;'))
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((name) => name.startsWith(prefix));
+  for (const name of names) await dropDatabase(name);
+  return names;
+}
+
+// create database ... template fails while anyone is connected to the template, and a
+// backend lingers briefly after a client exits, so templates are closed and then watched
+// until empty. Clones do not inherit allow_connections.
+export async function closeTemplate(name: string, timeoutMs = 10_000): Promise<void> {
+  await superuser(`alter database ${ident(name)} with allow_connections false;`);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const count = await superuser(
+      `select count(*) from pg_stat_activity where datname = '${name}';`,
+    );
+    if (count.trim() === '0') return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `template ${name} still has ${count.trim()} backends after ${String(timeoutMs)} ms`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

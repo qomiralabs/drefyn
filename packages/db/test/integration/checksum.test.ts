@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import {
   describeFailure,
   fixtureMigrations,
@@ -10,6 +10,7 @@ import {
   recordedName,
   shippedMigrations,
 } from './support/cli.ts';
+import { describeWithStack } from './support/presence.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { migrationState, tableExists } from './support/sql.ts';
 import { schemaDump } from './support/stack.ts';
@@ -30,7 +31,7 @@ async function appliedWithWidgets(): Promise<{ db: TestDatabase; dir: string }> 
 
 const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
-describe('checksums', () => {
+describeWithStack('checksums', () => {
   it('records the SHA-256 of every applied file', async () => {
     const { db, dir } = await appliedWithWidgets();
     const state = await migrationState(db.owner);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
@@ -24,7 +24,7 @@ function checkTypes(url: string, migrationsDir?: string) {
   );
 }
 
-describe('check:types', () => {
+describeWithStack('check:types', () => {
   it('passes when the committed types match the migrated schema', async () => {
     const db = await dbs.fresh('base');
     const result = await checkTypes(db.owner);

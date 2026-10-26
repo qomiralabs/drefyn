@@ -9,15 +9,20 @@ declare module 'vitest' {
   }
 }
 
-function inCi(env: NodeJS.ProcessEnv): boolean {
+export function inCi(env: NodeJS.ProcessEnv): boolean {
   const value = env['CI'] ?? '';
   return value !== '' && value !== 'false' && value !== '0';
 }
 
-// On a laptop without the stack, tests that opt in are skipped with this reason. In CI an
-// absent stack is never a reason to skip: the global setup then fails the run instead.
+// The one rule for every integration file: run when the stack is there; on a laptop
+// without it, skip with the reason in the suite name; in CI, fail the run with the reason.
+export function stackRule(absent: string | null, env: NodeJS.ProcessEnv): 'run' | 'skip' | 'fail' {
+  if (absent === null) return 'run';
+  return inCi(env) ? 'fail' : 'skip';
+}
+
+// Why the compose stack cannot be used on this machine, or null when it can.
 export async function stackAbsence(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  if (inCi(env)) return null;
   const project = env['COMPOSE_PROJECT_NAME'] ?? '';
   if (project === '') return 'COMPOSE_PROJECT_NAME is not set';
   const result = await run(

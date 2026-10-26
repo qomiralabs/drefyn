@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
@@ -23,7 +23,7 @@ async function refused(url: string, sql: string): Promise<string> {
   return 'allowed';
 }
 
-describe('application role after the first migration', () => {
+describeWithStack('application role after the first migration', () => {
   it('cannot create tables in app', async () => {
     const db = await dbs.fresh('migrated');
     expect(await refused(db.app, 'create table app.sneaky (id int)')).toBe('42501');
@@ -123,7 +123,7 @@ describe('application role after the first migration', () => {
   });
 });
 
-describe('tenant context functions', () => {
+describeWithStack('tenant context functions', () => {
   const ORG = '01a14984-4476-77ce-9335-2c3c3a59aa8b';
   const PROJECT = '01a14984-4476-77ce-9335-2c3c3a59aa8c';
 
@@ -178,7 +178,7 @@ describe('tenant context functions', () => {
   });
 });
 
-describe('migrations run as drefyn_owner only', () => {
+describeWithStack('migrations run as drefyn_owner only', () => {
   it.each([
     ['drefyn_app', 'app'],
     ['drefyn_public_reader', 'reader'],
@@ -192,7 +192,7 @@ describe('migrations run as drefyn_owner only', () => {
   });
 });
 
-describe('migrations cannot create or change extensions', () => {
+describeWithStack('migrations cannot create or change extensions', () => {
   it.each([
     ['create extension if not exists pg_trgm schema extensions;', /permission denied/i],
     ['create extension if not exists pg_trgm schema app;', /permission denied/i],

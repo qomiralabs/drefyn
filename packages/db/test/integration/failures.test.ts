@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import { start } from './support/process.ts';
@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 const dbs = databases();
 
-describe('failures exit 1', () => {
+describeWithStack('failures exit 1', () => {
   it('rolls back a file that fails halfway and records nothing for it', async () => {
     const db = await dbs.fresh('base');
     const dir = fixtureMigrations({

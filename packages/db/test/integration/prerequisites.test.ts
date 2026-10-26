@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import {
@@ -43,7 +43,7 @@ function expectNames(stderr: string, names: readonly (RegExp | string)[]) {
   }
 }
 
-describe('prerequisite check', () => {
+describeWithStack('prerequisite check', () => {
   it.each(cases)(
     'exits 4 when $what, applies nothing and takes no lock',
     async ({ sabotage, names }) => {
