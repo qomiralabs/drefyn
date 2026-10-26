@@ -19,6 +19,15 @@ export interface ConnectedRole {
   readonly bypassRls: boolean;
 }
 
+// An index in schema app with indisvalid false: a concurrent build that failed, was
+// cancelled, or is still running.
+export interface InvalidIndex {
+  readonly index: string;
+  readonly table: string;
+  // pg_stat_progress_create_index shows a build for it right now.
+  readonly building: boolean;
+}
+
 export interface RunRequest {
   readonly direction: 'up' | 'down';
   readonly count: number;
@@ -33,6 +42,7 @@ export interface RunRequest {
 export interface MigrateSession {
   role(): Promise<ConnectedRole>;
   vectorExtension(): Promise<VectorExtension | undefined>;
+  invalidIndexes(): Promise<InvalidIndex[]>;
   // pg_try_advisory_lock on the shared key; false when another session holds it.
   tryLock(): Promise<boolean>;
   // Rolls back anything left open, then releases the lock.
@@ -107,6 +117,23 @@ async function checkRoleAndPrerequisites(session: MigrateSession): Promise<void>
   // Before the lock, so a missing extension never holds up a concurrent run.
   const prerequisites = evaluatePrerequisites(await session.vectorExtension());
   if (!prerequisites.ok) throw new MigrateError('prerequisite_missing', prerequisites.message);
+  // A marked file rerun after a failed build would skip it through if not exists and be
+  // recorded on top of an index that does not work, so nothing runs until it is repaired.
+  const invalid = await session.invalidIndexes();
+  if (invalid.length > 0) throw new MigrateError('prerequisite_missing', invalidMessage(invalid));
+}
+
+function invalidMessage(invalid: readonly InvalidIndex[]): string {
+  return [
+    'these indexes in schema app are invalid, so nothing was run:',
+    ...invalid.map(
+      (i) =>
+        `  app.${i.index} on app.${i.table}${i.building ? ' (a build is still in progress)' : ''}`,
+    ),
+    'A build still in progress, even one started by hand, must finish first; run again after it does.',
+    'Otherwise fix the cause (duplicate rows for a unique index, or a long reader that held the build up),',
+    'then as drefyn_owner run: drop index concurrently if exists app.<index>; and run up again.',
+  ].join('\n');
 }
 
 // A snapshot that never creates anything and never takes the lock, so it is safe against

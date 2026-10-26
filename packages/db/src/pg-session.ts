@@ -11,7 +11,7 @@ import {
 } from './constants.ts';
 import { MIGRATION_NAME, type MigrationFile } from './migration-file.ts';
 import { MigrateError } from './outcome.ts';
-import type { ConnectedRole, MigrateSession, RunRequest } from './run.ts';
+import type { ConnectedRole, InvalidIndex, MigrateSession, RunRequest } from './run.ts';
 import type { VectorExtension } from './prerequisites.ts';
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -34,6 +34,33 @@ const IGNORE_PATTERN = '(?![0-9]{13}_[a-z0-9]+(_[a-z0-9]+)*\\.sql$).*';
 // because deleting the hash first and crashing before the record goes would leave a record
 // with no hash, and every later command would stop at exit 3.
 const ORPHANS = `delete from ${CHECKSUMS} c where not exists (select from ${MIGRATIONS} m where m.name = c.name)`;
+
+// Every invalid index in schema app, with whether a build for it is running now.
+const INVALID_INDEXES = `
+select i.relname as index, t.relname as table,
+       exists (select from pg_stat_progress_create_index p where p.index_relid = i.oid) as building
+  from pg_index x
+  join pg_class i on i.oid = x.indexrelid
+  join pg_class t on t.oid = x.indrelid
+  join pg_namespace n on n.oid = i.relnamespace
+ where n.nspname = '${MIGRATIONS_SCHEMA}' and not x.indisvalid
+ order by i.relname`;
+
+// Runs after a marked section and before its hash and record. A build that failed or was
+// skipped over an invalid index raises here, so the file is never recorded as done.
+const CHECK_INDEXES = `do $$
+declare
+  found text;
+begin
+  select string_agg(format('app.%s on app.%s', bad.index, bad.table)
+           || case when bad.building then ' (a build is still in progress)' else '' end,
+         ', ' order by bad.index)
+    into found
+    from (${INVALID_INDEXES}) bad;
+  if found is not null then
+    raise exception 'invalid indexes in schema app after this file ran: %', found;
+  end if;
+end $$;`;
 
 // Owner only on every up and down: default privileges from the first migration would
 // otherwise hand drefyn_app any bookkeeping table created later, for example after a drop.
@@ -150,6 +177,10 @@ class PgSession implements MigrateSession {
     return row;
   }
 
+  async invalidIndexes(): Promise<InvalidIndex[]> {
+    return this.rows<InvalidIndex>(INVALID_INDEXES);
+  }
+
   async tryLock(): Promise<boolean> {
     const [row] = await this.rows<{ locked: boolean }>(
       'select pg_try_advisory_lock($1::bigint) as locked',
@@ -214,6 +245,9 @@ class PgSession implements MigrateSession {
         current = file.name;
         if (!file.transaction) pgm.noTransaction();
         pgm.sql(direction === 'up' ? file.up : file.down);
+        // A failed transactional build rolls back and leaves no index, so only marked files
+        // need the check.
+        if (!file.transaction) pgm.sql(CHECK_INDEXES);
         const record = recordSql(file, direction);
         if (record !== undefined) pgm.sql(record);
       };
