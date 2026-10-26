@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { compareRenderings, renderSchema, type CatalogColumn } from '../src/schema-types.ts';
+import { MigrateError } from '../src/outcome.ts';
 import { committedTypesPath, runCheckTypes, type TypesDatabase } from '../src/types-check.ts';
 import type { Output } from '../src/run.ts';
 import { migrationsDir } from './support.ts';
@@ -23,7 +24,7 @@ const widgets: CatalogColumn[] = [
   col({ table: 'widgets', column: 'embedding', type: 'vector', nullable: true }),
   col({ table: 'widgets', column: 'tags', type: '_text', elementType: 'text' }),
   col({ table: 'widgets', column: 'state', type: 'widget_state', enumLabels: ['on', 'off'] }),
-  col({ table: 'widgets', column: 'odd name', type: 'mystery' }),
+  col({ table: 'widgets', column: 'odd name', type: 'bool' }),
 ];
 
 describe('renderSchema', () => {
@@ -40,7 +41,7 @@ describe('renderSchema', () => {
         '  embedding: string | null;',
         '  tags: string[];',
         "  state: 'on' | 'off';",
-        "  'odd name': unknown;",
+        "  'odd name': boolean;",
         '}',
       ].join('\n'),
     );
@@ -92,6 +93,50 @@ describe('renderSchema', () => {
 
   it('matches the committed file for the shipped migrations, which add no tables', () => {
     expect(readFileSync(committedTypesPath, 'utf8')).toBe(renderSchema([]));
+  });
+});
+
+// A type the map does not know must stop the run: `unknown` would compile, and quietly
+// weaken every query on that column.
+describe('renderSchema refuses types it cannot map', () => {
+  function refusal(columns: CatalogColumn[]): MigrateError {
+    let caught: unknown;
+    try {
+      renderSchema(columns);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(MigrateError);
+    return caught as MigrateError;
+  }
+
+  it('names the table, the column and the type of a plain column', () => {
+    const error = refusal([col({ table: 'bookings', column: 'during', type: 'int4range' })]);
+    expect(error.outcome).toBe('failed');
+    expect(error.message).toContain('app.bookings.during (int4range)');
+  });
+
+  it('names the element type of an array column', () => {
+    const error = refusal([
+      col({ table: 'bookings', column: 'slots', type: '_int4range', elementType: 'int4range' }),
+    ]);
+    expect(error.message).toContain('app.bookings.slots (int4range[])');
+  });
+
+  it('names every unmapped column at once, in order', () => {
+    const error = refusal([
+      col({ table: 'b', column: 'x', type: 'tsvector' }),
+      col({ table: 'a', column: 'ok', type: 'text' }),
+      col({ table: 'a', column: 'y', type: 'point' }),
+    ]);
+    expect(error.message).toMatch(/app\.a\.y \(point\)[\s\S]*app\.b\.x \(tsvector\)/);
+    expect(error.message).not.toContain('app.a.ok');
+  });
+
+  it('ignores an unmapped type in a bookkeeping table', () => {
+    expect(() =>
+      renderSchema([col({ table: 'pgmigrations', column: 'x', type: 'int4range' })]),
+    ).not.toThrow();
   });
 });
 
@@ -211,6 +256,21 @@ describe('runCheckTypes', () => {
     const r = await check([], fakeDatabase(null, []), typesFile(''), 4);
     expect(r.code).toBe(4);
   });
+
+  it.each([[[]], [['--write']]])(
+    'exits 1 naming an unmapped column and writes nothing (%j)',
+    async (argv) => {
+      const path = typesFile('untouched\n');
+      const r = await check(
+        argv,
+        fakeDatabase(null, [col({ table: 'bookings', column: 'during', type: 'int4range' })]),
+        path,
+      );
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('app.bookings.during (int4range)');
+      expect(readFileSync(path, 'utf8')).toBe('untouched\n');
+    },
+  );
 
   it('writes the file with --write', async () => {
     const path = typesFile('');

@@ -1,3 +1,5 @@
+import { MigrateError } from './outcome.ts';
+
 // Turns the app schema, read from pg_catalog, into the committed TypeScript table types,
 // and compares two renderings table by table. Pure: the same rows always give the same bytes.
 
@@ -74,7 +76,18 @@ function baseType(column: CatalogColumn, name: string): string {
   if (column.enumLabels !== null) {
     return column.enumLabels.length === 0 ? 'never' : column.enumLabels.map(quote).join(' | ');
   }
-  return SCALARS[name] ?? 'unknown';
+  const mapped = SCALARS[name];
+  // renderSchema refuses unmapped columns before it gets here.
+  if (mapped === undefined) throw new Error(`no TypeScript type for ${name}`);
+  return mapped;
+}
+
+// The Postgres type this column needs from the map, or undefined when it is mapped or an enum.
+function unmappedType(column: CatalogColumn): string | undefined {
+  if (column.enumLabels !== null) return undefined;
+  const name = column.elementType ?? column.type;
+  if (SCALARS[name] !== undefined) return undefined;
+  return column.elementType === null ? name : `${name}[]`;
 }
 
 function tsType(column: CatalogColumn): string {
@@ -124,6 +137,21 @@ function interfaceName(table: string, taken: ReadonlySet<string>): string {
 // Columns arrive in table and attribute order; that order is kept.
 export function renderSchema(columns: readonly CatalogColumn[]): string {
   const tables = group(columns);
+  // A guess such as unknown would compile and quietly weaken every query on the column.
+  const unmapped = [...tables.values()].flat().flatMap((c) => {
+    const type = unmappedType(c);
+    return type === undefined ? [] : [`app.${c.table}.${c.column} (${type})`];
+  });
+  if (unmapped.length > 0) {
+    throw new MigrateError(
+      'failed',
+      [
+        'these columns have Postgres types check:types cannot map, so nothing was written:',
+        ...unmapped.map((line) => `  ${line}`),
+        'Change the column type, or add the type to the map in src/schema-types.ts with a test.',
+      ].join('\n'),
+    );
+  }
   const names = new Map<string, string>();
   const parts = [HEADER];
   for (const [table, cols] of tables) {

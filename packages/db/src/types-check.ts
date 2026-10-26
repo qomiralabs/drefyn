@@ -1,12 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import pg from 'pg';
 import { USAGE, parseMigrateArgs } from './args.ts';
 import { parseMigrationConfig, type Env, type MigrationConfig } from './config.ts';
 import { MIGRATIONS_SCHEMA, MIGRATIONS_TABLE } from './constants.ts';
 import { DbError } from './errors.ts';
 import { MigrateError, exitCodeFor, outcomeOf } from './outcome.ts';
-import { clientConfig } from './pg-session.ts';
+import { createClient } from './pg-session.ts';
 import { runMigrate, type Output } from './run.ts';
 import { compareRenderings, renderSchema, type CatalogColumn } from './schema-types.ts';
 
@@ -30,24 +29,35 @@ export interface CheckTypesOptions {
   readonly typesPath?: string;
 }
 
+// Domains resolve to their final base type, however deeply they nest, and so do the
+// elements of an array column. The bookkeeping tables are dropped later, in renderSchema.
 const COLUMNS = `
+with recursive chain(start, oid, depth) as (
+  select t.oid, t.oid, 0 from pg_type t where t.typtype = 'd'
+  union all
+  select c.start, t.typbasetype, c.depth + 1
+    from chain c join pg_type t on t.oid = c.oid and t.typtype = 'd'
+),
+base(start, oid) as (
+  select distinct on (start) start, oid from chain order by start, depth desc
+)
 select c.relname as "table", a.attname as "column", r.typname as type,
-       et.typname as "elementType",
-       (select array_agg(e.enumlabel::text order by e.enumsortorder) from pg_enum e
-         where e.enumtypid = coalesce(et.oid, r.oid)) as "enumLabels",
+       e.typname as "elementType",
+       (select array_agg(l.enumlabel::text order by l.enumsortorder) from pg_enum l
+         where l.enumtypid = coalesce(e.oid, r.oid)) as "enumLabels",
        not a.attnotnull as nullable,
        (a.atthasdef or a.attidentity <> '' or a.attgenerated <> '') as "hasDefault"
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
-  join pg_type t on t.oid = a.atttypid
-  join pg_type r on r.oid = case when t.typtype = 'd' then t.typbasetype else t.oid end
-  left join pg_type et on r.typcategory = 'A' and et.oid = r.typelem
+  join pg_type r on r.oid = coalesce((select oid from base where start = a.atttypid), a.atttypid)
+  left join pg_type e on r.typcategory = 'A'
+   and e.oid = coalesce((select oid from base where start = r.typelem), r.typelem)
  where n.nspname = $1 and c.relkind in ('r', 'p', 'v', 'm') and not c.relispartition
  order by c.relname, a.attnum`;
 
 export async function openTypesDatabase(config: MigrationConfig): Promise<TypesDatabase> {
-  const client = new pg.Client(clientConfig(config));
+  const client = createClient(config);
   client.on('error', () => undefined);
   await client.connect();
   return {
