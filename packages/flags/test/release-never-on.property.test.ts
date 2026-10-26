@@ -21,7 +21,7 @@ import {
   fileConfig,
   fixtureFlags,
 } from './support/fixtures.ts';
-import { SEEDS } from './support/seeds.ts';
+import { PROVIDER_PROPERTY_TIMEOUT_MS, SEEDS } from './support/seeds.ts';
 
 vi.mock('@openfeature/flagd-provider', () => import('./support/flagd.ts'));
 
@@ -188,9 +188,13 @@ async function run({ init, steps }: { init: InitMode; steps: readonly Step[] }) 
 }
 
 describe.each(SEEDS)('under any sequence of provider failures, seed %i', (seed) => {
-  it('a release or experiment flag never evaluates on and a kill switch holds its safe value', async () => {
-    await fc.assert(fc.asyncProperty(scenario, run), { seed, numRuns: 60 });
-  });
+  it(
+    'a release or experiment flag never evaluates on and a kill switch holds its safe value',
+    { timeout: PROVIDER_PROPERTY_TIMEOUT_MS },
+    async () => {
+      await fc.assert(fc.asyncProperty(scenario, run), { seed, numRuns: 60 });
+    },
+  );
 });
 
 describe('the generated failures', () => {
