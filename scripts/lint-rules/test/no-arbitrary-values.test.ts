@@ -34,6 +34,10 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     // Full colour is the measured colour, and the identity filters change nothing.
     `const c = 'bg-ink/100 text-ink/100 brightness-100 contrast-100 saturate-100 grayscale-0';`,
     `const c = 'z-auto z-base z-overlay focus-visible:focus-ring stroke-0 decoration-0';`,
+    // Component sizes, fills and strokes are named tokens.
+    `const c = 'h-control-md size-icon-sm min-h-row-compact w-shell-nav h-shell-bar';`,
+    `const c = 'bg-hover active:bg-pressed bg-overlay bg-overlay-scrim bg-skeleton-fill';`,
+    `const c = 'focus-visible:focus-ring-inset border-l-indicator border-accent-ink';`,
     `const c = 'decoration-rule underline-offset-auto stroke-ink';`,
     // Plain prose and data are not class lists.
     `const s = 'Look at [this] and a-b';`,
@@ -46,6 +50,10 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     { code: `const c = 'bg-[rgb(0,0,0)]';`, errors: [arbitrary('bg-[rgb(0,0,0)]')] },
     { code: `const c = 'hover:!mt-[2rem]';`, errors: [arbitrary('hover:!mt-[2rem]')] },
     { code: `const c = '-mt-[2px]';`, errors: [arbitrary('-mt-[2px]')] },
+    // A size the tokens do not have, even one that matches a token value.
+    { code: `const c = 'h-[40px]';`, errors: [arbitrary('h-[40px]')] },
+    { code: `const c = 'size-[1.25rem]';`, errors: [arbitrary('size-[1.25rem]')] },
+    { code: `const c = 'w-(--dr-shell-nav)';`, errors: [arbitrary('w-(--dr-shell-nav)')] },
     { code: `const c = '[mask-type:luminance]';`, errors: [arbitrary('[mask-type:luminance]')] },
     { code: `const c = 'bg-ink/[0.3]';`, errors: [arbitrary('bg-ink/[0.3]')] },
     { code: `const c = 'bg-ink/(--alpha)';`, errors: [arbitrary('bg-ink/(--alpha)')] },
