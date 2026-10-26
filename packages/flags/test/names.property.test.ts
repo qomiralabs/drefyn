@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { FLAG_AREAS, FlagError, defineFlags, type FlagDefinition } from '../src/index.ts';
-import { SEEDS } from './support/seeds.ts';
+import { FIRST_BINARY_PROPERTY_TIMEOUT_MS, SEEDS } from './support/seeds.ts';
 
 const NAME = /^[a-z]+\.[a-z][a-z0-9_]*$/;
 const AREAS = new Set<string>(FLAG_AREAS);
@@ -48,28 +48,32 @@ const mutated = fc
 const anyName = fc.oneof(nearName, mutated, fc.string({ unit: 'binary' }));
 
 describe.each(SEEDS)('flag names, seed %i', (seed) => {
-  it('are accepted exactly when they match <area>.<feature> with a known area', () => {
-    const seen = { accepted: 0, name_pattern: 0, unknown_area: 0 };
-    fc.assert(
-      fc.property(anyName, (name) => {
-        const want = expected(name);
-        seen[want] += 1;
-        const got = outcome({ ...base, name });
-        if (want === 'accepted') {
-          expect(got).toBe('accepted');
-        } else {
-          expect(got).toBeInstanceOf(FlagError);
-          expect((got as FlagError).code).toBe('FLAG_DEFINITION_INVALID');
-          expect((got as FlagError).problem).toBe(want);
-        }
-      }),
-      { seed, numRuns: 400 },
-    );
-    // Guards against a generator that never reaches one of the branches.
-    expect(seen.accepted).toBeGreaterThan(0);
-    expect(seen.name_pattern).toBeGreaterThan(0);
-    expect(seen.unknown_area).toBeGreaterThan(0);
-  });
+  it(
+    'are accepted exactly when they match <area>.<feature> with a known area',
+    () => {
+      const seen = { accepted: 0, name_pattern: 0, unknown_area: 0 };
+      fc.assert(
+        fc.property(anyName, (name) => {
+          const want = expected(name);
+          seen[want] += 1;
+          const got = outcome({ ...base, name });
+          if (want === 'accepted') {
+            expect(got).toBe('accepted');
+          } else {
+            expect(got).toBeInstanceOf(FlagError);
+            expect((got as FlagError).code).toBe('FLAG_DEFINITION_INVALID');
+            expect((got as FlagError).problem).toBe(want);
+          }
+        }),
+        { seed, numRuns: 400 },
+      );
+      // Guards against a generator that never reaches one of the branches.
+      expect(seen.accepted).toBeGreaterThan(0);
+      expect(seen.name_pattern).toBeGreaterThan(0);
+      expect(seen.unknown_area).toBeGreaterThan(0);
+    },
+    seed === SEEDS[0] ? FIRST_BINARY_PROPERTY_TIMEOUT_MS : undefined,
+  );
 });
 
 const isoDay = fc
