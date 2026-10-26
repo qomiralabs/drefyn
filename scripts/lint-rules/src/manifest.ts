@@ -179,6 +179,9 @@ export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
   '.css',
   '.md',
   '.txt',
+  // Migrations stay plain SQL so review reads the bytes that run. Node cannot run
+  // SQL, and a .sql file reaches it as code only the ways a .txt file can.
+  '.sql',
   '.svg',
   '.png',
   '.jpg',

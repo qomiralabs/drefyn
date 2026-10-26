@@ -22,6 +22,8 @@
 /scripts/lint-rules/guard.config.js @Divine572
 # Everything here may open raw network connections, so every change is a security change.
 /packages/egress/          @Divine572
+# Migrations set grants, policies and row level security, so every change is a security change.
+/packages/db/migrations/   @Divine572
 /vitest.shared.ts          @Divine572
 /.prettierrc.json          @Divine572
 /.prettierignore           @Divine572

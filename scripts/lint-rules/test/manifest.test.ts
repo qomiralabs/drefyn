@@ -455,6 +455,12 @@ describe('manifest checker on paths the rules and the guard cannot see through',
     expect(check()).toEqual([]);
   });
 
+  it('I1: passes a lowercase .sql migration and refuses .SQL', () => {
+    ws.write('packages/a/migrations/1_x.sql', 'select 1;\n');
+    ws.write('packages/a/migrations/x.SQL', 'select 1;\n');
+    expect(check()).toEqual([`packages/a (@drefyn/a): migrations/x.SQL: ${fileType('.SQL')}`]);
+  });
+
   it('I1: judges a path in a merge conflict once, not once per stage', () => {
     const commit = (m: string) =>
       git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', m);
@@ -514,6 +520,21 @@ describe('the reviewed set matches the review gate', () => {
     for (const path of [...REVIEWED_PREFIXES, ...REVIEWED_ROOT_FILES]) {
       expect(owners, path).toContain(`/${path}`);
     }
+  });
+});
+
+describe('migrations need security review', () => {
+  // Migrations set grants, policies and row level security, so no change there is small.
+  it('I2: packages/db/migrations/ asks for security review and has a code owner', () => {
+    const rules = JSON.parse(
+      readFileSync(join(repoRoot, 'scripts/review-gate/rules.json'), 'utf8'),
+    ) as { paths: { security: { prefixes: string[] } } };
+    expect(rules.paths.security.prefixes).toContain('packages/db/migrations/');
+    const owners = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+      .map((line) => line.split(/\s+/)[0]);
+    expect(owners).toContain('/packages/db/migrations/');
   });
 });
 
