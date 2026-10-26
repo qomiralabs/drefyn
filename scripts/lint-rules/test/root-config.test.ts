@@ -35,7 +35,7 @@ async function lint(path: string, code: string): Promise<string[]> {
           parser: tseslint.parser,
           parserOptions: { ecmaFeatures: { jsx: true } },
         },
-        plugins: { 'react-hooks': reactHooks },
+        plugins: { 'react-hooks': { rules: reactHooks.rules } },
         rules,
       },
     ],
