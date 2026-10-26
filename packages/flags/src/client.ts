@@ -7,9 +7,11 @@ import {
   NOOP_PROVIDER,
   OpenFeature,
   ProviderEvents,
+  ProviderStatus,
   type Client,
   type EvaluationContext,
-  type EvaluationDetails,
+  type Logger,
+  type Provider,
 } from '@openfeature/server-sdk';
 import { assertFlagConfig, DEFAULT_FLAGD_SYNC_PORT, type FlagConfig } from './config.ts';
 import type { FlagDefinition, FlagRegistry, NameOf, PlanFlag, PlanNameOf } from './definitions.ts';
@@ -112,7 +114,7 @@ function fallback(value: boolean, errorCode: FlagEvaluationErrorCode): FlagEvalu
   return { value, source: 'safe_value', errorCode };
 }
 
-function fromErrorCode(code: ErrorCode): FlagEvaluationErrorCode {
+function fromErrorCode(code: unknown): FlagEvaluationErrorCode {
   switch (code) {
     case ErrorCode.FLAG_NOT_FOUND:
       return 'FLAG_NOT_FOUND';
@@ -128,14 +130,49 @@ function fromErrorCode(code: ErrorCode): FlagEvaluationErrorCode {
   }
 }
 
-// The server SDK hands back whatever the provider returned without checking its type, so
-// a string 'true' would pass as on. Only a real boolean is used.
-function fromDetails(details: EvaluationDetails<boolean>, safe: boolean): FlagEvaluation {
-  if (details.errorCode !== undefined) return fallback(safe, fromErrorCode(details.errorCode));
-  const value: unknown = details.value;
-  if (typeof value !== 'boolean') return fallback(safe, 'FLAG_PARSE_ERROR');
-  return { value, source: 'provider' };
+// A thrown error's code, as the SDK would read it; fromErrorCode maps anything unknown to
+// general. Reading it can itself throw (a getter, a proxy trap), and must not.
+function codeOf(error: unknown): unknown {
+  try {
+    return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  } catch {
+    return undefined;
+  }
 }
+
+// A provider can hand back anything, so a string 'true' or a missing result must not pass
+// as on. Only a real boolean from a result without an error code is used.
+function fromResolution(resolution: unknown, safe: boolean): FlagEvaluation {
+  try {
+    if (typeof resolution !== 'object' || resolution === null) {
+      return fallback(safe, 'FLAG_PARSE_ERROR');
+    }
+    const { value, errorCode } = resolution as { value?: unknown; errorCode?: unknown };
+    if (errorCode !== undefined && errorCode !== null) {
+      return fallback(safe, fromErrorCode(errorCode));
+    }
+    if (typeof value !== 'boolean') return fallback(safe, 'FLAG_PARSE_ERROR');
+    return { value, source: 'provider' };
+  } catch {
+    return fallback(safe, 'FLAG_GENERAL');
+  }
+}
+
+// Provider log lines are free text that can carry context values, so none are kept.
+// Stale and error keep answering, since the in process provider serves its last synced
+// values. Any other status, including one a later SDK adds, fails closed.
+const USABLE_STATUSES: ReadonlySet<unknown> = new Set([
+  ProviderStatus.READY,
+  ProviderStatus.STALE,
+  ProviderStatus.ERROR,
+]);
+
+const SILENT: Logger = {
+  error: () => undefined,
+  warn: () => undefined,
+  info: () => undefined,
+  debug: () => undefined,
+};
 
 // The work promise never rejects; whichever settles first wins and the timer is cleared.
 function withTimeout(
@@ -163,7 +200,7 @@ function toContext(ctx: FlagContext): EvaluationContext {
   if (ctx.userId !== undefined) context['userId'] = ctx.userId;
   // Always set: left out, a global OpenFeature context could turn internal rollout on.
   context['internal'] = ctx.internal === true;
-  return context;
+  return Object.freeze(context);
 }
 
 type ProviderFlag = Exclude<FlagDefinition, PlanFlag>;
@@ -185,18 +222,21 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
   private readonly config: FlagConfig;
   private readonly domain: string;
   private readonly client: Client;
+  private readonly provider: Provider;
   private readonly deps: FlagClientDeps<R>;
 
   constructor(
     config: FlagConfig,
     domain: string,
     client: Client,
+    provider: Provider,
     registry: FlagRegistry,
     deps: FlagClientDeps<R>,
   ) {
     this.config = config;
     this.domain = domain;
     this.client = client;
+    this.provider = provider;
     this.deps = deps;
     for (const definition of registry) this.definitions.set(definition.name, definition);
     this.labels = { source: config.source };
@@ -261,20 +301,39 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
   private fromProvider(definition: ProviderFlag, ctx: FlagContext): Promise<FlagEvaluation> {
     const safe = definition.safeValue;
     // Before the first sync the provider has nothing of ours to answer from.
-    if (this.closed || !this.everReady) {
+    if (this.closed || !this.everReady || !this.providerUsable()) {
       return Promise.resolve(fallback(safe, 'FLAG_PROVIDER_NOT_READY'));
     }
     let work: Promise<FlagEvaluation>;
     try {
-      // The safe value is the OpenFeature default: on any error the SDK returns it.
-      work = this.client.getBooleanDetails(definition.name, safe, toContext(ctx)).then(
-        (details) => fromDetails(details, safe),
-        () => fallback(safe, 'FLAG_GENERAL'),
+      // Straight to our own provider, not through the OpenFeature client. Any code in the
+      // process can add API or client hooks, and the provider adds its own: before hooks
+      // can rewrite or add context keys, and after and finally hooks can rewrite the
+      // answer. Nothing a hook does can then move a flag across organizations. The API
+      // and transaction contexts are left out too: the caller's context is the whole
+      // context.
+      // Wrapped so a provider that returns a plain result is awaited as the SDK would.
+      work = Promise.resolve(
+        this.provider.resolveBooleanEvaluation(definition.name, safe, toContext(ctx), SILENT),
+      ).then(
+        (resolution) => fromResolution(resolution, safe),
+        (error: unknown) => fallback(safe, fromErrorCode(codeOf(error))),
       );
-    } catch {
-      return Promise.resolve(fallback(safe, 'FLAG_GENERAL'));
+    } catch (error) {
+      return Promise.resolve(fallback(safe, fromErrorCode(codeOf(error))));
     }
     return withTimeout(work, this.config.evalTimeoutMs, fallback(safe, 'FLAG_TIMEOUT'));
+  }
+
+  // The client reports the status of whatever provider the domain points at. Once the
+  // domain is cleared or rebound that is someone else's provider, so ours stops answering.
+  private providerUsable(): boolean {
+    try {
+      if (OpenFeature.getProvider(this.domain) !== this.provider) return false;
+      return USABLE_STATUSES.has(this.client.providerStatus);
+    } catch {
+      return false;
+    }
   }
 
   // Plan flags fail closed: a broken lookup must not give a paid feature away.
@@ -378,7 +437,8 @@ export async function createFlagClient<const R extends FlagRegistry = Flags>(
 ): Promise<FlagClient<R>> {
   assertFlagConfig(config);
   const provider = new FlagdProvider(providerOptions(config));
-  // Random, so no other code in the process can guess the domain and swap our provider.
+  // Random, so it cannot collide with another client's domain. It is not a secret: API
+  // level event handlers receive it. A domain rebound to another provider fails closed.
   const domain = `drefyn-flags-${randomUUID()}`;
   // Registers the provider synchronously; the promise settles when its start does.
   const ready = OpenFeature.setProviderAndWait(domain, provider);
@@ -387,6 +447,7 @@ export async function createFlagClient<const R extends FlagRegistry = Flags>(
     config,
     domain,
     client,
+    provider,
     deps.registry ?? flags,
     deps,
   );
