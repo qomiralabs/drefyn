@@ -1,0 +1,5 @@
+import { mergeProps } from 'react-aria';
+
+export function Hooks() {
+  return <span {...mergeProps({}, {})} />;
+}

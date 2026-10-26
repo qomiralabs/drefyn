@@ -8,6 +8,8 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./react": "./src/react/index.ts",
+    "./react.css": "./src/react/react.css",
     "./tokens.css": "./src/generated/tokens.css",
     "./tailwind.css": "./src/generated/tailwind.css",
     "./tokens.dtcg.json": "./src/generated/tokens.dtcg.json",
@@ -18,10 +20,35 @@
     "preview": "node preview/build.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "storybook": "storybook dev --disable-telemetry -p 6006",
+    "storybook:build": "storybook build --disable-telemetry -o storybook-static",
+    "test:e2e": "playwright test --project=keyboard-chromium --project=keyboard-firefox --project=keyboard-webkit --project=axe --project=reduced-motion",
+    "test:visual": "node scripts/in-container.ts playwright test --project=visual",
+    "test:visual:update": "node scripts/in-container.ts playwright test --project=visual --update-snapshots"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "tailwindcss": "4.3.3"
+    "@playwright/test": "1.64.1",
+    "@storybook/addon-docs": "10.6.2",
+    "@storybook/react-vite": "10.6.2",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "happy-dom": "21.0.4",
+    "playwright-core": "1.64.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "storybook": "10.6.2",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.3"
   }
 }

@@ -1,0 +1,8 @@
+'use client';
+import { useState } from 'react';
+import { Menu as AriaMenu } from 'react-aria-components';
+
+export function Menu() {
+  const [open] = useState(false);
+  return <AriaMenu aria-label={open ? 'Open' : 'Closed'} />;
+}

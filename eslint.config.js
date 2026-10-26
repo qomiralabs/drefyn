@@ -1,7 +1,27 @@
 // @ts-check
 import js from '@eslint/js';
 import drefyn, { egressAllowList } from '@drefyn/lint-rules';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
+
+const motionMessage =
+  'Motion runs only in the dashboard and website. Use the duration and ease tokens.';
+// Bare package names only, so a local ./motion folder or @acme/motion is left alone.
+const motionSpecifier = '^(?:framer-)?motion(?:/|$)';
+// Dynamic imports are how Motion's features get lazy loaded, and no-restricted-imports
+// does not see them. A template literal with no placeholders names a package as surely
+// as a string does.
+const dynamicMotion = [
+  {
+    selector: 'ImportExpression[source.value=/^(framer-)?motion($|\\u002F)/]',
+    message: motionMessage,
+  },
+  {
+    selector:
+      "ImportExpression[source.type='TemplateLiteral'][source.expressions.length=0][source.quasis.0.value.cooked=/^(framer-)?motion($|\\u002F)/]",
+    message: motionMessage,
+  },
+];
 
 export default tseslint.config(
   {
@@ -10,6 +30,9 @@ export default tseslint.config(
       '**/coverage/**',
       '**/dist/**',
       '**/.turbo/**',
+      '**/storybook-static/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
       // Broken on purpose: the lint rule tests run ESLint on them with their own config.
       'scripts/lint-rules/test/fixtures/**',
     ],
@@ -39,6 +62,55 @@ export default tseslint.config(
     // Everything people see is styled from tokens only.
     files: ['packages/ui/**', 'apps/**'],
     rules: { 'drefyn/no-arbitrary-values': 'error' },
+  },
+  {
+    files: ['packages/ui/**', 'apps/**'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+    },
+  },
+  {
+    // Components only render text and style from token utilities, so nothing a
+    // customer typed can become markup and no value skips the token lint. Stories are
+    // held to the same rule because reviewers judge components by them.
+    files: ['packages/ui/src/react/**', 'packages/ui/stories/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='style']",
+          message: 'Style from token utilities, not inline styles.',
+        },
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'Components render text, never raw HTML.',
+        },
+        ...dynamicMotion,
+      ],
+    },
+  },
+  {
+    // Docs sites and status pages must never load Motion; components animate with CSS.
+    ignores: [
+      'apps/dashboard/**',
+      'apps/website/**',
+      'packages/ui/src/react/**',
+      'packages/ui/stories/**',
+    ],
+    rules: { 'no-restricted-syntax': ['error', ...dynamicMotion] },
+  },
+  {
+    ignores: ['apps/dashboard/**', 'apps/website/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [{ regex: motionSpecifier, message: motionMessage }],
+        },
+      ],
+    },
   },
   {
     files: ['**/*.js'],

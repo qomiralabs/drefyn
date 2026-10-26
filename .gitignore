@@ -16,3 +16,6 @@ coverage/
 dist/
 .turbo/
 *.tsbuildinfo
+storybook-static/
+test-results/
+playwright-report/

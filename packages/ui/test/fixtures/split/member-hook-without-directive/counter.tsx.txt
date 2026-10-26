@@ -1,0 +1,6 @@
+import * as React from 'react';
+
+export function Counter() {
+  const [count] = React.useState(0);
+  return <output>{count}</output>;
+}

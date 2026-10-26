@@ -1,4 +1,19 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src", "test", "preview", "vitest.config.ts"]
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src",
+    "test",
+    "preview",
+    "stories",
+    "e2e",
+    "scripts",
+    ".storybook/*.ts",
+    ".storybook/*.tsx",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }
