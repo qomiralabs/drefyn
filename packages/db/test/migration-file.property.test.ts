@@ -71,8 +71,10 @@ describe('migration file properties', () => {
   });
 
   // Fuzz: arbitrary text either parses into two non empty sections or is refused with a
-  // MigrateError; nothing else escapes.
-  it('never throws anything but a MigrateError', () => {
+  // MigrateError; nothing else escapes. 1000 runs took 216 to 249 ms alone and 439 to 635 ms
+  // beside two other suites on an M-series laptop, and 6349 ms on a loaded review machine
+  // (427 ms alone there). 30 s keeps about 4.7 times the worst seen.
+  it('never throws anything but a MigrateError', { timeout: 30_000 }, () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary', maxLength: 400 }), (text) => {
         try {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -132,6 +132,21 @@ describe('parseMigrationFile', () => {
     )}`;
     const file = parseMigrationFile(NAME, utf8(text));
     expect(file.transaction).toBe(false);
+  });
+
+  it.each([
+    '-- drefyn:no-transaction',
+    '-- drefyn: no transaction',
+    '-- Drefyn: no-transaction',
+    '--drefyn: no-transaction',
+    '-- drefyn: no-transaction.',
+    ' -- drefyn: no-transaction',
+  ])('does not take the misspelled marker %j as the marker', (line) => {
+    const text = `${line}\n${migrationText(
+      'create index concurrently widgets_name_idx on app.widgets (name);',
+      'drop index concurrently app.widgets_name_idx;',
+    )}`;
+    expect(refusal(NAME, text).message).toContain(NO_TRANSACTION_MARKER);
   });
 
   it('only honours the marker above the up section', () => {
@@ -315,6 +330,30 @@ describe('loadMigrationFiles refuses anything but strictly named .sql files', ()
     mkdirSync(join(dir, '1760000000002_b.sql'));
     const error = await rejected(loadMigrationFiles(dir, { warn: () => undefined }));
     expect((error as MigrateError).message).toContain('1760000000002_b.sql');
+  });
+
+  // A link could point the tool at a file nobody reviewed, or at something that is not a file.
+  it.each([
+    [
+      'a file outside the folder',
+      (dir: string, outside: string) => {
+        const target = join(outside, 'elsewhere.sql');
+        writeFileSync(target, migrationText('select 2;', 'select 2;'));
+        return target;
+      },
+    ],
+    ['a directory', (_dir: string, outside: string) => outside],
+    ['nothing (dangling)', (_dir: string, outside: string) => join(outside, 'missing.sql')],
+  ])('refuses a correctly named symlink to %s and names it', async (_, target) => {
+    const dir = migrationsDir({ '1760000000001_a.sql': migrationText('select 1;', 'select 1;') });
+    const outside = migrationsDir({});
+    symlinkSync(target(dir, outside), join(dir, '1760000000002_link.sql'));
+    const error = await rejected(loadMigrationFiles(dir, { warn: () => undefined }));
+    expect(error).toBeInstanceOf(MigrateError);
+    expect((error as MigrateError).outcome).toBe('failed');
+    expect((error as MigrateError).message).toContain(
+      '1760000000002_link.sql is not a regular file',
+    );
   });
 
   it.each([

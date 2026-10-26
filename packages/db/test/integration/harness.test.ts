@@ -18,14 +18,26 @@ import { stack, superuser, urlFor } from './support/stack.ts';
 const dbs = databases();
 
 describeWithStack('per file databases', () => {
-  it('gives this file its own database, cloned in under 200 ms', async () => {
+  it('gives this file its own database', async () => {
     const db = await dbs.fresh('base');
     const templates = inject('templates');
     const rows = await query<{ name: string }>(db.owner, 'select current_database() as name');
     expect(rows[0]?.name).toBe(db.name);
     expect([BOOTSTRAPPED, templates.base, templates.migrated]).not.toContain(db.name);
-    console.info(`clone ${db.name} from ${templates.base}: ${db.cloneMs} ms`);
-    expect(db.cloneMs).toBeLessThan(200);
+  });
+
+  // One clone can stall behind a checkpoint or a busy host, so the budget is held by the
+  // median of five. Measured on an M-series laptop: medians 19, 24 and 29 ms (single clones
+  // 15 to 50 ms) with two to six workers beside a unit run, against a 200 ms budget; a
+  // single clone once crossed 200 ms on a loaded review machine.
+  it('clones in under 200 ms, taken as the median of five', async () => {
+    const times: number[] = [];
+    for (let i = 0; i < 5; i += 1) times.push((await dbs.fresh('base')).cloneMs);
+    const median = [...times].sort((a, b) => a - b)[2] ?? Number.POSITIVE_INFINITY;
+    console.info(
+      `clone times from ${inject('templates').base}: ${times.join(', ')} ms, median ${String(median)} ms`,
+    );
+    expect(median).toBeLessThan(200);
   });
 
   it('never hands out the same database twice', async () => {
