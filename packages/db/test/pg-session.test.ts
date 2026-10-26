@@ -4,7 +4,7 @@ import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
 import { loadMigrationFiles, NO_TRANSACTION_MARKER } from '../src/migration-file.ts';
 import { MigrateError } from '../src/outcome.ts';
-import { clientConfig, sessionFor } from '../src/pg-session.ts';
+import { clientConfig, createClient, sessionFor } from '../src/pg-session.ts';
 import type { Output, RunRequest } from '../src/run.ts';
 import { migrationText, migrationsDir, rejected } from './support.ts';
 
@@ -21,6 +21,11 @@ function fakeClient(respond: Responder = () => undefined) {
       if (text.startsWith('grant nothing')) {
         for (const listener of notices) {
           listener({ code: '01007', message: 'no privileges were granted for "extensions"' });
+        }
+      }
+      if (text.startsWith('revoke nothing')) {
+        for (const listener of notices) {
+          listener({ code: '01006', message: 'no privileges could be revoked for "extensions"' });
         }
       }
       const answer = respond(text, values);
@@ -67,6 +72,9 @@ async function request(
 }
 
 // What ran from the first file statement on, without the tool's own catalog reads.
+const ORPHANS =
+  'delete from app.migration_checksums c where not exists (select from app.pgmigrations m where m.name = c.name)';
+
 const fromFirstFile = (sent: readonly string[]) =>
   sent.slice(sent.findIndex((s) => s === 'BEGIN;' || s.startsWith('create index')));
 
@@ -83,6 +91,7 @@ describe('the runner wiring', () => {
       `insert into app.migration_checksums (name, sha256) values ('1760000000001_widgets', '${files[0]?.sha256 ?? ''}');`,
       `INSERT INTO "app"."pgmigrations" (name, run_on) VALUES ('1760000000001_widgets', NOW());`,
       'COMMIT;',
+      ORPHANS,
     ]);
     expect(sent).toContain('set statement_timeout = 0');
     expect(r.out.text()).toContain('1760000000001_widgets');
@@ -119,6 +128,7 @@ describe('the runner wiring', () => {
       `delete from app.migration_checksums where name = '1760000000001_widgets';`,
       `DELETE FROM "app"."pgmigrations" WHERE name='1760000000001_widgets';`,
       'COMMIT;',
+      ORPHANS,
     ]);
   });
 
@@ -157,6 +167,40 @@ describe('the runner wiring', () => {
       /^1760000000001_widgets\.sql failed and was not recorded: no privileges were granted/,
     );
     expect(sent).not.toContain('COMMIT;');
+  });
+
+  it('fails a file whose revoke changed nothing, before it commits', async () => {
+    const dir = migrationsDir({ [PLAIN]: migrationText('revoke nothing;', 'select 1;') });
+    const { client, sent } = fakeClient();
+    const error = await rejected(sessionFor(client).run(await request(dir, 'up')));
+    expect((error as MigrateError).message).toMatch(/no privileges could be revoked/);
+    expect(sent).not.toContain('COMMIT;');
+  });
+
+  // A crash between deleting the hash and deleting the record would leave a record with no
+  // hash, which turns every later command into exit 3. The record goes first; the hash is
+  // cleared afterwards as an orphan.
+  it('removes the record of a marked file on down and only then its orphaned hash', async () => {
+    const dir = migrationsDir({ [MARKED]: marked });
+    const { client, sent } = fakeClient((text) =>
+      text.startsWith('SELECT name FROM "app"."pgmigrations"')
+        ? [{ name: '1760000000002_widgets_name_idx' }]
+        : undefined,
+    );
+    await sessionFor(client).run(await request(dir, 'down', 1));
+    const run = sent.slice(sent.indexOf('drop index concurrently if exists app.widgets_name_idx;'));
+    expect(run[0]).toBe('drop index concurrently if exists app.widgets_name_idx;');
+    expect(run[1]).toMatch(
+      /^DELETE FROM "app"\."pgmigrations" WHERE name='1760000000002_widgets_name_idx'/,
+    );
+    expect(run.slice(2)).toEqual([ORPHANS]);
+  });
+
+  it('clears orphaned hashes after a run', async () => {
+    const dir = migrationsDir({ [PLAIN]: plain });
+    const { client, sent } = fakeClient();
+    await sessionFor(client).run(await request(dir, 'up'));
+    expect(sent.at(-1)).toBe(ORPHANS);
   });
 
   it('names the file that failed', async () => {
@@ -298,6 +342,8 @@ describe('session queries', () => {
     expect(sql).toMatch(
       /revoke all on sequence app\.pgmigrations_id_seq from public, drefyn_app, drefyn_public_reader;/,
     );
+    // A crash between a marked file's statements can leave a hash with no record.
+    expect(sql).toContain(`${ORPHANS};`);
   });
 });
 
@@ -310,12 +356,17 @@ describe('clientConfig', () => {
       host: 'db.example',
       port: 6543,
       user: 'drefyn_owner',
-      password: 'p@ss/w',
       database: 'drefyn',
       application_name: 'drefyn-migrate',
       connectionTimeoutMillis: 10_000,
       statement_timeout: 30_000,
     });
+  });
+
+  it('decodes the password and hands it over through a function', async () => {
+    const { password } = config('postgres://drefyn_owner:p%40ss%2Fw@db.example:6543/drefyn');
+    expect(typeof password).toBe('function');
+    expect(await (password as () => Promise<string>)()).toBe('p@ss/w');
   });
 
   it('defaults the port and unwraps an IPv6 host', () => {
@@ -327,5 +378,66 @@ describe('clientConfig', () => {
     expect(config(url, 'disable').ssl).toBe(false);
     expect(config(url, 'require').ssl).toEqual({ rejectUnauthorized: false });
     expect(config(url, 'verify-full').ssl).toEqual({ rejectUnauthorized: true });
+  });
+});
+
+// pg fills any setting left empty from PG* variables and ~/.pgpass. PGOPTIONS would set
+// session settings for the migrate role, which the URL rule exists to prevent.
+describe('createClient ignores the PG* environment', () => {
+  const HOSTILE: Record<string, string> = {
+    PGOPTIONS: '-c search_path=public -c lock_timeout=0',
+    PGPASSWORD: 'from-the-environment',
+    PGREPLICATION: 'database',
+    PGBINARY: 'true',
+    PGCLIENT_ENCODING: 'LATIN1',
+    PGSSLNEGOTIATION: 'direct',
+    PGPASSFILE: '/nonexistent/pgpass',
+  };
+
+  function withEnv<T>(values: Record<string, string>, work: () => T): T {
+    const before = Object.fromEntries(Object.keys(values).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, values);
+    try {
+      return work();
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) Reflect.deleteProperty(process.env, key);
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  interface Params {
+    options?: unknown;
+    replication?: unknown;
+    binary?: unknown;
+    client_encoding?: unknown;
+    sslnegotiation?: unknown;
+  }
+
+  it('sends none of them, and leaves the environment as it was', () => {
+    const client = withEnv(HOSTILE, () =>
+      createClient({ url: 'postgres://drefyn_owner:pw@127.0.0.1:5432/drefyn', ssl: 'disable' }),
+    );
+    const params = (client as unknown as { connectionParameters: Params }).connectionParameters;
+    // pg's own defaults may stand; nothing may come from the variables above.
+    expect(params.options).toBeUndefined();
+    expect(params.replication).toBeUndefined();
+    expect(params.binary).not.toBe('true');
+    expect(params.client_encoding).not.toBe('LATIN1');
+    expect(params.sslnegotiation).toBeUndefined();
+    expect(process.env['PGOPTIONS']).toBeUndefined();
+  });
+
+  it('answers with the URL password, never PGPASSWORD or a pgpass file', async () => {
+    for (const url of [
+      'postgres://drefyn_owner:pw@127.0.0.1:5432/drefyn',
+      'postgres://drefyn_owner@127.0.0.1:5432/drefyn',
+    ]) {
+      const client = withEnv(HOSTILE, () => createClient({ url, ssl: 'disable' }));
+      const password = (client as unknown as { password: unknown }).password;
+      expect(typeof password).toBe('function');
+      expect(await (password as () => Promise<string>)()).toBe(url.includes(':pw@') ? 'pw' : '');
+    }
   });
 });

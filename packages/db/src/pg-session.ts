@@ -30,6 +30,11 @@ const CHECKSUMS = `${MIGRATIONS_SCHEMA}.${CHECKSUMS_TABLE}`;
 // Matches the tool's sort so a file it would never see cannot slip in beside ours.
 const IGNORE_PATTERN = '(?![0-9]{13}_[a-z0-9]+(_[a-z0-9]+)*\\.sql$).*';
 
+// A hash whose file is no longer recorded. A marked file's down leaves its hash for this,
+// because deleting the hash first and crashing before the record goes would leave a record
+// with no hash, and every later command would stop at exit 3.
+const ORPHANS = `delete from ${CHECKSUMS} c where not exists (select from ${MIGRATIONS} m where m.name = c.name)`;
+
 // Owner only on every up and down: default privileges from the first migration would
 // otherwise hand drefyn_app any bookkeeping table created later, for example after a drop.
 const BOOKKEEPING = `
@@ -45,6 +50,7 @@ create table if not exists ${CHECKSUMS} (
 );
 revoke all on ${MIGRATIONS}, ${CHECKSUMS} from public, drefyn_app, drefyn_public_reader;
 revoke all on sequence ${MIGRATIONS}_id_seq from public, drefyn_app, drefyn_public_reader;
+${ORPHANS};
 `;
 
 function sslOption(mode: SslMode): pg.ClientConfig['ssl'] {
@@ -59,14 +65,18 @@ function sslOption(mode: SslMode): pg.ClientConfig['ssl'] {
   }
 }
 
-// Every field set from the URL, so PG* variables in the environment can never fill a gap.
+// Every field the URL gives. pg still fills any setting left empty from PG* variables, so
+// createClient below is the only way a client is built.
 export function clientConfig(config: MigrationConfig): pg.ClientConfig {
   const url = new URL(config.url);
+  const password = decodeURIComponent(url.password);
   return {
     host: url.hostname.replace(/^\[(.*)\]$/, '$1'),
     port: url.port === '' ? 5432 : Number(url.port),
     user: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
+    // A function, so neither PGPASSWORD nor a pgpass file can stand in, even when the URL
+    // has no password.
+    password: () => Promise.resolve(password),
     database: decodeURIComponent(url.pathname.slice(1)),
     ssl: sslOption(config.ssl),
     application_name: 'drefyn-migrate',
@@ -76,14 +86,29 @@ export function clientConfig(config: MigrationConfig): pg.ClientConfig {
   };
 }
 
+// pg reads PGOPTIONS, PGREPLICATION, PGBINARY and others for any setting the config leaves
+// empty, and PGOPTIONS could set session settings for the migrate role. The constructor
+// reads them synchronously, so they are hidden for exactly that call and put back.
+export function createClient(config: MigrationConfig): pg.Client {
+  const hidden = Object.entries(process.env).filter(([key]) => key.startsWith('PG'));
+  for (const [key] of hidden) Reflect.deleteProperty(process.env, key);
+  try {
+    return new pg.Client(clientConfig(config));
+  } finally {
+    for (const [key, value] of hidden) process.env[key] = value;
+  }
+}
+
 // The name and hash end up inside SQL text the tool runs, so both are checked again here
 // even though the loader already did.
-function recordSql(file: MigrationFile, direction: 'up' | 'down'): string {
+function recordSql(file: MigrationFile, direction: 'up' | 'down'): string | undefined {
   const name = file.name.replace(/\.sql$/, '');
   if (!MIGRATION_NAME.test(file.name) || !/^[0-9a-f]{64}$/.test(file.sha256)) {
     throw new MigrateError('failed', `refusing to record ${JSON.stringify(file.name)}`);
   }
-  if (direction === 'down') return `delete from ${CHECKSUMS} where name = '${name}'`;
+  if (direction === 'down') {
+    return file.transaction ? `delete from ${CHECKSUMS} where name = '${name}'` : undefined;
+  }
   const insert = `insert into ${CHECKSUMS} (name, sha256) values ('${name}', '${file.sha256}')`;
   // A marked file repeats after a crash between its statements, so its hash may already be
   // there. A transactional file commits with its hash, so a leftover row there is an error.
@@ -189,7 +214,8 @@ class PgSession implements MigrateSession {
         current = file.name;
         if (!file.transaction) pgm.noTransaction();
         pgm.sql(direction === 'up' ? file.up : file.down);
-        pgm.sql(recordSql(file, direction));
+        const record = recordSql(file, direction);
+        if (record !== undefined) pgm.sql(record);
       };
       return { up: step('up'), down: step('down') };
     };
@@ -238,6 +264,7 @@ class PgSession implements MigrateSession {
     await this.rows('set statement_timeout = 0');
     try {
       await runner(options);
+      await this.rows(ORPHANS);
     } catch (error) {
       // The tool wraps a loader error in its own; ours says more.
       if (error instanceof Error && error.cause instanceof MigrateError) throw error.cause;
@@ -282,7 +309,7 @@ export function sessionFor(client: pg.Client): MigrateSession {
 }
 
 export async function connectPg(config: MigrationConfig): Promise<MigrateSession> {
-  const client = new pg.Client(clientConfig(config));
+  const client = createClient(config);
   // A dropped connection surfaces through the query in flight; this keeps it from also
   // crashing the process as an unhandled event.
   client.on('error', () => undefined);
