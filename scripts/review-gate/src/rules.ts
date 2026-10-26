@@ -42,16 +42,17 @@ function patterns(value: unknown, where: string): string[] {
 function parseMatcher(value: unknown, where: string): Matcher {
   if (!isObject(value)) fail(`${where} must be an object`);
   exactKeys(value, MATCHER_FIELDS, where);
-  const dirs = patterns(value['dirs'], `${where}.dirs`);
-  // A dir is one path segment; anything with a slash could never match.
-  const bad = dirs.findIndex((dir) => dir.includes('/'));
-  if (bad !== -1) fail(`${where}.dirs[${bad}] must be a single path segment`);
+  const prefixes = patterns(value['prefixes'], `${where}.prefixes`);
+  // Only a whole segment may be a wildcard; a* would read as a glob it is not.
+  const bad = prefixes.findIndex((p) =>
+    p.split('/').some((part) => part.includes('*') && part !== '*'),
+  );
+  if (bad !== -1) fail(`${where}.prefixes[${bad}] may use * only as a whole path segment`);
   return {
-    prefixes: patterns(value['prefixes'], `${where}.prefixes`),
+    prefixes,
     names: patterns(value['names'], `${where}.names`),
     contains: patterns(value['contains'], `${where}.contains`),
     suffixes: patterns(value['suffixes'], `${where}.suffixes`),
-    dirs,
   };
 }
 

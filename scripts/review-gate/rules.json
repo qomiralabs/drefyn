@@ -15,7 +15,9 @@
         "docker/",
         ".changeset/",
         "packages/egress/",
-        "packages/db/migrations/"
+        "packages/db/migrations/",
+        ".husky/",
+        ".githooks/"
       ],
       "names": [
         "renovate.json",
@@ -42,14 +44,47 @@
         ".prettierrc.json",
         ".prettierignore",
         "Dockerfile",
-        ".dockerignore"
+        ".dockerignore",
+        ".gitleaks.toml",
+        ".gitleaksignore",
+        "osv-scanner.toml",
+        ".trivyignore",
+        ".semgrepignore",
+        "CODEOWNERS",
+        "compose.yaml",
+        "compose.yml",
+        "compose.override.yaml",
+        "compose.override.yml"
       ],
-      "contains": ["auth", "tenancy", "billing", "credits", "entitlements", "publish", "tsconfig"],
-      "suffixes": [],
-      "dirs": []
+      "contains": [
+        "auth",
+        "tenancy",
+        "billing",
+        "credits",
+        "entitlements",
+        "publish",
+        "tsconfig",
+        "vitest.config",
+        "dockerfile",
+        "docker-compose"
+      ],
+      "suffixes": [".tf", ".tfvars"]
     },
     "tests": {
-      "prefixes": [],
+      "prefixes": [
+        "packages/*/test/",
+        "packages/*/tests/",
+        "packages/*/__tests__/",
+        "packages/*/e2e/",
+        "apps/*/test/",
+        "apps/*/tests/",
+        "apps/*/__tests__/",
+        "apps/*/e2e/",
+        "templates/*/test/",
+        "templates/*/tests/",
+        "templates/*/__tests__/",
+        "templates/*/e2e/"
+      ],
       "names": [],
       "contains": [],
       "suffixes": [
@@ -60,8 +95,7 @@
         ".test-d.ts",
         ".spec.ts",
         ".spec.tsx"
-      ],
-      "dirs": ["test", "tests", "__tests__", "e2e"]
+      ]
     },
     "ui": {
       "prefixes": [
@@ -73,15 +107,13 @@
       ],
       "names": [],
       "contains": [],
-      "suffixes": [".tsx", ".jsx", ".css", ".scss", ".svg", ".html", ".mdx"],
-      "dirs": []
+      "suffixes": [".tsx", ".jsx", ".css", ".scss", ".svg", ".html", ".mdx"]
     },
     "docs": {
-      "prefixes": ["docs/"],
+      "prefixes": [],
       "names": [],
       "contains": [],
-      "suffixes": [".md"],
-      "dirs": []
+      "suffixes": [".md"]
     }
   }
 }

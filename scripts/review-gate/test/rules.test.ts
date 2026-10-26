@@ -7,9 +7,8 @@ const matcher = {
   names: ['package.json'],
   contains: ['auth'],
   suffixes: [],
-  dirs: [],
 };
-const empty = { prefixes: [], names: [], contains: [], suffixes: [], dirs: [] };
+const empty = { prefixes: [], names: [], contains: [], suffixes: [] };
 const paths = { security: matcher, tests: empty, ui: empty, docs: { ...empty, suffixes: ['.md'] } };
 const reviewers = { 'code-reviewer': ['alice'], 'qa-verifier': ['alice', 'qa-bot'] };
 
@@ -38,7 +37,7 @@ describe('parseConfig', () => {
       'a matcher field missing',
       {
         reviewers,
-        paths: { ...paths, ui: { prefixes: [], names: [], contains: [], suffixes: [] } },
+        paths: { ...paths, ui: { prefixes: [], names: [], contains: [] } },
       },
     ],
     // A typo such as "prefix" would otherwise match nothing and quietly lower the tier.
@@ -54,7 +53,11 @@ describe('parseConfig', () => {
       'an empty pattern',
       { reviewers, paths: { ...paths, security: { ...matcher, contains: [''] } } },
     ],
-    ['a dir with a slash', { reviewers, paths: { ...paths, tests: { ...empty, dirs: ['a/b'] } } }],
+    [
+      'a wildcard inside a path segment',
+      { reviewers, paths: { ...paths, tests: { ...empty, prefixes: ['packages/a*/test/'] } } },
+    ],
+    ['the old dirs field', { reviewers, paths: { ...paths, tests: { ...empty, dirs: ['test'] } } }],
     ['reviewers missing', { paths }],
     ['reviewers not a map', { reviewers: ['alice'], paths }],
     [
@@ -139,6 +142,30 @@ describe('the shipped rules file', () => {
     '.gitattributes',
     'packages/web/.gitattributes',
     'vitest.shared.ts',
+    'packages/core/vitest.config.ts',
+    '.gitleaks.toml',
+    '.gitleaksignore',
+    'osv-scanner.toml',
+    '.trivyignore',
+    '.semgrepignore',
+    'CODEOWNERS',
+    'docs/CODEOWNERS',
+    '.husky/pre-commit',
+    '.githooks/pre-push',
+    'dockerfile',
+    'DOCKERFILE',
+    'apps/web/Dockerfile.prod',
+    'deploy-less/api.Dockerfile',
+    'compose.yaml',
+    'compose.yml',
+    'apps/web/compose.override.yml',
+    'docker-compose.yml',
+    'tools/docker-compose.dev.yaml',
+    'infra/main.tf',
+    'modules/vpc/variables.tf',
+    'envs/prod.tfvars',
+    'apps/web/vitest.config.mts',
+    'scripts/hygiene/vitest.config.ts',
     '.prettierrc.json',
     '.prettierignore',
     'packages/auth/src/session.ts',
@@ -162,7 +189,6 @@ describe('the shipped rules file', () => {
     ['packages/engine/src/index.ts', false],
     ['packages/status/src/agree.ts', false],
     ['packages/probe/src/http.ts', false],
-    ['packages/core/vitest.config.ts', false],
     ['templates/package/src/index.ts', false],
     ['packages/egress-old/src/index.ts', false],
     ['packages/ui/src/tokens.ts', true],
@@ -178,6 +204,13 @@ describe('the shipped rules file', () => {
     ['packages/engine/src/render/Badge.tsx', true],
     ['packages/engine/src/theme.css', true],
     ['packages/engine/assets/logo.svg', true],
+    ['apps/web/app/test/page.tsx', true],
+    ['packages/monitors/src/tests/http.ts', false],
+    ['apps/status/src/e2e/probe.ts', true],
+    ['apps/dashboard/src/__tests__/home.tsx', true],
+    ['packages/core/src/test/helpers.ts', false],
+    ['docs/guide.txt', false],
+    ['docs/guide.mdx', true],
   ])('puts %s in tier B (design reviewer %s)', (file, ui) => {
     expect(classify(file, config.paths)).toEqual({ tier: 'B', ui });
     const expected = ['code-reviewer', 'qa-verifier', ...(ui ? ['design-reviewer'] : [])];
@@ -199,8 +232,12 @@ describe('the shipped rules file', () => {
     'packages/engine/test/fixtures/repo.json',
     'packages/ui/src/Button.test.tsx',
     'apps/dashboard/e2e/login.spec.ts',
-    'apps/dashboard/src/__tests__/home.tsx',
     'templates/package/test/index.test.ts',
+    'packages/monitors/tests/http.ts',
+    'packages/engine/__tests__/render.ts',
+    'apps/dashboard/e2e/login.ts',
+    'apps/web/app/page.test.tsx',
+    'apps/web/test/setup.ts',
   ])('puts %s in tier C', (file) => {
     expect(tier(file)).toBe('C');
     expect(reviewersFor([file])).toEqual(['code-reviewer']);

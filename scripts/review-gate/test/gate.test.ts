@@ -45,15 +45,17 @@ const m = (part: Partial<Matcher>): Matcher => ({
   names: [],
   contains: [],
   suffixes: [],
-  dirs: [],
   ...part,
 });
 
 const PATHS: PathRules = {
   security: m({ prefixes: ['.github/', 'scripts/'], names: ['package.json'], contains: ['auth'] }),
-  tests: m({ suffixes: ['.test.ts', '.test.tsx'], dirs: ['test', '__tests__'] }),
+  tests: m({
+    prefixes: ['test/', 'packages/*/test/', 'apps/*/__tests__/'],
+    suffixes: ['.test.ts', '.test.tsx'],
+  }),
   ui: m({ prefixes: ['apps/', 'packages/ui/'], suffixes: ['.tsx', '.css'] }),
-  docs: m({ prefixes: ['docs/'], suffixes: ['.md'] }),
+  docs: m({ suffixes: ['.md'] }),
 };
 
 const CONFIG: GateConfig = {
@@ -137,16 +139,27 @@ describe('classify', () => {
     ['apps/web/__tests__/page.tsx', 'C', false],
     ['test/fixtures/data.json', 'C', false],
     ['README.md', 'C', false],
-    ['docs/guide.txt', 'C', false],
+    ['docs/guide.txt', 'B', false],
+    ['apps/web/app/test/page.tsx', 'B', true],
+    ['packages/monitors/src/tests/http.ts', 'B', false],
     ['packages/core/README.MD', 'C', false],
   ])('puts %s in tier %s (ui %s)', (file, tier, ui) => {
     expect(classify(file, PATHS)).toEqual({ tier, ui });
   });
 
-  it('matches a dir only as a whole path segment', () => {
-    expect(classify('packages/contest/src/x.ts', PATHS).tier).toBe('B');
-    expect(classify('packages/x/testing/y.ts', PATHS).tier).toBe('B');
-    expect(classify('packages/x/test', PATHS).tier).toBe('B');
+  it('lets a wildcard in a prefix stand for exactly one path segment', () => {
+    expect(classify('packages/core/test/x.ts', PATHS).tier).toBe('C');
+    expect(classify('packages/core/src/test/x.ts', PATHS).tier).toBe('B');
+    expect(classify('packages/a/b/test/x.ts', PATHS).tier).toBe('B');
+    expect(classify('packages/test/x.ts', PATHS).tier).toBe('B');
+    expect(classify('packages/core/testing/x.ts', PATHS).tier).toBe('B');
+    expect(classify('packages//test/x.ts', PATHS).tier).toBe('B');
+  });
+
+  it('treats regex characters in a prefix literally', () => {
+    const paths = { ...PATHS, tests: m({ prefixes: ['a.b/*/t+/'] }) };
+    expect(classify('a.b/x/t+/y.ts', paths).tier).toBe('C');
+    expect(classify('aXb/x/tt/y.ts', paths).tier).toBe('B');
   });
 });
 

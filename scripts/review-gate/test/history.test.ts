@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { carryOver, type GitRunner } from '../src/history.ts';
 import { BASE_REF, Repo } from './repo.ts';
 
@@ -282,6 +282,58 @@ describe('carryOver: history that lies', () => {
           : { code: 0, stdout: Buffer.from('') },
       );
     expect(await carry(X, { git })).toEqual({ carried: [], stop: 'git 2.37.9 is older than 2.38' });
+  });
+
+  it('ignores a commit message line that reads like a parent header', async () => {
+    const C = repo.commitTree(repo.cleanMergeTree(X, D1), [X], `x\n\nparent ${D1}\n`);
+    const result = await carry(C);
+    expect(result).toEqual({ carried: [], stop: `${C} is not a merge` });
+  });
+
+  it.each(['GIT_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_INDEX_FILE'])(
+    'reads the repository it was given, not one named by an inherited %s',
+    async (name) => {
+      const other = new Repo();
+      try {
+        const O = other.commit(undefined, { a: 'a\n' });
+        const target =
+          name === 'GIT_DIR'
+            ? join(other.dir, '.git')
+            : join(other.dir, '.git', name === 'GIT_INDEX_FILE' ? 'index' : 'objects');
+        vi.stubEnv(name, target);
+        const H = repo.merge(X, D1);
+        expect((await carry(H)).carried).toEqual([X]);
+        expect((await carry(O)).stop).toMatch(/not found/);
+      } finally {
+        vi.unstubAllEnvs();
+        other.remove();
+      }
+    },
+  );
+
+  it('carries nothing on a git with major version 1', async () => {
+    const git: GitRunner = () =>
+      Promise.resolve({ code: 0, stdout: Buffer.from('git version 1.99.0\n') });
+    expect(await carry(X, { git })).toEqual({ carried: [], stop: 'git 1.99.0 is older than 2.38' });
+  });
+
+  it('carries nothing when git cannot say whether history is shallow', async () => {
+    const real = (await import('../src/history.ts')).runGit;
+    const git: GitRunner = async (args, cwd) =>
+      args.includes('--is-shallow-repository')
+        ? { code: 0, stdout: Buffer.from('maybe\n') }
+        : real(args, cwd);
+    const result = await carry(repo.merge(X, D1), { git });
+    expect(result.carried).toEqual([]);
+    expect(result.stop).toMatch(/^git failed: rev-parse could not tell/);
+  });
+
+  it('carries nothing when the ancestry check errors rather than answering', async () => {
+    const real = (await import('../src/history.ts')).runGit;
+    const git: GitRunner = async (args, cwd) =>
+      args[0] === 'merge-base' ? { code: 128, stdout: Buffer.from('') } : real(args, cwd);
+    const result = await carry(repo.merge(X, D1), { git });
+    expect(result).toEqual({ carried: [], stop: 'git failed: merge-base exited 128' });
   });
 
   it('carries nothing on a version string it cannot read', async () => {

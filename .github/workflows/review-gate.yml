@@ -41,7 +41,8 @@ name: Review gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # edited covers a change of base branch, which changes the rules and the carry check.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   pull_request_review:
     types: [submitted, edited, dismissed]
   workflow_dispatch:
@@ -98,10 +99,14 @@ jobs:
             exit 1
           fi
       # Objects only: nothing from the PR is checked out or run. If the fetch fails, the
-      # gate finds no head commit and simply carries no approvals over.
+      # gate finds no head commit and simply carries no approvals over. A dispatch runs
+      # with the default branch's privileges, so it never fetches a PR ref; heads on
+      # branches in this repository are already present from the full history checkout,
+      # and a fork PR refreshed by dispatch just gets no carry-over.
       - name: Fetch the PR head objects
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
             echo "::error::no PR number to fetch"

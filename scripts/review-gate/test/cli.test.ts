@@ -38,7 +38,6 @@ const matcher = (part: Record<string, string[]> = {}) => ({
   names: [],
   contains: [],
   suffixes: [],
-  dirs: [],
   ...part,
 });
 

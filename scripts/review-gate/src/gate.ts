@@ -38,13 +38,13 @@ export interface GateInput {
 
 // A path matches when any one of these does. All comparisons ignore case.
 export interface Matcher {
+  // A segment that is exactly * stands for any one segment, so packages/*/test/ means a
+  // test directory at a package root and nowhere deeper.
   prefixes: string[];
   // The last path segment, exactly.
   names: string[];
   contains: string[];
   suffixes: string[];
-  // Any directory segment, exactly.
-  dirs: string[];
 }
 
 // Path classes, checked in this order for each file: security, tests, ui, docs.
@@ -56,7 +56,7 @@ export interface PathRules {
 }
 
 export const PATH_CLASSES = ['security', 'tests', 'ui', 'docs'] as const;
-export const MATCHER_FIELDS = ['prefixes', 'names', 'contains', 'suffixes', 'dirs'] as const;
+export const MATCHER_FIELDS = ['prefixes', 'names', 'contains', 'suffixes'] as const;
 
 // Which logins may sign for each reviewer name, plus the path classes.
 export interface GateConfig {
@@ -161,18 +161,28 @@ export function parseMarker(body: string): Marker | undefined {
   return { reviewer, sha, verdict: verdict === 'approve' ? 'approve' : 'changes_requested' };
 }
 
+function prefixMatches(prefix: string, path: string): boolean {
+  if (!prefix.split('/').includes('*')) return path.startsWith(prefix);
+  const want = prefix.split('/');
+  const have = path.split('/');
+  // A prefix ending in / names a directory, so the path needs at least one more segment.
+  if (have.length < want.length) return false;
+  return want.every((part, i) => {
+    if (i === want.length - 1 && part === '') return true;
+    if (part === '*') return have[i] !== '';
+    return have[i] === part;
+  });
+}
+
 function matches(matcher: Matcher, path: string): boolean {
   const lower = path.toLowerCase();
-  const segments = lower.split('/');
-  const name = segments.at(-1) ?? '';
-  const dirs = segments.slice(0, -1);
+  const name = lower.split('/').at(-1) ?? '';
   const low = (list: string[]) => list.map((item) => item.toLowerCase());
   return (
-    low(matcher.prefixes).some((prefix) => lower.startsWith(prefix)) ||
+    low(matcher.prefixes).some((prefix) => prefixMatches(prefix, lower)) ||
     low(matcher.names).includes(name) ||
     low(matcher.contains).some((part) => lower.includes(part)) ||
-    low(matcher.suffixes).some((suffix) => lower.endsWith(suffix)) ||
-    low(matcher.dirs).some((dir) => dirs.includes(dir))
+    low(matcher.suffixes).some((suffix) => lower.endsWith(suffix))
   );
 }
 
