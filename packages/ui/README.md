@@ -70,9 +70,12 @@ The tests fail if they drift.
 - Motion: under reduced motion, `transition`, `transition-all` and `transition-transform` fade
   colour and opacity only, so nothing travels. Use `duration-move-*` for movement. The narrowing
   sits in the utilities layer, so `motion-reduce:transition-none` still turns a transition off.
-  Behind any other variant, write `motion-safe:` first (`motion-safe:hover:transition`); the
-  lint rule rejects `hover:transition` because the variant would outrank
-  `motion-reduce:transition-none`.
+  Put the transition on the element itself and only the colour behind the variant:
+  `transition-colors hover:bg-hover`, or a bare `transition` with `hover:text-ink`. A
+  transition behind `hover:` fades in and snaps back out, and under reduced motion it loses the
+  colour fade too. Keep `motion-safe:` for transitions that really are scoped, such as
+  `motion-safe:sm:transition` (`sm` is the only breakpoint). The lint rule rejects
+  `hover:transition` because the variant would outrank `motion-reduce:transition-none`.
 - Numbers: `time`, `data`, `output`, table cells and `[data-numeric]` get tabular figures from
   `tokens.css`.
 

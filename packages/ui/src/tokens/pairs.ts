@@ -126,7 +126,9 @@ export const requiredPairs: readonly PairGroup[] = [
     why: 'The indicator bar on a selected row, the current nav item and the selected tab',
   },
   // State words on anything that can be hovered or pressed are body text beside the state
-  // icon. Red and grey state text still pass, for the sentence that explains an error.
+  // icon. Red and grey state text still pass, for the sentence that explains an error. The
+  // icon keeps its mark colour but is supplementary, because the word carries the meaning, so
+  // no 3:1 minimum applies to marks on these fills (light green measures 2.89 on hover).
   {
     fg: [
       'text.ink',
