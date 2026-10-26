@@ -7,6 +7,7 @@ import {
   generatedFiles,
   renderDtcg,
   renderEchartsTheme,
+  renderTailwindCss,
   renderTokensCss,
 } from '../src/tokens/generate.ts';
 import { tokens, type Tokens } from '../src/tokens/tokens.ts';
@@ -76,7 +77,9 @@ describe('tokens.css', () => {
   it('redefines every colour role in dark and nothing that does not change', () => {
     const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
     const colorNames = [...root.declarations.keys()].filter((n) =>
-      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|shadow)-/.test(n),
+      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|skeleton|overlay|shadow)-/.test(
+        n,
+      ),
     );
     const darkNames = [...system.declarations.keys()].filter((n) => n !== 'color-scheme');
     expect(darkNames.sort()).toEqual(colorNames.sort());
@@ -113,6 +116,83 @@ describe('tokens.css', () => {
     expect(root.declarations.get('--dr-docs-nav')).toBe('240px');
     expect(root.declarations.get('--dr-docs-content')).toBe('640px');
     expect(root.declarations.get('--dr-docs-toc')).toBe('220px');
+  });
+
+  it('ships the hover and pressed fills, the overlay surface and the scrim in both modes', () => {
+    const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
+    const names = [
+      '--dr-surface-hover',
+      '--dr-surface-pressed',
+      '--dr-overlay-scrim',
+      '--dr-skeleton-fill',
+    ];
+    expect(names.map((n) => root.declarations.get(n))).toEqual([
+      '#F1F0EE',
+      '#EBE9E7',
+      'rgb(11 17 32 / 0.24)',
+      root.declarations.get('--dr-border-rule'),
+    ]);
+    expect(names.map((n) => system.declarations.get(n))).toEqual([
+      '#262320',
+      '#2E2A26',
+      'rgb(0 0 0 / 0.5)',
+      system.declarations.get('--dr-border-rule'),
+    ]);
+  });
+
+  it('resolves the overlay surface to ground in light and raised in dark', () => {
+    const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
+    const chosen = findRule(rules, DARK_CHOSEN);
+    expect(root.declarations.get('--dr-surface-overlay')).toBe(
+      root.declarations.get('--dr-surface-ground'),
+    );
+    expect(root.declarations.get('--dr-surface-overlay')).toBe('#FAFAF9');
+    for (const dark of [system, chosen]) {
+      expect(dark.declarations.get('--dr-surface-overlay')).toBe(
+        dark.declarations.get('--dr-surface-raised'),
+      );
+      expect(dark.declarations.get('--dr-surface-overlay')).toBe('#1C1A17');
+    }
+  });
+
+  it('ships control, icon and row sizes, the new strokes and the shell widths', () => {
+    const expected = {
+      '--dr-size-control-sm': '1.5rem',
+      '--dr-size-control-md': '2rem',
+      '--dr-size-control-lg': '2.5rem',
+      '--dr-size-icon-sm': '1rem',
+      '--dr-size-icon-md': '1.25rem',
+      '--dr-size-icon-lg': '1.5rem',
+      '--dr-size-row-compact': '2rem',
+      '--dr-size-row-comfortable': '2.5rem',
+      '--dr-stroke-focus-inset': '-2px',
+      '--dr-stroke-indicator': '2px',
+      '--dr-shell-bar': '3rem',
+      '--dr-shell-nav': '15rem',
+      '--dr-shell-nav-collapsed': '3rem',
+    };
+    for (const [name, value] of Object.entries(expected)) {
+      expect(root.declarations.get(name), name).toBe(value);
+    }
+  });
+
+  it('keeps 40 out of the space scale; it lives in the size family only', () => {
+    expect(Object.keys(tokens.space)).not.toContain('40');
+    expect(root.declarations.has('--dr-space-40')).toBe(false);
+    expect(tokens.size.control.lg).toBe(40);
+    expect(tokens.size.row.comfortable).toBe(40);
+  });
+
+  it('ships the waits as timers, not as durations', () => {
+    expect(root.declarations.get('--dr-timer-tooltip')).toBe('500ms');
+    expect(root.declarations.get('--dr-timer-reveal')).toBe('200ms');
+    expect(root.declarations.get('--dr-timer-toast')).toBe('6000ms');
+    expect(root.declarations.get('--dr-timer-toast-undo')).toBe('10000ms');
+    expect([...root.declarations.keys()].filter((n) => n.startsWith('--dr-duration-'))).toEqual(
+      Object.keys(tokens.motion.duration).map(
+        (k) => `--dr-duration-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`,
+      ),
+    );
   });
 
   it('sets tabular figures on number elements without adding specificity', () => {
@@ -211,6 +291,64 @@ describe('tokens.dtcg.json', () => {
     expect(byPath.get('layout.docs-content')?.['$value']).toEqual({ value: 640, unit: 'px' });
     expect(byPath.get('layer.overlay')?.['$type']).toBe('number');
   });
+
+  it('carries the component tokens with their types', () => {
+    const byPath = new Map(leaves(dtcg).map((l) => [l.path, l.token]));
+    const hex = (path: string) => (byPath.get(path)?.['$value'] as { hex: string }).hex;
+    expect(hex('light.surface.hover')).toBe('#f1f0ee');
+    expect(hex('dark.surface.pressed')).toBe('#2e2a26');
+    expect(hex('light.surface.overlay')).toBe('#fafaf9');
+    expect(hex('dark.surface.overlay')).toBe('#1c1a17');
+    expect(hex('dark.skeleton.fill')).toBe('#292524');
+    expect(byPath.get('light.overlay.scrim')).toEqual({
+      $type: 'color',
+      $value: {
+        colorSpace: 'srgb',
+        components: [0.0431, 0.0667, 0.1255],
+        alpha: 0.24,
+        hex: '#0b1120',
+      },
+    });
+    expect(byPath.get('dark.overlay.scrim')?.['$value']).toMatchObject({ alpha: 0.5 });
+    expect(byPath.get('size.control.md')).toEqual({
+      $type: 'dimension',
+      $value: { value: 2, unit: 'rem' },
+    });
+    expect(byPath.get('size.icon.sm')?.['$value']).toEqual({ value: 1, unit: 'rem' });
+    expect(byPath.get('size.row.comfortable')?.['$value']).toEqual({ value: 2.5, unit: 'rem' });
+    expect(byPath.get('stroke.focus-inset')?.['$value']).toEqual({ value: -2, unit: 'px' });
+    expect(byPath.get('stroke.indicator')?.['$value']).toEqual({ value: 2, unit: 'px' });
+    expect(byPath.get('layout.shell-nav')).toEqual({
+      $type: 'dimension',
+      $value: { value: 15, unit: 'rem' },
+    });
+    expect(byPath.get('layout.shell-nav-collapsed')?.['$value']).toEqual({
+      value: 3,
+      unit: 'rem',
+    });
+    expect(byPath.get('timer.toast-undo')).toEqual({
+      $type: 'duration',
+      $value: { value: 10000, unit: 'ms' },
+    });
+    expect(byPath.get('timer.tooltip')?.['$value']).toEqual({ value: 500, unit: 'ms' });
+  });
+});
+
+// Timers are waits, not transitions. As a Tailwind duration utility a toast timer would be a
+// six second transition, and the reduced motion cap would close toasts after 120 ms.
+describe('timers', () => {
+  it('stay out of the Tailwind theme', () => {
+    const tailwind = renderTailwindCss();
+    expect(tailwind).not.toMatch(/timer/);
+    expect(tailwind).not.toMatch(/toast-undo|--transition-duration-(tooltip|reveal|toast)/);
+  });
+
+  it('are not durations, so the reduced motion rules never see them', () => {
+    for (const key of ['tooltip', 'reveal', 'toast', 'toastUndo']) {
+      expect(Object.keys(tokens.motion.duration), key).not.toContain(key);
+    }
+    expect(Object.keys(tokens.timer)).toEqual(['tooltip', 'reveal', 'toast', 'toastUndo']);
+  });
 });
 
 describe('ECharts themes', () => {
@@ -239,6 +377,10 @@ describe('ECharts themes', () => {
     expect(light.categoryAxis.splitLine.lineStyle.color).toBe(tokens.color.border.ruleStrong.light);
     expect(dark.valueAxis.axisLabel.color).toBe(tokens.color.text.secondary.dark);
     expect(dark.tooltip.backgroundColor).toBe(tokens.color.surface.raised.dark);
+    // Tooltips float, so they sit where menus do: paper with a shadow in light, raised in dark.
+    expect(light.tooltip.backgroundColor).toBe(tokens.color.surface.overlay.light);
+    expect(light.tooltip.backgroundColor).toBe(tokens.color.surface.ground.light);
+    expect(dark.tooltip.backgroundColor).toBe(tokens.color.surface.overlay.dark);
     expect(light.line.emphasis.lineStyle.color).toBe(tokens.color.accent.ink.light);
   });
 

@@ -68,4 +68,24 @@ describe('reduced motion', () => {
     expect(withExtra.get('--dr-duration-sheet')).toBe('0ms');
     expect(withExtra.get('--dr-duration-glow')).toBe('120ms');
   });
+
+  // A toast that waits six seconds must still wait six seconds; shortening it would take the
+  // message away before it can be read.
+  it('leaves every timer exactly as it is', () => {
+    const rules = parseRules(renderTokensCss());
+    const root = findRule(rules, ':root').declarations;
+    const reduced = findRule(rules, ':root', REDUCE).declarations;
+    const timers = [...root.keys()].filter((n) => n.startsWith('--dr-timer-'));
+    expect(timers).toEqual([
+      '--dr-timer-tooltip',
+      '--dr-timer-reveal',
+      '--dr-timer-toast',
+      '--dr-timer-toast-undo',
+    ]);
+    for (const name of timers) {
+      expect(reduced.has(name), name).toBe(false);
+      expect(reduced.get(name) ?? root.get(name), name).toBe(root.get(name));
+    }
+    expect([...reduced.keys()].some((n) => n.includes('timer'))).toBe(false);
+  });
 });

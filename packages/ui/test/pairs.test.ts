@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { contrast, floor2 } from '../src/tokens/contrast.ts';
+import { composite, contrast, floor2 } from '../src/tokens/contrast.ts';
 import { tokens } from '../src/tokens/tokens.ts';
 import {
+  aliasRoles,
   colorOf,
   decorativeRoles,
   disabledCeiling,
@@ -82,6 +83,29 @@ const required = [
   ['light', 'focus.ring', 'accent.wash@ground', 'non-text', 5.36],
   ['light', 'focus.ring', 'accent.wash@raised', 'non-text', 5.13],
   ['light', 'focus.ring', 'accent.wash@sunken', 'non-text', 5.13],
+  // Light, the selection indicator bar, on the wash and on each surface
+  ['light', 'accent.ink', 'accent.wash@ground', 'non-text', 5.36],
+  ['light', 'accent.ink', 'accent.wash@raised', 'non-text', 5.13],
+  ['light', 'accent.ink', 'accent.wash@sunken', 'non-text', 5.13],
+  ['light', 'accent.ink', 'surface.ground', 'non-text', 6.02],
+  ['light', 'accent.ink', 'surface.raised', 'non-text', 5.76],
+  ['light', 'accent.ink', 'surface.sunken', 'non-text', 5.76],
+  // Light, on the hover fill
+  ['light', 'text.ink', 'surface.hover', 'text', 16.53],
+  ['light', 'text.body', 'surface.hover', 'text', 12.84],
+  ['light', 'text.secondary', 'surface.hover', 'text', 6.65],
+  ['light', 'accent.ink', 'surface.hover', 'text', 5.52],
+  ['light', 'accent.press', 'surface.hover', 'text', 6.93],
+  ['light', 'state.broken.text', 'surface.hover', 'text', 5.68],
+  ['light', 'state.neutral.text', 'surface.hover', 'text', 6.65],
+  ['light', 'border.control', 'surface.hover', 'non-text', 3.03],
+  ['light', 'focus.ring', 'surface.hover', 'non-text', 5.52],
+  // Light, on the pressed fill
+  ['light', 'text.ink', 'surface.pressed', 'text', 15.54],
+  ['light', 'text.body', 'surface.pressed', 'text', 12.08],
+  ['light', 'text.secondary', 'surface.pressed', 'text', 6.25],
+  ['light', 'accent.ink', 'surface.pressed', 'text', 5.19],
+  ['light', 'focus.ring', 'surface.pressed', 'non-text', 5.19],
   // Dark, text
   ['dark', 'text.ink', 'surface.ground', 'text', 17.89],
   ['dark', 'text.ink', 'surface.raised', 'text', 16.62],
@@ -154,6 +178,30 @@ const required = [
   ['dark', 'focus.ring', 'accent.wash@ground', 'non-text', 5.52],
   ['dark', 'focus.ring', 'accent.wash@raised', 'non-text', 5.07],
   ['dark', 'focus.ring', 'accent.wash@sunken', 'non-text', 4.63],
+  // Dark, the selection indicator bar, on the wash and on each surface
+  ['dark', 'accent.ink', 'accent.wash@ground', 'non-text', 5.52],
+  ['dark', 'accent.ink', 'accent.wash@raised', 'non-text', 5.07],
+  ['dark', 'accent.ink', 'accent.wash@sunken', 'non-text', 4.63],
+  ['dark', 'accent.ink', 'surface.ground', 'non-text', 6.26],
+  ['dark', 'accent.ink', 'surface.raised', 'non-text', 5.82],
+  ['dark', 'accent.ink', 'surface.sunken', 'non-text', 5.37],
+  // Dark, on the hover fill
+  ['dark', 'text.ink', 'surface.hover', 'text', 14.96],
+  ['dark', 'text.body', 'surface.hover', 'text', 10.49],
+  ['dark', 'text.secondary', 'surface.hover', 'text', 6.19],
+  ['dark', 'accent.ink', 'surface.hover', 'text', 5.23],
+  ['dark', 'accent.press', 'surface.hover', 'text', 7.83],
+  ['dark', 'signal.text', 'surface.hover', 'text', 6.27],
+  ['dark', 'state.broken.text', 'surface.hover', 'text', 5.64],
+  ['dark', 'state.neutral.text', 'surface.hover', 'text', 6.19],
+  ['dark', 'border.control', 'surface.hover', 'non-text', 3.25],
+  ['dark', 'focus.ring', 'surface.hover', 'non-text', 5.23],
+  // Dark, on the pressed fill
+  ['dark', 'text.ink', 'surface.pressed', 'text', 13.62],
+  ['dark', 'text.body', 'surface.pressed', 'text', 9.55],
+  ['dark', 'text.secondary', 'surface.pressed', 'text', 5.64],
+  ['dark', 'accent.ink', 'surface.pressed', 'text', 4.77],
+  ['dark', 'focus.ring', 'surface.pressed', 'non-text', 4.77],
 ] as const;
 
 // Rules that come out of the numbers. Each must keep failing, so nobody "fixes" the table by
@@ -180,6 +228,22 @@ const forbidden = [
   ['light', 'border.control', 'accent.wash@raised', 'non-text', 2.82],
   ['light', 'border.control', 'accent.wash@sunken', 'non-text', 2.82],
   ['dark', 'border.control', 'accent.wash@sunken', 'non-text', 2.88],
+  // Green and amber words and captions miss 4.5 on the light fills, so anything that can be
+  // hovered or pressed shows state with its icon and body text.
+  ['light', 'state.fresh.text', 'surface.hover', 'text', 4.4],
+  ['light', 'state.stale.text', 'surface.hover', 'text', 4.4],
+  ['light', 'text.subtle', 'surface.hover', 'text', 4.17],
+  ['light', 'state.fresh.text', 'surface.pressed', 'text', 4.14],
+  ['light', 'state.stale.text', 'surface.pressed', 'text', 4.14],
+  ['light', 'text.subtle', 'surface.pressed', 'text', 3.92],
+  // A pressed element never draws a control edge.
+  ['light', 'border.control', 'surface.pressed', 'non-text', 2.85],
+  ['dark', 'border.control', 'surface.pressed', 'non-text', 2.96],
+  // Disabled items never take the hover or pressed fill.
+  ['light', 'disabled.text', 'surface.hover', 'text', 2.25],
+  ['dark', 'disabled.text', 'surface.hover', 'text', 2.04],
+  ['light', 'disabled.text', 'surface.pressed', 'text', 2.11],
+  ['dark', 'disabled.text', 'surface.pressed', 'text', 1.86],
 ] as const;
 
 // Ruled out by design even where the ratio passes, so the rule reads the same in both modes:
@@ -208,6 +272,17 @@ const ruledOut = [
   ['dark', 'text.subtle', 'accent.wash@sunken', 'text', 5.47],
   ['dark', 'border.control', 'accent.wash@ground', 'non-text', 3.43],
   ['dark', 'border.control', 'accent.wash@raised', 'non-text', 3.15],
+  // The same rule on the hover and pressed fills.
+  ['dark', 'state.fresh.text', 'surface.hover', 'text', 8.96],
+  ['dark', 'state.stale.text', 'surface.hover', 'text', 9.36],
+  ['dark', 'text.subtle', 'surface.hover', 'text', 6.19],
+  ['light', 'state.broken.text', 'surface.pressed', 'text', 5.34],
+  ['light', 'state.neutral.text', 'surface.pressed', 'text', 6.25],
+  ['dark', 'state.fresh.text', 'surface.pressed', 'text', 8.16],
+  ['dark', 'state.stale.text', 'surface.pressed', 'text', 8.52],
+  ['dark', 'state.broken.text', 'surface.pressed', 'text', 5.14],
+  ['dark', 'state.neutral.text', 'surface.pressed', 'text', 5.64],
+  ['dark', 'text.subtle', 'surface.pressed', 'text', 5.64],
 ] as const;
 
 // Disabled controls are drawn with their own colours, never with opacity, so every value they
@@ -370,8 +445,15 @@ describe('coverage', () => {
     const groups = [...requiredPairs, ...forbiddenPairs, ...ruledOutPairs, ...disabledPairs];
     const used = new Set(groups.flatMap((g) => [...g.fg, ...g.bg]));
     const decorative = new Set(decorativeRoles.map((d) => d.role));
+    // An alias is measured through the roles it resolves to, which must themselves be covered.
+    const aliased = new Set(
+      aliasRoles
+        .filter((a) => (['light', 'dark'] as const).every((m) => used.has(a.resolves[m])))
+        .map((a) => a.role),
+    );
     for (const role of roles) {
-      expect(used.has(role as never) || decorative.has(role as never), role).toBe(true);
+      const covered = used.has(role as never) || decorative.has(role as never);
+      expect(covered || aliased.has(role as never), role).toBe(true);
     }
     for (const d of decorativeRoles) {
       expect(roles, d.role).toContain(d.role);
@@ -400,5 +482,82 @@ describe('coverage', () => {
         expect(off, `${mode} ${s}`).toBeGreaterThanOrEqual(1.1);
       }
     }
+  });
+
+  // Light raised is only 1.04 off the hover fill, which is why floating things sit on ground
+  // in light. Every place a menu or list can put the fill clears the same floor as the wash.
+  it('keeps the hover fill visible on the surfaces it lands on', () => {
+    const off = (mode: 'light' | 'dark', bg: 'surface.ground' | 'surface.raised') =>
+      floor2(contrast(colorOf('surface.hover', mode), colorOf(bg, mode)));
+    expect([off('light', 'surface.ground'), off('light', 'surface.raised')]).toEqual([1.09, 1.04]);
+    expect([off('dark', 'surface.ground'), off('dark', 'surface.raised')]).toEqual([1.19, 1.11]);
+    for (const mode of ['light', 'dark'] as const) {
+      for (const bg of ['surface.ground', 'surface.raised', 'surface.overlay'] as const) {
+        const ratio = floor2(contrast(colorOf('surface.hover', mode), colorOf(bg, mode)));
+        expect(ratio, `${mode} ${bg}`).toBeGreaterThanOrEqual(1.04);
+      }
+      const onOverlay = floor2(
+        contrast(colorOf('surface.hover', mode), colorOf('surface.overlay', mode)),
+      );
+      expect(onOverlay, `${mode} overlay`).toBeGreaterThanOrEqual(1.09);
+    }
+  });
+
+  it('keeps the pressed fill a step past the hover fill', () => {
+    const step = (mode: 'light' | 'dark', bg: 'surface.ground' | 'surface.hover') =>
+      floor2(contrast(colorOf('surface.pressed', mode), colorOf(bg, mode)));
+    expect([step('light', 'surface.ground'), step('dark', 'surface.ground')]).toEqual([1.15, 1.31]);
+    expect([step('light', 'surface.hover'), step('dark', 'surface.hover')]).toEqual([1.06, 1.09]);
+  });
+});
+
+describe('aliases', () => {
+  it('puts floating things on ground in light and on raised in dark', () => {
+    expect(colorOf('surface.overlay', 'light')).toBe(tokens.color.surface.ground.light);
+    expect(colorOf('surface.overlay', 'dark')).toBe(tokens.color.surface.raised.dark);
+  });
+
+  it('draws skeletons in the rule colour, which never carries text', () => {
+    expect(tokens.color.skeleton.fill).toEqual(tokens.color.border.rule);
+    expect(decorativeRoles.map((d) => d.role)).toContain('skeleton.fill');
+  });
+
+  it('declares each alias with the roles it resolves to, in both modes', () => {
+    expect(aliasRoles.map((a) => a.role)).toEqual(['surface.overlay']);
+    for (const a of aliasRoles) {
+      for (const mode of ['light', 'dark'] as const) {
+        expect(colorOf(a.role, mode), `${a.role} ${mode}`).toBe(colorOf(a.resolves[mode], mode));
+      }
+      expect(a.why.length, a.role).toBeGreaterThan(10);
+    }
+  });
+});
+
+// The scrim is translucent and only ever lies over the page, so the numbers that matter are
+// the dialog against the dimmed page and, in dark, the edge that carries the dialog.
+describe('modal scrim', () => {
+  const dimmed = (mode: 'light' | 'dark') => {
+    const { base, alpha } = tokens.overlay.scrim[mode];
+    return composite(base, alpha, tokens.color.surface.ground[mode]);
+  };
+
+  it('is ink at 24 percent in light and black at half in dark, with no blur', () => {
+    expect(tokens.overlay.scrim.light).toEqual({ base: tokens.color.text.ink.light, alpha: 0.24 });
+    expect(tokens.overlay.scrim.dark).toEqual({ base: '#000000', alpha: 0.5 });
+  });
+
+  it('sets the dialog off the dimmed page', () => {
+    const lift = (mode: 'light' | 'dark') =>
+      floor2(contrast(colorOf('surface.overlay', mode), dimmed(mode)));
+    expect(lift('light')).toBe(1.7);
+    expect(lift('dark')).toBe(1.14);
+  });
+
+  it('lets the strong rule carry the dialog edge in dark', () => {
+    const edge = floor2(contrast(tokens.color.border.ruleStrong.dark, dimmed('dark')));
+    expect(edge).toBe(1.93);
+    expect(edge).toBeGreaterThan(
+      floor2(contrast(colorOf('surface.overlay', 'dark'), dimmed('dark'))),
+    );
   });
 });

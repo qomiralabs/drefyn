@@ -132,6 +132,77 @@ describe('Tailwind theme', () => {
     expect(body).toMatch(/outline-offset: var\(--dr-stroke-focus-offset\)/);
   });
 
+  it('ships an inset focus ring for items flush inside a container', async () => {
+    const css = await build(['focus-visible:focus-ring-inset']);
+    const body = ruleBody(css, 'focus-visible:focus-ring-inset');
+    expect(body).toMatch(/outline: var\(--dr-stroke-focus\) solid var\(--dr-focus-ring\)/);
+    expect(body).toMatch(/outline-offset: var\(--dr-stroke-focus-inset\)/);
+  });
+
+  it('sizes controls, icons and rows from the size tokens', async () => {
+    const expected = {
+      'h-control-sm': /height: var\(--dr-size-control-sm\)/,
+      'h-control-md': /height: var\(--dr-size-control-md\)/,
+      'min-h-control-lg': /min-height: var\(--dr-size-control-lg\)/,
+      'size-control-sm':
+        /width: var\(--dr-size-control-sm\);\s*height: var\(--dr-size-control-sm\)/,
+      'size-icon-sm': /width: var\(--dr-size-icon-sm\);\s*height: var\(--dr-size-icon-sm\)/,
+      'size-icon-lg': /width: var\(--dr-size-icon-lg\)/,
+      'h-row-compact': /height: var\(--dr-size-row-compact\)/,
+      'h-row-comfortable': /height: var\(--dr-size-row-comfortable\)/,
+    };
+    const css = await build(Object.keys(expected));
+    for (const [cls, pattern] of Object.entries(expected)) {
+      expect(ruleBody(css, cls), cls).toMatch(pattern);
+    }
+  });
+
+  it('paints the fills, the overlay, the scrim and skeletons from their roles', async () => {
+    const expected = {
+      'bg-hover': '--dr-surface-hover',
+      'bg-pressed': '--dr-surface-pressed',
+      'bg-overlay': '--dr-surface-overlay',
+      'bg-overlay-scrim': '--dr-overlay-scrim',
+      'bg-skeleton-fill': '--dr-skeleton-fill',
+    };
+    const css = await build(Object.keys(expected));
+    for (const [cls, variable] of Object.entries(expected)) {
+      expect(ruleBody(css, cls), cls).toMatch(new RegExp(`background-color: var\\(${variable}\\)`));
+    }
+  });
+
+  it('draws the selection indicator and lays out the shell from the tokens', async () => {
+    const css = await build([
+      'border-l-indicator',
+      'border-b-indicator',
+      'w-shell-nav',
+      'w-shell-nav-collapsed',
+      'h-shell-bar',
+    ]);
+    expect(ruleBody(css, 'border-l-indicator')).toMatch(
+      /border-left-width: var\(--dr-stroke-indicator\)/,
+    );
+    expect(ruleBody(css, 'border-b-indicator')).toMatch(
+      /border-bottom-width: var\(--dr-stroke-indicator\)/,
+    );
+    expect(ruleBody(css, 'w-shell-nav')).toMatch(/width: var\(--dr-shell-nav\)/);
+    expect(ruleBody(css, 'w-shell-nav-collapsed')).toMatch(
+      /width: var\(--dr-shell-nav-collapsed\)/,
+    );
+    expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
+  });
+
+  it('makes no utility from a timer', async () => {
+    const candidates = [
+      'duration-toast',
+      'duration-toast-undo',
+      'delay-tooltip',
+      'duration-reveal',
+    ];
+    const css = await build(candidates);
+    for (const cls of candidates) expect(hasRule(css, cls), cls).toBe(false);
+  });
+
   it('maps stacking and docs column utilities to the layout tokens', async () => {
     const css = await build(['z-base', 'z-raised', 'z-overlay', 'z-toast', 'w-docs-content']);
     for (const k of ['base', 'raised', 'overlay', 'toast']) {
@@ -181,6 +252,10 @@ describe('Tailwind theme', () => {
       'ease-in-out',
       'md:p-8',
       'blur-sm',
+      'h-10',
+      'size-5',
+      'p-40',
+      'gap-40',
     ];
     const css = await build(offScale);
     for (const cls of offScale) expect(hasRule(css, cls), cls).toBe(false);
