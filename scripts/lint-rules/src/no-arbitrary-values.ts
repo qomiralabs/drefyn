@@ -6,8 +6,8 @@ import type { Rule } from 'eslint';
 // class list built in a variable is caught as well as one written in className.
 
 // Arbitrary variants that select state are fine. The ones that invent a breakpoint, a
-// container query or any other at rule are not.
-const VALUE_VARIANT = /^(@?(min|max)-[[(]|\[@)/;
+// container query or any other at rule are not, negated with not- or otherwise.
+const VALUE_VARIANT = /^(not-)*(@?(min|max)-[[(]|@[[(]|\[@)/;
 const ARBITRARY = /^[a-z][a-z0-9-]*-(\[[^\s]+\]|\([^\s]+\))(\/.+)?$/;
 const ARBITRARY_MODIFIER = /^[a-z][a-z0-9-]*\/(\[[^\s]+\]|\([^\s]+\))$/;
 const ARBITRARY_PROPERTY = /^\[[a-z-]+:[^\s]+\]$/;
@@ -18,7 +18,7 @@ const bare = (prefix: string) => new RegExp(`^(${prefix})-${NUMBER}$`);
 const BARE_DURATION = bare('duration');
 const BARE_DELAY = bare('delay');
 const BARE_STROKE = bare(
-  'border(-[xytrblse])?|divide-[xy]|outline|ring|inset-ring|decoration|underline-offset|stroke',
+  'border(-([xytrblse]|bs|be))?|divide-[xy]|outline|ring|inset-ring|decoration|underline-offset|stroke',
 );
 const BARE_OFFSET = bare('outline-offset|ring-offset');
 const BARE_OPACITY = bare('(backdrop-)?opacity');
@@ -38,6 +38,13 @@ const FILTER_IDENTITY: Record<string, number> = {
   'hue-rotate': 0,
 };
 const BARE_LAYER = bare('z');
+// A coloured drop shadow paints a colour nobody measured next to the text it sits under.
+const DROP_SHADOW = /^drop-shadow-(?!none$)/;
+// Blending makes the painted colour depend on whatever is underneath.
+const BLEND = /^(mix|bg)-blend-(?!normal$)/;
+// The theme narrows these three to fades under reduced motion, but a variant raises the
+// specificity above motion-reduce:transition-none, so the author's opt out loses.
+const MOVING_TRANSITION = /^transition(-all|-transform)?$/;
 
 // Splits on ":" outside brackets and parentheses, so data-[state=open]:p-4 keeps its variant.
 function parts(token: string): string[] {
@@ -59,7 +66,16 @@ function parts(token: string): string[] {
 }
 
 export type Problem =
-  'arbitrary' | 'duration' | 'delay' | 'stroke' | 'offset' | 'opacity' | 'filter' | 'layer';
+  | 'arbitrary'
+  | 'duration'
+  | 'delay'
+  | 'stroke'
+  | 'offset'
+  | 'opacity'
+  | 'filter'
+  | 'blend'
+  | 'motion'
+  | 'layer';
 
 const value = (match: RegExpExecArray | null) =>
   match?.groups?.['n'] === undefined ? null : Number(match.groups['n']);
@@ -88,6 +104,11 @@ export function classify(token: string): Problem | null {
     const amount = value(filter) ?? 100;
     if (amount !== FILTER_IDENTITY[name]) return 'filter';
   }
+  if (DROP_SHADOW.test(utility)) return 'filter';
+  if (BLEND.test(utility)) return 'blend';
+  if (MOVING_TRANSITION.test(utility) && segments.length > 0 && !segments.includes('motion-safe')) {
+    return 'motion';
+  }
   if (BARE_LAYER.test(utility)) return 'layer';
   return null;
 }
@@ -111,6 +132,10 @@ export const noArbitraryValues: Rule.RuleModule = {
         "'{{token}}' makes a colour the contrast tests never measured. Use a colour role as it is. Disabled controls use the disabled colours.",
       filter:
         "'{{token}}' changes colours the contrast tests never measured. Use a colour role as it is.",
+      blend:
+        "'{{token}}' blends with whatever is underneath, so the colour shown is one the contrast tests never measured. Use a colour role as it is.",
+      motion:
+        "'{{token}}' transitions movement behind a variant. Write motion-safe: before it, or use transition-colors or transition-opacity.",
       layer: "'{{token}}' is a raw stacking order. Use z-base, z-raised, z-overlay or z-toast.",
     },
   },

@@ -46,10 +46,12 @@ The tests fail if they drift.
 - Hover fills: there is no neutral hover fill yet (#60). Do not paint `bg-rule` as a fill; it is
   a hairline colour that no contrast test measures under text.
 - Stacking: `z-base`, `z-raised`, `z-overlay` and `z-toast`. Bare `z-N` is rejected.
-- Motion: under reduced motion, plain `transition`, `transition-all` and `transition-transform`
-  fade colour and opacity only, so nothing travels. Use `duration-move-*` for movement. The
-  override matches the plain class names only, so write `transition` without a variant, or put
-  movement behind `motion-safe:`.
+- Motion: under reduced motion, `transition`, `transition-all` and `transition-transform` fade
+  colour and opacity only, so nothing travels. Use `duration-move-*` for movement. The narrowing
+  sits in the utilities layer, so `motion-reduce:transition-none` still turns a transition off.
+  Behind any other variant, write `motion-safe:` first (`motion-safe:hover:transition`); the
+  lint rule rejects `hover:transition` because the variant would outrank
+  `motion-reduce:transition-none`.
 - Numbers: `time`, `data`, `output`, table cells and `[data-numeric]` get tabular figures from
   `tokens.css`.
 
@@ -76,8 +78,10 @@ The tests fail if they drift.
   the weight class against the file name.
 
 `drefyn/no-arbitrary-values` from `scripts/lint-rules` rejects arbitrary Tailwind values
-(`p-[13px]`) and at rule variants, bare durations, delays, line widths, offsets and stacking
-orders, partial opacity, colour opacity modifiers and colour changing filters. Raw literals in
+(`p-[13px]`) and at rule variants (negated ones too), bare durations, delays, line widths,
+offsets and stacking orders, partial opacity, colour opacity modifiers, colour changing filters
+and drop shadows, blend modes, and transitions that move behind a variant without
+`motion-safe:`. Raw literals in
 hand written CSS are not checked yet (#55).
 
 ## Preview
