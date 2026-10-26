@@ -20,6 +20,10 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const CHECK_STATEMENT_TIMEOUT_MS = 30_000;
 const LOCK_TIMEOUT = '2s';
 
+// privilege_not_granted and privilege_not_revoked. Postgres only warns when a grant or
+// revoke changes nothing, which in a migration means it does not do what it says.
+const PRIVILEGE_WARNINGS = new Set(['01007', '01006']);
+
 const MIGRATIONS = `${MIGRATIONS_SCHEMA}.${MIGRATIONS_TABLE}`;
 const CHECKSUMS = `${MIGRATIONS_SCHEMA}.${CHECKSUMS_TABLE}`;
 
@@ -207,7 +211,7 @@ class PgSession implements MigrateSession {
       );
 
     const options: RunnerOption = {
-      dbClient: this.client,
+      dbClient: this.guarded(),
       noLock: true,
       // Never `schema`: it would replace the database search_path.
       migrationsSchema: MIGRATIONS_SCHEMA,
@@ -241,6 +245,30 @@ class PgSession implements MigrateSession {
       const message = error instanceof Error ? error.message : 'unknown error';
       throw new MigrateError('failed', `${current} failed and was not recorded: ${message}`);
     }
+  }
+
+  // The runner's client, failing any statement that drew a privilege warning. The throw
+  // comes before the file's COMMIT, so the file rolls back with its record and hash.
+  private guarded(): pg.Client {
+    const client = this.client;
+    const warnings: string[] = [];
+    client.on('notice', (notice) => {
+      if (notice.code !== undefined && PRIVILEGE_WARNINGS.has(notice.code)) {
+        warnings.push(notice.message ?? `warning ${notice.code}`);
+      }
+    });
+    const query = async (...args: Parameters<pg.Client['query']>) => {
+      const result: unknown = await (client.query as (...a: unknown[]) => Promise<unknown>)(
+        ...args,
+      );
+      const warning = warnings.shift();
+      if (warning !== undefined) {
+        warnings.length = 0;
+        throw new Error(`${warning}; a grant or revoke that changes nothing fails the migration`);
+      }
+      return result;
+    };
+    return Object.assign(Object.create(client) as pg.Client, { query });
   }
 
   async close(): Promise<void> {

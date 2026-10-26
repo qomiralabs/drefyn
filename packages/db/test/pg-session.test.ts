@@ -14,9 +14,15 @@ type Responder = (text: string, values: readonly unknown[]) => unknown[] | Error
 // can read the exact SQL sequence a run would send to Postgres.
 function fakeClient(respond: Responder = () => undefined) {
   const sent: string[] = [];
+  const notices: ((notice: { code?: string; message: string }) => void)[] = [];
   const client = {
     query: (text: string, values: readonly unknown[] = []) => {
       sent.push(text.trim());
+      if (text.startsWith('grant nothing')) {
+        for (const listener of notices) {
+          listener({ code: '01007', message: 'no privileges were granted for "extensions"' });
+        }
+      }
       const answer = respond(text, values);
       if (answer instanceof Error) return Promise.reject(answer);
       if (answer !== undefined) return Promise.resolve({ rows: answer });
@@ -29,6 +35,9 @@ function fakeClient(respond: Responder = () => undefined) {
       return Promise.resolve({ rows: [] });
     },
     end: () => Promise.resolve(),
+    on: (event: string, listener: (notice: { code?: string; message: string }) => void) => {
+      if (event === 'notice') notices.push(listener);
+    },
   };
   return { client: client as unknown as pg.Client, sent };
 }
@@ -136,6 +145,18 @@ describe('the runner wiring', () => {
     expect(error).toBeInstanceOf(MigrateError);
     expect((error as MigrateError).message).toContain('1760000000003_late.sql');
     expect(sent).not.toContain('create table app.widgets (id int);');
+  });
+
+  it('fails a file whose grant changed nothing, before it commits', async () => {
+    const dir = migrationsDir({
+      [PLAIN]: migrationText('grant nothing;', 'select 1;'),
+    });
+    const { client, sent } = fakeClient();
+    const error = await rejected(sessionFor(client).run(await request(dir, 'up')));
+    expect((error as MigrateError).message).toMatch(
+      /^1760000000001_widgets\.sql failed and was not recorded: no privileges were granted/,
+    );
+    expect(sent).not.toContain('COMMIT;');
   });
 
   it('names the file that failed', async () => {
