@@ -10,21 +10,29 @@
 #   that reviewer in scripts/review-gate/rules.json. GraphQL returns bot logins without
 #   the [bot] suffix, so the type is checked too. Author association is not used: the
 #   Actions token cannot see private org membership and reports members as CONTRIBUTOR.
-# - An approval counts only for the head SHA. A changes_requested marker counts on any
-#   SHA when it is that reviewer's newest review, since the head needs a newer approval.
-# - The gate script, its path rules and the allow list come from the PR base commit for
-#   PR and review events, and from the default branch for a dispatch, so editing them in
-#   a PR does not change how that PR is judged. This workflow never checks out PR code.
+# - An approval counts for the head SHA, or for an older commit the head reaches by first
+#   parents through merges of the base branch only, each with exactly two parents, the
+#   second already on the base branch, and a tree identical to git's own clean merge.
+#   Any other commit, a conflict, or any doubt (shallow history, missing objects, a git
+#   error) means nothing carries. A changes_requested marker counts on any SHA when it is
+#   that reviewer's newest review, since the head needs a newer approval.
+# - Reviewers come from the risk tier of the changed paths. The tier floors live in the
+#   gate script and the path lists in rules.json, both from the trusted ref.
+# - The gate script, its path rules and the allow list come from the PR base commit, so
+#   editing them in a PR does not change how that PR is judged. This workflow never checks out PR code:
+#   it fetches the PR head objects so git can recompute merges, and runs nothing from them.
 #   If the trusted ref has no gate script, the run fails and posts an error status
 #   rather than pass or skip.
 # - `evaluate` has read-only scopes. `report` holds `statuses: write`, checks out nothing,
 #   re-reads the PR head from the API and posts only for that SHA.
 # - Fork PRs cannot set the status from their own runs, since their pull_request and
 #   pull_request_review runs get a read-only token. A maintainer refreshes their status
-#   with a dispatch.
+#   with review-gate-dispatch.yml, which is a separate file so that no step running with
+#   the default branch's privileges ever reads PR event data or fetches a PR ref. The two
+#   files share a concurrency group per PR, so their runs never race on the status.
 #
-# What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
-# GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
+# What it does not protect: for pull_request and pull_request_review, GitHub runs this
+# file from the PR merge commit. A branch in this repo
 # can edit this file, or add another workflow, and post its own `review-gate` status.
 # The controls for that live outside the workflow: branch protection with code owner
 # review on .github/ and scripts/, and later an org required workflow or a status from a
@@ -34,20 +42,15 @@ name: Review gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # edited covers a change of base branch, which changes the rules and the carry check.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   pull_request_review:
     types: [submitted, edited, dismissed]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request number to evaluate
-        required: true
-        type: string
 
 permissions: {}
 
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: review-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -63,21 +66,15 @@ jobs:
       sha: ${{ steps.gate.outputs.sha }}
       description: ${{ steps.gate.outputs.description }}
     steps:
-      # PR and review events judge the PR with the code on its base commit.
+      # The PR is judged with the code on its base commit.
       - name: Check out the PR base
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      # A dispatch runs this file from the ref the caller picked, but the script always
-      # comes from the default branch, named literally so the ref never comes from input.
-      - name: Check out the default branch
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: development
-          persist-credentials: false
+          # Full history and every branch, so carry-over can walk merges and find the
+          # base branch tip.
+          fetch-depth: 0
       # Without a trusted copy of the script there is nothing safe to run. Failing here
       # leaves no state output, so report posts an error status on the head.
       - name: Check for the gate script on the trusted ref
@@ -86,6 +83,19 @@ jobs:
             echo "::error::the gate script is missing on the trusted ref; refusing to evaluate"
             exit 1
           fi
+      # Objects only: nothing from the PR is checked out or run. If the fetch fails, the
+      # gate finds no head commit and simply carries no approvals over.
+      - name: Fetch the PR head objects
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to fetch"
+            exit 1
+          fi
+          git fetch --no-tags --no-recurse-submodules --quiet origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/review-gate/head" ||
+            echo "::warning::could not fetch the PR head; approvals will not carry over merges"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -95,7 +105,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_GATE_GIT_DIR: ${{ github.workspace }}
         run: >-
           node scripts/review-gate/src/cli.ts github
           --repo "$REPO" --pr "$PR_NUMBER"
@@ -104,8 +115,8 @@ jobs:
   report:
     name: report
     needs: evaluate
-    # Fork PR runs, reviews included, have a read-only token and cannot post. A dispatch
-    # refreshes a fork PR's status.
+    # Fork PR runs, reviews included, have a read-only token and cannot post. The dispatch
+    # workflow refreshes a fork PR's status.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
       !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
@@ -120,7 +131,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           GATE_STATE: ${{ needs.evaluate.outputs.state }}
           GATE_SHA: ${{ needs.evaluate.outputs.sha }}
           GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
