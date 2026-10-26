@@ -20,6 +20,11 @@
       "env": ["DREFYN_RELEASE_FLAGS", "FC_SEED"],
       "outputs": ["coverage/**"]
     },
+    "test:integration": {
+      "cache": false,
+      "passThroughEnv": ["COMPOSE_PROJECT_NAME", "DREFYN_POSTGRES_PORT", "CI"],
+      "outputs": []
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
