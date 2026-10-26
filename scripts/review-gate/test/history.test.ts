@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { carryOver, type GitRunner } from '../src/history.ts';
 import { BASE_REF, Repo } from './repo.ts';
 
@@ -12,6 +12,7 @@ const edit = (line: number, text: string) =>
     .map((l, i) => (i === line ? text : l))
     .join('\n');
 
+let template: Repo;
 let repo: Repo;
 // R is the root on development; D1 and D2 move development on; X is the approved PR commit.
 let R: string;
@@ -19,17 +20,38 @@ let D1: string;
 let D2: string;
 let X: string;
 
-beforeEach(() => {
-  repo = new Repo();
-  R = repo.commit(undefined, {
+// Every test runs git for its own commits and for carryOver, 10 to 40 processes, so its
+// time is mostly process start up and grows as the host starves. With the test process
+// group held to 2 percent of a CPU, the 47 tests took 9.5 s median, 19.9 s p95 and 37.4 s
+// at most; at 1 percent they took up to 67 s. The 5 s default failed at a load average of
+// 277. 120 s is 3.2 times the 2 percent maximum.
+const GIT_TEST_TIMEOUT_MS = 120_000;
+// Building the shared history is about 30 git processes: 0.4 s here, 17.6 to 36.1 s over
+// 10 builds at 2 percent, which is why the old per test build broke the 10 s hook default.
+// The per test file copy took 0.4 to 2.2 s at 2 percent, so that hook keeps the default.
+const FIXTURE_HOOK_TIMEOUT_MS = 120_000;
+
+// Commits have fixed dates, so the shared history has the same SHAs on every run. Each test
+// works on its own copy, since many move development or write config, refs and grafts.
+beforeAll(() => {
+  template = new Repo();
+  R = template.commit(undefined, {
     'src/app.ts': 'app v1\n',
     'shared.txt': SHARED,
     'other.txt': 'o\n',
   });
-  D1 = repo.commit(R, { 'other.txt': 'o2\n' });
-  D2 = repo.commit(D1, { 'docs/new.md': 'new\n' });
-  repo.setBranch('development', D2);
-  X = repo.commit(R, { 'src/app.ts': 'app v2\n' });
+  D1 = template.commit(R, { 'other.txt': 'o2\n' });
+  D2 = template.commit(D1, { 'docs/new.md': 'new\n' });
+  template.setBranch('development', D2);
+  X = template.commit(R, { 'src/app.ts': 'app v2\n' });
+}, FIXTURE_HOOK_TIMEOUT_MS);
+
+afterAll(() => {
+  template.remove();
+});
+
+beforeEach(() => {
+  repo = template.clone();
 });
 
 afterEach(() => {
@@ -39,7 +61,7 @@ afterEach(() => {
 const carry = (head: string, options: { maxMerges?: number; git?: GitRunner } = {}) =>
   carryOver({ cwd: repo.dir, head, base: BASE_REF, ...options });
 
-describe('carryOver: what carries', () => {
+describe('carryOver: what carries', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it('carries nothing when the head is the approved commit itself', async () => {
     const result = await carry(X);
     expect(result.carried).toEqual([]);
@@ -87,7 +109,7 @@ describe('carryOver: what carries', () => {
   });
 });
 
-describe('carryOver: author changes never carry', () => {
+describe('carryOver: author changes never carry', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it('stops at a plain commit after the approval', async () => {
     const C = repo.commit(X, { 'src/app.ts': 'app v3\n' });
     const H = repo.merge(C, D1);
@@ -201,7 +223,7 @@ describe('carryOver: author changes never carry', () => {
   });
 });
 
-describe('carryOver: history that lies', () => {
+describe('carryOver: history that lies', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it('reads real parents, not a replace ref that dresses a plain commit up as a clean merge', async () => {
     const C = repo.commit(X, { 'src/app.ts': 'sneaky\n' });
     const disguise = repo.merge(X, D1);
