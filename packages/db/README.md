@@ -33,13 +33,13 @@ tables if needed (`app.pgmigrations` and `app.migration_checksums`, owner only),
 `status` only reads: it never takes the lock or creates anything, and prints one line per
 file: `applied`, `pending`, `changed`, `missing` or `unrecorded`.
 
-| Exit code | Meaning                                                                           |
-| --------- | --------------------------------------------------------------------------------- |
-| 0         | done                                                                              |
-| 1         | anything else: bad config, bad file, failed SQL, wrong role, wrong tracking table |
-| 2         | another run holds the lock; nothing was run                                       |
-| 3         | checksum mismatch: an applied file changed, is gone or has no recorded hash       |
-| 4         | prerequisite missing: names what is missing and the operator command              |
+| Exit code | Meaning                                                                              |
+| --------- | ------------------------------------------------------------------------------------ |
+| 0         | done                                                                                 |
+| 1         | anything else: bad config, bad file, failed SQL, wrong role, wrong tracking table    |
+| 2         | another run holds the lock; nothing was run                                          |
+| 3         | checksum mismatch: an applied file changed, is gone or has no recorded hash          |
+| 4         | prerequisite missing or an invalid index in `app`: names it and the operator command |
 
 The codes are part of the contract; scripts may branch on them.
 
@@ -65,6 +65,26 @@ line `-- drefyn: no-transaction` above `-- Up Migration`. A marked file must:
   transaction and refuses the concurrent build (the run exits 1);
 - be safe to repeat in both directions (`if not exists`, `if exists`), because a crash between
   the statement and its record leaves it run but unrecorded, and the next `up` runs it again.
+
+`if not exists` alone would let a rerun skip over a build that failed halfway, because a failed
+or cancelled concurrent build leaves its index behind, invalid. Two checks make the form safe:
+
+- Every command (`up`, `down`, `status`) exits 4 when any index in schema `app` is invalid,
+  naming each as `app.<index> on app.<table>`, before it takes the lock or runs anything. It
+  says when a build for that index is still in progress; that includes a build someone started
+  by hand, so wait for it to finish and run again.
+- After each section of a marked file, before its hash and record are written, the same check
+  runs. If it finds an invalid index, the run exits 1: after `up` the file stays unrecorded,
+  after `down` it stays recorded.
+
+To repair, as `drefyn_owner`:
+
+1. Fix the cause: remove the duplicate rows a unique index refused, or end the long running
+   reader that held the build up.
+2. Drop the invalid index: `drop index concurrently if exists app.<index>;`
+3. Run `drefyn migrate up` again.
+
+There is no flag to skip the check.
 
 ### Exit code 3: repairing checksums
 
