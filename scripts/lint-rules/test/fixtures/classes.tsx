@@ -21,6 +21,10 @@ export function Card() {
       <span className="z-50">bad</span>
       <span className="outline-offset-2">bad</span>
       <span className="decoration-2 underline-offset-4">bad</span>
+      <span className="hover:transition-all">bad</span>
+      <span className="mix-blend-multiply">bad</span>
+      <span className="not-max-[600px]:p-4">bad</span>
+      <span className="motion-safe:hover:transition-all hover:transition-colors">good</span>
       <span className="border-0 opacity-0 hover:opacity-100 bg-ink/100">good</span>
       <span className="z-overlay focus-visible:focus-ring">good</span>
       <span className="p-16 text-ink rounded-md duration-base sm:p-8">good</span>
