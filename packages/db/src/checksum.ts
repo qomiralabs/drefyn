@@ -1,4 +1,4 @@
-import { notImplemented } from './not-implemented.ts';
+import { createHash } from 'node:crypto';
 
 export interface RecordedMigration {
   readonly name: string;
@@ -22,7 +22,7 @@ export type ChecksumProblem =
   | { readonly kind: 'unrecorded'; readonly name: string };
 
 export function sha256Hex(contents: Uint8Array): string {
-  return notImplemented('sha256Hex', contents);
+  return createHash('sha256').update(contents).digest('hex');
 }
 
 // Every applied migration must still be on disk with the hash recorded when it ran.
@@ -30,5 +30,13 @@ export function verifyChecksums(
   recorded: readonly RecordedMigration[],
   onDisk: readonly MigrationOnDisk[],
 ): ChecksumProblem[] {
-  return notImplemented('verifyChecksums', recorded, onDisk);
+  const disk = new Map(onDisk.map((file) => [file.name, file.sha256]));
+  const problems: ChecksumProblem[] = [];
+  for (const { name, sha256 } of recorded) {
+    const actual = disk.get(name);
+    if (actual === undefined) problems.push({ kind: 'missing', name });
+    else if (sha256 === undefined) problems.push({ kind: 'unrecorded', name });
+    else if (sha256 !== actual) problems.push({ kind: 'changed', name, recorded: sha256, actual });
+  }
+  return problems;
 }
