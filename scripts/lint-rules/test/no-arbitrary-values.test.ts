@@ -39,6 +39,16 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     `const s = 'Look at [this] and a-b';`,
     `const list = [1, 2, 3];`,
     `import x from './[slug].ts';`,
+    // A bare transition is narrowed by the theme under reduced motion; behind a variant it
+    // must say motion-safe. Fades of colour or opacity never move anything.
+    `const c = 'transition transition-all transition-transform motion-safe:transition';`,
+    `const c = 'motion-safe:hover:transition-all group-hover:motion-safe:transition-transform';`,
+    `const c = 'hover:transition-colors md:transition-opacity motion-reduce:transition-none';`,
+    // The identity blend and an absent drop shadow leave colours alone.
+    `const c = 'mix-blend-normal bg-blend-normal drop-shadow-none';`,
+    `const c = 'border-bs-0 border-be-0 border-bs border-be';`,
+    // A container query on a token width is a token.
+    `const c = '@container @page:p-8 not-hover:bg-raised';`,
   ],
   invalid: [
     { code: `const c = 'p-[13px]';`, errors: [arbitrary('p-[13px]')] },
@@ -69,6 +79,9 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       'underline-offset-4',
       'stroke-2',
       'stroke-1.5',
+      'border-bs-2',
+      'border-be-2',
+      'hover:border-bs-1.5',
     ].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'stroke' as const, data: { token } }],
@@ -91,6 +104,32 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       code: `const c = '${token}';`,
       errors: [{ messageId: 'filter' as const, data: { token } }],
     })),
+    ...['drop-shadow-ink', 'drop-shadow-accent-ink', 'hover:drop-shadow-state-broken-mark'].map(
+      (token) => ({
+        code: `const c = '${token}';`,
+        errors: [{ messageId: 'filter' as const, data: { token } }],
+      }),
+    ),
+    ...[
+      'mix-blend-multiply',
+      'mix-blend-plus-lighter',
+      'bg-blend-screen',
+      'dark:bg-blend-color',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'blend' as const, data: { token } }],
+    })),
+    ...[
+      'hover:transition',
+      'md:transition',
+      'group-hover:transition-all',
+      'focus-visible:transition-transform',
+      'motion-reduce:transition',
+      'hover:!transition-all',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'motion' as const, data: { token } }],
+    })),
     ...['z-10', 'z-0', '-z-10', 'hover:z-50'].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'layer' as const, data: { token } }],
@@ -101,6 +140,15 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       '[@supports(display:grid)]:grid',
       '@min-[30rem]:p-4',
       'max-[40rem]:p-4',
+      'not-[@media(min-width:1px)]:p-4',
+      'not-[@container(min-width:1px)]:p-4',
+      'not-max-[600px]:p-4',
+      'not-min-[600px]:p-4',
+      'not-@max-[400px]:p-4',
+      'not-@min-[400px]:p-4',
+      '@[500px]:p-4',
+      'not-@[500px]:p-4',
+      'hover:not-max-[600px]:p-4',
     ].map((token) => ({
       code: `const c = '${token}';`,
       errors: [arbitrary(token)],
