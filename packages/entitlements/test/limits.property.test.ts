@@ -380,7 +380,16 @@ describe('send caps never allow a send past cap plus grace', () => {
           checkLimit(t, k, Number(ceiling + 1n), options).status === 'over_limit'
         );
       }),
-      RUNS,
+      {
+        ...RUNS,
+        // A plan can leave a send key at 0 and a contract can keep it there. Pinned here
+        // because a random draw lands on cap 0 only under some seeds.
+        examples: [
+          [{ t: 'free', k: 'status.voice_minutes_per_month', cap: 0 }],
+          [{ t: 'free', k: 'status.sms_sends_per_month', cap: 0 }],
+          [{ t: 'starter', k: 'status.voice_minutes_per_month', cap: 0 }],
+        ],
+      },
     );
   });
 
