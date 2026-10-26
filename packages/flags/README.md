@@ -77,6 +77,11 @@ await client.close();
 - A provider that reports itself failed for good (`PROVIDER_FATAL`) maps to
   `FLAG_PROVIDER_NOT_READY`. After `close()`, every call answers its safe value (plan flags
   off) without reaching the provider or entitlements.
+- The provider answers only while its status is `READY`, `STALE` or `ERROR` (the last two
+  serve the last synced values). Any other status, including one a later SDK adds, gives
+  the safe value with `FLAG_PROVIDER_NOT_READY`; a test fails if the SDK's status list
+  changes. So does a client whose OpenFeature domain was cleared or rebound to another
+  provider: the domain name is random but not secret, since API event handlers receive it.
 - Plan flag lookups share the evaluation timeout, so the reader should answer from a cached
   tier rather than a fresh database read.
 
@@ -94,7 +99,7 @@ that re-applies the pinned fields closes only the first of those, and runs befor
 provider hook.
 
 So the client skips the OpenFeature evaluation API and calls its provider's resolver with
-the caller's frozen context, after the same not ready and fatal checks the SDK makes. Hooks
+the caller's frozen context, after the status and domain checks above. Hooks
 anywhere in the process have no effect on these evaluations, a hook that throws included.
 What that gives up:
 

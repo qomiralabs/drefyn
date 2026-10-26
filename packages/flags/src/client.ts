@@ -133,10 +133,15 @@ function fromErrorCode(code: ErrorCode): FlagEvaluationErrorCode {
 const ERROR_CODES: ReadonlySet<unknown> = new Set(Object.values(ErrorCode));
 
 // What the SDK would report for a thrown error: its OpenFeature code, or general.
+// Reading the code can itself throw (a getter, a proxy trap), and must not.
 function codeOf(error: unknown): ErrorCode {
-  const code: unknown =
-    typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-  return ERROR_CODES.has(code) ? (code as ErrorCode) : ErrorCode.GENERAL;
+  try {
+    const code: unknown =
+      typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+    return ERROR_CODES.has(code) ? (code as ErrorCode) : ErrorCode.GENERAL;
+  } catch {
+    return ErrorCode.GENERAL;
+  }
 }
 
 // A provider can hand back anything, so a string 'true' or a missing result must not pass
@@ -158,6 +163,14 @@ function fromResolution(resolution: unknown, safe: boolean): FlagEvaluation {
 }
 
 // Provider log lines are free text that can carry context values, so none are kept.
+// Stale and error keep answering, since the in process provider serves its last synced
+// values. Any other status, including one a later SDK adds, fails closed.
+const USABLE_STATUSES: ReadonlySet<unknown> = new Set([
+  ProviderStatus.READY,
+  ProviderStatus.STALE,
+  ProviderStatus.ERROR,
+]);
+
 const SILENT: Logger = {
   error: () => undefined,
   warn: () => undefined,
@@ -315,12 +328,12 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
     return withTimeout(work, this.config.evalTimeoutMs, fallback(safe, 'FLAG_TIMEOUT'));
   }
 
-  // The same status check the SDK makes before it calls a provider. Stale and error still
-  // answer, from the last synced values.
+  // The client reports the status of whatever provider the domain points at. Once the
+  // domain is cleared or rebound that is someone else's provider, so ours stops answering.
   private providerUsable(): boolean {
     try {
-      const status = this.client.providerStatus;
-      return status !== ProviderStatus.NOT_READY && status !== ProviderStatus.FATAL;
+      if (OpenFeature.getProvider(this.domain) !== this.provider) return false;
+      return USABLE_STATUSES.has(this.client.providerStatus);
     } catch {
       return false;
     }
@@ -427,7 +440,8 @@ export async function createFlagClient<const R extends FlagRegistry = Flags>(
 ): Promise<FlagClient<R>> {
   assertFlagConfig(config);
   const provider = new FlagdProvider(providerOptions(config));
-  // Random, so no other code in the process can guess the domain and swap our provider.
+  // Random, so it cannot collide with another client's domain. It is not a secret: API
+  // level event handlers receive it. A domain rebound to another provider fails closed.
   const domain = `drefyn-flags-${randomUUID()}`;
   // Registers the provider synchronously; the promise settles when its start does.
   const ready = OpenFeature.setProviderAndWait(domain, provider);
