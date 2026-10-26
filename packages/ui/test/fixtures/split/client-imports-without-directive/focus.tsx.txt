@@ -1,0 +1,5 @@
+import { FocusScope } from '@react-aria/focus';
+
+export function Focus() {
+  return <FocusScope />;
+}

@@ -1,0 +1,5 @@
+import { Menu as AriaMenu } from 'react-aria-components';
+
+export function Menu() {
+  return <AriaMenu aria-label="Actions" />;
+}

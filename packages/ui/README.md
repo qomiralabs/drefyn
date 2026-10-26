@@ -1,6 +1,6 @@
 # @drefyn/ui
 
-Design tokens for every Drefyn surface. Components arrive in a later change.
+Design tokens and React components for every Drefyn surface.
 
 ## Tokens
 
@@ -124,6 +124,53 @@ and drop shadows, blend modes, and transitions that move behind a variant withou
 `motion-safe:`. Raw literals in
 hand written CSS are not checked yet (#55).
 
+## Two entries
+
+| Import                 | Holds                                                    | Runs in                                        |
+| ---------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| `@drefyn/ui`           | Tokens, contrast helpers, the head script, chart motion. | Anywhere, including plain Node. No React.      |
+| `@drefyn/ui/react`     | Components.                                              | React 19 apps. React is a peer dependency.     |
+| `@drefyn/ui/react.css` | `@source "./"` for the component files.                  | An app's Tailwind entry, after `tailwind.css`. |
+
+The token entry never imports React or a `.tsx` file, because Node refuses `.tsx` under type
+stripping and token only consumers should not install React. A test walks its import graph.
+
+In an app that uses Tailwind:
+
+```css
+@import 'tailwindcss';
+@import '@drefyn/ui/tailwind.css';
+@import '@drefyn/ui/react.css';
+```
+
+### Writing a component
+
+- One component per file in `src/react/`, exported from `src/react/index.ts` by name. Never
+  `export *`: the split test reads the barrel to know which file each export comes from.
+- Components are server components by default and ship no JS. A file that calls a hook or
+  imports `react-aria-components` starts with `'use client'` as its first statement. The
+  barrel never does. Badges, status marks, skeletons, empty states, buttons and icons must stay
+  server safe; the split test renders each one with `renderToStaticMarkup`.
+- Style only with token utilities. `style` and `dangerouslySetInnerHTML` are lint errors in
+  `src/react/`, and Motion is a lint error everywhere except the dashboard and website apps.
+  Animate with CSS transitions on the duration and ease tokens.
+- Stories live in `stories/` and import only `../src/react/index.ts` (and `../src/index.ts` for
+  token values), so they show what a consumer can import.
+
+## Storybook and browser tests
+
+- `pnpm --filter @drefyn/ui storybook` runs Storybook locally; `storybook:build` writes the
+  static build to `storybook-static/`. Telemetry is off. The Theme toolbar sets `data-theme` on
+  `<html>`, as an app does.
+- `pnpm --filter @drefyn/ui test:e2e` runs Playwright over the static build: keyboard specs in
+  Chromium, Firefox and WebKit, axe on every story in light, dark and 390 px, and the reduced
+  motion check. Build first. The tests serve the build from disk and fail on any request to
+  another host.
+- `pnpm --filter @drefyn/ui test:visual` compares screenshots, but only inside the pinned
+  Playwright Linux image, which it starts through Docker. It refuses to compare on a host,
+  because fonts render differently there. `test:visual:update` writes the baselines, also in
+  the image.
+
 ## Preview
 
 `pnpm --filter @drefyn/ui preview` writes `preview/dist/index.html`, a specimen of every token.
@@ -131,4 +178,4 @@ Serve `packages/ui` over HTTP and open `/preview/dist/index.html`. It is not shi
 
 ## Test
 
-`pnpm --filter @drefyn/ui test`
+`pnpm --filter @drefyn/ui test` runs the unit tests: node for tokens and checks, happy-dom for `test/react/`.

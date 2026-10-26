@@ -1,0 +1,25 @@
+[
+  {
+    "name": "@drefyn/ui",
+    "path": "/repo/packages/ui",
+    "devDependencies": {
+      "react": {
+        "from": "react",
+        "version": "19.3.1",
+        "path": "/repo/node_modules/.pnpm/react@19.3.1/node_modules/react"
+      },
+      "some-kit": {
+        "from": "some-kit",
+        "version": "1.0.0",
+        "path": "/repo/node_modules/.pnpm/some-kit@1.0.0/node_modules/some-kit",
+        "dependencies": {
+          "react": {
+            "from": "react",
+            "version": "18.3.1",
+            "path": "/repo/node_modules/.pnpm/react@18.3.1/node_modules/react"
+          }
+        }
+      }
+    }
+  }
+]

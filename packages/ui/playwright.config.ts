@@ -1,0 +1,55 @@
+import { defineConfig, devices } from '@playwright/test';
+import { ORIGIN } from './e2e/fixtures.ts';
+
+const chromium = devices['Desktop Chrome'];
+
+// Runs over the static Storybook build, served from disk by the fixture in e2e/. Build
+// it first with storybook:build.
+export default defineConfig({
+  testDir: './e2e',
+  outputDir: './test-results',
+  // Flaky tests are failures, so nothing retries.
+  retries: 0,
+  timeout: 30_000,
+  forbidOnly: true,
+  fullyParallel: true,
+  workers: 2,
+  reporter: 'list',
+  // A missing baseline fails; baselines are only written by test:visual:update.
+  updateSnapshots: 'none',
+  snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixels: 0,
+      threshold: 0,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'css',
+    },
+  },
+  use: { baseURL: ORIGIN },
+  projects: [
+    {
+      name: 'keyboard-chromium',
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      use: { ...chromium },
+    },
+    {
+      name: 'keyboard-firefox',
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'keyboard-webkit',
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      use: { ...devices['Desktop Safari'] },
+    },
+    { name: 'axe', testMatch: /axe\.spec\.ts$/, use: { ...chromium } },
+    { name: 'visual', testMatch: /visual\.spec\.ts$/, use: { ...chromium } },
+    {
+      name: 'reduced-motion',
+      testMatch: /reduced-motion\.spec\.ts$/,
+      use: { ...chromium, reducedMotion: 'reduce' },
+    },
+  ],
+});

@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+@import '../src/generated/tokens.css';
+@import '../src/generated/tailwind.css';
+@import '../src/react/react.css';
+@source "../stories";
+
+/* The story frame is the page ground in both modes, so nothing of the default white
+   shows around a story in dark. */
+html {
+  background-color: var(--dr-surface-ground);
+  color: var(--dr-text-body);
+  font-family: var(--dr-font-sans);
+}
+
+/* Docs pages: headings in ink, as on every other surface. The docs theme covers the
+   rest; these are the parts Storybook colours from fixed values. */
+.sbdocs-wrapper :is(.sbdocs-title, .sbdocs-subtitle, h1, h2, h3, h4) {
+  color: var(--dr-text-ink);
+}

@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The token entry runs in plain Node. The package typecheck adds the DOM library for
+  // components and stories, so this config checks the rest without it.
+  "include": ["src"],
+  "exclude": ["src/react"]
+}
