@@ -6,9 +6,6 @@ through `@drefyn/entitlements`, and experiments carry a written success metric. 
 evaluated through the OpenFeature Node server SDK with the flagd provider, in process only.
 No provider failure turns a release flag on or leaves a request waiting.
 
-Status: the API below is planned. The test suite describes it and fails until the client is
-built.
-
 ## Public API
 
 Everything other packages may use is exported from `src/index.ts`, plus the test helpers in
@@ -66,6 +63,11 @@ await client.close();
   If that call fails, hangs or answers something other than a boolean, the flag is off.
 - The context's `organizationId` is the OpenFeature targeting key.
 - A name outside the registry evaluates off with `FLAG_NOT_FOUND`.
+- A provider that reports itself failed for good (`PROVIDER_FATAL`) maps to
+  `FLAG_PROVIDER_NOT_READY`. After `close()`, every call answers its safe value (plan flags
+  off) without reaching the provider or entitlements.
+- Plan flag lookups share the evaluation timeout, so the reader should answer from a cached
+  tier rather than a fresh database read.
 
 ### Config
 
@@ -86,10 +88,23 @@ The production client ignores `DREFYN_RELEASE_FLAGS`.
 
 ### Metrics and logs
 
-Emitted through the injected sink: `flags_provider_ready` (gauge, 1 or 0),
-`flags_last_sync_age_seconds` (gauge) and `flags_evaluation_ms` (histogram, one per
-evaluation). Metric labels never carry organization, project or user IDs, and logs never
-carry user IDs. The one log event is `flags.provider_not_ready`.
+Emitted through the injected sink:
+
+- `flags_provider_ready` (gauge): 1 while the provider is in sync, 0 before it first syncs
+  and after it reports stale or error.
+- `flags_last_sync_age_seconds` (gauge): 0 while in sync; otherwise seconds since sync was
+  lost, or since the client started if the provider never synced. Both gauges are pushed on
+  every change of sync state and every 15 seconds while the client is open, so the age
+  keeps rising in a push sink; alert on it at 5 minutes. In file mode the provider never
+  loses sync, so the age stays 0.
+- `flags_evaluation_ms` (histogram): one per evaluation, labelled with the flag name (or
+  `unregistered`), the `source` and the `error` code when there is one.
+
+Gauges carry only the `source` label (`file` or `flagd`). Metric labels never carry
+organization, project or user IDs, and logs never carry user IDs. The one log event is
+`flags.provider_not_ready`, logged once when the provider is not ready at the end of the
+init wait, with the source, the reason (`timeout` or `failed`) and the time waited. A sink
+that throws is ignored.
 
 ### Test helpers: `@drefyn/flags/testing`
 
@@ -98,7 +113,9 @@ carry user IDs. The one log event is `flags.provider_not_ready`.
   switches and experiments are the same in all three, and plan flags are left out. Any
   other value throws `FLAG_CONFIG_INVALID`. Returns an OpenFeature in memory configuration.
 - `createTestFlagClient(overrides?, { env?, registry? })` returns a client over that
-  configuration with `overrides` applied on top (source `test_override`).
+  configuration with `overrides` applied on top (source `test_override`). It has no
+  entitlements, so a plan flag without an override is off. An override for a name outside
+  the registry, or one that is not a boolean, throws `FLAG_DEFINITION_INVALID` naming it.
 
 Production code never imports this entry point; a test checks every file under `src/`.
 
