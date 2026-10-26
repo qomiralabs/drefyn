@@ -1,5 +1,6 @@
 import type { FeatureKey } from '@drefyn/entitlements';
 import type { OrganizationId, ProjectId } from '@drefyn/tenancy';
+import { randomUUID } from 'node:crypto';
 import { FlagdProvider } from '@openfeature/flagd-provider';
 import {
   ErrorCode,
@@ -107,8 +108,6 @@ function providerOptions(config: FlagConfig): ProviderOptions {
   return pinned;
 }
 
-let domains = 0;
-
 function fallback(value: boolean, errorCode: FlagEvaluationErrorCode): FlagEvaluation {
   return { value, source: 'safe_value', errorCode };
 }
@@ -162,7 +161,8 @@ function toContext(ctx: FlagContext): EvaluationContext {
   };
   if (ctx.projectId !== undefined) context['projectId'] = ctx.projectId;
   if (ctx.userId !== undefined) context['userId'] = ctx.userId;
-  if (ctx.internal !== undefined) context['internal'] = ctx.internal;
+  // Always set: left out, a global OpenFeature context could turn internal rollout on.
+  context['internal'] = ctx.internal === true;
   return context;
 }
 
@@ -174,6 +174,8 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
   // When the client last knew its values matched the source; undefined while connected.
   private outOfSyncSince: number | undefined = this.startedAt;
   private everReady = false;
+  // Until the start wait ends, losses are not logged: the start reports its own reason.
+  private starting = true;
   private notReadyLogged = false;
   private closed = false;
   private readonly ticker: ReturnType<typeof setInterval>;
@@ -243,20 +245,25 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
     clearInterval(this.ticker);
     for (const [event, handler] of this.handlers) this.client.removeHandler(event, handler);
     // Swapping the domain to the no-op provider makes the SDK close ours exactly once and
-    // leaves nothing in the global registry pointing at a closed provider.
+    // leaves nothing in the global registry pointing at a closed provider. The SDK does not
+    // await that close; the patched provider stops its gRPC sync from reconnecting anyway.
     OpenFeature.setProvider(this.domain, NOOP_PROVIDER);
     return Promise.resolve();
   }
 
   // Called once the start wait is over, whichever way it ended.
   started(outcome: 'ready' | 'failed' | 'timeout'): void {
+    this.starting = false;
     if (outcome === 'ready') this.markReady();
     else this.markLost(outcome);
   }
 
   private fromProvider(definition: ProviderFlag, ctx: FlagContext): Promise<FlagEvaluation> {
     const safe = definition.safeValue;
-    if (this.closed) return Promise.resolve(fallback(safe, 'FLAG_PROVIDER_NOT_READY'));
+    // Before the first sync the provider has nothing of ours to answer from.
+    if (this.closed || !this.everReady) {
+      return Promise.resolve(fallback(safe, 'FLAG_PROVIDER_NOT_READY'));
+    }
     let work: Promise<FlagEvaluation>;
     try {
       // The safe value is the OpenFeature default: on any error the SDK returns it.
@@ -301,7 +308,7 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
   private markLost(reason: 'failed' | 'timeout' | 'lost' = 'lost'): void {
     if (this.closed) return;
     this.outOfSyncSince ??= Date.now();
-    if (!this.everReady && !this.notReadyLogged) {
+    if (!this.everReady && !this.starting && !this.notReadyLogged) {
       this.notReadyLogged = true;
       this.warn('flags.provider_not_ready', {
         source: this.config.source,
@@ -371,8 +378,8 @@ export async function createFlagClient<const R extends FlagRegistry = Flags>(
 ): Promise<FlagClient<R>> {
   assertFlagConfig(config);
   const provider = new FlagdProvider(providerOptions(config));
-  domains += 1;
-  const domain = `drefyn-flags-${String(domains)}`;
+  // Random, so no other code in the process can guess the domain and swap our provider.
+  const domain = `drefyn-flags-${randomUUID()}`;
   // Registers the provider synchronously; the promise settles when its start does.
   const ready = OpenFeature.setProviderAndWait(domain, provider);
   const client = OpenFeature.getClient(domain);

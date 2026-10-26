@@ -1,6 +1,6 @@
 // Failures outside the provider: the SDK client itself, the injected sinks and the
 // entitlements reader can all misbehave, and none of them may break an evaluation.
-import { OpenFeature } from '@openfeature/server-sdk';
+import { OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFlagClient, type FlagClient, type FlagClientDeps } from '../src/index.ts';
 import { createTestFlagClient } from '../src/testing.ts';
@@ -61,6 +61,19 @@ afterEach(async () => {
 });
 
 describe('an SDK client that misbehaves', () => {
+  it('keeps a release flag off when it throws synchronously', async () => {
+    breakSdkClients(() => {
+      throw new Error('sdk bug');
+    });
+    const client = await boot(new FakeProvider().set(RELEASE, { kind: 'value', value: true }));
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+      value: false,
+      source: 'safe_value',
+      errorCode: 'FLAG_GENERAL',
+    });
+    expect(await settle(client.isOn(RELEASE, ctx))).toBe(false);
+  });
+
   it('gives the safe value with FLAG_GENERAL when it throws synchronously', async () => {
     breakSdkClients(() => {
       throw new Error('sdk bug');
@@ -119,10 +132,15 @@ describe('sinks that throw', () => {
     const boom = () => {
       throw new Error('sink down');
     };
-    const client = await boot(
-      new FakeProvider('reject').set(RELEASE, { kind: 'value', value: true }),
-      { logger: { warn: boom }, metrics: { gauge: boom, histogram: boom } },
-    );
+    // A failed start logs, so the throwing logger is exercised too.
+    const fake = new FakeProvider('reject').set(RELEASE, { kind: 'value', value: true });
+    const client = await boot(fake, {
+      logger: { warn: boom },
+      metrics: { gauge: boom, histogram: boom },
+    });
+    expect((await settle(client.evaluate(RELEASE, ctx))).value).toBe(false);
+    fake.emit(ProviderEvents.Ready);
+    await vi.advanceTimersByTimeAsync(0);
     expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
       value: true,
       source: 'provider',

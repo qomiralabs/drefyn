@@ -629,7 +629,23 @@ describe('evaluation context', () => {
     const second = fake.callsFor(RELEASE)[1]?.context;
     expect(second).toMatchObject({ targetingKey: OTHER_ORG });
     expect(second).not.toHaveProperty('projectId');
-    expect(second).not.toHaveProperty('internal');
+    // Always sent, so a global OpenFeature context cannot fill it in.
+    expect(second).toMatchObject({ internal: false });
+  });
+
+  it('cannot be turned internal by a global OpenFeature context', async () => {
+    OpenFeature.setContext({ internal: true, targetingKey: 'someone-else' });
+    try {
+      const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+      const client = await boot(fake);
+      await client.evaluate(RELEASE, { organizationId: OTHER_ORG });
+      await client.evaluate(RELEASE, { organizationId: OTHER_ORG, internal: false });
+      for (const call of fake.callsFor(RELEASE)) {
+        expect(call.context).toMatchObject({ internal: false, targetingKey: OTHER_ORG });
+      }
+    } finally {
+      OpenFeature.setContext({});
+    }
   });
 });
 
