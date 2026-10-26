@@ -110,6 +110,7 @@ describe('the shipped rules file', () => {
     'packages/billing/src/invoice.ts',
     'packages/credits/src/ledger.ts',
     'packages/entitlements/src/plans.ts',
+    'packages/db/migrations/1760000000000_x.sql',
   ])('requires the security reviewer for %s', (file) => {
     expect(needsSecurity(file)).toBe(true);
   });
@@ -120,6 +121,7 @@ describe('the shipped rules file', () => {
     'apps/web/src/page.tsx',
     'CONTRIBUTING.md',
     'packages/egress-old/src/index.ts',
+    'packages/db/migrations-old/x.sql',
   ])('does not require it for %s', (file) => {
     expect(needsSecurity(file)).toBe(false);
   });
