@@ -9,6 +9,9 @@
   --color-ground: var(--dr-surface-ground);
   --color-raised: var(--dr-surface-raised);
   --color-sunken: var(--dr-surface-sunken);
+  --color-hover: var(--dr-surface-hover);
+  --color-pressed: var(--dr-surface-pressed);
+  --color-overlay: var(--dr-surface-overlay);
   --color-rule: var(--dr-border-rule);
   --color-rule-strong: var(--dr-border-rule-strong);
   --color-control: var(--dr-border-control);
@@ -34,6 +37,8 @@
   --color-state-neutral-mark: var(--dr-state-neutral-mark);
   --color-state-neutral-text: var(--dr-state-neutral-text);
   --color-focus-ring: var(--dr-focus-ring);
+  --color-skeleton-fill: var(--dr-skeleton-fill);
+  --color-overlay-scrim: var(--dr-overlay-scrim);
   --spacing-0: var(--dr-space-0);
   --spacing-2: var(--dr-space-2);
   --spacing-4: var(--dr-space-4);
@@ -46,6 +51,22 @@
   --spacing-64: var(--dr-space-64);
   --spacing-96: var(--dr-space-96);
   --spacing-128: var(--dr-space-128);
+  --height-control-sm: var(--dr-size-control-sm);
+  --size-control-sm: var(--dr-size-control-sm);
+  --height-control-md: var(--dr-size-control-md);
+  --size-control-md: var(--dr-size-control-md);
+  --height-control-lg: var(--dr-size-control-lg);
+  --size-control-lg: var(--dr-size-control-lg);
+  --height-icon-sm: var(--dr-size-icon-sm);
+  --size-icon-sm: var(--dr-size-icon-sm);
+  --height-icon-md: var(--dr-size-icon-md);
+  --size-icon-md: var(--dr-size-icon-md);
+  --height-icon-lg: var(--dr-size-icon-lg);
+  --size-icon-lg: var(--dr-size-icon-lg);
+  --height-row-compact: var(--dr-size-row-compact);
+  --size-row-compact: var(--dr-size-row-compact);
+  --height-row-comfortable: var(--dr-size-row-comfortable);
+  --size-row-comfortable: var(--dr-size-row-comfortable);
   --radius-none: var(--dr-radius-none);
   --radius-xs: var(--dr-radius-xs);
   --radius-sm: var(--dr-radius-sm);
@@ -107,6 +128,10 @@
   --container-docs-nav: var(--dr-docs-nav);
   --container-docs-content: var(--dr-docs-content);
   --container-docs-toc: var(--dr-docs-toc);
+  --height-shell-bar: var(--dr-shell-bar);
+  --container-shell-nav: var(--dr-shell-nav);
+  --container-shell-nav-collapsed: var(--dr-shell-nav-collapsed);
+  --border-width-indicator: var(--dr-stroke-indicator);
   --shadow-0: var(--dr-shadow-0);
   --shadow-1: var(--dr-shadow-1);
   --shadow-2: var(--dr-shadow-2);
@@ -132,6 +157,10 @@
 @utility focus-ring {
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-offset);
+}
+@utility focus-ring-inset {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-inset);
 }
 @utility transition {
   @media (prefers-reduced-motion: reduce) {

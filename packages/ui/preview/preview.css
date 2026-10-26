@@ -538,7 +538,7 @@ button.quiet {
 }
 
 button.quiet:hover {
-  background: var(--dr-surface-raised);
+  background: var(--dr-surface-hover);
 }
 
 /* Disabled. No opacity anywhere: each part has its own measured colour. */
@@ -643,4 +643,187 @@ button.quiet:disabled {
 .field:has(input:disabled) label,
 .check:has(input:disabled) label {
   color: var(--dr-disabled-text);
+}
+
+/* Fills and floating surfaces */
+
+.floating {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--dr-space-128) * 2.5)), 1fr));
+  gap: var(--dr-space-32);
+  align-items: start;
+}
+
+.specimen {
+  margin: 0;
+}
+
+.menu {
+  padding: var(--dr-space-4);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-overlay);
+  box-shadow: var(--dr-shadow-1);
+}
+
+.item {
+  display: flex;
+  gap: var(--dr-space-12);
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--dr-size-control-md);
+  padding-inline: var(--dr-space-8);
+  /* Reserved on every item so the label does not move when the selection does. */
+  border-inline-start: var(--dr-stroke-indicator) solid transparent;
+  border-radius: var(--dr-radius-sm);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-s);
+}
+
+.item-state {
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-caption);
+  font-family: var(--dr-font-mono);
+}
+
+.item.is-hover {
+  background: var(--dr-surface-hover);
+}
+
+.item.is-pressed {
+  background: var(--dr-surface-pressed);
+}
+
+.item.is-focus {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-inset);
+}
+
+.item.is-selected {
+  border-inline-start-color: var(--dr-accent-ink);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  background: var(--dr-accent-wash);
+  color: var(--dr-text-ink);
+}
+
+.item.is-disabled {
+  color: var(--dr-disabled-text);
+}
+
+.status {
+  display: inline-flex;
+  gap: var(--dr-space-8);
+  align-items: center;
+}
+
+.pip {
+  position: relative;
+  inline-size: var(--dr-space-8);
+  block-size: var(--dr-space-8);
+  background: var(--mark);
+}
+
+.pip::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--dr-stroke-focus);
+  background: var(--text);
+}
+
+.scrim-demo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-block-size: calc(var(--dr-space-128) * 1.5);
+  overflow: hidden;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-ground);
+}
+
+.page-behind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--dr-space-12);
+  padding: var(--dr-space-16);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--dr-overlay-scrim);
+}
+
+.dialog {
+  position: relative;
+  max-inline-size: calc(100% - var(--dr-space-48));
+  padding: var(--dr-space-16) var(--dr-space-24);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-overlay);
+  box-shadow: var(--dr-shadow-2);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-s);
+}
+
+.dialog p {
+  margin: 0;
+}
+
+.dialog-title {
+  margin-block-end: var(--dr-space-4);
+  color: var(--dr-text-ink);
+  font-weight: var(--dr-weight-strong);
+}
+
+/* Sizes, shell and skeletons */
+
+.sizes {
+  align-items: end;
+}
+
+.size-box {
+  display: block;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-raised);
+}
+
+.size-row {
+  inline-size: calc(var(--dr-space-128) + var(--dr-space-32));
+  border-inline: 0;
+  border-radius: 0;
+}
+
+.shell li {
+  grid-template-columns: calc(var(--dr-space-64) + var(--dr-space-32)) minmax(0, 1fr) var(
+      --dr-space-64
+    );
+}
+
+.shell .bar {
+  max-inline-size: 100%;
+}
+
+.skeleton-demo {
+  display: grid;
+  gap: var(--dr-space-12);
+  max-inline-size: calc(var(--dr-space-128) * 3);
+}
+
+.skeleton {
+  display: block;
+  block-size: var(--dr-space-12);
+  border-radius: var(--dr-radius-xs);
+  background: var(--dr-skeleton-fill);
+}
+
+.skeleton.short {
+  inline-size: calc(var(--dr-space-128) * 1.5);
+  max-inline-size: 100%;
 }

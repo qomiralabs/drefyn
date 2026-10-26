@@ -81,8 +81,12 @@ string that holds a Tailwind class which mints a value outside the tokens:
 - `transition`, `transition-all` and `transition-transform` behind a variant without
   `motion-safe:`: `hover:transition`, `md:transition`, `group-hover:transition-all`. The
   theme narrows these to colour and opacity fades under reduced motion, but a variant
-  outranks `motion-reduce:transition-none`, so the author's opt out would lose. Write
-  `motion-safe:hover:transition`, or use `transition-colors` or `transition-opacity`
+  outranks `motion-reduce:transition-none`, so the author's opt out would lose. Put the
+  transition on the element and the change behind the variant: `transition-colors` with
+  `hover:bg-hover`, or a bare `transition` with `hover:text-ink`. A transition behind `hover:`
+  fades in, snaps back out, and drops the colour fade under reduced motion. Use
+  `motion-safe:` only for a transition that really is scoped, such as
+  `motion-safe:sm:transition` (`sm` is the only breakpoint)
 - bare stacking orders: `z-10`. Use `z-base`, `z-raised`, `z-overlay` or `z-toast`
 
 Every bare number may have decimals. Zero is allowed for lengths and delays (`border-0`,

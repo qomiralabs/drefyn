@@ -25,14 +25,26 @@ export interface ShadowLayer {
   alpha: number;
 }
 
+const ground = { light: '#FAFAF9', dark: '#141210' } as const satisfies ModeColor;
+const raised = { light: '#F5F5F4', dark: '#1C1A17' } as const satisfies ModeColor;
+const rule = { light: '#E7E5E4', dark: '#292524' } as const satisfies ModeColor;
+
 const color = {
   surface: {
-    ground: { light: '#FAFAF9', dark: '#141210' },
-    raised: { light: '#F5F5F4', dark: '#1C1A17' },
+    ground,
+    raised,
     sunken: { light: '#F5F5F4', dark: '#24211D' },
+    // Menus, lists and rows under the pointer. Light raised sits only 1.04 off this, which is
+    // why floating things are paper in light.
+    hover: { light: '#F1F0EE', dark: '#262320' },
+    pressed: { light: '#EBE9E7', dark: '#2E2A26' },
+    // Menus, popovers, tooltips, dialogs, the command bar and toasts. An alias, not a new
+    // colour, so every pair on it is already measured: paper with a shadow in light, raised
+    // with the strong rule in dark, where shadows do not show.
+    overlay: { light: ground.light, dark: raised.dark },
   },
   border: {
-    rule: { light: '#E7E5E4', dark: '#292524' },
+    rule,
     ruleStrong: { light: '#D6D3D1', dark: '#44403C' },
     control: { light: '#8F8984', dark: '#78716C' },
   },
@@ -86,6 +98,10 @@ const color = {
   focus: {
     ring: { light: '#4F46E5', dark: '#818CF8' },
   },
+  // Placeholder blocks while content loads. Never under text, and it never shimmers or pulses.
+  skeleton: {
+    fill: rule,
+  },
 } as const satisfies Record<string, Record<string, ModeColor | Record<string, ModeColor>>>;
 
 const wash = {
@@ -94,6 +110,16 @@ const wash = {
   // passes on every surface and the wash still sits 1.13 off its surface.
   dark: { base: '#818CF8', alpha: 0.1 },
 } as const satisfies Wash;
+
+// Dims the page behind a dialog or the command bar. Menus and popovers have none. Translucent
+// for the same reason as the wash, and a token because the lint bans opacity modifiers. In
+// dark the page is already near black, so the dialog's strong rule does the separating.
+const overlay = {
+  scrim: {
+    light: { base: '#0B1120', alpha: 0.24 },
+    dark: { base: '#000000', alpha: 0.5 },
+  },
+} as const satisfies Record<string, Wash>;
 
 // Shadows are drawn in ink. Dark mode has none: floating things use the raised surface and a
 // strong rule instead, because a shadow on a near black ground reads as dirt.
@@ -155,11 +181,32 @@ const space = {
   128: 128,
 } as const;
 
+// Pixels at the default root size, shipped in rem so controls grow with text. 40 lives here
+// only: a space step of 40 would invite 40 px gaps.
+const size = {
+  // 24 is the smallest target WCAG allows, for toolbar icon buttons. 32 is the dashboard
+  // default, 40 is for public pages and touch first forms.
+  control: { sm: 24, md: 32, lg: 40 },
+  icon: { sm: 16, md: 20, lg: 24 },
+  row: { compact: 32, comfortable: 40 },
+} as const;
+
 // Pixels, not rem: corners and lines should not grow with text.
 const radius = { none: 0, xs: 2, sm: 4, md: 6, full: 9999 } as const;
 // The gutter is the status gutter beside a docs section, as wide as the brand's status rule.
-// The focus offset keeps the ring off the control's own edge.
-const stroke = { hairline: 1, focus: 2, focusOffset: 2, icon: 1.5, gutter: 4 } as const;
+// The focus offset keeps the ring off the control's own edge. The inset offset pulls it inside
+// for items flush in a container (menu items, options, rows, cells), where an outside ring
+// would be clipped or overlap a neighbour. The indicator marks the selected row, the current
+// nav item and the selected tab.
+const stroke = {
+  hairline: 1,
+  focus: 2,
+  focusOffset: 2,
+  focusInset: -2,
+  icon: 1.5,
+  gutter: 4,
+  indicator: 2,
+} as const;
 
 // Stacking order, named by job. Gaps of ten leave room without renumbering.
 const layer = { base: 0, raised: 10, overlay: 20, toast: 30 } as const;
@@ -197,6 +244,23 @@ const motion = {
   spring: Record<string, { stiffness: number; damping: number; mass: number }>;
 };
 
+export interface Timer {
+  ms: number;
+}
+
+// Waits, not transitions, so they are kept apart from motion: they never become Tailwind
+// duration utilities and reduced motion never shortens them. A toast that waited 120 ms
+// instead of six seconds would be gone before anyone read it.
+const timer = {
+  // Then 0 while moving between triggers.
+  tooltip: { ms: 500 },
+  // Before a skeleton shows, so fast loads never flash one.
+  reveal: { ms: 200 },
+  toast: { ms: 6000 },
+  // Longer, so there is time to reach Undo.
+  toastUndo: { ms: 10000 },
+} as const satisfies Record<string, Timer>;
+
 // Fades never run longer than this when the reader asks for reduced motion.
 export const reducedFadeCapMs = 120;
 
@@ -210,20 +274,26 @@ const layout = {
   measure: 35, // em
   // The docs site's three columns: navigation, reading, on this page.
   docs: { nav: 240, content: 640, toc: 220 },
+  // The dashboard frame: top bar height and side nav widths. Pixels at the default root
+  // size, shipped in rem so the frame keeps up with zoomed text.
+  shell: { bar: 48, nav: 240, navCollapsed: 48 },
 } as const;
 
 export const tokens = {
   color,
   wash,
+  overlay,
   shadow,
   font,
   weight,
   type,
   space,
+  size,
   radius,
   stroke,
   layer,
   motion,
+  timer,
   layout,
 } as const;
 

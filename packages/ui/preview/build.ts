@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { themeScript } from '../src/theme-script.ts';
+import { renderTokensCss } from '../src/tokens/generate.ts';
 import {
   colorOf,
   disabledCeiling,
@@ -66,6 +67,8 @@ const BACKDROPS: Backdrop[] = [
   'surface.ground',
   'surface.raised',
   'surface.sunken',
+  'surface.hover',
+  'surface.pressed',
   ...washBackdrops,
 ];
 const backdropLabel = (b: Backdrop) =>
@@ -131,7 +134,8 @@ function pairsSection(): string {
       <h2 id="contrast">Contrast</h2>
       <p class="lede">Measured from the tokens and floored to two decimals. Text needs ${minimum.text}:1,
       marks and control edges need ${minimum['non-text']}:1. The selection wash is translucent, so it is
-      measured over each surface. Pairs that fail are never used, and pairs marked ruled out pass but
+      measured over each surface. The overlay surface is ground in light and raised in dark, so
+      its pairs are those columns. Pairs that fail are never used, and pairs marked ruled out pass but
       are never used either, so a rule reads the same in both modes.</p>
       <div class="matrices">${pairMatrix('light')}${pairMatrix('dark')}</div>
     </section>`;
@@ -238,11 +242,13 @@ function scaleSection(): string {
         `<li><span class="corner" style="border-radius: var(--dr-radius-${k})"></span><span class="label">${k}</span><span class="numbers">${v}px</span></li>`,
     )
     .join('');
+  // An inset offset is negative, so its line is drawn at the same length turned positive.
   const stroke = Object.entries(tokens.stroke)
-    .map(
-      ([k, v]) =>
-        `<li><span class="line" style="block-size: var(--dr-stroke-${k})"></span><span class="label">${k}</span><span class="numbers">${v}px</span></li>`,
-    )
+    .map(([k, v]) => {
+      const length =
+        v < 0 ? `calc(var(--dr-stroke-${kebab(k)}) * -1)` : `var(--dr-stroke-${kebab(k)})`;
+      return `<li><span class="line" style="block-size: ${length}"></span><span class="label">${kebab(k)}</span><span class="numbers">${v}px</span></li>`;
+    })
     .join('');
   return `
     <section aria-labelledby="scale">
@@ -260,10 +266,125 @@ function scaleSection(): string {
     </section>`;
 }
 
+function fillsSection(): string {
+  const items = [
+    ['Rename', 'rest', ''],
+    ['Duplicate', 'hover', 'is-hover'],
+    ['Move to folder', 'pressed', 'is-pressed'],
+    ['Copy link', 'focus, inset ring', 'is-focus'],
+    ['Checkout API', 'selected', 'is-selected'],
+    ['Delete project', 'disabled, no fill', 'is-disabled'],
+  ] as const;
+  const menu = items
+    .map(
+      ([text, state, cls]) =>
+        `<li class="item ${cls}"${cls === 'is-disabled' ? ' aria-disabled="true"' : ''}><span>${text}</span><span class="item-state">${state}</span></li>`,
+    )
+    .join('');
+  const status = (['fresh', 'stale', 'broken', 'neutral'] as const)
+    .map((k, i) => {
+      const word = ['Operational', 'Degraded', 'Outage', 'Maintenance'][i] ?? '';
+      return `<li class="item ${i === 1 ? 'is-hover' : ''} state-${k}"><span class="status"><span class="pip" aria-hidden="true"></span>${word}</span><span class="item-state">${i === 1 ? 'hover' : 'rest'}</span></li>`;
+    })
+    .join('');
+  return `
+    <section aria-labelledby="fills">
+      <h2 id="fills">Fills and floating surfaces</h2>
+      <p class="lede">Menus, popovers, tooltips, dialogs, the command bar and toasts sit on the overlay surface with the strong rule: paper with a shadow in light, raised in dark.
+      Items under the pointer take the hover fill, pressed items the pressed fill. State words on them are body text beside the state mark.</p>
+      <div class="floating">
+        <figure class="specimen">
+          <figcaption>Menu on the overlay surface</figcaption>
+          <ul class="menu">${menu}</ul>
+        </figure>
+        <figure class="specimen">
+          <figcaption>State on a fill</figcaption>
+          <ul class="menu">${status}</ul>
+        </figure>
+        <figure class="specimen">
+          <figcaption>Dialog over the scrim</figcaption>
+          <div class="scrim-demo">
+            <div class="page-behind" aria-hidden="true"><span class="skeleton"></span><span class="skeleton short"></span><span class="skeleton"></span></div>
+            <div class="scrim" aria-hidden="true"></div>
+            <div class="dialog"><p class="dialog-title">Rotate the API key?</p><p>The current key stops working at once.</p></div>
+          </div>
+        </figure>
+      </div>
+    </section>`;
+}
+
+function sizeSection(): string {
+  const groups = Object.entries(tokens.size)
+    .map(([group, steps]) => {
+      const tiles = Object.entries(steps)
+        .map(
+          ([k, v]) =>
+            `<li><span class="size-box size-${group}" style="block-size: var(--dr-size-${group}-${kebab(k)}); ${group === 'row' ? '' : `inline-size: var(--dr-size-${group}-${kebab(k)})`}"></span><span class="label">${group} ${kebab(k)}</span><span class="numbers">${v / 16}rem</span></li>`,
+        )
+        .join('');
+      return `<div><h3>${group === 'control' ? 'Controls' : group === 'icon' ? 'Icons' : 'Rows'}</h3><ul class="tiles sizes">${tiles}</ul></div>`;
+    })
+    .join('');
+  const shell = Object.entries(tokens.layout.shell)
+    .map(
+      ([k, v]) =>
+        `<li><span class="label">${kebab(k)}</span><span class="bar" style="inline-size: var(--dr-shell-${kebab(k)})"></span><span class="numbers">${v / 16}rem</span></li>`,
+    )
+    .join('');
+  const skeleton = `<div class="skeleton-demo" aria-hidden="true"><span class="skeleton"></span><span class="skeleton short"></span><span class="skeleton"></span></div>`;
+  return `
+    <section aria-labelledby="sizes">
+      <h2 id="sizes">Sizes, shell and skeletons</h2>
+      <p class="lede">24 is the smallest target, 32 the dashboard default, 40 for public pages and touch. The space scale has no 40; it exists only as a size.</p>
+      <div class="scales">${groups}</div>
+      <h3>Shell</h3>
+      <ul class="space shell">${shell}</ul>
+      <h3>Skeleton</h3>
+      <p class="lede">Drawn in the rule colour, never under text, with no shimmer or pulse.</p>
+      ${skeleton}
+    </section>`;
+}
+
+// What a reader who asks for reduced motion gets for one property: the value in the reduced
+// motion block when it is redefined there, the root value otherwise. Read from the stylesheet,
+// so the specimen shows what ships rather than what the source intends.
+export function reducedMotionValue(css: string, name: string): string {
+  const find = (block: string) =>
+    new RegExp(`${name}:\\s*([^;]+);`).exec(block)?.[1]?.trim() ?? undefined;
+  const at = css.indexOf('@media (prefers-reduced-motion: reduce)');
+  const reduced = at === -1 ? undefined : find(css.slice(at, css.indexOf('}', at)));
+  const root = find(css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root'))));
+  const value = reduced ?? root;
+  if (value === undefined) throw new Error(`${name} is not in the stylesheet`);
+  return value;
+}
+
+const reducedMs = (name: string) => parseInt(reducedMotionValue(renderTokensCss(), name), 10);
+
+function timerSection(): string {
+  const rows = Object.entries(tokens.timer)
+    .map(
+      ([k, t]) =>
+        `<tr><th scope="row">${kebab(k)}</th><td class="numbers">${t.ms} ms</td><td class="numbers">${reducedMs(`--dr-timer-${kebab(k)}`)} ms</td></tr>`,
+    )
+    .join('');
+  return `
+    <section aria-labelledby="timers">
+      <h2 id="timers">Timers</h2>
+      <p class="lede">Waits, not transitions. They are not Tailwind utilities, and reduced motion leaves them alone, because a shorter toast is gone before it is read. Toasts pause on hover, focus and a hidden window.</p>
+      <div class="scroll" tabindex="0" role="region" aria-label="Timer values">
+        <table>
+          <thead><tr><th scope="col">Timer</th><th scope="col">Default</th><th scope="col">Reduced</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
 function motionSection(): string {
   const rows = Object.entries(tokens.motion.duration)
     .map(([k, d]) => {
-      const reduced = d.kind === 'move' ? 0 : Math.min(d.ms, reducedFadeCapMs);
+      const reduced = reducedMs(`--dr-duration-${kebab(k)}`);
       return `<tr><th scope="row">${kebab(k)}</th><td>${d.kind}</td><td class="numbers">${d.ms} ms</td><td class="numbers">${reduced} ms</td></tr>`;
     })
     .join('');
@@ -318,10 +439,13 @@ export function renderPreview(): string {
 ${colorSection()}
 ${pairsSection()}
 ${disabledSection()}
+${fillsSection()}
 ${stateSection()}
 ${typeSection()}
 ${scaleSection()}
+${sizeSection()}
 ${motionSection()}
+${timerSection()}
 </main>
 <script>
 document.querySelectorAll('input[name="theme"]').forEach(function (input) {
