@@ -100,8 +100,15 @@ describe('the component entry', () => {
   });
 
   it("does not start with 'use client', so server safe exports stay server components", () => {
-    const text = readFileSync(join(root, 'src', 'react', 'index.ts'), 'utf8');
-    expect(text).not.toMatch(/['"]use client['"]/);
+    const file = join(root, 'src', 'react', 'index.ts');
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest);
+    const first = source.statements[0];
+    const directive =
+      first !== undefined &&
+      ts.isExpressionStatement(first) &&
+      ts.isStringLiteral(first.expression) &&
+      first.expression.text === 'use client';
+    expect(directive).toBe(false);
   });
 
   it("lets an app's Tailwind see the component classes", () => {
