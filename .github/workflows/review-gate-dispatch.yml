@@ -1,0 +1,148 @@
+# Trust model
+#
+# This is the manual refresh for the review-gate status, mainly for fork PRs, whose own
+# runs get a read-only token and cannot post. It runs with the default branch's
+# privileges, so it is kept apart from review-gate.yml:
+#
+# - The only trigger is workflow_dispatch. Nothing here reads pull_request event data;
+#   the PR number comes only from the input and is checked to be a positive integer
+#   before any use.
+# - The gate script, path rules and allow list come from the default branch, named
+#   literally, so neither the input nor the ref the caller picked chooses the code.
+# - No PR ref is fetched and no PR code is checked out or run. The full history
+#   checkout already holds heads of branches in this repository, so their approvals can
+#   carry over clean base merges; a fork head is absent and nothing carries.
+# - Reviews, rules and the status work as in review-gate.yml. Keep the two files in step
+#   when either changes. They share a concurrency group per PR, so their runs never race
+#   on the status.
+#
+# What it does not protect: GitHub runs this file from the ref the caller picked, so a
+# branch in this repository can edit it. The controls for that are the same as for
+# review-gate.yml: code owner review on .github/ and, later, a status from a GitHub App.
+
+name: Review gate (dispatch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: review-gate-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: evaluate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out the gate script
+      pull-requests: read # PR head, labels, files and reviews
+    outputs:
+      state: ${{ steps.gate.outputs.state }}
+      sha: ${{ steps.gate.outputs.sha }}
+      description: ${{ steps.gate.outputs.description }}
+    steps:
+      - name: Check the PR number
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::pr_number must be a positive integer"
+            exit 1
+          fi
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: development
+          persist-credentials: false
+          # Full history and every branch, so carry-over can walk merges and find the
+          # base branch tip.
+          fetch-depth: 0
+      # Without a trusted copy of the script there is nothing safe to run. Failing here
+      # leaves no state output, so report posts an error status on the head.
+      - name: Check for the gate script on the trusted ref
+        run: |
+          if [ ! -f scripts/review-gate/src/cli.ts ]; then
+            echo "::error::the gate script is missing on the trusted ref; refusing to evaluate"
+            exit 1
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Evaluate
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEW_GATE_GIT_DIR: ${{ github.workspace }}
+        run: >-
+          node scripts/review-gate/src/cli.ts github
+          --repo "$REPO" --pr "$PR_NUMBER"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  report:
+    name: report
+    needs: evaluate
+    if: ${{ !cancelled() && needs.evaluate.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # re-read the PR head
+      statuses: write # post the review-gate status
+    steps:
+      - name: Set the review-gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          GATE_STATE: ${{ needs.evaluate.outputs.state }}
+          GATE_SHA: ${{ needs.evaluate.outputs.sha }}
+          GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          is_sha() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to report on"
+            exit 1
+          fi
+          # The current head comes from the API, not from evaluate.
+          head="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          if ! is_sha "$head"; then
+            echo "::error::could not read the PR head"
+            exit 1
+          fi
+
+          state="$GATE_STATE"
+          description="$GATE_DESCRIPTION"
+          case "$state" in
+            success|failure)
+              if [ "$GATE_SHA" != "$head" ]; then
+                echo "::error::evaluate reported ${GATE_SHA:-no SHA}, but the PR head is ${head}"
+                exit 1
+              fi
+              ;;
+            *)
+              # No usable result. An error status cannot help anyone pass, so it is posted
+              # on the head read above to fail closed.
+              state=error
+              description="the gate could not evaluate this PR"
+              ;;
+          esac
+
+          gh api --method POST "repos/${REPO}/statuses/${head}" \
+            -f state="$state" -f context=review-gate \
+            -f description="${description:0:140}" -f target_url="$RUN_URL" > /dev/null
+          echo "review-gate: ${state} on ${head}: ${description}"
+          if [ "$state" = error ]; then
+            echo "::error::the gate produced no result"
+            exit 1
+          fi
