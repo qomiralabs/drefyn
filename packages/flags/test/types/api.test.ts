@@ -72,59 +72,79 @@ describe('flag names', () => {
   });
 });
 
+// The calls below hold invalid definitions that defineFlags rejects at run time, so they sit
+// in functions that are never called; tsc still checks every one.
 describe('definitions', () => {
   it('a kill switch without safeValue fails typecheck', () => {
-    defineFlags([
-      // @ts-expect-error safeValue is required on a kill switch
-      { ...base, name: 'ai.generation', kind: 'kill_switch' },
-    ]);
-    defineFlags([{ ...base, name: 'ai.generation', kind: 'kill_switch', safeValue: true }]);
+    const typeOnly = () => {
+      defineFlags([
+        // @ts-expect-error safeValue is required on a kill switch
+        { ...base, name: 'ai.generation', kind: 'kill_switch' },
+      ]);
+      defineFlags([{ ...base, name: 'ai.generation', kind: 'kill_switch', safeValue: true }]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
     expectTypeOf<KillSwitch['safeValue']>().toEqualTypeOf<boolean>();
   });
 
   it('a release flag cannot fail open', () => {
     expectTypeOf<ReleaseFlag['safeValue']>().toEqualTypeOf<false>();
-    defineFlags([
-      // @ts-expect-error a release flag is false when unsure, by type
-      { ...base, name: 'status.sms', kind: 'release', safeValue: true },
-    ]);
-    defineFlags([
-      // @ts-expect-error safeValue is required on a release flag too
-      { ...base, name: 'status.sms', kind: 'release' },
-    ]);
+    const typeOnly = () => {
+      defineFlags([
+        // @ts-expect-error a release flag is false when unsure, by type
+        { ...base, name: 'status.sms', kind: 'release', safeValue: true },
+      ]);
+      defineFlags([
+        // @ts-expect-error safeValue is required on a release flag too
+        { ...base, name: 'status.sms', kind: 'release' },
+      ]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
   });
 
   it('an experiment needs a metric and cannot fail open', () => {
-    defineFlags([
-      // @ts-expect-error metric is required
-      { ...base, name: 'site.hero_copy', kind: 'experiment', safeValue: false },
-    ]);
-    defineFlags([
-      // @ts-expect-error an experiment is false when unsure
-      { ...base, name: 'site.hero_copy', kind: 'experiment', safeValue: true, metric: 'Signups' },
-    ]);
+    const typeOnly = () => {
+      defineFlags([
+        // @ts-expect-error metric is required
+        { ...base, name: 'site.hero_copy', kind: 'experiment', safeValue: false },
+      ]);
+      defineFlags([
+        // @ts-expect-error an experiment is false when unsure
+        { ...base, name: 'site.hero_copy', kind: 'experiment', safeValue: true, metric: 'Signups' },
+      ]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
   });
 
   it('a plan flag names an entitlements feature', () => {
-    defineFlags([{ ...base, name: 'docs.versioning', kind: 'plan', feature: 'docs.versioning' }]);
-    defineFlags([
-      // @ts-expect-error not an entitlements feature
-      { ...base, name: 'docs.versioning', kind: 'plan', feature: 'docs.teleport' },
-    ]);
+    const typeOnly = () => {
+      defineFlags([{ ...base, name: 'docs.versioning', kind: 'plan', feature: 'docs.versioning' }]);
+      defineFlags([
+        // @ts-expect-error not an entitlements feature
+        { ...base, name: 'docs.versioning', kind: 'plan', feature: 'docs.teleport' },
+      ]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
   });
 
   it('a name needs a known area', () => {
-    defineFlags([
-      // @ts-expect-error website is not an area
-      { ...base, name: 'website.hero', kind: 'release', safeValue: false },
-    ]);
+    const typeOnly = () => {
+      defineFlags([
+        // @ts-expect-error website is not an area
+        { ...base, name: 'website.hero', kind: 'release', safeValue: false },
+      ]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
   });
 
   it('an unknown kind fails typecheck', () => {
-    defineFlags([
-      // @ts-expect-error permanent is not a kind
-      { ...base, name: 'status.sms', kind: 'permanent', safeValue: false },
-    ]);
+    const typeOnly = () => {
+      defineFlags([
+        // @ts-expect-error permanent is not a kind
+        { ...base, name: 'status.sms', kind: 'permanent', safeValue: false },
+      ]);
+    };
+    expectTypeOf(typeOnly).toBeFunction();
   });
 });
 
