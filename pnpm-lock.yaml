@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@openfeature/flagd-provider@0.17.0':
+    hash: 2362ed5ea11a9886bc5cb97eeff03d1f6b540c75e39f81b47d2eb6f8ba54bccb
+    path: patches/@openfeature__flagd-provider@0.17.0.patch
+
 importers:
 
   .:
@@ -61,7 +66,7 @@ importers:
         version: 1.12.0
       '@openfeature/flagd-provider':
         specifier: 0.17.0
-        version: 0.17.0(@grpc/grpc-js@1.14.6)(@openfeature/core@1.12.0)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
+        version: 0.17.0(patch_hash=2362ed5ea11a9886bc5cb97eeff03d1f6b540c75e39f81b47d2eb6f8ba54bccb)(@grpc/grpc-js@1.14.6)(@openfeature/core@1.12.0)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
       '@openfeature/server-sdk':
         specifier: 1.23.0
         version: 1.23.0(@openfeature/core@1.12.0)
@@ -1242,7 +1247,7 @@ snapshots:
       object-hash: 3.0.0
       semver: 7.8.5
 
-  '@openfeature/flagd-provider@0.17.0(@grpc/grpc-js@1.14.6)(@openfeature/core@1.12.0)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))':
+  '@openfeature/flagd-provider@0.17.0(patch_hash=2362ed5ea11a9886bc5cb97eeff03d1f6b540c75e39f81b47d2eb6f8ba54bccb)(@grpc/grpc-js@1.14.6)(@openfeature/core@1.12.0)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))':
     dependencies:
       '@grpc/grpc-js': 1.14.6
       '@openfeature/flagd-core': 5.0.0(@openfeature/core@1.12.0)

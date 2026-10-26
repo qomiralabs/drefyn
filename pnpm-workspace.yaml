@@ -10,3 +10,8 @@ minimumReleaseAge: 4320
 # protobufjs (under the flagd provider) has a postinstall that only prints a version hint;
 # nothing needs it, and listing it here keeps installs warning free.
 ignoredBuiltDependencies: [protobufjs]
+
+# The flagd provider's gRPC sync kept reconnecting after close and held the process open;
+# the patch adds a closed guard. Drop it once a provider release stops on close.
+patchedDependencies:
+  '@openfeature/flagd-provider@0.17.0': patches/@openfeature__flagd-provider@0.17.0.patch

@@ -1,0 +1,92 @@
+diff --git a/index.cjs.js b/index.cjs.js
+index 70d393b57b03279cebc27abb026f53eeeed3aba8..d46d69a2085d722f0b5da700395c7418e16b1454 100644
+--- a/index.cjs.js
++++ b/index.cjs.js
+@@ -8387,12 +8387,20 @@ class GrpcFetch {
+         return __awaiter(this, void 0, void 0, function* () {
+             var _a;
+             (_a = this._logger) === null || _a === void 0 ? void 0 : _a.debug('Disconnecting gRPC sync connection');
++            // Drefyn patch: stop reconnecting once closed.
++            this._closed = true;
++            clearTimeout(this._reconnectTimer);
+             closeStreamIfDefined(this._syncStream);
+             this._syncClient.close();
+         });
+     }
+     listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback, resolveConnect, rejectConnect) {
+         var _a;
++        // Drefyn patch: a closed fetcher never connects again.
++        if (this._closed) {
++            rejectConnect === null || rejectConnect === void 0 ? void 0 : rejectConnect(new serverSdk.GeneralError('closed'));
++            return;
++        }
+         (_a = this._logger) === null || _a === void 0 ? void 0 : _a.debug('Starting gRPC sync connection');
+         closeStreamIfDefined(this._syncStream);
+         try {
+@@ -8445,6 +8453,11 @@ class GrpcFetch {
+     }
+     handleError(err, dataCallback, reconnectCallback, changedCallback, disconnectCallback, rejectConnect) {
+         var _a, _b, _c;
++        // Drefyn patch: errors from the closed channel must not schedule a reconnect.
++        if (this._closed) {
++            rejectConnect === null || rejectConnect === void 0 ? void 0 : rejectConnect(new serverSdk.GeneralError('closed'));
++            return;
++        }
+         // Check if error is a fatal status code on first connection only
+         if (isFatalStatusCodeError(err, this._initialized, this._fatalStatusCodes)) {
+             this._isConnected = false;
+@@ -8460,7 +8473,7 @@ class GrpcFetch {
+         this.reconnect(dataCallback, reconnectCallback, changedCallback, disconnectCallback);
+     }
+     reconnect(dataCallback, reconnectCallback, changedCallback, disconnectCallback) {
+-        setTimeout(() => this.listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback), this._errorThrottled ? this._maxBackoffMs : 0);
++        this._reconnectTimer = setTimeout(() => this.listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback), this._errorThrottled ? this._maxBackoffMs : 0);
+         this._errorThrottled = false;
+     }
+ }
+diff --git a/index.esm.js b/index.esm.js
+index e7c77e25aab17023087efe1c74544adf09494243..5d8d8103025c4f1026fb00908b15d6765c309683 100644
+--- a/index.esm.js
++++ b/index.esm.js
+@@ -8385,12 +8385,20 @@ class GrpcFetch {
+         return __awaiter(this, void 0, void 0, function* () {
+             var _a;
+             (_a = this._logger) === null || _a === void 0 ? void 0 : _a.debug('Disconnecting gRPC sync connection');
++            // Drefyn patch: stop reconnecting once closed.
++            this._closed = true;
++            clearTimeout(this._reconnectTimer);
+             closeStreamIfDefined(this._syncStream);
+             this._syncClient.close();
+         });
+     }
+     listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback, resolveConnect, rejectConnect) {
+         var _a;
++        // Drefyn patch: a closed fetcher never connects again.
++        if (this._closed) {
++            rejectConnect === null || rejectConnect === void 0 ? void 0 : rejectConnect(new GeneralError('closed'));
++            return;
++        }
+         (_a = this._logger) === null || _a === void 0 ? void 0 : _a.debug('Starting gRPC sync connection');
+         closeStreamIfDefined(this._syncStream);
+         try {
+@@ -8443,6 +8451,11 @@ class GrpcFetch {
+     }
+     handleError(err, dataCallback, reconnectCallback, changedCallback, disconnectCallback, rejectConnect) {
+         var _a, _b, _c;
++        // Drefyn patch: errors from the closed channel must not schedule a reconnect.
++        if (this._closed) {
++            rejectConnect === null || rejectConnect === void 0 ? void 0 : rejectConnect(new GeneralError('closed'));
++            return;
++        }
+         // Check if error is a fatal status code on first connection only
+         if (isFatalStatusCodeError(err, this._initialized, this._fatalStatusCodes)) {
+             this._isConnected = false;
+@@ -8458,7 +8471,7 @@ class GrpcFetch {
+         this.reconnect(dataCallback, reconnectCallback, changedCallback, disconnectCallback);
+     }
+     reconnect(dataCallback, reconnectCallback, changedCallback, disconnectCallback) {
+-        setTimeout(() => this.listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback), this._errorThrottled ? this._maxBackoffMs : 0);
++        this._reconnectTimer = setTimeout(() => this.listen(dataCallback, reconnectCallback, changedCallback, disconnectCallback), this._errorThrottled ? this._maxBackoffMs : 0);
+         this._errorThrottled = false;
+     }
+ }
