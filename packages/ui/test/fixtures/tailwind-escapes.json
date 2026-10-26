@@ -1,1 +1,15 @@
-["p-[13px]", "duration-200", "delay-150", "border-2", "opacity-50", "text-ink/60"]
+[
+  "p-[13px]",
+  "duration-200",
+  "delay-150",
+  "border-2",
+  "opacity-50",
+  "text-ink/60",
+  "not-max-[600px]:p-4",
+  "not-[@media(min-width:1px)]:p-4",
+  "@[500px]:p-4",
+  "border-bs-2",
+  "mix-blend-multiply",
+  "bg-blend-screen",
+  "drop-shadow-ink"
+]

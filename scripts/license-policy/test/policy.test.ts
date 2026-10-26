@@ -40,6 +40,7 @@ const policy: Policy = {
       reason: 'platform builds',
     },
   ],
+  forbidden: [],
 };
 
 const mpl = (name: string, license = 'MPL-2.0') => ({ name, versions: ['2.0.0'], license });
@@ -224,7 +225,13 @@ describe('license-policy cli', () => {
       input,
       JSON.stringify({
         MIT: [{ name: 'a', versions: ['1'], license: 'MIT' }],
-        'MPL-2.0': [mpl('lightningcss'), mpl('lightningcss-linux-x64-gnu')],
+        'MPL-2.0': [
+          mpl('lightningcss'),
+          mpl('lightningcss-linux-x64-gnu'),
+          mpl('axe-core'),
+          mpl('@axe-core/playwright'),
+        ],
+        'CC-BY-4.0': [mpl('caniuse-lite', 'CC-BY-4.0')],
       }),
     );
     const code = main(['--input', input], { out: () => undefined, err: () => undefined });

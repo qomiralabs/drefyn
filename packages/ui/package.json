@@ -21,6 +21,7 @@
     "test": "vitest run --coverage"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "tailwindcss": "4.3.3"
   }
 }
