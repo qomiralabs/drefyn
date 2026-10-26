@@ -41,8 +41,3 @@ export class FlagError extends Error {
     if (detail.key !== undefined) this.key = detail.key;
   }
 }
-
-// Stub marker for the test first commit; every caller is replaced by the implementation.
-export function notImplemented(what: string, ...args: unknown[]): never {
-  throw new Error(`${what}: not implemented (called with ${String(args.length)} arguments)`);
-}
