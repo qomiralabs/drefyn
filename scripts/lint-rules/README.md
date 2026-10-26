@@ -1,8 +1,9 @@
 # `@drefyn/lint-rules`
 
-Repo tooling that keeps workspace packages behind their public entry points and keeps
-outbound network calls behind `@drefyn/egress`. The root `eslint.config.js` loads the
-rules for every package at severity `error`.
+Repo tooling that keeps workspace packages behind their public entry points, keeps
+outbound network calls behind `@drefyn/egress` and keeps styling on the design tokens.
+The root `eslint.config.js` loads the boundary and egress rules for every package and
+`no-arbitrary-values` for `packages/ui` and `apps/*`, all at severity `error`.
 
 ## Rules
 
@@ -52,6 +53,31 @@ Every new entry needs a security review.
 
 ESLint reads manifests once per process. Restart an editor's ESLint server after
 changing a `package.json` or `pnpm-workspace.yaml`.
+
+`drefyn/no-arbitrary-values` is on for `packages/ui` and `apps/*`. It reports any
+string that holds a Tailwind class which mints a value outside the tokens:
+
+- arbitrary values and properties: `p-[13px]`, `text-[#ff0000]`, `p-(--x)`,
+  `[mask-type:alpha]`
+- arbitrary breakpoints and at rule variants: `min-[700px]:p-16`,
+  `[@media(min-width:700px)]:p-4`, `[@container(min-width:30rem)]:p-4`
+- raw durations and delays, which skip reduced motion and the motion tokens:
+  `duration-200`, `delay-150`
+- raw line widths, which skip the stroke tokens: `border-2`, `outline-2`, `ring-1`,
+  `decoration-2`, `underline-offset-4`, `stroke-2` (plain `border` and `outline` read the
+  stroke tokens)
+- raw focus offsets: `outline-offset-2`, `ring-offset-2`. Use `focus-ring`
+- partial opacity and colour opacity modifiers, which make colours nobody measured:
+  `opacity-50`, `opacity-2.5`, `text-ink/60`, `bg-ink/12.5`. Disabled controls use the
+  disabled colour tokens instead
+- colour changing filters: `brightness-50`, `saturate-50`, `grayscale`, `hue-rotate-15`
+- bare stacking orders: `z-10`. Use `z-base`, `z-raised`, `z-overlay` or `z-toast`
+
+Every bare number may have decimals. Zero is allowed for lengths and delays (`border-0`,
+`delay-0`), full or no opacity is allowed (`opacity-0`, `opacity-100`, `bg-ink/100`), and
+so are the identity filters (`brightness-100`, `grayscale-0`). State variants such as
+`data-[state=open]:` stay allowed. The guard step does not run this rule; it is a styling
+rule, not a boundary.
 
 ## Manifest checker
 

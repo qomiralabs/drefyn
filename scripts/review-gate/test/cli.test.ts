@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { main, type Deps } from '../src/cli.ts';
+import { Repo } from './repo.ts';
 
 const HEAD = 'd'.repeat(40);
 const marker = (reviewer: string, verdict = 'approve') =>
@@ -29,8 +30,16 @@ const passingInput = {
   headSha: HEAD,
   labels: [],
   files: ['README.md'],
-  reviews: ['code-reviewer', 'qa-verifier', 'hygiene-auditor'].map((r, i) => member(marker(r), i)),
+  reviews: ['code-reviewer', 'qa-verifier'].map((r, i) => member(marker(r), i)),
 };
+
+const matcher = (part: Record<string, string[]> = {}) => ({
+  prefixes: [],
+  names: [],
+  contains: [],
+  suffixes: [],
+  ...part,
+});
 
 async function run(args: string[], env: NodeJS.ProcessEnv = {}, deps: Deps = {}) {
   let out = '';
@@ -69,7 +78,9 @@ describe('review-gate evaluate', () => {
       writeInput({ ...passingInput, files: ['.github/workflows/ci.yml'] }),
     ]);
     expect(res.code).toBe(1);
-    expect(res.out).toMatch(/security-reviewer\s+missing \(path \.github\/workflows\/ci\.yml\)/);
+    expect(res.out).toMatch(
+      /security-reviewer\s+missing \(tier A, path \.github\/workflows\/ci\.yml\)/,
+    );
   });
 
   it('reads path rules from --rules', async () => {
@@ -80,10 +91,14 @@ describe('review-gate evaluate', () => {
         reviewers: {
           'code-reviewer': ['Divine572'],
           'qa-verifier': ['Divine572'],
-          'hygiene-auditor': ['Divine572'],
           'design-reviewer': ['Divine572'],
         },
-        rules: [{ reviewer: 'design-reviewer', prefixes: ['apps/web/'], names: [], contains: [] }],
+        paths: {
+          security: matcher(),
+          tests: matcher(),
+          ui: matcher({ prefixes: ['apps/web/'] }),
+          docs: matcher({ suffixes: ['.md'] }),
+        },
       }),
     );
     const res = await run([
@@ -94,12 +109,12 @@ describe('review-gate evaluate', () => {
       rules,
     ]);
     expect(res.code).toBe(1);
-    expect(res.out).toMatch(/design-reviewer\s+missing \(path apps\/web\/page\.tsx\)/);
+    expect(res.out).toMatch(/design-reviewer\s+missing \(ui path apps\/web\/page\.tsx\)/);
   });
 
   it('exits 2 on a broken rules file', async () => {
     const rules = join(dir, 'rules.json');
-    writeFileSync(rules, '{"rules": "nope"}');
+    writeFileSync(rules, '{"paths": "nope"}');
     const res = await run(['evaluate', '--input', writeInput(passingInput), '--rules', rules]);
     expect(res.code).toBe(2);
     expect(res.err).toContain('invalid rules');
@@ -209,6 +224,37 @@ describe('review-gate evaluate', () => {
     expect(res.err).toContain('review-gate: error');
   });
 
+  it('counts approvals on SHAs listed in carry and prints the carry note', async () => {
+    const old = 'e'.repeat(40);
+    const reviews = passingInput.reviews.map((e) => ({ ...e, body: e.body.replace(HEAD, old) }));
+    const input = {
+      ...passingInput,
+      files: ['packages/core/src/a.ts'],
+      reviews,
+      carry: [old],
+      carryNote: 'walked one merge',
+    };
+    const res = await run(['evaluate', '--input', writeInput(input)]);
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('carry-over stopped: walked one merge');
+  });
+
+  it.each([
+    ['carry is not a list', { carry: 'e' }],
+    ['carry holds a non string', { carry: [1] }],
+    ['carryNote is not a string', { carryNote: 3 }],
+  ])('exits 2 when %s', async (_name, extra) => {
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, ...extra })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('carry');
+  });
+
+  it('exits 2 on a malformed carried SHA', async () => {
+    const res = await run(['evaluate', '--input', writeInput({ ...passingInput, carry: ['abc'] })]);
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('carried SHA');
+  });
+
   it('exits 2 on input with the wrong shape', async () => {
     const res = await run(['evaluate', '--input', writeInput({ headSha: HEAD, labels: 'x' })]);
     expect(res.code).toBe(2);
@@ -304,6 +350,120 @@ describe('review-gate github', () => {
     const res = await run(['github', '--pr', '3'], { GITHUB_TOKEN: 't' });
     expect(res.code).toBe(2);
     expect(res.err).toContain('--repo');
+  });
+});
+
+describe('review-gate github with history', () => {
+  let repo: Repo;
+  let X: string;
+  let H: string;
+  beforeEach(() => {
+    repo = new Repo();
+    const R = repo.commit(undefined, { 'packages/core/src/a.ts': 'v1\n', 'other.txt': 'o\n' });
+    const D1 = repo.commit(R, { 'other.txt': 'o2\n' });
+    // The workflow checks out with full history, so the base branch is a remote ref.
+    repo.git('update-ref', 'refs/remotes/origin/development', D1);
+    X = repo.commit(R, { 'packages/core/src/a.ts': 'v2\n' });
+    H = repo.merge(X, D1);
+  });
+  afterEach(() => {
+    repo.remove();
+  });
+
+  function api(base: unknown = { ref: 'development' }): typeof fetch {
+    return (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === '/graphql') {
+        const nodes = ['code-reviewer', 'qa-verifier'].map((r, i) => ({
+          author: { __typename: 'User', login: 'Divine572' },
+          authorAssociation: 'MEMBER',
+          submittedAt: `2026-10-07T10:00:0${i}Z`,
+          lastEditedAt: null,
+          state: 'COMMENTED',
+          body: `<!-- drefyn-review reviewer=${r} sha=${X} verdict=approve -->`,
+        }));
+        return Promise.resolve(
+          Response.json({
+            data: {
+              repository: {
+                pullRequest: {
+                  reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.pathname === '/repos/o/r/pulls/3') {
+        return Promise.resolve(
+          Response.json({ head: { sha: H }, base, labels: [], changed_files: 1 }),
+        );
+      }
+      if (url.pathname === '/repos/o/r/pulls/3/files') {
+        return Promise.resolve(Response.json([{ filename: 'packages/core/src/a.ts' }]));
+      }
+      return Promise.resolve(Response.json({ message: 'Not Found' }, { status: 404 }));
+    };
+  }
+
+  const env = (extra: NodeJS.ProcessEnv = {}) => ({
+    GITHUB_TOKEN: 't',
+    GITHUB_API_URL: 'https://api.example.test',
+    ...extra,
+  });
+
+  it('carries approvals over a clean base merge when given the git directory', async () => {
+    const res = await run(
+      ['github', '--repo', 'o/r', '--pr', '3'],
+      env({ REVIEW_GATE_GIT_DIR: repo.dir }),
+      {
+        fetch: api(),
+      },
+    );
+    expect(res.out).toContain(`carry-over: approvals on these commits also count:\n  ${X}\n`);
+    expect(res.code).toBe(0);
+  });
+
+  it('carries nothing without the git directory, so approvals must be on the head', async () => {
+    const res = await run(['github', '--repo', 'o/r', '--pr', '3'], env(), { fetch: api() });
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('carry-over: none (no git directory given)');
+  });
+
+  it('carries nothing when the PR names no base branch', async () => {
+    const res = await run(
+      ['github', '--repo', 'o/r', '--pr', '3'],
+      env({ REVIEW_GATE_GIT_DIR: repo.dir }),
+      {
+        fetch: api(null),
+      },
+    );
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('carry-over: none (the PR names no base branch)');
+  });
+
+  it('carries nothing when the base branch is not fetched', async () => {
+    const res = await run(
+      ['github', '--repo', 'o/r', '--pr', '3'],
+      env({ REVIEW_GATE_GIT_DIR: repo.dir }),
+      {
+        fetch: api({ ref: 'staging' }),
+      },
+    );
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('carry-over: none (base ref refs/remotes/origin/staging not found)');
+  });
+
+  it('exits 2 on a base branch name git could read as something else', async () => {
+    const res = await run(
+      ['github', '--repo', 'o/r', '--pr', '3'],
+      env({ REVIEW_GATE_GIT_DIR: repo.dir }),
+      {
+        fetch: api({ ref: '--upload-pack=x' }),
+      },
+    );
+    expect(res.code).toBe(2);
+    expect(res.err).toContain('base branch');
   });
 });
 
