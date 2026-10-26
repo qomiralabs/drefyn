@@ -27,6 +27,17 @@ export interface Paths {
   gid: number;
 }
 
+// The one test of being inside the pinned image, shared with the visual spec so a
+// marker set by hand on a host can neither compare nor write a baseline.
+export const insidePinnedImage = (where: Where): boolean =>
+  where.env[MARKER] === IMAGE && where.platform === 'linux' && where.browsers;
+
+export const currentPlace = (): Where => ({
+  platform: process.platform,
+  env: process.env,
+  browsers: existsSync(IMAGE_BROWSERS),
+});
+
 export interface Plan {
   kind: 'run' | 'docker';
   command: string[];
@@ -45,6 +56,9 @@ export function plan(args: readonly string[], where: Where, paths: Paths): Plan 
         'run',
         '--rm',
         '--ipc=host',
+        // Screenshots of a static build need no network, and none means none can leak.
+        '--network',
+        'none',
         // Files written to the mounted checkout stay owned by the caller.
         '--user',
         `${paths.uid}:${paths.gid}`,
@@ -63,7 +77,7 @@ export function plan(args: readonly string[], where: Where, paths: Paths): Plan 
       ],
     };
   }
-  if (marker !== IMAGE || where.platform !== 'linux' || !where.browsers) {
+  if (!insidePinnedImage(where)) {
     throw new Error(
       `${MARKER} is set, but this is not inside the pinned Playwright image (${IMAGE}). ` +
         'Unset it and run the script again so it starts the image.',
@@ -75,17 +89,13 @@ export function plan(args: readonly string[], where: Where, paths: Paths): Plan 
 function main() {
   const pkg = join(dirname(fileURLToPath(import.meta.url)), '..');
   const repo = join(pkg, '..', '..');
-  const { command } = plan(
-    process.argv.slice(2),
-    { platform: process.platform, env: process.env, browsers: existsSync(IMAGE_BROWSERS) },
-    {
-      repo,
-      pkg: relative(repo, pkg).split(sep).join('/'),
-      cli: fileURLToPath(import.meta.resolve('@playwright/test/cli')),
-      uid: process.getuid?.() ?? 0,
-      gid: process.getgid?.() ?? 0,
-    },
-  );
+  const { command } = plan(process.argv.slice(2), currentPlace(), {
+    repo,
+    pkg: relative(repo, pkg).split(sep).join('/'),
+    cli: fileURLToPath(import.meta.resolve('@playwright/test/cli')),
+    uid: process.getuid?.() ?? 0,
+    gid: process.getgid?.() ?? 0,
+  });
   const [program, ...rest] = command[0] === 'docker' ? command : [process.execPath, ...command];
   if (program === undefined) throw new Error('empty command');
   const result = spawnSync(program, rest, { stdio: 'inherit', cwd: pkg });

@@ -7,6 +7,8 @@ import { tokens } from '../src/index.ts';
 const { color, font } = tokens;
 
 addons.setConfig({
+  // No addon panel is in use, so the story gets the whole width.
+  showPanel: false,
   theme: create({
     base: 'light',
     brandTitle: 'Drefyn UI',

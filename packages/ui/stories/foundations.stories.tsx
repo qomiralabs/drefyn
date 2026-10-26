@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { tokens } from '../src/index.ts';
 
 type StepKey = keyof typeof tokens.type;
@@ -33,18 +33,52 @@ const surfaces: { key: SurfaceKey; name: string; use: string; className: string 
   },
 ];
 
-// Each sample carries its transition, so a pointer over a row shows the duration, and
-// the reduced motion check has something real to read.
+// Each row is a toggle carrying its own transition: focus or a pointer previews it, and
+// pressing holds the end state, so the durations can be seen from the keyboard too.
+// The moves only travel when motion is allowed; under reduced motion the fill still
+// changes, so the press is never silent.
 const motion: { key: DurationKey; name: string; className: string }[] = [
-  { key: 'fast', name: 'Fade, fast', className: 'transition-colors duration-fast hover:bg-hover' },
-  { key: 'base', name: 'Fade, base', className: 'transition-colors duration-base hover:bg-hover' },
-  { key: 'slow', name: 'Fade, slow', className: 'transition-colors duration-slow hover:bg-hover' },
+  {
+    key: 'fast',
+    name: 'Fade, fast',
+    className: 'transition-colors duration-fast focus-visible:bg-hover',
+  },
+  {
+    key: 'base',
+    name: 'Fade, base',
+    className: 'transition-colors duration-base focus-visible:bg-hover',
+  },
+  {
+    key: 'slow',
+    name: 'Fade, slow',
+    className: 'transition-colors duration-slow focus-visible:bg-hover',
+  },
   {
     key: 'moveBase',
     name: 'Move, base',
-    className: 'transition-transform duration-move-base motion-safe:hover:translate-x-4',
+    className:
+      'transition duration-move-base motion-safe:hover:translate-x-4 motion-safe:focus-visible:translate-x-4 motion-safe:aria-pressed:translate-x-4',
   },
 ];
+
+function MotionRow({ name, ms, className }: { name: string; ms: number; className: string }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={() => {
+        setPressed(!pressed);
+      }}
+      className={`flex w-full items-baseline justify-between gap-16 px-8 py-12 text-left hover:bg-hover focus-visible:focus-ring-inset aria-pressed:bg-pressed ${className}`}
+    >
+      <span className="text-body-s text-ink">{name}</span>
+      <span className="text-caption text-secondary" data-numeric>
+        {ms} ms
+      </span>
+    </button>
+  );
+}
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -121,16 +155,14 @@ function Foundations() {
           </a>
           .
         </p>
+        <p className="mt-16 max-w-measure text-body-m text-body">
+          Point at a row or move focus to it to preview its duration. Press it to hold the end
+          state.
+        </p>
         <ul className="mt-24">
           {motion.map(({ key, name, className }) => (
-            <li
-              key={key}
-              className={`flex items-baseline justify-between gap-16 border-t border-rule px-8 py-12 ${className}`}
-            >
-              <span className="text-body-s text-ink">{name}</span>
-              <span className="text-caption text-secondary" data-numeric>
-                {tokens.motion.duration[key].ms} ms
-              </span>
+            <li key={key} className="border-t border-rule">
+              <MotionRow name={name} ms={tokens.motion.duration[key].ms} className={className} />
             </li>
           ))}
         </ul>
@@ -141,8 +173,12 @@ function Foundations() {
 
 const meta = {
   title: 'Foundations',
-  // A page of tokens has no props table to document.
-  tags: ['!autodocs'],
+  // A page of tokens has no args, actions or play function, so those panels stay off.
+  parameters: {
+    controls: { disable: true },
+    actions: { disable: true },
+    interactions: { disable: true },
+  },
 } satisfies Meta;
 
 export default meta;

@@ -1,4 +1,4 @@
-import { IMAGE, MARKER } from '../scripts/in-container.ts';
+import { currentPlace, insidePinnedImage } from '../scripts/in-container.ts';
 import { expect, MOBILE, openStory, storyIds, test, type Theme } from './fixtures.ts';
 
 const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
@@ -10,7 +10,7 @@ const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
 // Font rendering differs between machines, so a baseline is only made or compared in the
 // pinned image. The runner script starts it; this stops a direct call on a host.
 test.beforeAll(() => {
-  if (process.env[MARKER] !== IMAGE) {
+  if (!insidePinnedImage(currentPlace())) {
     throw new Error('Screenshots are compared only inside the pinned image. Run test:visual.');
   }
 });

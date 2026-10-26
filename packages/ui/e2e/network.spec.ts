@@ -13,7 +13,7 @@ test('a docs page loads only from the static build', async ({ page }) => {
   const [docs] = docsIds();
   expect(docs, 'the build has at least one docs page').toBeDefined();
   await page.goto(`/iframe.html?id=${docs ?? ''}&viewMode=docs`);
-  await expect(page.locator('#storybook-docs .sbdocs')).toBeVisible();
+  await expect(page.locator('#storybook-docs .sbdocs').first()).toBeVisible();
   await page.waitForLoadState('networkidle');
 });
 
@@ -25,7 +25,6 @@ test('every story iframe loads only from the static build', async ({ page }) => 
 });
 
 test('a malformed path gets a 404, not a stuck request', async ({ page }) => {
-  await openStory(page, FOUNDATIONS, 'light');
-  const status = await page.evaluate(async () => (await fetch('/%E0%A4%A')).status);
-  expect(status).toBe(404);
+  const response = await page.goto('/%E0%A4%A', { waitUntil: 'commit' });
+  expect(response?.status()).toBe(404);
 });

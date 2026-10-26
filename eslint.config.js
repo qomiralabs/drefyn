@@ -6,12 +6,22 @@ import tseslint from 'typescript-eslint';
 
 const motionMessage =
   'Motion runs only in the dashboard and website. Use the duration and ease tokens.';
+// Bare package names only, so a local ./motion folder or @acme/motion is left alone.
+const motionSpecifier = '^(?:framer-)?motion(?:/|$)';
 // Dynamic imports are how Motion's features get lazy loaded, and no-restricted-imports
-// does not see them.
-const dynamicMotion = {
-  selector: 'ImportExpression[source.value=/^(framer-)?motion($|\\u002F)/]',
-  message: motionMessage,
-};
+// does not see them. A template literal with no placeholders names a package as surely
+// as a string does.
+const dynamicMotion = [
+  {
+    selector: 'ImportExpression[source.value=/^(framer-)?motion($|\\u002F)/]',
+    message: motionMessage,
+  },
+  {
+    selector:
+      "ImportExpression[source.type='TemplateLiteral'][source.expressions.length=0][source.quasis.0.value.cooked=/^(framer-)?motion($|\\u002F)/]",
+    message: motionMessage,
+  },
+];
 
 export default tseslint.config(
   {
@@ -63,8 +73,9 @@ export default tseslint.config(
   },
   {
     // Components only render text and style from token utilities, so nothing a
-    // customer typed can become markup and no value skips the token lint.
-    files: ['packages/ui/src/react/**'],
+    // customer typed can become markup and no value skips the token lint. Stories are
+    // held to the same rule because reviewers judge components by them.
+    files: ['packages/ui/src/react/**', 'packages/ui/stories/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -76,14 +87,19 @@ export default tseslint.config(
           selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
           message: 'Components render text, never raw HTML.',
         },
-        dynamicMotion,
+        ...dynamicMotion,
       ],
     },
   },
   {
     // Docs sites and status pages must never load Motion; components animate with CSS.
-    ignores: ['apps/dashboard/**', 'apps/website/**', 'packages/ui/src/react/**'],
-    rules: { 'no-restricted-syntax': ['error', dynamicMotion] },
+    ignores: [
+      'apps/dashboard/**',
+      'apps/website/**',
+      'packages/ui/src/react/**',
+      'packages/ui/stories/**',
+    ],
+    rules: { 'no-restricted-syntax': ['error', ...dynamicMotion] },
   },
   {
     ignores: ['apps/dashboard/**', 'apps/website/**'],
@@ -91,12 +107,7 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          patterns: [
-            {
-              group: ['motion', 'motion/*', 'framer-motion', 'framer-motion/*'],
-              message: motionMessage,
-            },
-          ],
+          patterns: [{ regex: motionSpecifier, message: motionMessage }],
         },
       ],
     },

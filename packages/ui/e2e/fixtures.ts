@@ -46,7 +46,13 @@ export async function openStory(page: Page, id: string, theme: Theme): Promise<v
 }
 
 function fileFor(url: URL): string | undefined {
-  const path = decodeURIComponent(url.pathname);
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    // A malformed escape is a missing file, not a request left hanging.
+    return undefined;
+  }
   const file = resolve(STATIC, `.${path.endsWith('/') ? `${path}index.html` : path}`);
   if (!file.startsWith(STATIC + sep)) return undefined;
   if (!existsSync(file) || !statSync(file).isFile()) return undefined;
