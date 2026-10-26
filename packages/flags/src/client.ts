@@ -114,7 +114,7 @@ function fallback(value: boolean, errorCode: FlagEvaluationErrorCode): FlagEvalu
   return { value, source: 'safe_value', errorCode };
 }
 
-function fromErrorCode(code: ErrorCode): FlagEvaluationErrorCode {
+function fromErrorCode(code: unknown): FlagEvaluationErrorCode {
   switch (code) {
     case ErrorCode.FLAG_NOT_FOUND:
       return 'FLAG_NOT_FOUND';
@@ -130,17 +130,13 @@ function fromErrorCode(code: ErrorCode): FlagEvaluationErrorCode {
   }
 }
 
-const ERROR_CODES: ReadonlySet<unknown> = new Set(Object.values(ErrorCode));
-
-// What the SDK would report for a thrown error: its OpenFeature code, or general.
-// Reading the code can itself throw (a getter, a proxy trap), and must not.
-function codeOf(error: unknown): ErrorCode {
+// A thrown error's code, as the SDK would read it; fromErrorCode maps anything unknown to
+// general. Reading it can itself throw (a getter, a proxy trap), and must not.
+function codeOf(error: unknown): unknown {
   try {
-    const code: unknown =
-      typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-    return ERROR_CODES.has(code) ? (code as ErrorCode) : ErrorCode.GENERAL;
+    return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   } catch {
-    return ErrorCode.GENERAL;
+    return undefined;
   }
 }
 
@@ -153,7 +149,7 @@ function fromResolution(resolution: unknown, safe: boolean): FlagEvaluation {
     }
     const { value, errorCode } = resolution as { value?: unknown; errorCode?: unknown };
     if (errorCode !== undefined && errorCode !== null) {
-      return fallback(safe, fromErrorCode(codeOf({ code: errorCode })));
+      return fallback(safe, fromErrorCode(errorCode));
     }
     if (typeof value !== 'boolean') return fallback(safe, 'FLAG_PARSE_ERROR');
     return { value, source: 'provider' };
@@ -316,12 +312,13 @@ class ProviderFlagClient<R extends FlagRegistry> implements FlagClient<R> {
       // answer. Nothing a hook does can then move a flag across organizations. The API
       // and transaction contexts are left out too: the caller's context is the whole
       // context.
-      work = this.provider
-        .resolveBooleanEvaluation(definition.name, safe, toContext(ctx), SILENT)
-        .then(
-          (resolution) => fromResolution(resolution, safe),
-          (error: unknown) => fallback(safe, fromErrorCode(codeOf(error))),
-        );
+      // Wrapped so a provider that returns a plain result is awaited as the SDK would.
+      work = Promise.resolve(
+        this.provider.resolveBooleanEvaluation(definition.name, safe, toContext(ctx), SILENT),
+      ).then(
+        (resolution) => fromResolution(resolution, safe),
+        (error: unknown) => fallback(safe, fromErrorCode(codeOf(error))),
+      );
     } catch (error) {
       return Promise.resolve(fallback(safe, fromErrorCode(codeOf(error))));
     }
