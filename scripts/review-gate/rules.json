@@ -15,6 +15,7 @@
         "docker/",
         ".changeset/",
         "packages/egress/",
+        "packages/flags/",
         "packages/db/migrations/",
         ".husky/",
         ".githooks/"

@@ -54,8 +54,12 @@ await client.close();
   `scripts/patches/@openfeature__flagd-provider@0.17.0.patch`) so that its gRPC sync stops
   reconnecting once closed; without it a closed client kept retrying and held the process
   open.
-- The context always sends `internal` (false unless the caller says true), so a global
-  OpenFeature context cannot turn an internal rollout on for everyone.
+- The provider sees exactly the caller's context and nothing else: `targetingKey` and
+  `organizationId` from `organizationId`, `projectId` and `userId` when given, and
+  `internal`, false unless the caller says true. The global and transaction OpenFeature
+  contexts are not merged in, and the context is frozen.
+- Evaluations call the client's own provider directly, not an OpenFeature client, so no
+  OpenFeature hook runs on them. See Hooks below.
 - `isOn(name, ctx)` returns a boolean. Plan flags are left out by type.
 - `evaluate(name, ctx)` returns `{ value, source, errorCode? }`. `source` is `provider`,
   `safe_value`, `test_override` or `entitlements`. `errorCode` is `FLAG_TIMEOUT`,
@@ -73,8 +77,43 @@ await client.close();
 - A provider that reports itself failed for good (`PROVIDER_FATAL`) maps to
   `FLAG_PROVIDER_NOT_READY`. After `close()`, every call answers its safe value (plan flags
   off) without reaching the provider or entitlements.
+- The provider answers only while its status is `READY`, `STALE` or `ERROR` (the last two
+  serve the last synced values). Any other status, including one a later SDK adds, gives
+  the safe value with `FLAG_PROVIDER_NOT_READY`; a test fails if the SDK's status list
+  changes. So does a client whose OpenFeature domain was cleared or rebound to another
+  provider: the domain name is random but not secret, since API event handlers receive it.
 - Plan flag lookups share the evaluation timeout, so the reader should answer from a cached
   tier rather than a fresh database read.
+
+### Hooks
+
+OpenFeature hooks are process wide: any code that imports the SDK can call
+`OpenFeature.addHooks`, and a provider can carry its own (flagd adds one in sync mode that
+merges the sync stream's context). In `@openfeature/server-sdk` 1.23.0, before hooks run
+API, client, call, then provider hooks, and each can return or write context keys; after,
+error and finally hooks run in reverse, so API hooks run last there, and they share the
+result object. A hook could therefore set `internal`, move `targetingKey` and
+`organizationId` to another organization (and with them a fractional rollout), add keys a
+targeting rule reads, or rewrite the value after the provider answered. A call level hook
+that re-applies the pinned fields closes only the first of those, and runs before the
+provider hook.
+
+So the client skips the OpenFeature evaluation API and calls its provider's resolver with
+the caller's frozen context, after the status and domain checks above. Hooks
+anywhere in the process have no effect on these evaluations, a hook that throws included.
+What that gives up:
+
+- Hooks added for telemetry or logging do not see flag evaluations. Use
+  `flags_evaluation_ms` and the client's own logs instead.
+- The flagd sync context is not merged into the evaluation context. Targeting rules must
+  read only the fields above.
+- Log lines from the provider during an evaluation are dropped, since they are free text
+  that can carry context values. Failures still show in the result's `errorCode` and in
+  the histogram labels.
+
+The provider's events still arrive through the OpenFeature client. The test client from
+`@drefyn/flags/testing` already reads its in memory provider directly, so hooks do not
+reach it either.
 
 ### Config
 

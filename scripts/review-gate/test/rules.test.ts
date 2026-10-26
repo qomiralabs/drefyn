@@ -179,6 +179,9 @@ describe('the shipped rules file', () => {
     'packages/entitlements/src/plans.ts',
     'packages/engine/src/publish/gate.ts',
     'apps/studio/src/PublishButton.tsx',
+    'packages/flags/src/client.ts',
+    'packages/flags/test/evaluation.test.ts',
+    'packages/flags/README.md',
   ])('puts %s in tier A', (file) => {
     expect(tier(file)).toBe('A');
     expect(reviewersFor([file])).toEqual(
@@ -193,6 +196,7 @@ describe('the shipped rules file', () => {
     ['templates/package/src/index.ts', false],
     ['packages/egress-old/src/index.ts', false],
     ['packages/db/migrations-old/x.sql', false],
+    ['packages/flags-old/src/index.ts', false],
     ['packages/ui/src/tokens.ts', true],
     ['packages/ui/README.md', true],
     ['packages/email/src/welcome.ts', true],

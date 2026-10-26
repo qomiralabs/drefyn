@@ -1,12 +1,18 @@
 import {
+  AsyncLocalStorageTransactionContextPropagator,
   ErrorCode,
   FlagNotFoundError,
+  NOOP_TRANSACTION_CONTEXT_PROPAGATOR,
   GeneralError,
   OpenFeature,
   ParseError,
   ProviderEvents,
   TypeMismatchError,
+  type Client as OpenFeatureClient,
+  type EvaluationContext,
+  type Hook,
 } from '@openfeature/server-sdk';
+import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFlagClient,
@@ -18,6 +24,7 @@ import {
 } from '../src/index.ts';
 import { FakeProvider, type Behaviour } from './support/fake-provider.ts';
 import { install, reset } from './support/flagd.ts';
+import { PROVIDER_PROPERTY_TIMEOUT_MS, SEEDS } from './support/seeds.ts';
 import {
   EXPERIMENT,
   KILL_SAFE_OFF,
@@ -314,9 +321,9 @@ describe('the wrapper timeout', () => {
   });
 });
 
-describe('every evaluation passes the safe value as the OpenFeature default', () => {
-  // Records the default handed to any boolean method of any OpenFeature client the
-  // package creates, whichever of getBooleanValue or getBooleanDetails it uses.
+describe('every evaluation passes the safe value as the provider default', () => {
+  // Records any boolean method called on any OpenFeature client the package creates. None
+  // should be: those run hooks, so the client goes to its provider directly.
   function spyOnClients() {
     const calls: { method: string; flagKey: unknown; defaultValue: unknown }[] = [];
     const getClient = OpenFeature.getClient.bind(OpenFeature) as (...args: unknown[]) => object;
@@ -352,10 +359,8 @@ describe('every evaluation passes the safe value as the OpenFeature default', ()
       const atProvider = fake.callsFor(name);
       expect(atProvider, name).toHaveLength(2);
       for (const call of atProvider) expect(call.defaultValue, name).toBe(safe);
-      const atClient = calls.filter((c) => c.flagKey === name);
-      expect(atClient, name).toHaveLength(2);
-      for (const call of atClient) expect(call.defaultValue, name).toBe(safe);
     }
+    expect(calls).toEqual([]);
   });
 
   it('for every flag in the package registry', async () => {
@@ -370,10 +375,8 @@ describe('every evaluation passes the safe value as the OpenFeature default', ()
       await client.evaluate(flag.name, ctx);
       const expected = 'safeValue' in flag ? flag.safeValue : undefined;
       expect(fake.callsFor(flag.name).map((c) => c.defaultValue)).toEqual([expected]);
-      expect(calls.filter((c) => c.flagKey === flag.name).map((c) => c.defaultValue)).toEqual([
-        expected,
-      ]);
     }
+    expect(calls).toEqual([]);
   });
 });
 
@@ -633,18 +636,136 @@ describe('evaluation context', () => {
     expect(second).toMatchObject({ internal: false });
   });
 
-  it('cannot be turned internal by a global OpenFeature context', async () => {
-    OpenFeature.setContext({ internal: true, targetingKey: 'someone-else' });
+  // Keys the caller never set, such as plan, must not reach a targeting rule either.
+  const OUTSIDE = {
+    internal: true,
+    targetingKey: 'someone-else',
+    organizationId: 'someone-else',
+    plan: 'enterprise',
+    projectId: 'someone-else',
+  };
+  const EXACT = { targetingKey: OTHER_ORG, organizationId: OTHER_ORG, internal: false };
+
+  it('leaves the global OpenFeature context out entirely', async () => {
+    OpenFeature.setContext(OUTSIDE);
     try {
       const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
       const client = await boot(fake);
       await client.evaluate(RELEASE, { organizationId: OTHER_ORG });
       await client.evaluate(RELEASE, { organizationId: OTHER_ORG, internal: false });
-      for (const call of fake.callsFor(RELEASE)) {
-        expect(call.context).toMatchObject({ internal: false, targetingKey: OTHER_ORG });
-      }
+      expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([EXACT, EXACT]);
     } finally {
       OpenFeature.setContext({});
+    }
+  });
+
+  it('leaves the transaction context out entirely', async () => {
+    OpenFeature.setTransactionContextPropagator(
+      new AsyncLocalStorageTransactionContextPropagator(),
+    );
+    try {
+      const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+      const client = await boot(fake);
+      await new Promise<void>((resolve, reject) => {
+        OpenFeature.setTransactionContext(OUTSIDE, () => {
+          // Proves the propagator really carries the context inside the callback.
+          expect(OpenFeature.getTransactionContext()).toEqual(OUTSIDE);
+          client.evaluate(RELEASE, { organizationId: OTHER_ORG }).then(() => {
+            resolve();
+          }, reject);
+        });
+      });
+      expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([EXACT]);
+    } finally {
+      OpenFeature.setTransactionContextPropagator(NOOP_TRANSACTION_CONTEXT_PROPAGATOR);
+    }
+  });
+});
+
+describe('provider results of the wrong shape', () => {
+  const throwingValue = () =>
+    Object.defineProperty({}, 'value', {
+      get() {
+        throw new Error('getter');
+      },
+    });
+  it.each<[string, () => unknown, FlagEvaluationErrorCode]>([
+    ['undefined', () => undefined, 'FLAG_PARSE_ERROR'],
+    ['null', () => null, 'FLAG_PARSE_ERROR'],
+    ['the string true', () => 'true', 'FLAG_PARSE_ERROR'],
+    ['true itself', () => true, 'FLAG_PARSE_ERROR'],
+    ['an empty error code', () => ({ value: true, errorCode: '' }), 'FLAG_GENERAL'],
+    ['an unknown error code', () => ({ value: true, errorCode: 'NOPE' }), 'FLAG_GENERAL'],
+    ['a value getter that throws', throwingValue, 'FLAG_GENERAL'],
+  ])('give the safe value for %s', async (_label, resolution, code) => {
+    const client = await boot(new FakeProvider().set(RELEASE, { kind: 'raw', resolution }));
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+      value: false,
+      source: 'safe_value',
+      errorCode: code,
+    });
+  });
+
+  it('a plain result, not a promise, is used like a resolved one', async () => {
+    const fake = new FakeProvider().set(RELEASE, { kind: 'plain', value: true });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(RELEASE, ctx))).toEqual({
+      value: true,
+      source: 'provider',
+    });
+  });
+
+  it('a synchronous FlagNotFoundError keeps its code', async () => {
+    const fake = new FakeProvider().set(KILL_SAFE_ON, {
+      kind: 'throw_sync',
+      error: new FlagNotFoundError('x'),
+    });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual({
+      value: true,
+      source: 'safe_value',
+      errorCode: 'FLAG_NOT_FOUND',
+    });
+  });
+
+  it('a thrown object that is not an OpenFeature error counts as general', async () => {
+    const fake = new FakeProvider().set(KILL_SAFE_ON, {
+      kind: 'throw',
+      error: { code: 'NOT_A_CODE' },
+    });
+    const client = await boot(fake);
+    expect(await settle(client.evaluate(KILL_SAFE_ON, ctx))).toEqual({
+      value: true,
+      source: 'safe_value',
+      errorCode: 'FLAG_GENERAL',
+    });
+  });
+});
+
+describe('what the provider is handed', () => {
+  it('a frozen context, so a provider cannot change it for later calls', async () => {
+    const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+    const client = await boot(fake);
+    await client.evaluate(RELEASE, fullCtx);
+    expect(Object.isFrozen(fake.callsFor(RELEASE)[0]?.context)).toBe(true);
+  });
+
+  it('a logger that keeps nothing, since provider lines can carry context values', async () => {
+    const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+    const client = await boot(fake);
+    await client.evaluate(RELEASE, fullCtx);
+    const logger = fake.callsFor(RELEASE)[0]?.logger;
+    expect(logger).toBeDefined();
+    const consoleSpies = (['error', 'warn', 'info', 'debug', 'log'] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => undefined),
+    );
+    try {
+      for (const method of ['error', 'warn', 'info', 'debug'] as const) {
+        expect(logger?.[method](USER, ORG)).toBeUndefined();
+      }
+      for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of consoleSpies) spy.mockRestore();
     }
   });
 });
@@ -754,5 +875,241 @@ describe('metrics and logs', () => {
     const metrics = JSON.stringify([rec.gauge.mock.calls, rec.histogram.mock.calls]);
     for (const id of [ORG, PROJECT, USER]) expect(metrics).not.toContain(id);
     expect(JSON.stringify(rec.warn.mock.calls)).not.toContain(USER);
+  });
+});
+
+// A hook anywhere in the process can rewrite the context before the provider sees it, or
+// the result after. Neither may change what a flag answers for an organization.
+describe('hostile OpenFeature hooks', () => {
+  const REWRITE = { internal: true, targetingKey: OTHER_ORG, organizationId: OTHER_ORG };
+  const PINNED = { targetingKey: ORG, organizationId: ORG, internal: false };
+  // On only for an internal organization or for OTHER_ORG, so any rewrite that got through
+  // would turn the flag on for ORG.
+  const rule = (context: EvaluationContext) =>
+    context['internal'] === true ||
+    context.targetingKey === OTHER_ORG ||
+    context['organizationId'] === OTHER_ORG;
+
+  function rewriting(): Hook {
+    return {
+      before: (hookContext) => {
+        // Writes through the shared context as well as returning a new one.
+        Object.assign(hookContext.context, REWRITE);
+        return { ...REWRITE };
+      },
+      after: (_hookContext, details) => {
+        Object.assign(details, { value: true, errorCode: undefined });
+      },
+      error: () => undefined,
+      finally: (_hookContext, details) => {
+        Object.assign(details, { value: true, errorCode: undefined, reason: 'STATIC' });
+      },
+    };
+  }
+
+  function throwing(): Hook {
+    const fail = () => {
+      throw new Error('hook failed');
+    };
+    return { before: fail, after: fail, error: fail, finally: fail };
+  }
+
+  // Hands back the OpenFeature client the flag client builds, as a caller holding it would.
+  function captureClient(): () => OpenFeatureClient {
+    const spy = vi.spyOn(OpenFeature, 'getClient');
+    return () => {
+      const result = spy.mock.results.at(-1);
+      if (result?.type !== 'return') throw new Error('no OpenFeature client was created');
+      return result.value;
+    };
+  }
+
+  type Install = (fake: FakeProvider, hook: Hook, client: () => OpenFeatureClient) => void;
+  const PLACES: [string, Install][] = [
+    [
+      'global, by OpenFeature.addHooks',
+      (_fake, hook) => {
+        OpenFeature.addHooks(hook);
+      },
+    ],
+    [
+      'on the client',
+      (_fake, hook, client) => {
+        client().addHooks(hook);
+      },
+    ],
+    // The SDK runs provider hooks after call level ones, and flagd adds one in sync mode.
+    [
+      'on the provider',
+      (fake, hook) => {
+        fake.hooks.push(hook);
+      },
+    ],
+  ];
+
+  afterEach(() => {
+    OpenFeature.clearHooks();
+    vi.restoreAllMocks();
+  });
+
+  describe.each(PLACES)('a hook %s', (_place, place) => {
+    it('cannot rewrite the context the provider sees', async () => {
+      const client = captureClient();
+      const fake = new FakeProvider().set(RELEASE, { kind: 'rule', rule });
+      const flagClient = await boot(fake);
+      place(fake, rewriting(), client);
+      expect(await settle(flagClient.evaluate(RELEASE, ctx))).toEqual({
+        value: false,
+        source: 'provider',
+      });
+      expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([PINNED]);
+    });
+
+    it('keeps the projectId and userId of the caller', async () => {
+      const client = captureClient();
+      const fake = new FakeProvider().set(RELEASE, { kind: 'value', value: false });
+      const flagClient = await boot(fake);
+      place(
+        fake,
+        { before: () => ({ projectId: 'someone-else', userId: 'someone-else' }) },
+        client,
+      );
+      await settle(flagClient.evaluate(RELEASE, fullCtx));
+      expect(fake.callsFor(RELEASE)[0]?.context).toEqual({
+        targetingKey: ORG,
+        organizationId: ORG,
+        projectId: PROJECT,
+        userId: USER,
+        internal: true,
+      });
+    });
+
+    it.each(PROVIDER_FLAGS)(
+      'cannot rewrite the answer for %s after the provider gave it',
+      async (name, safe) => {
+        const client = captureClient();
+        const fake = new FakeProvider().set(name, { kind: 'value', value: false });
+        const flagClient = await boot(fake);
+        place(fake, rewriting(), client);
+        expect(await settle(flagClient.evaluate(name, ctx))).toEqual({
+          value: false,
+          source: 'provider',
+        });
+        // A failed evaluation stays failed, whatever the hook writes over it.
+        fake.set(name, { kind: 'throw', error: new Error('boom') });
+        expect(await settle(flagClient.evaluate(name, ctx))).toEqual({
+          value: safe,
+          source: 'safe_value',
+          errorCode: 'FLAG_GENERAL',
+        });
+      },
+    );
+
+    describe.each(PROVIDER_FLAGS)('a hook that throws, %s', (name, safe) => {
+      it.each([true, false])('leaves the provider answer %s as it is', async (value) => {
+        const client = captureClient();
+        const fake = new FakeProvider().set(name, { kind: 'value', value });
+        const flagClient = await boot(fake);
+        place(fake, throwing(), client);
+        expect(await settle(flagClient.evaluate(name, ctx))).toEqual({
+          value,
+          source: 'provider',
+        });
+      });
+
+      it('still gives the safe value when the provider fails', async () => {
+        const client = captureClient();
+        const fake = new FakeProvider().set(name, {
+          kind: 'error_result',
+          errorCode: ErrorCode.GENERAL,
+          value: !safe,
+        });
+        const flagClient = await boot(fake);
+        place(fake, throwing(), client);
+        expect(await settle(flagClient.evaluate(name, ctx))).toEqual({
+          value: safe,
+          source: 'safe_value',
+          errorCode: 'FLAG_GENERAL',
+        });
+      });
+    });
+  });
+
+  // Both states of every release flag, in the fixture registry and the package one, with a
+  // hostile hook in each place at once.
+  const RELEASE_NAMES = [...fixtureFlags, ...flags]
+    .filter((flag) => flag.kind === 'release')
+    .map((flag) => flag.name);
+
+  describe.each(RELEASE_NAMES)('release flag %s with hostile hooks everywhere', (name) => {
+    it.each([true, false])('serves %s as the provider decides', async (value) => {
+      const client = captureClient();
+      const fake = new FakeProvider().set(name, {
+        kind: 'rule',
+        rule: (context) => (rule(context) ? !value : value),
+      });
+      install(fake);
+      const flagClient = await createFlagClient(fileConfig, {
+        entitlements: entitlements().reader,
+        registry: defineRegistryOf(name),
+      });
+      open.push(flagClient);
+      for (const [, place] of PLACES) place(fake, rewriting(), client);
+      expect(await settle(flagClient.evaluate(name, ctx))).toEqual({
+        value,
+        source: 'provider',
+      });
+      expect(await settle(flagClient.evaluate(name, { ...ctx, internal: true }))).toEqual({
+        value: !value,
+        source: 'provider',
+      });
+    });
+  });
+
+  function defineRegistryOf(name: string) {
+    const definition = [...fixtureFlags, ...flags].find((flag) => flag.name === name);
+    if (definition === undefined) throw new Error(`no flag ${name}`);
+    return [definition] as const;
+  }
+
+  const rewriteKey = fc.oneof(
+    fc.constantFrom('targetingKey', 'organizationId', 'internal', 'projectId', 'userId'),
+    fc.string({ maxLength: 12 }),
+  );
+  const rewriteValue = fc.oneof(
+    fc.constantFrom<unknown>(ORG, OTHER_ORG, true, false, 'true', 1, null),
+    fc.string({ maxLength: 12 }),
+    fc.boolean(),
+    fc.integer(),
+  );
+  const rewrites = fc.dictionary(rewriteKey, rewriteValue, { maxKeys: 6 });
+  const callerCtx = fc.record({
+    organizationId: fc.constantFrom(ORG, OTHER_ORG),
+    internal: fc.boolean(),
+  });
+
+  describe.each(SEEDS)('under any rewrite from a global hook, seed %i', (seed) => {
+    it('evaluates exactly as with no hook', { timeout: PROVIDER_PROPERTY_TIMEOUT_MS }, async () => {
+      const fake = new FakeProvider().set(RELEASE, { kind: 'rule', rule });
+      const flagClient = await boot(fake);
+      await fc.assert(
+        fc.asyncProperty(rewrites, callerCtx, async (rewrite, caller) => {
+          OpenFeature.clearHooks();
+          fake.calls.length = 0;
+          const clean = await settle(flagClient.evaluate(RELEASE, caller));
+          OpenFeature.addHooks({
+            before: (hookContext) => {
+              Object.assign(hookContext.context, rewrite);
+              return rewrite as EvaluationContext;
+            },
+          });
+          const hooked = await settle(flagClient.evaluate(RELEASE, caller));
+          const [first, second] = fake.calls;
+          expect(hooked).toEqual(clean);
+          expect(second?.context).toEqual(first?.context);
+        }),
+        { seed, numRuns: 60 },
+      );
+    });
   });
 });
