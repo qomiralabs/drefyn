@@ -15,7 +15,13 @@ import {
 } from '../src/index.ts';
 import type { FeatureKey, LimitKey, LimitValue, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
-import { RUNS, atLeastAsGenerous, caughtCode, isLimitValue } from './support/assert.ts';
+import {
+  FIRST_BINARY_PROPERTY_TIMEOUT_MS,
+  RUNS,
+  atLeastAsGenerous,
+  caughtCode,
+  isLimitValue,
+} from './support/assert.ts';
 
 // Arbitraries come from the fixture, not the package, so an empty or wrong export list
 // cannot make a property pass by giving it nothing to check.
@@ -414,7 +420,7 @@ describe('fuzzed input fails closed', () => {
   const knownKeys: readonly string[] = pricing.LIMIT_KEYS;
   const knownFeatures: readonly string[] = pricing.FEATURE_KEYS;
 
-  it('rejects any string that is not a tier', () => {
+  it('rejects any string that is not a tier', { timeout: FIRST_BINARY_PROPERTY_TIMEOUT_MS }, () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary' }), (t) => {
         fc.pre(!knownTiers.includes(t));

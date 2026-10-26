@@ -17,7 +17,7 @@
       "outputs": []
     },
     "test": {
-      "env": ["DREFYN_RELEASE_FLAGS"],
+      "env": ["DREFYN_RELEASE_FLAGS", "FC_SEED"],
       "outputs": ["coverage/**"]
     },
     "build": {
