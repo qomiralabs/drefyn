@@ -193,8 +193,13 @@ describe('Tailwind theme', () => {
   });
 
   it('narrows a transition behind a variant too', async () => {
-    const css = await build(['hover:transition', 'group-hover:transition-all']);
-    for (const cls of ['hover:transition', 'group-hover:transition-all']) {
+    // Kept in a fixture: the lint rule rejects these without motion-safe: in source.
+    const classes = JSON.parse(
+      readFileSync(join(here, 'fixtures/variant-transitions.json'), 'utf8'),
+    ) as string[];
+    expect(classes.length).toBeGreaterThan(0);
+    const css = await build(classes);
+    for (const cls of classes) {
       const props = reducedTransitionProperty(css, [cls]) ?? '';
       expect(props, cls).toMatch(/opacity/);
       expect(props, cls).not.toMatch(/\b(transform|all)\b/);
