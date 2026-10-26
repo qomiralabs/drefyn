@@ -48,13 +48,28 @@ describe('the server and client split', () => {
     ]);
   });
 
+  it('fails on a hook called through the React namespace', () => {
+    expect(details('member-hook-without-directive')).toEqual([
+      "counter.tsx: calls useState without 'use client' as its first statement",
+    ]);
+  });
+
+  it('fails on every React Aria and React Stately entry, not only the components package', () => {
+    expect(details('client-imports-without-directive').sort()).toEqual([
+      "focus.tsx: imports @react-aria/focus without 'use client' as its first statement",
+      "hooks.tsx: imports react-aria without 'use client' as its first statement",
+      "state.tsx: imports react-stately without 'use client' as its first statement",
+      "utils.tsx: imports @react-stately/utils without 'use client' as its first statement",
+    ]);
+  });
+
   it('only counts the directive as the first statement', () => {
     expect(details('directive-not-first')).toEqual([
       "toggle.tsx: calls useState without 'use client' as its first statement",
     ]);
   });
 
-  it('passes server safe, client and icon files that follow the rules', () => {
+  it('passes server safe, client and icon files, and names that only start with use', () => {
     expect(details('valid')).toEqual([]);
   });
 

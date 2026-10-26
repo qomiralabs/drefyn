@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IMAGE, MARKER, plan } from '../scripts/in-container.ts';
+import { IMAGE, insidePinnedImage, MARKER, plan } from '../scripts/in-container.ts';
 
 const paths = { repo: '/home/me/drefyn', pkg: 'packages/ui', cli: '/cli.js', uid: 501, gid: 20 };
 const visual = ['playwright', 'test', '--project=visual'];
@@ -18,6 +18,8 @@ describe('the visual runner', () => {
         'run',
         '--rm',
         '--ipc=host',
+        '--network',
+        'none',
         '--user',
         '501:20',
         '-e',
@@ -67,5 +69,14 @@ describe('the visual runner', () => {
   it('only runs Playwright', () => {
     expect(() => plan(['sh', '-c', 'true'], inside, paths)).toThrow(/runs only playwright/);
     expect(() => plan([], inside, paths)).toThrow(/runs only playwright/);
+  });
+
+  it('shares one test of being inside the image with the visual spec', () => {
+    expect(insidePinnedImage(inside)).toBe(true);
+    // A marker set by hand on a host is not enough to write or compare baselines.
+    expect(insidePinnedImage({ ...inside, platform: 'darwin' })).toBe(false);
+    expect(insidePinnedImage({ ...inside, browsers: false })).toBe(false);
+    expect(insidePinnedImage({ ...inside, env: {} })).toBe(false);
+    expect(insidePinnedImage({ ...inside, env: { [MARKER]: 'other' } })).toBe(false);
   });
 });

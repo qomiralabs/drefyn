@@ -19,7 +19,7 @@ interface IndexEntry {
   type: string;
 }
 
-export function storyIds(): string[] {
+function entries(type: 'story' | 'docs'): string[] {
   const index = join(STATIC, 'index.json');
   if (!existsSync(index)) {
     throw new Error('No static Storybook. Run pnpm --filter @drefyn/ui storybook:build first.');
@@ -28,10 +28,13 @@ export function storyIds(): string[] {
     entries: Record<string, IndexEntry>;
   };
   return Object.values(entries)
-    .filter((entry) => entry.type === 'story')
+    .filter((entry) => entry.type === type)
     .map((entry) => entry.id)
     .sort();
 }
+
+export const storyIds = (): string[] => entries('story');
+export const docsIds = (): string[] => entries('docs');
 
 export async function openStory(page: Page, id: string, theme: Theme): Promise<void> {
   await page.goto(`/iframe.html?id=${id}&viewMode=story&globals=theme:${theme}`);

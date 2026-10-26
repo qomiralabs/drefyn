@@ -1,0 +1,5 @@
+import type { ListState } from 'react-stately';
+
+export function State(_: { state?: ListState<string> }) {
+  return <span />;
+}

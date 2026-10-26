@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -52,6 +52,9 @@ function graph(entry: string): { files: string[]; packages: string[] } {
   };
 }
 
+// Paths are relative to the package root, with the platform separator.
+const inComponentEntry = (file: string) => file.startsWith(join('src', 'react') + sep);
+
 describe('the token entry', () => {
   const { files, packages } = graph(join(root, 'src', 'index.ts'));
 
@@ -65,7 +68,13 @@ describe('the token entry', () => {
   });
 
   it('never reaches the component entry', () => {
-    expect(files.filter((file) => file.startsWith(join('src', 'react')))).toEqual([]);
+    expect(files.filter(inComponentEntry)).toEqual([]);
+  });
+
+  it('tells the component folder from a file that only starts with its name', () => {
+    expect(inComponentEntry(join('src', 'react', 'index.ts'))).toBe(true);
+    expect(inComponentEntry(join('src', 'reactive.ts'))).toBe(false);
+    expect(inComponentEntry(join('src', 'react-utils', 'a.ts'))).toBe(false);
   });
 
   it('runs in plain Node under type stripping', () => {

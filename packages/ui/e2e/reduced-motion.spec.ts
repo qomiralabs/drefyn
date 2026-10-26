@@ -1,4 +1,4 @@
-import { reducedFadeCapMs } from '../src/index.ts';
+import { reducedFadeCapMs, tokens } from '../src/index.ts';
 import { expect, FOUNDATIONS, openStory, test, THEMES } from './fixtures.ts';
 
 // Properties that move or resize something; under reduced motion none of them may animate.
@@ -36,5 +36,26 @@ for (const theme of THEMES) {
     expect(transitions.length).toBeGreaterThan(0);
     expect(transitions.filter((t) => MOVING.test(t.property))).toEqual([]);
     expect(transitions.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
+  });
+}
+
+for (const theme of THEMES) {
+  test(`pressing the move row changes its fill and nothing travels in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, FOUNDATIONS, theme);
+    const row = page.getByRole('button', { name: /^Move, base/ });
+    await row.focus();
+    await page.keyboard.press('Space');
+    await expect(row).toHaveAttribute('aria-pressed', 'true');
+    const n = Number.parseInt(tokens.color.surface.pressed[theme].slice(1), 16);
+    await expect
+      .poll(() => row.evaluate((el) => getComputedStyle(el).backgroundColor))
+      .toBe(`rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`);
+    const moved = await row.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { translate: style.translate, transform: style.transform };
+    });
+    expect(moved).toEqual({ translate: 'none', transform: 'none' });
   });
 }

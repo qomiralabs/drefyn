@@ -31,17 +31,17 @@ export default defineConfig({
   projects: [
     {
       name: 'keyboard-chromium',
-      testMatch: /(\.keyboard|theme)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'keyboard-firefox',
-      testMatch: /(\.keyboard|theme)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'keyboard-webkit',
-      testMatch: /(\.keyboard|theme)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     { name: 'axe', testMatch: /axe\.spec\.ts$/, use: { ...chromium } },

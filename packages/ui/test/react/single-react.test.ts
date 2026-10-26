@@ -26,9 +26,11 @@ describe('one React across the workspace', () => {
     ).toEqual([]);
   });
 
-  it('resolves exactly one react', { timeout: 60_000 }, () => {
-    const paths = resolvedPaths(workspaceListing(repo, 'react'), 'react');
-    expect(paths).toHaveLength(1);
-    expect(paths[0]).toMatch(/react@19\.3\.1/);
-  });
+  for (const name of ['react', 'react-dom']) {
+    it(`resolves exactly one ${name}`, { timeout: 60_000 }, () => {
+      const paths = resolvedPaths(workspaceListing(repo, name), name);
+      expect(paths).toHaveLength(1);
+      expect(paths[0]).toContain(`${name}@19.3.1`);
+    });
+  }
 });
