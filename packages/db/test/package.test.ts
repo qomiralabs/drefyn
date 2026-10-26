@@ -34,19 +34,52 @@ describe('package shape', () => {
 
   // Exact pins, each with a licence on the allow list and a reason in the Decisions log.
   it('pins the database dependencies exactly', () => {
-    expect(manifest.dependencies).toMatchObject({ pg: '8.23.1', 'node-pg-migrate': '9.0.0' });
+    expect(manifest.dependencies).toMatchObject({
+      pg: '8.23.1',
+      'node-pg-migrate': '9.0.0',
+      kysely: '0.29.7',
+      '@drefyn/tenancy': 'workspace:*',
+    });
     for (const [name, version] of Object.entries({
       ...manifest.dependencies,
       ...manifest.devDependencies,
     })) {
-      expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
+      if (name.startsWith('@drefyn/')) expect(version, name).toBe('workspace:*');
+      else expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
     }
   });
 
-  it('exports the config parser and the error type', () => {
+  // Every way in needs a tenant or the published reader: nothing here hands out a pool, a
+  // client, a Kysely instance or a transaction without context.
+  it('exports only context bound access, the config parsers and the helpers', () => {
     expect(Object.keys(db).sort()).toEqual(
-      ['DbError', 'parseDatabaseConfig', 'parseMigrationConfig'].sort(),
+      [
+        'DbError',
+        'closeDatabase',
+        'createDatabase',
+        'createPublishedDatabase',
+        'newId',
+        'parseDatabaseConfig',
+        'parseMigrationConfig',
+        'parsePublishedReaderConfig',
+        'toSafeInteger',
+        'withPublishedReader',
+        'withTenant',
+      ].sort(),
     );
+  });
+
+  it('runs the catalog and source checks as package tasks', () => {
+    expect(manifest.scripts['check:catalog']).toBe('node src/check-catalog.ts');
+    expect(manifest.scripts['check:sources']).toBe('node src/check-sources.ts');
+  });
+
+  it('runs the catalog check in e2e.yml against the migrated database', () => {
+    const workflow = readFileSync(
+      join(root, '..', '..', '.github', 'workflows', 'e2e.yml'),
+      'utf8',
+    );
+    expect(workflow).toMatch(/pnpm --filter @drefyn\/db check:catalog/);
   });
 
   it('documents every exit code in the README', () => {

@@ -15,10 +15,14 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "check:types": "node src/check-types.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts && vitest run --config vitest.integration.serial.config.ts",
+    "check:types": "node src/check-types.ts",
+    "check:catalog": "node src/check-catalog.ts",
+    "check:sources": "node src/check-sources.ts"
   },
   "dependencies": {
+    "@drefyn/tenancy": "workspace:*",
+    "kysely": "0.29.7",
     "node-pg-migrate": "9.0.0",
     "pg": "8.23.1"
   },

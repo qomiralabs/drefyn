@@ -1,4 +1,5 @@
 import { DbError } from './errors.ts';
+import { notImplemented } from './not-implemented.ts';
 
 export type SslMode = 'require' | 'verify-full' | 'disable';
 
@@ -151,4 +152,10 @@ export function parseMigrationConfig(env: Env): MigrationConfig {
   };
   c.throwIfAny();
   return config;
+}
+
+// Reads DREFYN_PUBLIC_READER_DATABASE_URL with the same pool and SSL keys as the app pool and
+// a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL.
+export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
+  return notImplemented(`parsePublishedReaderConfig(${typeof env})`);
 }
