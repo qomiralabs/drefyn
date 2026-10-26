@@ -11,7 +11,8 @@
     "stories",
     "e2e",
     "scripts",
-    ".storybook",
+    ".storybook/*.ts",
+    ".storybook/*.tsx",
     "vitest.config.ts",
     "playwright.config.ts"
   ]

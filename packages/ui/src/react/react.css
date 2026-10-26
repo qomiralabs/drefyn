@@ -1,0 +1,3 @@
+/* Import after tailwindcss and @drefyn/ui/tailwind.css, so the app's Tailwind build also
+   reads the class names the components use. */
+@source "./";

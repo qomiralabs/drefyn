@@ -11,7 +11,7 @@ for (const theme of THEMES) {
     await openStory(page, FOUNDATIONS, theme);
     const colours = await page.evaluate(() => {
       const ground = getComputedStyle(document.documentElement).backgroundColor;
-      const heading = document.querySelector('h1');
+      const heading = document.querySelector('#storybook-root h1');
       return { ground, ink: heading ? getComputedStyle(heading).color : '' };
     });
     expect(colours).toEqual({

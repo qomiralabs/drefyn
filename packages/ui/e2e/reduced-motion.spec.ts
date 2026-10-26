@@ -26,7 +26,7 @@ for (const theme of THEMES) {
           // Durations repeat to fill the property list, as the CSS spec says.
           const duration = durations[i % durations.length] ?? 0;
           if (duration > 0) {
-            found.push({ element: el.className.toString(), property, ms: duration });
+            found.push({ element: el.tagName.toLowerCase(), property, ms: duration });
           }
         });
       }

@@ -98,7 +98,7 @@ describe('server safe components', () => {
       readFileSync(join(root, 'src', 'react', 'index.ts'), 'utf8'),
     );
     const serverSafe = [...exports.keys()].filter(isServerSafe).sort();
-    const rendered = renderServerSafe(components as Record<string, unknown>);
+    const rendered = renderServerSafe(components);
     expect([...rendered.keys()].sort()).toEqual(serverSafe);
     for (const [name, markup] of rendered) expect(markup, name).not.toBe('');
   });
