@@ -11,3 +11,9 @@ html {
   color: var(--dr-text-body);
   font-family: var(--dr-font-sans);
 }
+
+/* Docs pages: headings in ink, as on every other surface. The docs theme covers the
+   rest; these are the parts Storybook colours from fixed values. */
+.sbdocs-wrapper :is(.sbdocs-title, .sbdocs-subtitle, h1, h2, h3, h4) {
+  color: var(--dr-text-ink);
+}

@@ -86,7 +86,8 @@ export const test = base.extend<{ outside: string[] }>({
           return;
         }
         const file = fileFor(url);
-        if (file === undefined) await route.fulfill({ status: 404, body: '' });
+        if (file === undefined)
+          await route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' });
         else await route.fulfill({ path: file });
       });
       await use(outside);
