@@ -7,9 +7,10 @@ packages:
 # added packages and lockfile maintenance, not only Renovate PRs.
 minimumReleaseAge: 4320
 
-# protobufjs (under the flagd provider) has a postinstall that only prints a version hint;
-# nothing needs it, and listing it here keeps installs warning free.
-ignoredBuiltDependencies: [protobufjs]
+# Install scripts nothing needs; listing them keeps installs warning free.
+# protobufjs (under the flagd provider) only prints a version hint. esbuild only checks
+# that its platform binary is present, which the optional dependency already guarantees.
+ignoredBuiltDependencies: [esbuild, protobufjs]
 
 # The flagd provider's gRPC sync kept reconnecting after close and held the process open;
 # the patch adds a closed guard. Drop it once a provider release stops on close.

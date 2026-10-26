@@ -1,0 +1,4 @@
+import type { Meta } from '@storybook/react-vite';
+import { Badge } from '../src/react/badge.tsx';
+
+export default { title: 'Badge', component: Badge } satisfies Meta<typeof Badge>;
