@@ -8,6 +8,9 @@ command, which runs reversible SQL migrations as `drefyn_owner`.
 - `parseDatabaseConfig(env)`: reads `DREFYN_DATABASE_URL`, `DREFYN_DATABASE_POOL_MAX` (10),
   `DREFYN_DATABASE_POOL_WAIT_MS` (2000), `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS` (5000) and
   `DREFYN_DATABASE_SSL` (`verify-full` unless set; `require` and `disable` also accepted).
+  `require` encrypts the connection but checks no certificate, so anyone on the path can
+  pose as the server; use it only where `verify-full` cannot work, and never across a network
+  you do not control.
   Throws `DbError` with `DB_CONFIG_INVALID` naming each bad key; the message never holds a
   password or the URL. Zero for the wait or the timeout is refused, because pg and Postgres
   read zero as "forever". Query parameters on the URL are refused: TLS is set only by
@@ -87,6 +90,23 @@ override it.
      ```
 
 3. Run `drefyn migrate status` again; it exits 0 once every applied file matches.
+
+### Exit code 2: finding the run that holds the lock
+
+The lock is a session advisory lock on key `7241865325823964`, so it ends with the session
+that holds it. To see who holds it, connected to the same database:
+
+```sql
+select a.pid, a.usename, a.application_name, a.client_addr, a.backend_start, a.state
+  from pg_locks l join pg_stat_activity a on a.pid = l.pid
+ where l.locktype = 'advisory' and l.classid = 1686128 and l.objid = 708954076
+   and l.objsubid = 1 and l.database = (select oid from pg_database where datname = current_database());
+```
+
+A live `drefyn-migrate` session is a real run: wait for it. Only once you are sure it is stuck,
+end it with `select pg_terminate_backend(<pid>)` as the superuser or master user. A file that
+was mid run rolls back, unless it was marked to run outside a transaction, which is why marked
+files must be safe to repeat.
 
 ### Exit code 4: prerequisites
 
