@@ -18,9 +18,8 @@
 #   that reviewer's newest review, since the head needs a newer approval.
 # - Reviewers come from the risk tier of the changed paths. The tier floors live in the
 #   gate script and the path lists in rules.json, both from the trusted ref.
-# - The gate script, its path rules and the allow list come from the PR base commit for
-#   PR and review events, and from the default branch for a dispatch, so editing them in
-#   a PR does not change how that PR is judged. This workflow never checks out PR code:
+# - The gate script, its path rules and the allow list come from the PR base commit, so
+#   editing them in a PR does not change how that PR is judged. This workflow never checks out PR code:
 #   it fetches the PR head objects so git can recompute merges, and runs nothing from them.
 #   If the trusted ref has no gate script, the run fails and posts an error status
 #   rather than pass or skip.
@@ -28,10 +27,12 @@
 #   re-reads the PR head from the API and posts only for that SHA.
 # - Fork PRs cannot set the status from their own runs, since their pull_request and
 #   pull_request_review runs get a read-only token. A maintainer refreshes their status
-#   with a dispatch.
+#   with review-gate-dispatch.yml, which is a separate file so that no step running with
+#   the default branch's privileges ever reads PR event data or fetches a PR ref. The two
+#   files share a concurrency group per PR, so their runs never race on the status.
 #
-# What it does not protect: for pull_request, pull_request_review and workflow_dispatch,
-# GitHub runs this file from the PR merge commit or the chosen ref. A branch in this repo
+# What it does not protect: for pull_request and pull_request_review, GitHub runs this
+# file from the PR merge commit. A branch in this repo
 # can edit this file, or add another workflow, and post its own `review-gate` status.
 # The controls for that live outside the workflow: branch protection with code owner
 # review on .github/ and scripts/, and later an org required workflow or a status from a
@@ -45,17 +46,11 @@ on:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   pull_request_review:
     types: [submitted, edited, dismissed]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request number to evaluate
-        required: true
-        type: string
 
 permissions: {}
 
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: review-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -71,24 +66,14 @@ jobs:
       sha: ${{ steps.gate.outputs.sha }}
       description: ${{ steps.gate.outputs.description }}
     steps:
-      # PR and review events judge the PR with the code on its base commit.
+      # The PR is judged with the code on its base commit.
       - name: Check out the PR base
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
           # Full history and every branch, so carry-over can walk merges and find the
           # base branch tip.
-          fetch-depth: 0
-      # A dispatch runs this file from the ref the caller picked, but the script always
-      # comes from the default branch, named literally so the ref never comes from input.
-      - name: Check out the default branch
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: development
-          persist-credentials: false
           fetch-depth: 0
       # Without a trusted copy of the script there is nothing safe to run. Failing here
       # leaves no state output, so report posts an error status on the head.
@@ -99,12 +84,8 @@ jobs:
             exit 1
           fi
       # Objects only: nothing from the PR is checked out or run. If the fetch fails, the
-      # gate finds no head commit and simply carries no approvals over. A dispatch runs
-      # with the default branch's privileges, so it never fetches a PR ref; heads on
-      # branches in this repository are already present from the full history checkout,
-      # and a fork PR refreshed by dispatch just gets no carry-over.
+      # gate finds no head commit and simply carries no approvals over.
       - name: Fetch the PR head objects
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -124,7 +105,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_GATE_GIT_DIR: ${{ github.workspace }}
         run: >-
           node scripts/review-gate/src/cli.ts github
@@ -134,8 +115,8 @@ jobs:
   report:
     name: report
     needs: evaluate
-    # Fork PR runs, reviews included, have a read-only token and cannot post. A dispatch
-    # refreshes a fork PR's status.
+    # Fork PR runs, reviews included, have a read-only token and cannot post. The dispatch
+    # workflow refreshes a fork PR's status.
     if: >-
       !cancelled() && needs.evaluate.result != 'skipped' &&
       !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)
@@ -150,7 +131,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           GATE_STATE: ${{ needs.evaluate.outputs.state }}
           GATE_SHA: ${{ needs.evaluate.outputs.sha }}
           GATE_DESCRIPTION: ${{ needs.evaluate.outputs.description }}
