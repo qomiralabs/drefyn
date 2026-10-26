@@ -5,7 +5,14 @@
 // on every call, so one bad entry is never partly applied.
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { UNLIMITED, checkLimit, graceAllowance, limitFor, limitInfo } from '../src/index.ts';
+import {
+  EntitlementError,
+  UNLIMITED,
+  checkLimit,
+  graceAllowance,
+  limitFor,
+  limitInfo,
+} from '../src/index.ts';
 import type { LimitKey, LimitOverrides, Tier } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
 import { RUNS, atLeastAsGenerous, caughtCode, expectEntitlementError } from './support/assert.ts';
@@ -213,6 +220,108 @@ describe('raise only overrides', () => {
     );
     expect(limitFor('enterprise', 'status.monitors')).not.toBe(5000);
   });
+});
+
+// Runs with a value field planted on Object.prototype and removes it before any assertion,
+// because the test runner itself builds property descriptors and would trip over it.
+function withPollutedValue(planted: unknown, run: () => unknown): () => unknown {
+  const proto = Object.prototype as Record<string, unknown>;
+  let result: unknown = undefined;
+  let caught: unknown = undefined;
+  let threw = false;
+  proto['value'] = planted;
+  try {
+    result = run();
+  } catch (error) {
+    threw = true;
+    caught = error;
+  } finally {
+    delete proto['value'];
+  }
+  return () => {
+    if (threw) throw caught;
+    return result;
+  };
+}
+
+describe('hostile override maps', () => {
+  // A getter's descriptor has no own value field, so a value inherited from a polluted
+  // prototype must not be read as if the getter had returned it.
+  it('refuses a getter entry even when Object.prototype carries a value field', () => {
+    const map: Record<string, unknown> = {};
+    Object.defineProperty(map, 'status.monitors', { get: () => 5000, enumerable: true });
+    const replay = withPollutedValue(UNLIMITED, () =>
+      limitFor('enterprise', 'status.monitors', { overrides: overrides(map) }),
+    );
+    const error = expectEntitlementError(replay, 'ENTITLEMENT_INVALID_OVERRIDE');
+    expect(error.limitKey).toBe('status.monitors');
+  });
+
+  it('refuses a getter for graceEligible even when Object.prototype carries a value field', () => {
+    const options: Record<string, unknown> = {};
+    Object.defineProperty(options, 'graceEligible', { get: () => true, enumerable: true });
+    const replay = withPollutedValue(true, () =>
+      checkLimit('growth', 'status.email_sends_per_month', 3751, options),
+    );
+    expectEntitlementError(replay, 'ENTITLEMENT_INVALID_OVERRIDE');
+  });
+
+  // Caller data a trap might throw: it must never surface in the message or as a cause.
+  const secret = 'contact ops@example.test about row 42';
+  const forged = (): EntitlementError => {
+    const error = new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE');
+    Object.defineProperty(error, 'message', { value: secret });
+    return error;
+  };
+  const throwers: [string, () => unknown][] = [
+    ['an Error', () => new Error(secret)],
+    ['a bare string', () => secret],
+    ['a forged EntitlementError', forged],
+  ];
+  const trapsFor = (names: readonly (keyof ProxyHandler<Record<string, unknown>>)[]) =>
+    names.flatMap((name) =>
+      throwers.map(([what, make]) => {
+        const handler: ProxyHandler<Record<string, unknown>> = {
+          [name]: () => {
+            throw make();
+          },
+        };
+        return [`${name}, throwing ${what}`, handler] as const;
+      }),
+    );
+  const fixedMessage = new EntitlementError('ENTITLEMENT_INVALID_OVERRIDE').message;
+
+  function expectFixedRefusal(run: () => unknown): void {
+    const error = expectEntitlementError(run, 'ENTITLEMENT_INVALID_OVERRIDE');
+    expect(error.message).toBe(fixedMessage);
+    expect(error.message).not.toContain('ops@example.test');
+    expect(error).not.toHaveProperty('cause');
+    expect(error.limitKey).toBeUndefined();
+  }
+
+  for (const [label, handler] of trapsFor([
+    'getPrototypeOf',
+    'ownKeys',
+    'getOwnPropertyDescriptor',
+  ])) {
+    it(`fails closed when the overrides map traps ${label}`, () => {
+      const map = new Proxy({ 'status.monitors': 5000 }, handler);
+      const options = { overrides: overrides(map) };
+      expectFixedRefusal(() => limitFor('enterprise', 'status.monitors', options));
+      expectFixedRefusal(() =>
+        graceAllowance('enterprise', 'status.email_sends_per_month', options),
+      );
+      expectFixedRefusal(() => checkLimit('enterprise', 'status.monitors', 1, options));
+    });
+  }
+
+  // Options are read through their prototype and their own fields only, never their key list.
+  for (const [label, handler] of trapsFor(['getPrototypeOf', 'getOwnPropertyDescriptor'])) {
+    it(`fails closed when the options object traps ${label}`, () => {
+      const options = new Proxy({ graceEligible: true }, handler);
+      expectFixedRefusal(() => checkLimit('enterprise', 'status.monitors', 1, options));
+    });
+  }
 });
 
 describe('override properties', () => {

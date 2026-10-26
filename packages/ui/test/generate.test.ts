@@ -7,6 +7,7 @@ import {
   generatedFiles,
   renderDtcg,
   renderEchartsTheme,
+  renderTailwindCss,
   renderTokensCss,
 } from '../src/tokens/generate.ts';
 import { tokens, type Tokens } from '../src/tokens/tokens.ts';
@@ -282,5 +283,68 @@ describe('colour values', () => {
 
   it('accepts lower case six digit hex', () => {
     expect(renderTokensCss(withInk('#0b1120'))).toContain('--dr-text-ink: #0b1120;');
+  });
+});
+
+// Numbers and names go straight into CSS, JSON and the chart themes. A NaN, an Infinity, a
+// negative size or a name with a space would ship a broken or silently wrong value.
+describe('numbers and names', () => {
+  const renderers = { renderTokensCss, renderTailwindCss, renderDtcg, renderEchartsTheme };
+  const withSpace = (key: string, v: number): Tokens => ({
+    ...tokens,
+    space: { ...tokens.space, [key]: v },
+  });
+  const withBorder = (key: string): Tokens => ({
+    ...tokens,
+    color: {
+      ...tokens.color,
+      border: { ...tokens.color.border, [key]: tokens.color.border.rule },
+    },
+  });
+  const withDuration = (ms: number): Tokens =>
+    ({
+      ...tokens,
+      motion: {
+        ...tokens.motion,
+        duration: { ...tokens.motion.duration, base: { ms, kind: 'fade' } },
+      },
+    }) as unknown as Tokens;
+  const withAlpha = (alpha: number): Tokens =>
+    ({
+      ...tokens,
+      wash: { ...tokens.wash, light: { ...tokens.wash.light, alpha } },
+    }) as unknown as Tokens;
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -4])(
+    'rejects %s as a size, a duration and an alpha in every format',
+    (value) => {
+      for (const [name, render] of Object.entries(renderers)) {
+        expect(() => render(withSpace('16', value)), name).toThrow(/space\.16/);
+        expect(() => render(withDuration(value)), name).toThrow(/motion\.duration\.base\.ms/);
+        expect(() => render(withAlpha(value)), name).toThrow(/wash\.light\.alpha/);
+      }
+    },
+  );
+
+  it.each(['rule strong', 'rule_strong', 'Rule', 'rule;', '', 'rulé'])(
+    'rejects the role name "%s" in every format',
+    (key) => {
+      for (const [name, render] of Object.entries(renderers)) {
+        expect(() => render(withBorder(key)), name).toThrow(/name/);
+      }
+    },
+  );
+
+  it('rejects a bad name outside the colours too', () => {
+    expect(() => renderTokensCss(withSpace('1 6', 16))).toThrow(/name/);
+  });
+
+  it('still allows negative tracking, which tightens display type', () => {
+    expect(tokens.type.displayXl.tracking).toBeLessThan(0);
+    expect(() => generatedFiles()).not.toThrow();
+  });
+
+  it('accepts camelCase role names, which become kebab case', () => {
+    expect(renderTokensCss(withBorder('ruleFaint'))).toContain('--dr-border-rule-faint:');
   });
 });

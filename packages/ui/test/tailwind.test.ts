@@ -140,19 +140,81 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'w-docs-content')).toMatch(/width: var\(--dr-docs-content\)/);
   });
 
-  it('keeps plain transition utilities from moving things under reduced motion', async () => {
-    const css = await build(['transition', 'transition-all', 'transition-transform']);
-    const at = css.indexOf('@media (prefers-reduced-motion: reduce)');
-    expect(at).toBeGreaterThan(-1);
-    const block = css.slice(at, css.indexOf('}', css.indexOf('{', css.indexOf('{', at) + 1)));
-    expect(block).toMatch(/\.transition,\s*\.transition-all,\s*\.transition-transform/);
-    const props = /transition-property:([^;]*);/.exec(block)?.[1] ?? '';
-    expect(props).toMatch(/opacity/);
-    for (const moving of ['transform', 'translate', 'scale', 'rotate']) {
-      expect(props, moving).not.toMatch(new RegExp(`\\b${moving}\\b`));
+  // The stylesheet with every @layer block cut out.
+  function outsideLayers(css: string): string {
+    let out = '';
+    let i = 0;
+    for (let at = css.indexOf('@layer', i); at !== -1; at = css.indexOf('@layer', i)) {
+      out += css.slice(i, at);
+      const open = css.indexOf('{', at);
+      const semicolon = css.indexOf(';', at);
+      // A statement such as "@layer theme, base;" has no block.
+      if (semicolon !== -1 && semicolon < open) {
+        i = semicolon + 1;
+        continue;
+      }
+      let depth = 0;
+      let j = open;
+      for (; j < css.length; j++) {
+        if (css[j] === '{') depth += 1;
+        if (css[j] === '}') depth -= 1;
+        if (depth === 0) break;
+      }
+      i = j + 1;
     }
-    // Unlayered, so it wins over Tailwind's utilities layer whatever the order.
-    expect(css.slice(0, at)).not.toMatch(/@layer[^{]*\{[^}]*$/);
+    return out + css.slice(i);
+  }
+
+  // The transition-property each rule in the utilities layer sets for one of these classes,
+  // in cascade order. Under reduced motion every rule here applies, the motion-safe ones
+  // aside, and they share a layer, so the last one wins.
+  function reducedTransitionProperty(css: string, classes: string[]): string | undefined {
+    const layer = css.slice(css.indexOf('@layer utilities'));
+    const selectors = classes.map((c) => escapeRegExp(selector(c))).join('|');
+    // Variants add pseudo classes after the name: .group-hover\:x:is(:where(.group):hover *).
+    const rule = new RegExp(`(?:${selectors})(?![\\w\\\\-])[^{},]*\\{([^}]*)\\}`, 'g');
+    let last: string | undefined;
+    for (const match of layer.matchAll(rule)) {
+      const value = /transition-property:([^;]*);/.exec(match[1] ?? '')?.[1];
+      if (value !== undefined) last = value.trim();
+    }
+    return last;
+  }
+
+  it('keeps plain transition utilities from moving things under reduced motion', async () => {
+    for (const cls of ['transition', 'transition-all', 'transition-transform']) {
+      const css = await build([cls]);
+      const props = reducedTransitionProperty(css, [cls]) ?? '';
+      expect(props, cls).toMatch(/opacity/);
+      for (const moving of ['transform', 'translate', 'scale', 'rotate', 'all']) {
+        expect(props, `${cls} ${moving}`).not.toMatch(new RegExp(`\\b${moving}\\b`));
+      }
+    }
+  });
+
+  it('narrows a transition behind a variant too', async () => {
+    // Kept in a fixture: the lint rule rejects these without motion-safe: in source.
+    const classes = JSON.parse(
+      readFileSync(join(here, 'fixtures/variant-transitions.json'), 'utf8'),
+    ) as string[];
+    expect(classes.length).toBeGreaterThan(0);
+    const css = await build(classes);
+    for (const cls of classes) {
+      const props = reducedTransitionProperty(css, [cls]) ?? '';
+      expect(props, cls).toMatch(/opacity/);
+      expect(props, cls).not.toMatch(/\b(transform|all)\b/);
+    }
+  });
+
+  it('lets motion-reduce:transition-none stop every transition under reduced motion', async () => {
+    for (const cls of ['transition', 'transition-all', 'transition-transform']) {
+      const css = await build([cls, 'motion-reduce:transition-none']);
+      // An unlayered rule would beat the utilities layer whatever its order.
+      expect(outsideLayers(css), cls).not.toMatch(/transition-property/);
+      expect(reducedTransitionProperty(css, [cls, 'motion-reduce:transition-none']), cls).toBe(
+        'none',
+      );
+    }
   });
 
   it('still compiles bare numbers and brackets, which is why the lint rule rejects them', async () => {
