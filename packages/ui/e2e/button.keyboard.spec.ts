@@ -73,7 +73,9 @@ for (const theme of THEMES) {
       await expect.poll(() => ring(button), { message: name }).toBe(expectedRing);
       await page.keyboard.press('Enter');
       await page.keyboard.press('Space');
-      await button.click();
+      // Playwright treats aria-disabled as not enabled and would wait; force still sends a
+      // real pointer click, which the button must ignore.
+      await button.click({ force: true });
     }
     await expect(output).toHaveText('Presses: 0');
   });
@@ -100,7 +102,9 @@ for (const theme of THEMES) {
       await expect.poll(() => ring(button), { message: name }).toBe(expectedRing);
       await page.keyboard.press('Enter');
       await page.keyboard.press('Space');
-      await button.click();
+      // Playwright treats aria-disabled as not enabled and would wait; force still sends a
+      // real pointer click, which the button must ignore.
+      await button.click({ force: true });
     }
     await expect(page.getByText(/^Presses: \d+$/)).toHaveText('Presses: 0');
   });

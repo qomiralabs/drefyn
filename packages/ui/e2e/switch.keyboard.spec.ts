@@ -78,7 +78,9 @@ for (const theme of THEMES) {
       await expect(toggle, name).toHaveAttribute('aria-disabled', 'true');
       await expect.poll(() => ringsInside(page, name), { message: name }).toEqual([expectedRing]);
       await page.keyboard.press('Space');
-      await page.getByText(name).click();
+      // Playwright treats the label of an aria-disabled input as not enabled and would wait;
+      // force still sends a real pointer click, which the switch must ignore.
+      await page.getByText(name).click({ force: true });
       expect(await checked(toggle), name).toBe(on);
     }
   });
