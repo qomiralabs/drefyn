@@ -1,4 +1,4 @@
-import { ButtonLink, StatusPip } from '@drefyn/ui/react';
+import { Badge, ButtonLink, StatusPip } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
@@ -63,7 +63,7 @@ async function ProjectBody({ org, project }: { org: string; project: Placeholder
       <Calm>
         <Head>
           <Eyebrow>{project.name}</Eyebrow>
-          <StatusPip state="broken" label="Could not load" />
+          <Badge state="broken">Could not load</Badge>
           <Answer
             claim="We could not load this project."
             rest="Your docs site is still online; only the dashboard is affected."

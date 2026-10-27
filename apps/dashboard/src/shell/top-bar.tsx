@@ -127,7 +127,7 @@ function CommandTrigger(): ReactNode {
     >
       <IconSearch />
       {/* The name is the visible words, read even where only the icon shows. */}
-      <span className="sr-only min-w-0 flex-1 truncate text-start md:not-sr-only">
+      <span className="sr-only min-w-0 flex-1 truncate text-start md:not-sr-only md:truncate">
         Search or run a command
       </span>
       <kbd

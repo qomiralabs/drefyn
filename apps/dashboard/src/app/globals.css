@@ -41,7 +41,8 @@
   }
 }
 
-/* The drawer and scrim fade in. Under reduced motion the duration token drops to 120 ms. */
+/* The drawer scrim fades in; the drawer itself appears at once, so its text is never caught
+   half transparent. Under reduced motion the duration token drops to 120 ms. */
 @keyframes dr-fade-in {
   from {
     opacity: 0;

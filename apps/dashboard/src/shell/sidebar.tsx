@@ -165,7 +165,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           'flex-col gap-16 overflow-y-auto border-e border-rule bg-ground px-8 py-12 outline-none focus-visible:focus-ring-inset',
           'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav',
           drawerOpen
-            ? 'max-sm:fixed max-sm:inset-y-0 max-sm:start-0 max-sm:z-overlay max-sm:flex max-sm:w-shell-drawer max-sm:animate-fade-in max-sm:border-rule-strong max-sm:bg-overlay max-sm:shadow-2'
+            ? 'max-sm:fixed max-sm:inset-y-0 max-sm:start-0 max-sm:z-overlay max-sm:flex max-sm:w-shell-drawer max-sm:border-rule-strong max-sm:bg-overlay max-sm:shadow-2'
             : 'hidden',
         ].join(' ')}
       >
