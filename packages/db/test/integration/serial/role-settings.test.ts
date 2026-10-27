@@ -24,6 +24,7 @@ alter role drefyn_public_reader in database ${BOOTSTRAPPED} reset all;
 alter role drefyn_app nosuperuser nobypassrls;
 alter role drefyn_public_reader nosuperuser nobypassrls;
 revoke drefyn_owner from drefyn_app;
+alter role all reset all;
 `;
 
 async function settingsRows(): Promise<number> {
@@ -175,5 +176,29 @@ alter database ${db.name} set search_path = app, extensions;
     expect(app.message).toContain(name);
     const reader = await unsafe(createPublishedDatabase(readerConfig(db.reader)));
     expect(reader.message).toContain(name);
+  });
+});
+
+// alter role all set ... is stored for no role and no database, and follows every
+// connection in the cluster, the pools included.
+describeWithStack('settings for all roles', () => {
+  beforeAll(async () => {
+    db = await dbs.fresh('migrated');
+    await superuser(reset());
+  });
+
+  afterEach(async () => {
+    await superuser(reset());
+  });
+
+  it('fail the catalog check and startup for both pools', async () => {
+    await superuser("alter role all set work_mem = '64MB';");
+    const problems = await catalogProblems(db.owner, ALLOW_LISTS);
+    const hit = problems.find((p) => p.rule === 'role_setting' && p.object === 'all roles');
+    expect(hit?.message).toContain('work_mem');
+    expect((await unsafe(createDatabase(appConfig(db.app)))).message).toContain('work_mem');
+    expect((await unsafe(createPublishedDatabase(readerConfig(db.reader)))).message).toContain(
+      'work_mem',
+    );
   });
 });

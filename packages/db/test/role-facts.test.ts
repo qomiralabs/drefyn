@@ -15,6 +15,7 @@ const row = {
   member_of: [],
   role_settings: ['|search_path=public', 'drefyn|statement_timeout=0\u001fwork_mem=64MB'],
   database_settings: ['search_path=app, extensions'],
+  cluster_settings: ['work_mem=64MB'],
 };
 
 describe('readRoleFacts', () => {
@@ -30,6 +31,7 @@ describe('readRoleFacts', () => {
         { database: 'drefyn', settings: ['statement_timeout=0', 'work_mem=64MB'] },
       ],
       databaseSettings: ['search_path=app, extensions'],
+      clusterSettings: ['work_mem=64MB'],
     });
   });
 

@@ -1,7 +1,7 @@
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { beforeAll, expect, it } from 'vitest';
-import { withTenant, type Database } from '../../src/index.ts';
+import { withOrganization, withTenant, type Database } from '../../src/index.ts';
 import { DbError } from '../../src/errors.ts';
 import { rejected } from '../support.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
@@ -121,6 +121,7 @@ describeWithStack('no tenant context on a plain app connection', () => {
     try {
       await client.query('begin');
       await client.query("select set_config('drefyn.organization_id', $1, true)", [ORG_A]);
+      await client.query("select set_config('drefyn.project_id', $1, true)", [PRJ_A1]);
       const error = await rejected(
         client.query('update app.fixture_notes set organization_id = $1 where id = $2', [
           ORG_B,
@@ -160,14 +161,14 @@ describeWithStack('withTenant scoping', () => {
       org: ORG_A,
       project: PRJ_A1,
     });
-    expect(await withTenant(app, A, (tx) => one(tx, context))).toMatchObject({
+    expect(await withOrganization(app, A, (tx) => one(tx, context))).toMatchObject({
       org: ORG_A,
       project: null,
     });
   });
 
   it('returns what the work returns', async () => {
-    await expect(withTenant(app, A, () => Promise.resolve({ ok: 1 }))).resolves.toEqual({ ok: 1 });
+    await expect(withTenant(app, A1, () => Promise.resolve({ ok: 1 }))).resolves.toEqual({ ok: 1 });
   });
 
   it('reads only the project in a project transaction', async () => {
@@ -176,12 +177,38 @@ describeWithStack('withTenant scoping', () => {
     expect(await withTenant(app, B1, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1 note' }]);
   });
 
-  it('reads every project of the organization and nothing of another in an organization transaction', async () => {
-    expect(await withTenant(app, A, (tx) => rows(tx, bodies))).toEqual([
-      { body: 'a1 note' },
-      { body: 'a2 note' },
-    ]);
-    expect(await withTenant(app, B, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1 note' }]);
+  // Organization scope reads no project table at all, even through raw SQL, though A has
+  // rows in two projects.
+  it('reads no project rows in an organization transaction', async () => {
+    expect(
+      (
+        await superuser(
+          `select count(distinct project_id) from app.fixture_notes where organization_id = '${ORG_A}';`,
+          db.name,
+        )
+      ).trim(),
+    ).toBe('2');
+    expect(await withOrganization(app, A, (tx) => rows(tx, bodies))).toEqual([]);
+    expect(await withOrganization(app, B, (tx) => rows(tx, bodies))).toEqual([]);
+    const byId = sql<{ body: string }>`select body from app.fixture_notes where id = ${NOTE_A1}`;
+    expect(await withOrganization(app, A, (tx) => rows(tx, byId))).toEqual([]);
+  });
+
+  it('cannot write project rows in an organization transaction', async () => {
+    const error = await rejected(
+      withOrganization(app, A, (tx) =>
+        sql`insert into app.fixture_notes (organization_id, project_id, body) values (${ORG_A}, ${PRJ_A1}, 'x')`.execute(
+          tx,
+        ),
+      ),
+    );
+    expect((error as DbError).code).toBe('DB_RLS_VIOLATION');
+    const touched = await withOrganization(app, A, async (tx) => {
+      const update = await sql`update app.fixture_notes set body = 'x'`.execute(tx);
+      const remove = await sql`delete from app.fixture_notes`.execute(tx);
+      return [update.numAffectedRows, remove.numAffectedRows];
+    });
+    expect(touched).toEqual([0n, 0n]);
   });
 
   it('scopes organization tables by organization only', async () => {
@@ -189,14 +216,14 @@ describeWithStack('withTenant scoping', () => {
     expect(await withTenant(app, A1, (tx) => rows(tx, emails))).toEqual([
       { email: 'a@example.test' },
     ]);
-    expect(await withTenant(app, B, (tx) => rows(tx, emails))).toEqual([
+    expect(await withOrganization(app, B, (tx) => rows(tx, emails))).toEqual([
       { email: 'b@example.test' },
     ]);
   });
 
   it('cannot read another tenant row by its id', async () => {
     const byId = sql<{ body: string }>`select body from app.fixture_notes where id = ${NOTE_B1}`;
-    expect(await withTenant(app, A, (tx) => rows(tx, byId))).toEqual([]);
+    expect(await withTenant(app, A1, (tx) => rows(tx, byId))).toEqual([]);
     const otherProject = sql<{
       body: string;
     }>`select body from app.fixture_notes where id = ${NOTE_A2}`;
@@ -204,7 +231,7 @@ describeWithStack('withTenant scoping', () => {
   });
 
   it('updates and deletes nothing of another organization or project', async () => {
-    const touched = await withTenant(app, A, async (tx) => {
+    const touched = await withTenant(app, A1, async (tx) => {
       const update =
         await sql`update app.fixture_notes set body = 'hijacked' where id = ${NOTE_B1}`.execute(tx);
       const remove = await sql`delete from app.fixture_notes where id = ${NOTE_B1}`.execute(tx);
@@ -244,16 +271,16 @@ describeWithStack('withTenant scoping', () => {
     expect((error as DbError).code).toBe('DB_RLS_VIOLATION');
   });
 
-  // The composite foreign key: a row cannot hang off another organization's project.
+  // The composite foreign key: a row cannot hang off another organization's project. The
+  // policy already refuses this for drefyn_app, so the key is proved past RLS as the superuser.
   it('refuses a row in its own organization that points at another organization project', async () => {
     const error = await rejected(
-      withTenant(app, A, (tx) =>
-        sql`insert into app.fixture_notes (organization_id, project_id, body) values (${ORG_A}, ${PRJ_B1}, 'x')`.execute(
-          tx,
-        ),
+      superuser(
+        `insert into app.fixture_notes (organization_id, project_id, body) values ('${ORG_A}', '${PRJ_B1}', 'x');`,
+        db.name,
       ),
     );
-    expect(failure(error).code).toBe('23503');
+    expect(String(error)).toMatch(/violates foreign key constraint/);
     expect(await withTenant(app, B1, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1 note' }]);
   });
 
@@ -281,7 +308,7 @@ describeWithStack('withTenant scoping', () => {
 
   it('refuses an organization row moved to another organization', async () => {
     const error = await rejected(
-      withTenant(app, A, (tx) =>
+      withOrganization(app, A, (tx) =>
         sql`update app.fixture_members set organization_id = ${ORG_B} where email = 'a@example.test'`.execute(
           tx,
         ),
@@ -350,7 +377,8 @@ describeWithStack('withTenant scoping', () => {
         return 'looks fine';
       }),
     );
-    expect(error).toBeInstanceOf(Error);
+    // The error the work swallowed, division by zero.
+    expect(failure(error).code).toBe('22012');
     expect(
       await withTenant(app, A2, (tx) =>
         rows(tx, sql<{ body: string }>`select body from app.fixture_drafts`),
@@ -363,16 +391,59 @@ describeWithStack('withTenant scoping', () => {
     ['a missing organization', {}],
     ['a malformed organization', { organizationId: 'org_x' }],
     ['an empty project', { organizationId: ORG_A, projectId: '' }],
+    ['no project', { organizationId: ORG_A }],
+    ['a project of undefined', { organizationId: ORG_A, projectId: undefined }],
     ['null', null],
   ])('refuses %s with DB_TENANT_CONTEXT_MISSING and never runs the work', async (_label, ctx) => {
     let ran = false;
     const error = await rejected(
-      withTenant(app, ctx as OrganizationRef, () => {
+      withTenant(app, ctx as TenantRef, () => {
         ran = true;
         return Promise.resolve(1);
       }),
     );
     expect((error as DbError).code).toBe('DB_TENANT_CONTEXT_MISSING');
     expect(ran).toBe(false);
+  });
+
+  it.each<[string, unknown]>([
+    ['a TenantRef', A1],
+    ['a project of undefined', { organizationId: ORG_A, projectId: undefined }],
+  ])('refuses %s for organization scope with DB_TENANT_CONTEXT_INVALID', async (_label, ctx) => {
+    let ran = false;
+    const error = await rejected(
+      withOrganization(app, ctx as OrganizationRef, () => {
+        ran = true;
+        return Promise.resolve(1);
+      }),
+    );
+    expect((error as DbError).code).toBe('DB_TENANT_CONTEXT_INVALID');
+    expect(ran).toBe(false);
+  });
+
+  // The work runs inside the tenant's transaction and could set the context itself; the
+  // commit checks it is still the one withTenant set.
+  it.each([
+    ['another organization', `select set_config('drefyn.organization_id', '${ORG_B}', true)`],
+    ['another project', `select set_config('drefyn.project_id', '${PRJ_A2}', true)`],
+    ['set local', `set local drefyn.organization_id = '${ORG_B}'`],
+  ])('refuses work that switches to %s, and keeps nothing it wrote', async (_label, statement) => {
+    const error = await rejected(
+      withTenant(app, A1, async (tx) => {
+        await sql`insert into app.fixture_drafts (organization_id, project_id, body) values (${ORG_A}, ${PRJ_A1}, 'switched')`.execute(
+          tx,
+        );
+        await sql.raw(statement).execute(tx);
+      }),
+    );
+    expect((error as DbError).code).toBe('DB_TRANSACTION_INVALID');
+    expect(
+      await withTenant(app, A1, (tx) =>
+        rows(
+          tx,
+          sql<{ body: string }>`select body from app.fixture_drafts where body = 'switched'`,
+        ),
+      ),
+    ).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { beforeAll, expect, it } from 'vitest';
-import { withTenant, type Database } from '../../src/index.ts';
+import { withOrganization, withTenant, type Database } from '../../src/index.ts';
 import type { DbError } from '../../src/errors.ts';
 import { rejected } from '../support.ts';
 import { databases } from './support/databases.ts';
@@ -71,12 +71,21 @@ const notes = sql<{ id: string; project_id: string; body: string }>`
 
 const sorted = (values: readonly string[]) => [...values].sort();
 
-async function bodiesOf(ref: OrganizationRef | TenantRef): Promise<string[]> {
+async function bodiesOf(ref: TenantRef): Promise<string[]> {
   return sorted((await withTenant(app, ref, (tx) => rows(tx, notes))).map((n) => n.body));
 }
 
-async function idsOf(ref: OrganizationRef): Promise<string[]> {
+async function idsOf(ref: TenantRef): Promise<string[]> {
   return (await withTenant(app, ref, (tx) => rows(tx, notes))).map((n) => n.id);
+}
+
+// Organization scope reads no project table, whatever the organization holds.
+async function organizationRows(ref: OrganizationRef): Promise<unknown[]> {
+  return withOrganization(app, ref, (tx) => rows(tx, notes));
+}
+
+async function allIds(org: OrgData): Promise<string[]> {
+  return (await Promise.all(org.projects.map((p) => idsOf(p.ref)))).flat();
 }
 
 describeWithStack('cross tenant isolation over random datasets', () => {
@@ -87,7 +96,7 @@ describeWithStack('cross tenant isolation over random datasets', () => {
   });
 
   it.each(SEEDS)(
-    'organization A never reads, changes or deletes B rows, seed %i',
+    'organization A never reads, changes or deletes B rows, and project A never reads project B, seed %i',
     async (seedValue) => {
       await fc.assert(
         fc.asyncProperty(shape, async ({ a: aShape, b: bShape, guesses }) => {
@@ -95,24 +104,20 @@ describeWithStack('cross tenant isolation over random datasets', () => {
             build(seedValue, 0xa, aShape),
             build(seedValue, 0xb, bShape),
           ]);
-          const aBodies = sorted(a.projects.flatMap((p) => p.bodies));
           const bBodies = sorted(b.projects.flatMap((p) => p.bodies));
-          const bIds = await idsOf(b.ref);
-          const aIds = await idsOf(a.ref);
+          const bIds = await allIds(b);
+          const aIds = await allIds(a);
           expect(bIds).toHaveLength(bBodies.length);
 
-          // Reads: each organization and each project sees exactly its own, run concurrently.
-          const reads = await Promise.all([
-            bodiesOf(a.ref),
-            bodiesOf(b.ref),
-            ...a.projects.map((p) => bodiesOf(p.ref)),
-            ...b.projects.map((p) => bodiesOf(p.ref)),
-          ]);
-          expect(reads[0]).toEqual(aBodies);
-          expect(reads[1]).toEqual(bBodies);
-          [...a.projects, ...b.projects].forEach((p, i) => {
-            expect(reads[i + 2]).toEqual(sorted(p.bodies));
+          // Reads: each project sees exactly its own and organization scope sees no project
+          // rows, all run concurrently.
+          const projects = [...a.projects, ...b.projects];
+          const reads = await Promise.all(projects.map((p) => bodiesOf(p.ref)));
+          projects.forEach((p, i) => {
+            expect(reads[i]).toEqual(sorted(p.bodies));
           });
+          expect(await organizationRows(a.ref)).toEqual([]);
+          expect(await organizationRows(b.ref)).toEqual([]);
 
           // A's organization with one of B's projects sees nothing at all.
           const crossed = {
@@ -121,9 +126,13 @@ describeWithStack('cross tenant isolation over random datasets', () => {
           };
           expect(await bodiesOf(crossed)).toEqual([]);
 
-          // Guessed and real foreign ids: no reads, no updates, no deletes.
-          const targets = [...bIds, ...guesses];
-          const touched = await withTenant(app, a.ref, async (tx) => {
+          // From A's first project: B's ids, A's other projects' ids and guessed ids give no
+          // reads, updates or deletes.
+          const [home, ...others] = a.projects;
+          if (home === undefined) throw new Error('every organization has a project');
+          const otherIds = (await Promise.all(others.map((p) => idsOf(p.ref)))).flat();
+          const targets = [...bIds, ...otherIds, ...guesses];
+          const touched = await withTenant(app, home.ref, async (tx) => {
             let n = 0n;
             for (const id of targets) {
               const read =
@@ -147,30 +156,31 @@ describeWithStack('cross tenant isolation over random datasets', () => {
           });
           expect(touched).toBe(0n);
 
-          // A blanket update in A touches exactly A's rows.
+          // A blanket update in one project touches exactly that project's rows.
           const updated = await withTenant(
             app,
-            a.ref,
+            home.ref,
             async (tx) =>
               (await sql`update app.fixture_notes set body = body`.execute(tx)).numAffectedRows,
           );
-          expect(updated).toBe(BigInt(aIds.length));
+          expect(updated).toBe(BigInt(home.bodies.length));
+          expect(aIds.length).toBe(a.projects.reduce((n, p) => n + p.bodies.length, 0));
 
           // Writing into B, or moving an A row to B, is refused.
           const target = b.projects[0]?.ref;
           if (target !== undefined) {
             const insert = await rejected(
-              withTenant(app, a.ref, (tx) =>
+              withTenant(app, home.ref, (tx) =>
                 sql`insert into app.fixture_notes (organization_id, project_id, body) values (${target.organizationId}, ${target.projectId}, 'planted')`.execute(
                   tx,
                 ),
               ),
             );
             expect((insert as DbError).code).toBe('DB_RLS_VIOLATION');
-            const moved = aIds[0];
+            const moved = (await idsOf(home.ref))[0];
             if (moved !== undefined) {
               const move = await rejected(
-                withTenant(app, a.ref, (tx) =>
+                withTenant(app, home.ref, (tx) =>
                   sql`update app.fixture_notes set organization_id = ${target.organizationId}, project_id = ${target.projectId} where id = ${moved}::uuid`.execute(
                     tx,
                   ),
@@ -180,9 +190,12 @@ describeWithStack('cross tenant isolation over random datasets', () => {
             }
           }
 
-          // B is exactly as it was.
-          expect(await bodiesOf(b.ref)).toEqual(bBodies);
-          expect(sorted(await idsOf(b.ref))).toEqual(sorted(bIds));
+          // B and A's other projects are exactly as they were.
+          expect(
+            sorted((await Promise.all(b.projects.map((p) => bodiesOf(p.ref)))).flat()),
+          ).toEqual(bBodies);
+          expect(sorted(await allIds(b))).toEqual(sorted(bIds));
+          for (const p of others) expect(await bodiesOf(p.ref)).toEqual(sorted(p.bodies));
         }),
         { seed: seedValue, numRuns: RUNS_PER_SEED },
       );

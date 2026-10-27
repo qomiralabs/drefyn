@@ -7,6 +7,7 @@ import { beforeAll, expect, it } from 'vitest';
 import {
   closeDatabase,
   createDatabase,
+  withOrganization,
   withTenant,
   type Database,
   type Schema,
@@ -89,19 +90,19 @@ describeWithStack('tenant context on a reused pooled connection', () => {
 
   it('runs every transaction on the one backend and leaves it idle, out of any transaction', async () => {
     const first = await withTenant(single, A1, (tx) => one(tx, context));
-    const second = await withTenant(single, B, (tx) => one(tx, context));
+    const second = await withOrganization(single, B, (tx) => one(tx, context));
     expect(second.pid).toBe(first.pid);
     await idle(first.pid);
   });
 
   it('starts the next transaction with only its own context', async () => {
     const a = await withTenant(single, A1, (tx) => one(tx, context));
-    const b = await withTenant(single, B, (tx) => one(tx, context));
+    const b = await withOrganization(single, B, (tx) => one(tx, context));
     expect(b.pid).toBe(a.pid);
     expect(a).toMatchObject({ org: ORG_A, project: PRJ_A1 });
     // The project from the last transaction must not carry over to an organization one.
     expect(b).toMatchObject({ org: ORG_B, project: null });
-    expect(await withTenant(single, B, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1' }]);
+    expect(await withTenant(single, B1, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1' }]);
   });
 
   it('starts clean after work that threw', async () => {
@@ -111,7 +112,7 @@ describeWithStack('tenant context on a reused pooled connection', () => {
         throw new Error('boom');
       }),
     );
-    const after = await withTenant(single, B, (tx) => one(tx, context));
+    const after = await withOrganization(single, B, (tx) => one(tx, context));
     expect(after).toMatchObject({ pid: before.pid, org: ORG_B, project: null });
     await idle(before.pid);
   });
@@ -119,7 +120,7 @@ describeWithStack('tenant context on a reused pooled connection', () => {
   it('starts clean after a SQL error rolled the transaction back', async () => {
     const error = await rejected(withTenant(single, A1, (tx) => sql`select 1 / 0`.execute(tx)));
     expect(error).toBeInstanceOf(Error);
-    const after = await withTenant(single, B, (tx) => one(tx, context));
+    const after = await withOrganization(single, B, (tx) => one(tx, context));
     expect(after).toMatchObject({ org: ORG_B, project: null });
     await idle(after.pid);
   });
@@ -141,29 +142,31 @@ describeWithStack('tenant context on a reused pooled connection', () => {
     await withTenant(single, A1, (tx) =>
       sql.raw(LEAK_PROJECT.replace('$1', `'${PRJ_A1}'`)).execute(tx),
     );
-    const next = await withTenant(single, A, (tx) => one(tx, context));
+    const next = await withOrganization(single, A, (tx) => one(tx, context));
     expect(next).toMatchObject({ org: ORG_A, project: null });
-    const other = await withTenant(single, B, (tx) => rows(tx, bodies));
+    const other = await withTenant(single, B1, (tx) => rows(tx, bodies));
     expect(other).toEqual([{ body: 'b1' }]);
   });
 
   it('sets the statement timeout per transaction, with the configured default', async () => {
     const timeout = sql<{ statement_timeout: string }>`show statement_timeout`;
-    expect(await withTenant(single, A, (tx) => one(tx, timeout), { timeoutMs: 1500 })).toEqual({
+    expect(
+      await withOrganization(single, A, (tx) => one(tx, timeout), { timeoutMs: 1500 }),
+    ).toEqual({
       statement_timeout: '1500ms',
     });
-    expect(await withTenant(single, A, (tx) => one(tx, timeout))).toEqual({
+    expect(await withOrganization(single, A, (tx) => one(tx, timeout))).toEqual({
       statement_timeout: '5s',
     });
   });
 
   it('times out a slow statement with DB_TIMEOUT and leaves the connection usable', async () => {
     const error = await rejected(
-      withTenant(single, A, (tx) => sql`select pg_sleep(30)`.execute(tx), { timeoutMs: 50 }),
+      withOrganization(single, A, (tx) => sql`select pg_sleep(30)`.execute(tx), { timeoutMs: 50 }),
     );
     expect(error).toBeInstanceOf(DbError);
     expect((error as DbError).code).toBe('DB_TIMEOUT');
-    const after = await withTenant(single, B, (tx) => one(tx, context));
+    const after = await withOrganization(single, B, (tx) => one(tx, context));
     expect(after).toMatchObject({ org: ORG_B, project: null });
     await idle(after.pid);
   });
@@ -173,7 +176,7 @@ describeWithStack('tenant context on a reused pooled connection', () => {
     async (ms) => {
       let ran = false;
       const error = await rejected(
-        withTenant(
+        withOrganization(
           single,
           A,
           () => {
@@ -226,22 +229,26 @@ describeWithStack('tenant context on a reused pooled connection', () => {
 
   it('keeps concurrent transactions on separate connections apart', async () => {
     const wide = await open.app(db.app, { DREFYN_DATABASE_POOL_MAX: '4' });
-    const refs = [A1, B1, A, B, A1, B1, A, B, A1, B1, A, B];
+    const refs: (TenantRef | OrganizationRef)[] = [A1, B1, A, B, A1, B1, A, B, A1, B1, A, B];
     const seen = await Promise.all(
-      refs.map((ref) =>
-        withTenant(wide, ref, async (tx) => {
+      refs.map((ref) => {
+        const work = async <DB>(tx: Transaction<DB>) => {
           const first = await one(tx, context);
           const found = await rows(tx, bodies);
           const last = await one(tx, context);
           return { ref, first, found, last };
-        }),
-      ),
+        };
+        return 'projectId' in ref ? withTenant(wide, ref, work) : withOrganization(wide, ref, work);
+      }),
     );
     for (const { ref, first, found, last } of seen) {
       const project = 'projectId' in ref ? ref.projectId : null;
       expect(first).toMatchObject({ org: ref.organizationId, project });
       expect(last).toMatchObject({ org: ref.organizationId, project });
-      expect(found).toEqual([{ body: ref.organizationId === ORG_A ? 'a1' : 'b1' }]);
+      // Organization scope sees no project rows.
+      const expected =
+        project === null ? [] : [{ body: ref.organizationId === ORG_A ? 'a1' : 'b1' }];
+      expect(found).toEqual(expected);
     }
   });
 
@@ -251,10 +258,10 @@ describeWithStack('tenant context on a reused pooled connection', () => {
       DREFYN_DATABASE_POOL_WAIT_MS: '200',
     });
     const hold = deferred();
-    const holding = withTenant(tight, A, () => hold.promise);
+    const holding = withOrganization(tight, A, () => hold.promise);
     let ran = false;
     const error = await rejected(
-      withTenant(tight, B, () => {
+      withOrganization(tight, B, () => {
         ran = true;
         return Promise.resolve(1);
       }),
@@ -263,12 +270,16 @@ describeWithStack('tenant context on a reused pooled connection', () => {
     await holding;
     expect((error as DbError).code).toBe('DB_UNAVAILABLE');
     expect(ran).toBe(false);
-    await expect(withTenant(tight, B, (tx) => rows(tx, bodies))).resolves.toEqual([{ body: 'b1' }]);
+    await expect(withTenant(tight, B1, (tx) => rows(tx, bodies))).resolves.toEqual([
+      { body: 'b1' },
+    ]);
   });
 
   it('replaces the int8 parser on its own pool only', async () => {
     expect(
-      await withTenant(single, A, (tx) => one(tx, sql<{ n: unknown }>`select 42::bigint as n`)),
+      await withOrganization(single, A, (tx) =>
+        one(tx, sql<{ n: unknown }>`select 42::bigint as n`),
+      ),
     ).toEqual({ n: 42 });
     // Everything else in the process keeps the driver default.
     const parse = pg.types.getTypeParser(pg.types.builtins.INT8, 'text') as (
@@ -279,14 +290,86 @@ describeWithStack('tenant context on a reused pooled connection', () => {
 
   it('closes cleanly, refuses work after close and can close twice', async () => {
     const own = await createDatabase(appConfig(db.app, { DREFYN_DATABASE_POOL_MAX: '1' }));
-    const { pid } = await withTenant(own, A, (tx) => one(tx, context));
+    const { pid } = await withOrganization(own, A, (tx) => one(tx, context));
     await closeDatabase(own);
     await closeDatabase(own);
-    const error = await rejected(withTenant(own, A, () => Promise.resolve(1)));
+    const error = await rejected(withOrganization(own, A, () => Promise.resolve(1)));
     expect((error as DbError).code).toBe('DB_UNAVAILABLE');
     await until(async () => !(await backendsOf('drefyn_app', db.name)).some((b) => b.pid === pid), {
       timeoutMs: 5000,
       what: `backend ${String(pid)} to go after close`,
     });
+  });
+
+  // Session state the work leaves behind must never reach the next tenant on the same
+  // connection: the client is reset before it goes back to the pool.
+  it.each([
+    [
+      'a WITH HOLD cursor',
+      'declare leaked cursor with hold for select 1',
+      sql<{ n: number }>`select count(*)::int as n from pg_cursors`,
+    ],
+    // A drefyn setting withTenant does not set itself, so only the reset can clear it.
+    [
+      'a session drefyn setting',
+      LEAK_PROJECT.replace('drefyn.project_id', 'drefyn.leak').replace('$1', "'x'"),
+      sql<{
+        n: number;
+      }>`select (coalesce(current_setting('drefyn.leak', true), '') = 'x')::int as n`,
+    ],
+    [
+      'a LISTEN',
+      'listen tenant_events',
+      sql<{ n: number }>`select count(*)::int as n from pg_listening_channels()`,
+    ],
+    [
+      'a session advisory lock',
+      'select pg_advisory_lock(4242)',
+      sql<{
+        n: number;
+      }>`select count(*)::int as n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()`,
+    ],
+  ])('drops %s before the next transaction', async (_label, statement, probe) => {
+    const left = await withTenant(single, A1, async (tx) => {
+      await sql.raw(statement).execute(tx);
+      return one(tx, context);
+    });
+    const next = await withTenant(single, B1, async (tx) => ({
+      ...(await one(tx, context)),
+      ...(await one(tx, probe)),
+    }));
+    expect(next.pid).toBe(left.pid);
+    expect(next.n).toBe(0);
+  });
+
+  it('runs unnamed queries again after the reset, so nothing relies on prepared statements', async () => {
+    const first = await withTenant(single, A1, (tx) => rows(tx, bodies));
+    const second = await withTenant(single, A1, (tx) => rows(tx, bodies));
+    expect(second).toEqual(first);
+  });
+
+  // Ending the transaction inside the work leaves later statements with no tenant and no
+  // atomicity, so it fails and the connection is replaced.
+  it('refuses work that commits on its own and replaces the client', async () => {
+    const before = await withTenant(single, A1, (tx) => one(tx, context));
+    const error = await rejected(
+      withTenant(single, A1, async (tx) => {
+        await sql.raw('commit').execute(tx);
+      }),
+    );
+    expect((error as DbError).code).toBe('DB_TRANSACTION_INVALID');
+    const after = await withTenant(single, A1, (tx) => one(tx, context));
+    expect(after.pid).not.toBe(before.pid);
+  });
+
+  it('refuses work that commits and then fails', async () => {
+    const error = await rejected(
+      withTenant(single, A1, async (tx) => {
+        await sql.raw('commit').execute(tx);
+        throw new Error('after the commit');
+      }),
+    );
+    expect((error as DbError).code).toBe('DB_TRANSACTION_INVALID');
+    expect(await withTenant(single, B1, (tx) => rows(tx, bodies))).toEqual([{ body: 'b1' }]);
   });
 });

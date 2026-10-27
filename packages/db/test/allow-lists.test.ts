@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALLOW_LISTS,
+  APP_FUNCTIONS,
+  CROSS_PROJECT_FOREIGN_KEYS,
   GLOBAL_TABLES,
   PUBLISHED_TABLES,
   READER_FUNCTIONS,
@@ -60,6 +62,17 @@ describe('allow lists', () => {
     ]);
   });
 
+  it('let drefyn_app execute only the two tenant context readers', () => {
+    expect(APP_FUNCTIONS.map((f) => f.name).sort()).toEqual([
+      'app.current_org()',
+      'app.current_project()',
+    ]);
+  });
+
+  it('start with no cross project foreign key', () => {
+    expect(CROSS_PROJECT_FOREIGN_KEYS).toEqual([]);
+  });
+
   it('start with no SECURITY DEFINER function and no published table', () => {
     expect(SECURITY_DEFINER_FUNCTIONS).toEqual([]);
     expect(PUBLISHED_TABLES).toEqual([]);
@@ -91,6 +104,14 @@ describe('allow lists', () => {
     [
       'an unqualified name',
       (l) => ({ ...l, publishedTables: [{ name: 'pages', reason: 'reviewed' }] }),
+    ],
+    [
+      'an app function outside schema app',
+      (l) => ({ ...l, appFunctions: [{ name: 'public.f()', reason: 'reviewed' }] }),
+    ],
+    [
+      'a cross project key that is not table.constraint',
+      (l) => ({ ...l, crossProjectForeignKeys: [{ name: 'app.notes', reason: 'reviewed' }] }),
     ],
   ])('fail on %s', (_label, change) => {
     const problems = allowListProblems(change(ALLOW_LISTS));

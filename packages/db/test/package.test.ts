@@ -63,6 +63,7 @@ describe('package shape', () => {
         'parseMigrationConfig',
         'parsePublishedReaderConfig',
         'toSafeInteger',
+        'withOrganization',
         'withPublishedReader',
         'withTenant',
       ].sort(),

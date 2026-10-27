@@ -143,6 +143,112 @@ create policy published_read on app.bad_published_read for select to drefyn_publ
 alter policy tenant_isolation on app.bad_project_clause
   using (organization_id = app.current_org()) with check (organization_id = app.current_org());`,
   },
+  // The old project clause let organization scope read every project.
+  'a project table with the old organization scope arm': {
+    rule: 'policy',
+    object: 'app.bad_null_arm',
+    up: () => `${projectTable('bad_null_arm')}
+alter policy tenant_isolation on app.bad_null_arm
+  using (organization_id = app.current_org() and (app.current_project() is null or project_id = app.current_project()))
+  with check (organization_id = app.current_org() and (app.current_project() is null or project_id = app.current_project()));`,
+  },
+  // Each half of the policy is compared on its own: an exact USING with an open WITH CHECK
+  // would let drefyn_app write rows into another organization.
+  'a tenant_isolation weakened only in with check': {
+    rule: 'policy',
+    object: 'app.bad_check_only',
+    up: () => `${orgTable('bad_check_only')}
+alter policy tenant_isolation on app.bad_check_only with check (true);`,
+  },
+  'a tenant_isolation weakened only in using': {
+    rule: 'policy',
+    object: 'app.bad_using_only',
+    up: () => `${orgTable('bad_using_only')}
+alter policy tenant_isolation on app.bad_using_only using (true);`,
+  },
+  'a tenant_isolation for select only': {
+    rule: 'policy',
+    object: 'app.bad_policy_cmd',
+    up: () => `${orgTable('bad_policy_cmd')}
+drop policy tenant_isolation on app.bad_policy_cmd;
+create policy tenant_isolation on app.bad_policy_cmd for select to drefyn_app
+  using (organization_id = app.current_org());`,
+  },
+  'a published_read for every command': {
+    rule: 'policy',
+    object: 'app.fixture_published',
+    up: () => `drop policy published_read on app.fixture_published;
+create policy published_read on app.fixture_published for all to drefyn_public_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());`,
+  },
+  // TRUNCATE ignores row level security.
+  'a truncate grant to drefyn_app': {
+    rule: 'app_privilege',
+    object: 'app.fixture_notes',
+    mentions: ['TRUNCATE', 'drefyn_app'],
+    up: () => 'grant truncate on app.fixture_notes to drefyn_app;',
+  },
+  'all privileges to drefyn_app': {
+    rule: 'app_privilege',
+    object: 'app.fixture_drafts',
+    mentions: ['REFERENCES'],
+    up: () => 'grant all on app.fixture_drafts to drefyn_app;',
+  },
+  'a grant option for drefyn_app': {
+    rule: 'app_privilege',
+    object: 'app.fixture_members',
+    mentions: ['grant option'],
+    up: () => 'grant select on app.fixture_members to drefyn_app with grant option;',
+  },
+  'create on schema app for drefyn_app': {
+    rule: 'app_privilege',
+    object: 'app',
+    mentions: ['CREATE'],
+    up: () => 'grant create on schema app to drefyn_app;',
+  },
+  'an update grant on a sequence to drefyn_app': {
+    rule: 'app_privilege',
+    object: 'app.bad_app_seq',
+    mentions: ['UPDATE'],
+    up: () => `create sequence app.bad_app_seq;
+grant update on sequence app.bad_app_seq to drefyn_app;`,
+  },
+  'execute on a function off the app allow list': {
+    rule: 'app_privilege',
+    object: 'app.bad_app_fn()',
+    up: () => `create function app.bad_app_fn() returns int language sql as $$ select 1 $$;
+grant execute on function app.bad_app_fn() to drefyn_app;`,
+  },
+  'default truncate for drefyn_app in schema app': {
+    rule: 'app_privilege',
+    object: 'drefyn_app',
+    mentions: ['TRUNCATE'],
+    up: () =>
+      'alter default privileges for role drefyn_owner in schema app grant truncate on tables to drefyn_app;',
+  },
+  'default execute for drefyn_app everywhere': {
+    rule: 'app_privilege',
+    object: 'drefyn_app',
+    mentions: ['EXECUTE'],
+    up: () =>
+      'alter default privileges for role drefyn_owner grant execute on functions to drefyn_app;',
+  },
+  // Referential checks ignore RLS, so a bare id would let one tenant probe another's rows.
+  'a single column foreign key into a tenant table': {
+    rule: 'tenant_foreign_key',
+    object: 'app.bad_fk',
+    mentions: ['organization_id'],
+    up: () => orgTable('bad_fk', ['note_id uuid references app.fixture_notes (id)']),
+  },
+  'a foreign key between project tables without project_id': {
+    rule: 'tenant_foreign_key',
+    object: 'app.bad_fk_project',
+    mentions: ['project_id'],
+    up: () => `alter table app.fixture_notes add constraint fixture_notes_org_id_key unique (organization_id, id);
+${projectTable('bad_fk_project', ['note_id uuid'])}
+alter table app.bad_fk_project add foreign key (organization_id, note_id)
+  references app.fixture_notes (organization_id, id);`,
+  },
   'a numeric column': {
     rule: 'banned_type',
     object: 'app.bad_numeric.amount',
@@ -350,6 +456,36 @@ describeWithStack('catalog check passes', () => {
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
+  it('with a foreign key that carries organization and project', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `alter table app.fixture_notes add constraint fixture_notes_tenant_id_key unique (organization_id, project_id, id);
+${projectTable('ok_fk', ['note_id uuid'])}
+alter table app.ok_fk add foreign key (organization_id, project_id, note_id)
+  references app.fixture_notes (organization_id, project_id, id);`,
+    );
+    const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with a reviewed cross project foreign key', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `alter table app.fixture_notes add constraint fixture_notes_org_id_key unique (organization_id, id);
+${projectTable('ok_cross', ['note_id uuid'])}
+alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organization_id, note_id)
+  references app.fixture_notes (organization_id, id);`,
+    );
+    const allow: AllowLists = {
+      ...FIXTURE_ALLOW_LISTS,
+      crossProjectForeignKeys: [{ name: 'app.ok_cross.ok_cross_note_fkey', reason: 'test only' }],
+    };
+    const problems = await catalogProblems(db.owner, allow);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
   it('through check:catalog with exit 0 on the migrated template', async () => {
     const db = await dbs.fresh('migrated');
     const result = await checkCatalogCli(db.owner);
@@ -467,6 +603,8 @@ describe('catalog case list', () => {
       'reader_grant',
       'public_execute',
       'default_privileges',
+      'app_privilege',
+      'tenant_foreign_key',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }

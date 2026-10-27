@@ -264,6 +264,23 @@ describeWithStack('withPublishedReader', () => {
     ]);
   });
 
+  // The read only transaction is what stops this write: the reader holds an UPDATE grant on
+  // this table on purpose, so permissions alone would let it through.
+  it('refuses a write the reader holds a grant for, since the transaction is read only', async () => {
+    await query(db.owner, 'create table app.reader_scratch (id int)');
+    await query(db.owner, 'grant select, update on app.reader_scratch to drefyn_public_reader');
+    try {
+      const error = await rejected(
+        withPublishedReader(reader, A1, (tx) =>
+          sql`update app.reader_scratch set id = 1`.execute(tx),
+        ),
+      );
+      expect(failure(error).code).toBe('25006');
+    } finally {
+      await query(db.owner, 'drop table app.reader_scratch');
+    }
+  });
+
   it.each<[string, unknown]>([
     ['an OrganizationRef', { organizationId: ORG_A } satisfies OrganizationRef],
     ['an empty project', { organizationId: ORG_A, projectId: '' }],

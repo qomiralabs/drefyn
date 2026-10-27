@@ -12,6 +12,7 @@ function facts(overrides: Partial<RoleFacts> = {}): RoleFacts {
     memberOf: [],
     settings: [],
     databaseSettings: ['search_path=app, extensions'],
+    clusterSettings: [],
     ...overrides,
   };
 }
@@ -115,6 +116,22 @@ describe('roleProblems', () => {
       const problems = roleProblems(input, pool);
       expect(problems.join('\n'), pool).toMatch(reason);
       expect(problems.join('\n'), pool).toMatch(/database/i);
+    }
+  });
+
+  // alter role all set ... applies to every role in every database, the pools included.
+  it.each([
+    ['search_path=public', /search_path=public/],
+    ['search_path=app, extensions', /search_path=app, extensions/],
+    ['drefyn.organization_id=x', /drefyn\.organization_id/],
+  ])('refuses %s set for all roles', (setting, reason) => {
+    for (const [pool, input] of [
+      ['app', facts({ clusterSettings: [setting] })],
+      ['reader', reader({ clusterSettings: [setting] })],
+    ] as const) {
+      const text = roleProblems(input, pool).join('\n');
+      expect(text, pool).toMatch(reason);
+      expect(text, pool).toMatch(/every role/);
     }
   });
 

@@ -4,7 +4,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { ALLOW_LISTS, type AllowLists } from '../../src/allow-lists.ts';
 import { runCheckCatalog } from '../../src/catalog-check.ts';
 import { DbError } from '../../src/errors.ts';
-import { createDatabase, withTenant, type Database } from '../../src/index.ts';
+import {
+  closeDatabase,
+  createDatabase,
+  withOrganization,
+  withTenant,
+  type Database,
+} from '../../src/index.ts';
 import { rejected } from '../support.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
@@ -242,5 +248,32 @@ create function app.ok_definer() returns int language sql security definer as $$
         await superuser(`alter database ${db.name} reset work_mem;`);
       }
     });
+  });
+});
+
+describeWithStack('createDatabase with a logger', () => {
+  beforeAll(async () => {
+    db = await fixture();
+  });
+
+  // Ids and the pool kind only: no SQL text and no values.
+  it('reports a transaction the work ended itself, for both scopes', async () => {
+    const warnings: [string, unknown][] = [];
+    const app = await createDatabase(appConfig(db.app), {
+      logger: { warn: (event, fields) => warnings.push([event, fields]) },
+    });
+    try {
+      const commit = ['com', 'mit'].join('');
+      await rejected(withTenant(app, TENANT, (tx) => sql.raw(commit).execute(tx)));
+      await rejected(
+        withOrganization(app, { organizationId: ORG }, (tx) => sql.raw(commit).execute(tx)),
+      );
+      expect(warnings).toEqual([
+        ['db_transaction_invalid', { pool: 'app', organization_id: ORG, project_id: PRJ }],
+        ['db_transaction_invalid', { pool: 'app', organization_id: ORG }],
+      ]);
+    } finally {
+      await closeDatabase(app);
+    }
   });
 });

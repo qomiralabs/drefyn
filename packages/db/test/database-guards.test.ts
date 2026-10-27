@@ -53,9 +53,9 @@ describe('handles that did not come from the constructors', () => {
       ran = true;
       return Promise.resolve(1);
     };
-    expect(await code(withTenant(db as Database, { organizationId: ORG }, work))).toBe(
-      'DB_CONFIG_INVALID',
-    );
+    expect(
+      await code(withTenant(db as Database, { organizationId: ORG, projectId: PROJECT }, work)),
+    ).toBe('DB_CONFIG_INVALID');
     expect(ran).toBe(false);
   });
 

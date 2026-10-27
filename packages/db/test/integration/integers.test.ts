@@ -14,7 +14,8 @@ const open = pools();
 
 const ORG = organizationId('01a14984-4476-77ce-9335-40000000000a');
 const PRJ = projectId('01a14984-4476-77ce-9335-4000000000a1');
-const A = { organizationId: ORG };
+// Project scope: organization scope reads no project rows.
+const A = { organizationId: ORG, projectId: PRJ };
 
 let app: Database;
 

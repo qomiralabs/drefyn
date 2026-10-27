@@ -3,7 +3,8 @@ import { DbError } from '../src/errors.ts';
 import {
   APP_TIMEOUT_MAX_MS,
   READER_TIMEOUT_MAX_MS,
-  tenantSettings,
+  organizationSettings,
+  projectSettings,
   transactionTimeout,
 } from '../src/tenant-context.ts';
 import { thrown } from './support.ts';
@@ -16,74 +17,99 @@ function code(fn: () => unknown): string {
   return error instanceof DbError ? error.code : `not a DbError: ${String(error)}`;
 }
 
-describe('tenantSettings', () => {
+const withGetter = (key: string, value: string, base: object = {}) =>
+  Object.defineProperty({ ...base }, key, { get: () => value, enumerable: true });
+
+describe('projectSettings', () => {
   it('takes a TenantRef as both settings', () => {
-    expect(tenantSettings({ organizationId: ORG, projectId: PROJECT }, 'organization')).toEqual({
-      organizationId: ORG,
-      projectId: PROJECT,
-    });
-    expect(tenantSettings({ organizationId: ORG, projectId: PROJECT }, 'project')).toEqual({
+    expect(projectSettings({ organizationId: ORG, projectId: PROJECT })).toEqual({
       organizationId: ORG,
       projectId: PROJECT,
     });
   });
 
-  // The project is always set, to empty here, so nothing left on the session can stand in.
-  it('takes an OrganizationRef with an empty project', () => {
-    expect(tenantSettings({ organizationId: ORG }, 'organization')).toEqual({
+  it('takes a null prototype object', () => {
+    const ctx = Object.assign(Object.create(null) as object, {
       organizationId: ORG,
-      projectId: '',
+      projectId: PROJECT,
     });
-    expect(tenantSettings({ organizationId: ORG, projectId: undefined }, 'organization')).toEqual({
-      organizationId: ORG,
-      projectId: '',
-    });
+    expect(projectSettings(ctx)).toEqual({ organizationId: ORG, projectId: PROJECT });
   });
 
-  it('ignores extra keys', () => {
-    expect(
-      tenantSettings({ organizationId: ORG, projectId: PROJECT, role: 'admin' }, 'project'),
-    ).toEqual({ organizationId: ORG, projectId: PROJECT });
-  });
-
-  it.each([
+  // A project transaction must never quietly become an organization one.
+  it.each<[string, unknown]>([
     ['undefined', undefined],
     ['null', null],
     ['a string', ORG],
     ['an empty object', {}],
-    ['an empty organization', { organizationId: '' }],
-    ['a blank organization', { organizationId: '   ' }],
-    ['a null organization', { organizationId: null }],
-    ['a numeric organization', { organizationId: 1 }],
-    ['an organization that is not a UUID', { organizationId: 'org_123' }],
-    ['an uppercase organization', { organizationId: ORG.toUpperCase() }],
-    ['an organization with spaces', { organizationId: ` ${ORG}` }],
-    ['a public id', { organizationId: 'org_01k7a0000000000000000000' }],
-    // An empty project must never widen a project transaction to the whole organization.
+    ['an OrganizationRef', { organizationId: ORG }],
+    ['a projectId of undefined', { organizationId: ORG, projectId: undefined }],
     ['an empty project', { organizationId: ORG, projectId: '' }],
     ['a null project', { organizationId: ORG, projectId: null }],
     ['a project that is not a UUID', { organizationId: ORG, projectId: 'prj' }],
+    ['an uppercase project', { organizationId: ORG, projectId: PROJECT.toUpperCase() }],
     ['a project without an organization', { projectId: PROJECT }],
-    ['an organization smuggling a setting', { organizationId: `${ORG}', true) --` }],
+    ['an empty organization', { organizationId: '', projectId: PROJECT }],
+    ['a public id', { organizationId: 'org_01k7a0000000000000000000', projectId: PROJECT }],
+    [
+      'an organization smuggling a setting',
+      { organizationId: `${ORG}', true) --`, projectId: PROJECT },
+    ],
+    ['a project from a getter', withGetter('projectId', PROJECT, { organizationId: ORG })],
+    ['an organization from a getter', withGetter('organizationId', ORG, { projectId: PROJECT })],
   ])('refuses %s with DB_TENANT_CONTEXT_MISSING', (_label, ctx) => {
-    expect(code(() => tenantSettings(ctx, 'organization'))).toBe('DB_TENANT_CONTEXT_MISSING');
+    expect(code(() => projectSettings(ctx))).toBe('DB_TENANT_CONTEXT_MISSING');
   });
 
-  it('refuses an OrganizationRef where a project is required', () => {
-    expect(code(() => tenantSettings({ organizationId: ORG }, 'project'))).toBe(
-      'DB_TENANT_CONTEXT_MISSING',
-    );
+  it.each<[string, unknown]>([
+    ['an extra field', { organizationId: ORG, projectId: PROJECT, role: 'admin' }],
+    ['an extra getter', withGetter('role', 'admin', { organizationId: ORG, projectId: PROJECT })],
+    [
+      'a class instance',
+      new (class {
+        organizationId = ORG;
+        projectId = PROJECT;
+      })(),
+    ],
+    ['an array', [ORG, PROJECT]],
+    [
+      'ids from the prototype',
+      Object.create({ organizationId: ORG, projectId: PROJECT }) as object,
+    ],
+  ])('refuses %s with DB_TENANT_CONTEXT_INVALID', (_label, ctx) => {
+    expect(code(() => projectSettings(ctx))).toBe('DB_TENANT_CONTEXT_INVALID');
+  });
+});
+
+describe('organizationSettings', () => {
+  // The project is always set, to empty here, so nothing left on the session can stand in.
+  it('takes an OrganizationRef with an empty project', () => {
+    expect(organizationSettings({ organizationId: ORG })).toEqual({
+      organizationId: ORG,
+      projectId: '',
+    });
   });
 
-  it('reads the ids once, so a getter cannot change them between check and use', () => {
-    let reads = 0;
-    const ctx = {
-      get organizationId() {
-        reads += 1;
-        return reads === 1 ? ORG : 'not-a-uuid';
-      },
-    };
-    expect(tenantSettings(ctx, 'organization')).toEqual({ organizationId: ORG, projectId: '' });
+  // Organization scope has to be asked for: a TenantRef that lost its project, or one
+  // widened to an OrganizationRef, must not land here.
+  it.each<[string, unknown]>([
+    ['a TenantRef', { organizationId: ORG, projectId: PROJECT }],
+    ['a projectId of undefined', { organizationId: ORG, projectId: undefined }],
+    ['an empty project', { organizationId: ORG, projectId: '' }],
+    ['a project from a getter', withGetter('projectId', PROJECT, { organizationId: ORG })],
+    ['an extra field', { organizationId: ORG, role: 'admin' }],
+  ])('refuses %s with DB_TENANT_CONTEXT_INVALID', (_label, ctx) => {
+    expect(code(() => organizationSettings(ctx))).toBe('DB_TENANT_CONTEXT_INVALID');
+  });
+
+  it.each<[string, unknown]>([
+    ['undefined', undefined],
+    ['an empty object', {}],
+    ['an empty organization', { organizationId: '' }],
+    ['an organization that is not a UUID', { organizationId: 'org_123' }],
+    ['an organization from a getter', withGetter('organizationId', ORG)],
+  ])('refuses %s with DB_TENANT_CONTEXT_MISSING', (_label, ctx) => {
+    expect(code(() => organizationSettings(ctx))).toBe('DB_TENANT_CONTEXT_MISSING');
   });
 });
 
