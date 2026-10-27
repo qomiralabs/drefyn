@@ -6,6 +6,7 @@ import { findProject, type PlaceholderProject } from '../../../../fixtures/proje
 import { PLACEHOLDER } from '../../../../fixtures/placeholder.ts';
 import { requireDashboard } from '../../../../server/gate.ts';
 import { parseShellPath, shellHref } from '../../../../shell/route.ts';
+import { MainBusy } from '../../../../views/main-busy.tsx';
 import { ProjectLoading } from '../../../../views/project-loading.tsx';
 import { TryAgain } from '../../../../views/try-again.tsx';
 import { Answer, Calm, Evidence, Eyebrow, Head, Ranked } from '../../../../views/calm.tsx';
@@ -36,9 +37,13 @@ export default async function ProjectHome({ params }: Params) {
   const project = await projectFrom(params);
   const { org } = await params;
   return (
-    <Suspense fallback={<ProjectLoading name={project.name} />}>
-      <ProjectBody org={org} project={project} />
-    </Suspense>
+    <>
+      <MainBusy busy />
+      <Suspense fallback={<ProjectLoading name={project.name} />}>
+        <MainBusy busy={false} />
+        <ProjectBody org={org} project={project} />
+      </Suspense>
+    </>
   );
 }
 

@@ -1,17 +1,9 @@
-'use client';
 import { Skeleton } from '@drefyn/ui/react';
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
-// The final layout in skeleton blocks, so nothing moves when the data lands. Main is busy and
-// keeps its name through a heading that is read, not drawn.
+// The final layout in skeleton blocks, so nothing moves when the data lands. Main keeps its
+// name through a heading that is read, not drawn; MainBusy marks it busy.
 export function ProjectLoading({ name }: { name: string }): ReactNode {
-  useEffect(() => {
-    const main = document.getElementById('main');
-    main?.setAttribute('aria-busy', 'true');
-    return () => {
-      main?.removeAttribute('aria-busy');
-    };
-  }, []);
   return (
     <div className="flex max-w-landing flex-col gap-32 px-16 pt-24 pb-96 sm:gap-48 sm:px-24 sm:pt-64">
       <h1 className="sr-only">{name}</h1>
