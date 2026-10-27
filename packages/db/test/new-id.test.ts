@@ -15,6 +15,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// newId never goes back to an earlier timestamp than one it already used, and earlier tests
+// in this file run on the real clock, so every fake time here is far in the future and each
+// test starts later than the one before.
+const CLOCK_START = '2099-01-01T12:00:00.000Z';
+const CLOCK_LATER = '2099-06-01T00:00:00.123Z';
+const BURST_AT = '2100-01-01T12:00:00.000Z';
+const BURST_STEP_BACK = '2100-01-01T11:59:59.000Z';
+const MOVING_FROM = '2101-01-01T12:00:00.000Z';
+
 describe('newId', () => {
   it.each(ID_KINDS)('gives a canonical lowercase UUIDv7 for %s', (kind) => {
     const id = newId(kind);
@@ -25,24 +34,23 @@ describe('newId', () => {
 
   it('carries the clock time in its first 48 bits', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-26T12:00:00.000Z'));
-    expect(timestampOf(newId('org'))).toBe(Date.parse('2026-10-26T12:00:00.000Z'));
-    vi.setSystemTime(new Date('2030-01-01T00:00:00.123Z'));
-    expect(timestampOf(newId('prj'))).toBe(Date.parse('2030-01-01T00:00:00.123Z'));
+    vi.setSystemTime(new Date(CLOCK_START));
+    expect(timestampOf(newId('org'))).toBe(Date.parse(CLOCK_START));
+    vi.setSystemTime(new Date(CLOCK_LATER));
+    expect(timestampOf(newId('prj'))).toBe(Date.parse(CLOCK_LATER));
   });
 
   // Ids made later in one process sort later, which keeps index inserts at the right edge.
   // After a step back the first 48 bits hold the last timestamp used, not the clock.
   it('increases strictly within one millisecond and across a clock step back', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-26T12:00:00.000Z'));
+    vi.setSystemTime(new Date(BURST_AT));
     const ids: string[] = [];
     for (let i = 0; i < 5000; i += 1) ids.push(newId('nod'));
-    vi.setSystemTime(new Date('2026-10-26T11:59:59.000Z'));
+    expect(timestampOf(ids[0] ?? '')).toBe(Date.parse(BURST_AT));
+    vi.setSystemTime(new Date(BURST_STEP_BACK));
     for (let i = 0; i < 10; i += 1) ids.push(newId('nod'));
-    expect(timestampOf(ids.at(-1) ?? '')).toBeGreaterThanOrEqual(
-      Date.parse('2026-10-26T12:00:00.000Z'),
-    );
+    expect(timestampOf(ids.at(-1) ?? '')).toBeGreaterThanOrEqual(Date.parse(BURST_AT));
     for (let i = 1; i < ids.length; i += 1) {
       expect((ids[i] ?? '') > (ids[i - 1] ?? ''), `id ${String(i)}`).toBe(true);
     }
@@ -55,7 +63,7 @@ describe('newId', () => {
       fc.property(
         fc.array(fc.integer({ min: 0, max: 3 }), { minLength: 1, maxLength: 200 }),
         (steps) => {
-          vi.setSystemTime(new Date('2026-10-26T12:00:00.000Z'));
+          vi.setSystemTime(new Date(MOVING_FROM));
           const seen = new Set<string>();
           for (const step of steps) {
             vi.advanceTimersByTime(step);

@@ -46,10 +46,19 @@ const identifier = fc
   .stringMatching(/^[a-z][a-z0-9_]{0,20}$/)
   .filter((name) => !name.includes('extension'));
 
+// Building the first binary string costs about 300 ms in fast-check, so it happens here, at
+// collection, instead of inside the first test's timeout.
+const anyText = fc.string({ unit: 'binary', maxLength: 400 });
+fc.sample(anyText, { seed: 0, numRuns: 1 });
+
+// 400 runs take 3 to 25 ms once warm on a quiet laptop; cold they took about 300 ms there and
+// near 6 s under heavy load, so the limit leaves room for a loaded CI runner.
+const FUZZ_TIMEOUT_MS = 20_000;
+
 describe.each(SEEDS)('source checks with seed %i', (seed) => {
-  it('never throw on arbitrary text', () => {
+  it('never throw on arbitrary text', { timeout: FUZZ_TIMEOUT_MS }, () => {
     fc.assert(
-      fc.property(fc.string({ unit: 'binary', maxLength: 400 }), (text) => {
+      fc.property(anyText, (text) => {
         expect(Array.isArray(extensionDdlProblems('f.sql', text))).toBe(true);
         expect(Array.isArray(sessionSettingProblems('f.ts', text))).toBe(true);
       }),
