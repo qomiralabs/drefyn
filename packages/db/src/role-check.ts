@@ -21,6 +21,8 @@ export interface RoleFacts {
   readonly settings: readonly RoleSetting[];
   // Database wide pg_db_role_setting entries (setrole = 0) for the current database.
   readonly databaseSettings: readonly string[];
+  // alter role all set ...: setrole = 0 and setdatabase = 0, for every role everywhere.
+  readonly clusterSettings: readonly string[];
 }
 
 export const POOL_ROLES: Readonly<Record<PoolKind, string>> = {
@@ -61,6 +63,9 @@ export function roleProblems(facts: RoleFacts, pool: PoolKind): readonly string[
   for (const setting of facts.settings) {
     if (setting.settings.length === 0) continue;
     problems.push(`${user} has the role setting ${describeRoleSetting(setting)}`);
+  }
+  for (const setting of facts.clusterSettings) {
+    problems.push(`the setting ${setting} applies to every role in every database`);
   }
   for (const setting of unexpectedDatabaseSettings(facts.databaseSettings)) {
     const tenant = setting.startsWith('drefyn.') ? ', which gives every connection a tenant' : '';
@@ -105,7 +110,11 @@ select r.rolname::text as current_user_name,
                    from pg_catalog.pg_db_role_setting s
                    join pg_catalog.pg_database d on d.oid = s.setdatabase
                   where s.setrole = 0 and d.datname = pg_catalog.current_database()),
-                '{}'::text[]) as database_settings
+                '{}'::text[]) as database_settings,
+       coalesce((select s.setconfig
+                   from pg_catalog.pg_db_role_setting s
+                  where s.setrole = 0 and s.setdatabase = 0),
+                '{}'::text[]) as cluster_settings
   from pg_catalog.pg_roles r
  where r.rolname = pg_catalog.current_user()`;
 
@@ -147,5 +156,6 @@ export async function readRoleFacts(client: pg.ClientBase): Promise<RoleFacts> {
     memberOf: strings(row['member_of'], 'member_of'),
     settings: strings(row['role_settings'], 'role_settings').map(parseRoleSetting),
     databaseSettings: strings(row['database_settings'], 'database_settings'),
+    clusterSettings: strings(row['cluster_settings'], 'cluster_settings'),
   };
 }

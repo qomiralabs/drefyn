@@ -11,6 +11,10 @@ function missing(reason: string): DbError {
   return new DbError('DB_TENANT_CONTEXT_MISSING', `tenant context ${reason}`);
 }
 
+function invalid(reason: string): DbError {
+  return new DbError('DB_TENANT_CONTEXT_INVALID', `tenant context ${reason}`);
+}
+
 function canonical(value: unknown, parse: (text: string) => string): string | undefined {
   if (typeof value !== 'string') return undefined;
   try {
@@ -20,25 +24,48 @@ function canonical(value: unknown, parse: (text: string) => string): string | un
   }
 }
 
-// Validates a context at run time, because a cast or an untyped caller can get past the
-// branded types. Throws DbError DB_TENANT_CONTEXT_MISSING.
-export function tenantSettings(ctx: unknown, scope: 'organization' | 'project'): TenantSettings {
+// The own data properties of a plain object. Descriptors never run a getter, so a value
+// cannot pass the check and then change, and nothing comes from a prototype.
+function ownFields(ctx: unknown, allowed: readonly string[]): Map<string, PropertyDescriptor> {
   if (typeof ctx !== 'object' || ctx === null) throw missing('is not an object');
-  // Each id is read exactly once, so a getter cannot pass the check and then change.
-  const rawOrganization: unknown = Reflect.get(ctx, 'organizationId');
-  const hasProject = 'projectId' in ctx;
-  const rawProject: unknown = hasProject ? Reflect.get(ctx, 'projectId') : undefined;
-  const organization = canonical(rawOrganization, organizationId);
-  if (organization === undefined) throw missing('has no valid organizationId');
-  if (rawProject === undefined) {
-    if (scope === 'project') throw missing('needs a projectId here');
-    return { organizationId: organization, projectId: '' };
+  const proto: unknown = Object.getPrototypeOf(ctx);
+  if (proto !== Object.prototype && proto !== null) throw invalid('is not a plain object');
+  const fields = new Map(Object.entries(Object.getOwnPropertyDescriptors(ctx)));
+  for (const key of fields.keys()) {
+    if (!allowed.includes(key))
+      throw invalid('has a field other than organizationId and projectId');
   }
-  // An empty or malformed project must never widen a project transaction to the whole
-  // organization.
-  const project = canonical(rawProject, projectId);
-  if (project === undefined) throw missing('has an invalid projectId');
+  return fields;
+}
+
+function dataValue(descriptor: PropertyDescriptor | undefined): unknown {
+  return descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
+}
+
+function organizationOf(fields: Map<string, PropertyDescriptor>): string {
+  const organization = canonical(dataValue(fields.get('organizationId')), organizationId);
+  if (organization === undefined) throw missing('has no valid organizationId');
+  return organization;
+}
+
+const FIELDS = ['organizationId', 'projectId'];
+
+// For withTenant and the reader: a project is required. Throws DbError
+// DB_TENANT_CONTEXT_MISSING, or DB_TENANT_CONTEXT_INVALID for anything but the two ids.
+export function projectSettings(ctx: unknown): TenantSettings {
+  const fields = ownFields(ctx, FIELDS);
+  const organization = organizationOf(fields);
+  const project = canonical(dataValue(fields.get('projectId')), projectId);
+  if (project === undefined) throw missing('has no valid projectId');
   return { organizationId: organization, projectId: project };
+}
+
+// For withOrganization. Any own projectId, even undefined, means the caller holds a project
+// context and asked for the wider scope by mistake.
+export function organizationSettings(ctx: unknown): TenantSettings {
+  const fields = ownFields(ctx, FIELDS);
+  if (fields.has('projectId')) throw invalid('has a projectId; use withTenant for a project');
+  return { organizationId: organizationOf(fields), projectId: '' };
 }
 
 // Ceilings per pool: an unbounded value would quietly turn the timeout off.

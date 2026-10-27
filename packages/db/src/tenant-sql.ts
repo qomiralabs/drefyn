@@ -22,13 +22,12 @@ function identifier(value: string, what: string): string {
   return value;
 }
 
-// The policy text the catalog check compares against, as it is written here. Policies are
-// to drefyn_app only: on PUBLIC they would also apply to the reader and the owner, and
-// permissive policies are OR'd.
+// Policies are to drefyn_app only: on PUBLIC they would also apply to the reader and the
+// owner, and permissive policies are OR'd. A project table needs both settings, so
+// organization scope reads none of its rows.
 export function tenantPredicate(scope: 'project' | 'organization'): string {
   return scope === 'project'
-    ? `organization_id = app.current_org()
-         and (app.current_project() is null or project_id = app.current_project())`
+    ? 'organization_id = app.current_org() and project_id = app.current_project()'
     : 'organization_id = app.current_org()';
 }
 

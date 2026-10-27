@@ -27,7 +27,9 @@ export type CatalogRule =
   | 'bookkeeping_grant'
   | 'public_execute'
   | 'default_privileges'
-  | 'role_setting';
+  | 'role_setting'
+  | 'app_privilege'
+  | 'tenant_foreign_key';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -49,14 +51,16 @@ const BOOKKEEPING = new Set([
 // pg_get_expr output for the helper's policies, read with search_path = pg_catalog so every
 // name is schema qualified. Exact text on purpose: a semantic comparison would be a SQL
 // analyser we would have to trust. A Postgres major upgrade reruns the catalog tests first.
+// A project table needs both settings, so organization scope reads none of its rows.
 const PROJECT_POLICY =
-  '((organization_id = app.current_org()) AND ((app.current_project() IS NULL) OR (project_id = app.current_project())))';
+  '((organization_id = app.current_org()) AND (project_id = app.current_project()))';
 const ORGANIZATION_POLICY = '(organization_id = app.current_org())';
 const PUBLISHED_POLICY =
   '((organization_id = app.current_org()) AND (project_id = app.current_project()))';
 
 const TABLE_NAME = /^app\.[a-z_][a-z0-9_]*$/;
 const FUNCTION_NAME = /^app\.[a-z_][a-z0-9_]*\([^()]*\)$/;
+const CONSTRAINT_NAME = /^app\.[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/;
 
 const problem = (rule: CatalogRule, object: string, message: string): CatalogProblem => ({
   rule,
@@ -71,6 +75,8 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
     ['SECURITY DEFINER function', allow.securityDefinerFunctions, FUNCTION_NAME],
     ['published table', allow.publishedTables, TABLE_NAME],
     ['reader function', allow.readerFunctions, FUNCTION_NAME],
+    ['app function', allow.appFunctions, FUNCTION_NAME],
+    ['cross project foreign key', allow.crossProjectForeignKeys, CONSTRAINT_NAME],
   ];
   const problems: CatalogProblem[] = [];
   for (const [label, entries, shape] of lists) {
@@ -298,6 +304,10 @@ select r.rolname::text as role_name, d.datname::text as database_name, s.setconf
  where r.rolname in ('${APP_ROLE}', '${READER_ROLE}') and cardinality(s.setconfig) > 0
  order by 1, 2 nulls first`;
 
+// alter role all set ...: no role and no database, so it follows every connection.
+const CLUSTER_SETTINGS = `
+select s.setconfig as settings from pg_db_role_setting s where s.setrole = 0 and s.setdatabase = 0`;
+
 const DATABASE_SETTINGS = `
 select current_database()::text as database_name,
        coalesce((select s.setconfig from pg_db_role_setting s join pg_database d on d.oid = s.setdatabase
@@ -345,63 +355,86 @@ interface Policy {
 const sameRoles = (roles: readonly string[], role: string) =>
   roles.length === 1 && roles[0] === role;
 
+interface ExpectedPolicy {
+  readonly cmd: string;
+  readonly role: string;
+  readonly qual: string;
+  readonly withCheck: string | null;
+}
+
+const COMMANDS: Readonly<Record<string, string>> = {
+  '*': 'all',
+  r: 'select',
+  a: 'insert',
+  w: 'update',
+  d: 'delete',
+};
+
+// Each part is compared on its own and named in the message: an exact USING with an open
+// WITH CHECK would let drefyn_app write rows into another tenant.
+function policyMismatches(policy: Policy, expected: ExpectedPolicy): string[] {
+  const out: string[] = [];
+  if (policy.cmd !== expected.cmd) {
+    out.push(
+      `is for ${COMMANDS[policy.cmd] ?? policy.cmd}, not ${COMMANDS[expected.cmd] ?? expected.cmd}`,
+    );
+  }
+  if (!sameRoles(policy.roles, expected.role)) {
+    out.push(`is to ${policy.roles.join(', ')}, not ${expected.role} only`);
+  }
+  if (policy.qual !== expected.qual) out.push('has a USING clause other than the standard one');
+  if (policy.withCheck !== expected.withCheck) {
+    out.push(
+      expected.withCheck === null
+        ? 'has a WITH CHECK clause'
+        : 'has a WITH CHECK clause other than the standard one',
+    );
+  }
+  return out;
+}
+
 function policyProblems(
   table: TableFacts,
   policies: readonly Policy[],
   published: boolean,
 ): CatalogProblem[] {
   const out: CatalogProblem[] = [];
-  const expected = table.projectColumn === null ? ORGANIZATION_POLICY : PROJECT_POLICY;
-  let isolated = false;
+  const clause = table.projectColumn === null ? ORGANIZATION_POLICY : PROJECT_POLICY;
+  const isolation = { cmd: '*', role: APP_ROLE, qual: clause, withCheck: clause };
+  const reading = { cmd: 'r', role: READER_ROLE, qual: PUBLISHED_POLICY, withCheck: null };
   // Restrictive policies can only narrow what the permissive ones let through.
   for (const policy of policies.filter((p) => p.permissive)) {
-    if (policy.name === 'tenant_isolation') {
-      const exact =
-        policy.cmd === '*' &&
-        sameRoles(policy.roles, APP_ROLE) &&
-        policy.qual === expected &&
-        policy.withCheck === expected;
-      if (exact) {
-        isolated = true;
-        continue;
-      }
+    if (policy.name !== 'tenant_isolation' && policy.name !== 'published_read') {
       out.push(
         problem(
           'policy',
           table.name,
-          `${table.name} policy tenant_isolation must be for all commands, to ${APP_ROLE} only, with the standard ${table.projectColumn === null ? 'organization' : 'project'} clause in using and with check (found to ${policy.roles.join(', ')})`,
+          `${table.name} has the extra permissive policy ${policy.name}; permissive policies are OR'd, so it can widen tenant_isolation`,
         ),
       );
       continue;
     }
-    if (policy.name === 'published_read') {
-      const exact =
-        policy.cmd === 'r' &&
-        sameRoles(policy.roles, READER_ROLE) &&
-        policy.qual === PUBLISHED_POLICY &&
-        policy.withCheck === null;
-      if (published && exact) continue;
+    if (policy.name === 'published_read' && !published) {
       out.push(
         problem(
           'policy',
           table.name,
-          published
-            ? `${table.name} policy published_read must be for select, to ${READER_ROLE} only, needing both organization and project`
-            : `${table.name} has a published_read policy but is not on the published table allow list`,
+          `${table.name} has a published_read policy but is not on the published table allow list`,
         ),
       );
       continue;
     }
-    out.push(
-      problem(
-        'policy',
-        table.name,
-        `${table.name} has the extra permissive policy ${policy.name}; permissive policies are OR'd, so it can widen tenant_isolation`,
-      ),
+    const wrong = policyMismatches(
+      policy,
+      policy.name === 'tenant_isolation' ? isolation : reading,
     );
+    if (wrong.length > 0) {
+      out.push(
+        problem('policy', table.name, `${table.name} policy ${policy.name} ${wrong.join('; ')}`),
+      );
+    }
   }
-  const reported = policies.some((p) => p.permissive && p.name === 'tenant_isolation');
-  if (!isolated && !reported) {
+  if (!policies.some((p) => p.permissive && p.name === 'tenant_isolation')) {
     out.push(
       problem('policy', table.name, `${table.name} has no tenant_isolation policy to ${APP_ROLE}`),
     );
@@ -636,6 +669,17 @@ async function settingProblems(client: pg.ClientBase): Promise<CatalogProblem[]>
       ),
     );
   }
+  for (const row of await rows(client, CLUSTER_SETTINGS)) {
+    for (const setting of texts(row, 'settings')) {
+      out.push(
+        problem(
+          'role_setting',
+          'all roles',
+          `the setting ${setting} is set for all roles in every database, the pools included`,
+        ),
+      );
+    }
+  }
   for (const database of await rows(client, DATABASE_SETTINGS)) {
     const name = text(database, 'database_name');
     for (const setting of unexpectedDatabaseSettings(texts(database, 'settings'))) {
@@ -647,6 +691,196 @@ async function settingProblems(client: pg.ClientBase): Promise<CatalogProblem[]>
         ),
       );
     }
+  }
+  return out;
+}
+
+const APP_ROLE_OID = `(select oid from pg_roles where rolname = '${APP_ROLE}')`;
+
+const APP_RELATION_GRANTS = `
+select n.nspname || '.' || c.relname as object, c.relkind::text as kind, null::text as column_name,
+       a.privilege_type as privilege, a.is_grantable as grantable
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(c.relacl) a
+ where n.nspname = 'app' and a.grantee = ${APP_ROLE_OID}
+union all
+select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text,
+       a.privilege_type, a.is_grantable
+  from pg_attribute att
+  join pg_class c on c.oid = att.attrelid
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(att.attacl) a
+ where n.nspname = 'app' and att.attnum > 0 and not att.attisdropped and att.attacl is not null
+   and a.grantee = ${APP_ROLE_OID}
+ order by 1, 3 nulls first, 4`;
+
+// has_*_privilege counts PUBLIC and role membership too, which is what drefyn_app can use.
+const APP_REACH = `
+select 'CREATE' as privilege, n.nspname::text as object from pg_namespace n
+ where n.nspname not like 'pg\\_%' and n.nspname <> 'information_schema'
+   and has_schema_privilege('${APP_ROLE}', n.oid, 'CREATE')
+union all
+select 'TEMP', current_database()::text
+ where has_database_privilege('${APP_ROLE}', current_database(), 'TEMP')
+union all
+select 'OWNS', n.nspname || '.' || c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where c.relowner = ${APP_ROLE_OID}
+union all
+select 'OWNS', n.nspname || '.' || p.proname || '()' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where p.proowner = ${APP_ROLE_OID}
+union all
+select 'OWNS', n.nspname::text from pg_namespace n where n.nspowner = ${APP_ROLE_OID}
+union all
+select 'OWNS', n.nspname || '.' || t.typname from pg_type t join pg_namespace n on n.oid = t.typnamespace
+ where t.typowner = ${APP_ROLE_OID} and t.typrelid = 0 and t.typelem = 0
+union all
+select 'EXECUTE', ${FUNCTION_NAME_SQL} from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'app' and has_function_privilege('${APP_ROLE}', p.oid, 'EXECUTE')
+ order by 1, 2`;
+
+const APP_DEFAULT_ACLS = `
+select pg_get_userbyid(d.defaclrole)::text as role,
+       coalesce(' in schema ' || n.nspname::text, '') as in_schema,
+       d.defaclobjtype::text as objtype, a.privilege_type as privilege, a.is_grantable as grantable
+  from pg_default_acl d
+  left join pg_namespace n on n.oid = d.defaclnamespace
+  cross join lateral aclexplode(d.defaclacl) a
+ where a.grantee = ${APP_ROLE_OID}
+ order by 1, 2, 3, 4`;
+
+// What drefyn_app may hold, by relation kind and by default privilege object type. TRUNCATE
+// ignores row level security; REFERENCES, TRIGGER and MAINTAIN are owner business.
+const TABLE_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE', 'DELETE']);
+const SEQUENCE_PRIVILEGES = new Set(['USAGE', 'SELECT']);
+const DEFAULT_ALLOWED: Readonly<Record<string, ReadonlySet<string>>> = {
+  r: TABLE_PRIVILEGES,
+  S: SEQUENCE_PRIVILEGES,
+};
+
+async function appPrivilegeProblems(
+  client: pg.ClientBase,
+  allow: AllowLists,
+): Promise<CatalogProblem[]> {
+  const out: CatalogProblem[] = [];
+  // One line per object and column, listing everything beyond what drefyn_app may hold.
+  const beyond = new Map<
+    string,
+    { object: string; allowed: ReadonlySet<string>; extra: string[] }
+  >();
+  for (const row of await rows(client, APP_RELATION_GRANTS)) {
+    const object = text(row, 'object');
+    const column = maybeText(row, 'column_name');
+    const privilege = text(row, 'privilege');
+    const target = column === null ? object : `${object}.${column}`;
+    const allowed = text(row, 'kind') === 'S' ? SEQUENCE_PRIVILEGES : TABLE_PRIVILEGES;
+    if (flag(row, 'grantable')) {
+      out.push(
+        problem(
+          'app_privilege',
+          object,
+          `${target} grants ${privilege} to ${APP_ROLE} with grant option`,
+        ),
+      );
+    }
+    if (allowed.has(privilege)) continue;
+    const entry = beyond.get(target) ?? { object, allowed, extra: [] };
+    entry.extra.push(privilege);
+    beyond.set(target, entry);
+  }
+  for (const [target, { object, allowed, extra }] of beyond) {
+    out.push(
+      problem(
+        'app_privilege',
+        object,
+        `${target} grants ${extra.join(', ')} to ${APP_ROLE}, beyond ${[...allowed].join(', ')}`,
+      ),
+    );
+  }
+  const functions = new Set(allow.appFunctions.map((e) => e.name));
+  for (const row of await rows(client, APP_REACH)) {
+    const privilege = text(row, 'privilege');
+    const object = text(row, 'object');
+    if (privilege === 'EXECUTE' && functions.has(object)) continue;
+    const what: Readonly<Record<string, string>> = {
+      CREATE: `${APP_ROLE} has CREATE on schema ${object}`,
+      TEMP: `${APP_ROLE} has TEMP on database ${object}`,
+      OWNS: `${APP_ROLE} owns ${object}`,
+      EXECUTE: `${APP_ROLE} can execute ${object}, which is not on the app function allow list`,
+    };
+    out.push(
+      problem('app_privilege', object, what[privilege] ?? `${APP_ROLE} ${privilege} ${object}`),
+    );
+  }
+  for (const row of await rows(client, APP_DEFAULT_ACLS)) {
+    const privilege = text(row, 'privilege');
+    const allowed = DEFAULT_ALLOWED[text(row, 'objtype')];
+    const grantable = flag(row, 'grantable');
+    if (allowed?.has(privilege) === true && !grantable) continue;
+    out.push(
+      problem(
+        'app_privilege',
+        APP_ROLE,
+        `default privileges for ${text(row, 'role')}${text(row, 'in_schema')} grant ${privilege}${grantable ? ' with grant option' : ''} on new objects of type ${text(row, 'objtype')} to ${APP_ROLE}`,
+      ),
+    );
+  }
+  return out;
+}
+
+const FOREIGN_KEYS = `
+select n.nspname || '.' || c.relname as table_name, con.conname::text as name,
+       rn.nspname || '.' || rc.relname as target,
+       array(select a.attname::text from unnest(con.conkey) with ordinality as k(attnum, ord)
+               join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+              order by k.ord) as columns,
+       array(select a.attname::text from unnest(con.confkey) with ordinality as k(attnum, ord)
+               join pg_attribute a on a.attrelid = con.confrelid and a.attnum = k.attnum
+              order by k.ord) as target_columns,
+       exists (select from pg_attribute a where a.attrelid = con.confrelid and a.attname = 'organization_id'
+                  and a.attnum > 0 and not a.attisdropped) as target_organization,
+       exists (select from pg_attribute a where a.attrelid = con.confrelid and a.attname = 'project_id'
+                  and a.attnum > 0 and not a.attisdropped) as target_project,
+       exists (select from pg_attribute a where a.attrelid = con.conrelid and a.attname = 'project_id'
+                  and a.attnum > 0 and not a.attisdropped) as source_project
+  from pg_constraint con
+  join pg_class c on c.oid = con.conrelid
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_class rc on rc.oid = con.confrelid
+  join pg_namespace rn on rn.oid = rc.relnamespace
+ where con.contype = 'f' and n.nspname = 'app'
+ order by 1, 2`;
+
+// Referential checks run with the owner's rights and ignore RLS, so a key on a bare id would
+// let one tenant point at, and probe for, another tenant's row.
+async function foreignKeyProblems(
+  client: pg.ClientBase,
+  allow: AllowLists,
+): Promise<CatalogProblem[]> {
+  const out: CatalogProblem[] = [];
+  const crossProject = new Set(allow.crossProjectForeignKeys.map((e) => e.name));
+  for (const row of await rows(client, FOREIGN_KEYS)) {
+    if (!flag(row, 'target_organization')) continue;
+    const table = text(row, 'table_name');
+    const name = text(row, 'name');
+    const columns = texts(row, 'columns');
+    const targetColumns = texts(row, 'target_columns');
+    const pairs = (column: string) =>
+      targetColumns.some((target, i) => target === column && columns[i] === column);
+    const missing: string[] = [];
+    if (!pairs('organization_id')) missing.push('organization_id');
+    const bothProjects = flag(row, 'target_project') && flag(row, 'source_project');
+    if (bothProjects && !pairs('project_id') && !crossProject.has(`${table}.${name}`)) {
+      missing.push('project_id');
+    }
+    if (missing.length === 0) continue;
+    out.push(
+      problem(
+        'tenant_foreign_key',
+        table,
+        `${table} foreign key ${name} into ${text(row, 'target')} must include ${missing.join(' and ')} on both sides`,
+      ),
+    );
   }
   return out;
 }
@@ -664,6 +898,8 @@ export async function checkCatalog(
     problems.push(...(await tableProblems(client, allow)));
     problems.push(...(await definitionProblems(client, allow)));
     problems.push(...(await grantProblems(client, allow)));
+    problems.push(...(await appPrivilegeProblems(client, allow)));
+    problems.push(...(await foreignKeyProblems(client, allow)));
     problems.push(...(await defaultPrivilegeProblems(client)));
     problems.push(...(await settingProblems(client)));
   } finally {

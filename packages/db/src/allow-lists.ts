@@ -16,6 +16,11 @@ export interface AllowLists {
   readonly publishedTables: readonly AllowEntry[];
   // Functions in app drefyn_public_reader may execute, by regprocedure text.
   readonly readerFunctions: readonly AllowEntry[];
+  // Functions in app drefyn_app may execute, by regprocedure text.
+  readonly appFunctions: readonly AllowEntry[];
+  // Foreign keys between project tables that may leave project_id out, as
+  // app.table.constraint: a reviewed reference across projects of one organization.
+  readonly crossProjectForeignKeys: readonly AllowEntry[];
 }
 
 const BOOKKEEPING = 'migration bookkeeping, owner only, no tenant data';
@@ -37,11 +42,23 @@ export const READER_FUNCTIONS: readonly AllowEntry[] = [
   },
 ];
 
+export const APP_FUNCTIONS: readonly AllowEntry[] = [
+  { name: 'app.current_org()', reason: 'reads the transaction setting every tenant policy needs' },
+  {
+    name: 'app.current_project()',
+    reason: 'reads the transaction setting every tenant policy needs',
+  },
+];
+
+export const CROSS_PROJECT_FOREIGN_KEYS: readonly AllowEntry[] = [];
+
 export const ALLOW_LISTS: AllowLists = {
   globalTables: GLOBAL_TABLES,
   securityDefinerFunctions: SECURITY_DEFINER_FUNCTIONS,
   publishedTables: PUBLISHED_TABLES,
   readerFunctions: READER_FUNCTIONS,
+  appFunctions: APP_FUNCTIONS,
+  crossProjectForeignKeys: CROSS_PROJECT_FOREIGN_KEYS,
 };
 
 // Published table names as the reader's transaction type sees them, without the schema.

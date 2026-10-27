@@ -463,6 +463,114 @@ export function sessionSettingProblems(file: string, text: string): readonly Sou
   return problems.sort((a, b) => a.line - b.line);
 }
 
+// Code that may set the tenant settings and end transactions itself: the transaction code
+// and the db package's own tests, which prove the policies on raw sessions.
+const CONTEXT_OWNERS = ['packages/db/src/database.ts', 'packages/db/test/'];
+
+const ownsContext = (file: string) =>
+  CONTEXT_OWNERS.some((owner) => (owner.endsWith('/') ? file.startsWith(owner) : file === owner));
+
+const ANY_SET_CONFIG = /(?<![A-Za-z0-9_$])set_config\s*\(/gi;
+const LOCAL_SET = /(?<![A-Za-z0-9_$])set\s+local\s+"?drefyn\./gi;
+const TENANT_NAME = /^\s*(['"])drefyn\./i;
+const LITERAL_NAME = /^\s*(['"])[^'"]*\1\s*$/;
+
+// Work runs inside the tenant's transaction and could switch tenant with a local setting, so
+// only the context code may set a drefyn setting at all, whatever is_local says. A name that
+// is not a literal cannot be shown to be safe.
+export function tenantSettingProblems(file: string, text: string): readonly SourceProblem[] {
+  if (ownsContext(file)) return [];
+  const problems: SourceProblem[] = [];
+  for (const match of text.matchAll(ANY_SET_CONFIG)) {
+    const { args, end } = callArguments(text, match.index + match[0].length);
+    const name = args[0] ?? '';
+    if (!TENANT_NAME.test(name) && LITERAL_NAME.test(name)) continue;
+    problems.push({
+      file,
+      line: lineAt(text, match.index),
+      statement: oneLine(text.slice(match.index, Math.min(end, match.index + 400))),
+      message: 'only the db package sets the tenant settings; work must not switch tenant',
+    });
+  }
+  for (const match of text.matchAll(LOCAL_SET)) {
+    problems.push({
+      file,
+      line: lineAt(text, match.index),
+      statement: oneLine(text.slice(match.index).split(/[;\n]/)[0] ?? ''),
+      message: 'only the db package sets the tenant settings; work must not switch tenant',
+    });
+  }
+  return problems;
+}
+
+// The first words of raw SQL in a sql template or sql.raw literal.
+const RAW_SQL = /(?<![A-Za-z0-9_$])sql(?:`|\.raw\(\s*(['"`]))/g;
+const TRANSACTION_CONTROL =
+  /^(?:(?:begin|commit|end|abort)\b|rollback\b(?!\s+to\b)|start\s+transaction\b|set\s+session\b|set\s+(?!local\b|constraints\b|transaction\b|session\b)[a-z_."]+)/i;
+
+function leadingSql(text: string, from: number): string {
+  let rest = text.slice(from, from + 200);
+  for (;;) {
+    const trimmed = rest.replace(/^\s+/, '');
+    if (trimmed.startsWith('--')) rest = trimmed.slice(trimmed.indexOf('\n') + 1 || trimmed.length);
+    else if (trimmed.startsWith('/*'))
+      rest = trimmed.slice(trimmed.indexOf('*/') + 2 || trimmed.length);
+    else return trimmed;
+  }
+}
+
+// Ending or opening a transaction, or a session level SET, from inside the work would leave
+// later statements without tenant context or atomicity. Savepoints stay allowed.
+export function transactionControlProblems(file: string, text: string): readonly SourceProblem[] {
+  if (ownsContext(file)) return [];
+  const problems: SourceProblem[] = [];
+  for (const match of text.matchAll(RAW_SQL)) {
+    const start = match.index + match[0].length;
+    const head = leadingSql(text, start);
+    if (!TRANSACTION_CONTROL.test(head)) continue;
+    problems.push({
+      file,
+      line: lineAt(text, match.index),
+      statement: oneLine(head.split(/[`'";]/)[0] ?? ''),
+      message: 'raw SQL must not begin, end or change the session around the tenant transaction',
+    });
+  }
+  return problems;
+}
+
+const QUERY_CONFIG = /\.query\s*(?:<[^>()]*>)?\(\s*\{/g;
+
+// DISCARD ALL after every transaction deallocates prepared statements, so a named query
+// would fail on its next use of a pooled connection.
+export function namedQueryProblems(file: string, text: string): readonly SourceProblem[] {
+  const problems: SourceProblem[] = [];
+  for (const match of text.matchAll(QUERY_CONFIG)) {
+    const { args } = callArguments(text, match.index + match[0].length);
+    const body = args.join(',');
+    if (!/(?:^|[\s,])name\s*:/.test(topLevel(body))) continue;
+    problems.push({
+      file,
+      line: lineAt(text, match.index),
+      statement: oneLine(text.slice(match.index, match.index + 120)),
+      message:
+        'no named queries: the session reset after each transaction drops prepared statements',
+    });
+  }
+  return problems;
+}
+
+// The text of an object literal body with nested brackets blanked out.
+function topLevel(body: string): string {
+  let depth = 0;
+  let out = '';
+  for (const c of body) {
+    if (c === '{' || c === '[' || c === '(') depth += 1;
+    else if (c === '}' || c === ']' || c === ')') depth -= 1;
+    else if (depth === 0) out += c;
+  }
+  return out;
+}
+
 // The fixtures this check is tested with, and nothing else.
 const REVIEWED_FIXTURES = 'packages/db/test/fixtures/session-settings/';
 const MAX_SCANNED_BYTES = 8 * 1024 * 1024;
@@ -489,7 +597,13 @@ export function repoSourceProblems(root: string): readonly SourceProblem[] {
     const bytes = readFileSync(full);
     // Binary files (images, fonts) carry NUL bytes and no SQL.
     if (bytes.subarray(0, 8000).includes(0)) continue;
-    problems.push(...sessionSettingProblems(path, bytes.toString('utf8')));
+    const text = bytes.toString('utf8');
+    problems.push(
+      ...sessionSettingProblems(path, text),
+      ...tenantSettingProblems(path, text),
+      ...transactionControlProblems(path, text),
+      ...namedQueryProblems(path, text),
+    );
   }
   return problems;
 }
