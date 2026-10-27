@@ -7,6 +7,8 @@ const config: NextConfig = {
   // image optimiser for it.
   images: { unoptimized: true },
   poweredByHeader: false,
+  // Next dev writes an AGENTS.md into the app unless told not to; nothing here wants it.
+  agentRules: false,
   reactStrictMode: true,
 };
 
