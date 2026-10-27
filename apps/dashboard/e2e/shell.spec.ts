@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   ANSWERS,
   banner,
+  NEEDS_YOU,
   main,
   openShell,
   products,
@@ -143,9 +144,9 @@ test.describe('top bar', () => {
     test(`the inbox count is a plain number, never a state colour (${theme})`, async ({ page }) => {
       await useTheme(page, theme);
       await openShell(page, ROUTES.overview);
-      const inbox = banner(page).getByRole('button', { name: 'Inbox, 3 need you' });
+      const inbox = banner(page).getByRole('button', { name: `Inbox, ${NEEDS_YOU} need you` });
       await expect(inbox).toBeVisible();
-      const count = inbox.getByText('3', { exact: true });
+      const count = inbox.getByText(String(NEEDS_YOU), { exact: true });
       await expect(count).toBeVisible();
       const { paints, states } = await count.evaluate((el) => {
         const root = getComputedStyle(document.documentElement);
@@ -241,6 +242,28 @@ test.describe('sidebar and URL', () => {
 });
 
 test.describe('answers', () => {
+  test('the inbox, the overview sentence and the Needs you list agree on what needs you', async ({
+    page,
+  }) => {
+    await openShell(page, ROUTES.overview);
+    const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+    const heading = await main(page).getByRole('heading', { level: 1 }).textContent();
+    const said = /^(\w+) things? needs? you\./.exec(heading ?? '')?.[1] ?? '';
+    const inbox = await banner(page)
+      .getByRole('button', { name: /^Inbox, / })
+      .getAttribute('aria-label');
+    const counted = Number(/^Inbox, (\d+) need you$/.exec(inbox ?? '')?.[1]);
+    const listed = await main(page)
+      .getByRole('region', { name: 'Needs you' })
+      .getByRole('listitem')
+      .count();
+    expect({ said: words.indexOf(said), counted, listed }).toEqual({
+      said: NEEDS_YOU,
+      counted: NEEDS_YOU,
+      listed: NEEDS_YOU,
+    });
+  });
+
   test('the overview heading is the answer sentence', async ({ page }) => {
     await openShell(page, ROUTES.overview);
     await expect(main(page).getByRole('heading', { level: 1 })).toHaveText(ANSWERS.overview);

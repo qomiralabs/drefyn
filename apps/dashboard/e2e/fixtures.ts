@@ -21,6 +21,10 @@ export const ROUTES = {
   loading: '/acme/docs/pending',
 } as const;
 
+// What needs the person on the overview. The inbox count, the overview sentence and the
+// Needs you list all say this number.
+export const NEEDS_YOU = 2;
+
 export const ANSWERS = {
   overview: 'Two things need you. Everything else is fresh and running.',
   project: '3 pages are out of date. The other 47 match your API.',
@@ -64,13 +68,14 @@ export async function addField(page: Page): Promise<Locator> {
   return page.getByRole('textbox', { name: 'Stand in field' });
 }
 
-// Describes the focused element, so a failure says where focus went.
+// Describes the focused element by tag and name, so a failure says where focus went. Ids are
+// left out: React Aria gives its triggers generated ids that change between builds.
 export async function focused(page: Page): Promise<string> {
   return page.evaluate(() => {
     const el = document.activeElement;
     if (el === null || el === document.body) return 'body';
     const name = el.getAttribute('aria-label') ?? el.textContent.trim().replace(/\s+/g, ' ');
-    return `${el.tagName.toLowerCase()}${el.id === '' ? '' : `#${el.id}`} ${name}`.trim();
+    return `${el.tagName.toLowerCase()} ${name}`.trim();
   });
 }
 
