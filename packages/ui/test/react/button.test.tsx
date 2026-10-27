@@ -462,3 +462,80 @@ describe('prop names', () => {
     expect([a, b, c]).toHaveLength(3);
   });
 });
+
+describe('runtime guards for callers without types', () => {
+  it('refuses an empty busy label, which would collapse the width it exists to keep', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const busyLabel of ['', '   ']) {
+      expect(
+        () => render(<Button busyLabel={busyLabel}>Publish update</Button>),
+        JSON.stringify(busyLabel),
+      ).toThrow(/busy label/i);
+      cleanup();
+    }
+  });
+
+  it('refuses busy without a busy label', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const untyped = { busy: true, children: 'Publish update' } as unknown as ComponentProps<
+      typeof Button
+    >;
+    expect(() => render(<Button {...untyped} />)).toThrow(/busy label/i);
+  });
+
+  it('never writes a style attribute from props', () => {
+    const untyped = {
+      style: { color: 'red' },
+      children: 'Save draft',
+    } as unknown as ComponentProps<typeof Button>;
+    render(<Button {...untyped} />);
+    expect(button('Save draft').hasAttribute('style')).toBe(false);
+  });
+});
+
+describe('press handlers on a Button that cannot act', () => {
+  const PRESS = [
+    'onClick',
+    'onDoubleClick',
+    'onAuxClick',
+    'onPointerDown',
+    'onPointerUp',
+    'onMouseDown',
+    'onMouseUp',
+    'onTouchStart',
+    'onTouchEnd',
+    'onKeyDown',
+    'onKeyUp',
+  ] as const;
+
+  for (const state of ['disabled', 'busy'] as const) {
+    it(`drops every press handler while ${state}, and keeps hover and focus ones`, async () => {
+      const handlers = Object.fromEntries(PRESS.map((name) => [name, vi.fn()]));
+      const onPointerEnter = vi.fn();
+      const onFocus = vi.fn();
+      const stateProps = state === 'disabled' ? { disabled: true } : { busy: true };
+      const user = userEvent.setup();
+      render(
+        <Button
+          {...handlers}
+          {...stateProps}
+          busyLabel="Publishing"
+          onPointerEnter={onPointerEnter}
+          onFocus={onFocus}
+        >
+          Publish update
+        </Button>,
+      );
+      const el = theButton();
+      await user.hover(el);
+      await user.click(el);
+      await user.dblClick(el);
+      el.focus();
+      await user.keyboard('{Enter}');
+      await user.keyboard(' ');
+      for (const name of PRESS) expect(handlers[name], name).not.toHaveBeenCalled();
+      expect(onPointerEnter).toHaveBeenCalled();
+      expect(onFocus).toHaveBeenCalled();
+    });
+  }
+});

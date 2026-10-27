@@ -205,4 +205,76 @@ describe('Menu', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('menu', { name: 'Actions for Payments API' })).toBeDefined();
   });
+
+  it('drops aria-keyshortcuts when an item loses its shortcut', () => {
+    const { rerender } = render(
+      <Menu trigger="Payments API" defaultOpen>
+        <MenuItem id="open" shortcut="O">
+          Open monitor
+        </MenuItem>
+      </Menu>,
+    );
+    expect(
+      screen.getByRole('menuitem', { name: 'Open monitor' }).getAttribute('aria-keyshortcuts'),
+    ).toBe('O');
+    rerender(
+      <Menu trigger="Payments API" defaultOpen>
+        <MenuItem id="open">Open monitor</MenuItem>
+      </Menu>,
+    );
+    const item = screen.getByRole('menuitem', { name: 'Open monitor' });
+    expect(item.hasAttribute('aria-keyshortcuts')).toBe(false);
+    expect(item.querySelector('kbd')).toBeNull();
+  });
+
+  it('draws the shortcut as a hairline keycap', async () => {
+    render(<Actions />);
+    await userEvent.setup().click(trigger());
+    const key = screen.getByRole('menuitem', { name: 'Open monitor' }).querySelector('kbd');
+    expect(key).not.toBeNull();
+    expect(classesOf(key as Element)).toEqual(
+      expect.arrayContaining(['border', 'border-rule-strong', 'rounded-sm', 'px-4']),
+    );
+  });
+});
+
+// Tab leaves an open menu the way it leaves a closed one: it closes the menu and moves on
+// from the trigger, so the user keeps their place in the page.
+describe('Tab in an open Menu', () => {
+  function Row() {
+    return (
+      <>
+        <Button>Edit component</Button>
+        <Actions />
+        <Button>Share page</Button>
+      </>
+    );
+  }
+
+  it('closes the menu and moves to the control after the trigger', async () => {
+    const onAction = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <>
+        <Button>Edit component</Button>
+        <Actions onAction={onAction} />
+        <Button>Share page</Button>
+      </>,
+    );
+    await user.click(trigger());
+    expect(screen.getByRole('menu')).toBeDefined();
+    await user.tab();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Share page' }));
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('closes the menu and moves to the control before the trigger on Shift+Tab', async () => {
+    const user = userEvent.setup();
+    render(<Row />);
+    await user.click(trigger());
+    await user.tab({ shift: true });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit component' }));
+  });
 });

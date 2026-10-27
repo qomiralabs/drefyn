@@ -1,8 +1,9 @@
 import type { Locator, Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import { expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
 
 const STORY = 'components-menu--default';
+const ROW = 'components-menu--in-a-row';
 const trigger = (page: Page) => page.getByRole('button', { name: 'Payments API' });
 const item = (page: Page, name: string) => page.getByRole('menuitem', { name });
 const output = (page: Page) => page.getByText(/^Last action: /);
@@ -23,6 +24,27 @@ async function openWith(page: Page, browserName: string, key: string) {
   await page.keyboard.press(key);
   await expect(page.getByRole('menu', { name: 'Payments API' })).toBeVisible();
 }
+
+// Tab past the control before the trigger, then open with Enter.
+async function openInRow(page: Page, browserName: string) {
+  await page.keyboard.press(tabKey(browserName));
+  await expect(page.getByRole('button', { name: 'Edit component' })).toBeFocused();
+  await page.keyboard.press(tabKey(browserName));
+  await expect(trigger(page)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(item(page, 'Open monitor')).toBeFocused();
+}
+
+// A menu that starts open is modal, so on the docs page it would hide everything else.
+test('the menu docs page opens no menu and leaves every heading readable', async ({ page }) => {
+  await openPage(page, { id: 'components-menu--docs', type: 'docs' }, 'light');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  // Storybook names each story heading with its anchor link first.
+  await expect(page.getByRole('heading', { name: / Open$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: / Sections$/ })).toBeVisible();
+  // An open modal menu marks everything outside it aria-hidden, the docs included.
+  await expect(page.locator('#storybook-docs')).not.toHaveAttribute('aria-hidden', 'true');
+});
 
 for (const theme of THEMES) {
   const inset = `solid ${tokens.stroke.focus}px ${tokens.stroke.focusInset}px ${rgb(tokens.color.focus.ring[theme])}`;
@@ -112,14 +134,27 @@ for (const theme of THEMES) {
     await expect(output(page)).toHaveText('Last action: none');
   });
 
-  test(`Tab closes the menu without running anything in ${theme}`, async ({
+  test(`Tab closes the menu and moves on from the trigger, without running anything, in ${theme}`, async ({
     page,
     browserName,
   }) => {
-    await openStory(page, STORY, theme);
-    await openWith(page, browserName, 'Enter');
+    await openStory(page, ROW, theme);
+    await openInRow(page, browserName);
     await page.keyboard.press(tabKey(browserName));
     await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Share page' })).toBeFocused();
+    await expect(output(page)).toHaveText('Last action: none');
+  });
+
+  test(`Shift+Tab closes the menu and moves back from the trigger in ${theme}`, async ({
+    page,
+    browserName,
+  }) => {
+    await openStory(page, ROW, theme);
+    await openInRow(page, browserName);
+    await page.keyboard.press(`Shift+${tabKey(browserName)}`);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Edit component' })).toBeFocused();
     await expect(output(page)).toHaveText('Last action: none');
   });
 

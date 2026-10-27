@@ -116,6 +116,17 @@ describe('StatusPip', () => {
     expect(pip).toBeDefined();
   });
 
+  it('refuses an empty name, which would leave the shape unnamed', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const label of ['', '   ']) {
+      expect(
+        () => render(<StatusPip state="fresh" label={label} />),
+        JSON.stringify(label),
+      ).toThrow(/label|word/i);
+      cleanup();
+    }
+  });
+
   it('never animates', () => {
     render(<StatusPip state="broken" label="Major outage" />);
     const pip = screen.getByRole('img', { name: 'Major outage' });

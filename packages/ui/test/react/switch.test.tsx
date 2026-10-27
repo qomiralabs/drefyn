@@ -160,4 +160,24 @@ describe('a disabled Switch', () => {
     expect(isOn()).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('drops aria-disabled when it turns live, and puts it back when disabled again', async () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <Switch disabled onChange={onChange}>
+        {LABEL}
+      </Switch>,
+    );
+    expect(toggle().getAttribute('aria-disabled')).toBe('true');
+    rerender(<Switch onChange={onChange}>{LABEL}</Switch>);
+    expect(toggle().hasAttribute('aria-disabled')).toBe(false);
+    await userEvent.setup().click(toggle());
+    expect(onChange).toHaveBeenCalledWith(true);
+    rerender(
+      <Switch disabled onChange={onChange}>
+        {LABEL}
+      </Switch>,
+    );
+    expect(toggle().getAttribute('aria-disabled')).toBe('true');
+  });
 });

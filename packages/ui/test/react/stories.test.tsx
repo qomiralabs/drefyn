@@ -50,7 +50,7 @@ const REQUIRED: Record<string, string[]> = {
   'empty-state': ['ErrorState', 'FirstUse', 'NoResults', 'OverLimit'],
   icons: ['All'],
   switch: ['Disabled', 'Off', 'On', 'Settings'],
-  menu: ['Default', 'IconTrigger', 'Open', 'Sections'],
+  menu: ['Default', 'IconTrigger', 'InARow', 'Open', 'Sections'],
 };
 
 // Stories that show a disabled or busy control. The browser paint check opens each and

@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Button, ButtonLink, IconCheck } from '../../src/react/index.ts';
 import { classesOf } from './classes.ts';
@@ -69,5 +70,17 @@ describe('ButtonLink', () => {
     // @ts-expect-error ButtonLink takes no disabled prop.
     const link = <ButtonLink href="/x" disabled children="Nowhere" />;
     expect(link).toBeDefined();
+  });
+});
+
+describe('ButtonLink for callers without types', () => {
+  it('never writes a style attribute from props', () => {
+    const untyped = {
+      href: '/history',
+      style: { color: 'red' },
+      children: 'View history',
+    } as unknown as ComponentProps<typeof ButtonLink>;
+    render(<ButtonLink {...untyped} />);
+    expect(screen.getByRole('link', { name: 'View history' }).hasAttribute('style')).toBe(false);
   });
 });
