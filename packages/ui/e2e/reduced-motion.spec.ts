@@ -1,5 +1,6 @@
 import { reducedFadeCapMs, tokens } from '../src/index.ts';
-import { expect, FOUNDATIONS, openStory, test, THEMES } from './fixtures.ts';
+import type { Page } from '@playwright/test';
+import { expect, FOUNDATIONS, openStory, storyIds, test, THEMES } from './fixtures.ts';
 
 // Properties that move or resize something; under reduced motion none of them may animate.
 const MOVING =
@@ -11,27 +12,41 @@ interface Transition {
   ms: number;
 }
 
+// Every running transition in the story, the floating layer included, since menus and
+// popovers render outside the story root.
+function transitionsIn(page: Page): Promise<Transition[]> {
+  return page.evaluate(() => {
+    const ms = (value: string) =>
+      value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000;
+    const found: Transition[] = [];
+    // Storybook's own chrome is left out; anything else in the body is the story's.
+    const own = (el: Element) =>
+      el.id === 'storybook-docs' ||
+      el.tagName === 'SCRIPT' ||
+      String(el.getAttribute('class')).startsWith('sb-');
+    const roots = [...document.body.children].filter((el) => !own(el));
+    for (const el of roots
+      .flatMap((r) => (r.id === 'storybook-root' ? [] : [r]))
+      .concat(roots.flatMap((r) => [...r.querySelectorAll('*')]))) {
+      const style = getComputedStyle(el);
+      const properties = style.transitionProperty.split(',').map((p) => p.trim());
+      const durations = style.transitionDuration.split(',').map((d) => ms(d.trim()));
+      properties.forEach((property, i) => {
+        // Durations repeat to fill the property list, as the CSS spec says.
+        const duration = durations[i % durations.length] ?? 0;
+        if (duration > 0) {
+          found.push({ element: el.tagName.toLowerCase(), property, ms: duration });
+        }
+      });
+    }
+    return found;
+  });
+}
+
 for (const theme of THEMES) {
   test(`nothing travels and fades stay short in ${theme}`, async ({ page }) => {
     await openStory(page, FOUNDATIONS, theme);
-    const transitions: Transition[] = await page.evaluate(() => {
-      const ms = (value: string) =>
-        value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000;
-      const found: Transition[] = [];
-      for (const el of document.querySelectorAll('#storybook-root *')) {
-        const style = getComputedStyle(el);
-        const properties = style.transitionProperty.split(',').map((p) => p.trim());
-        const durations = style.transitionDuration.split(',').map((d) => ms(d.trim()));
-        properties.forEach((property, i) => {
-          // Durations repeat to fill the property list, as the CSS spec says.
-          const duration = durations[i % durations.length] ?? 0;
-          if (duration > 0) {
-            found.push({ element: el.tagName.toLowerCase(), property, ms: duration });
-          }
-        });
-      }
-      return found;
-    });
+    const transitions = await transitionsIn(page);
     // The motion samples carry fades; without them this test would pass on nothing.
     expect(transitions.length).toBeGreaterThan(0);
     expect(transitions.filter((t) => MOVING.test(t.property))).toEqual([]);
@@ -57,5 +72,46 @@ for (const theme of THEMES) {
       return { translate: style.translate, transform: style.transform };
     });
     expect(moved).toEqual({ translate: 'none', transform: 'none' });
+  });
+}
+
+for (const theme of THEMES) {
+  test(`no component story moves anything or fades past the cap in ${theme}`, async ({ page }) => {
+    const ids = storyIds().filter((id) => id.startsWith('components-'));
+    expect(ids.length).toBeGreaterThan(0);
+    const bad: string[] = [];
+    let fades = 0;
+    for (const id of ids) {
+      await openStory(page, id, theme);
+      const transitions = await transitionsIn(page);
+      fades += transitions.length;
+      for (const t of transitions) {
+        if (MOVING.test(t.property) || t.ms > reducedFadeCapMs) {
+          bad.push(`${id} ${t.element} ${t.property} ${t.ms}ms`);
+        }
+      }
+    }
+    // Buttons, switches and menu items fade colour, so a run that finds none found nothing.
+    expect(fades).toBeGreaterThan(0);
+    expect(bad).toEqual([]);
+  });
+
+  test(`a flipped switch fades colour and moves nothing in ${theme}`, async ({ page }) => {
+    await openStory(page, 'components-switch--off', theme);
+    const toggle = page.getByRole('switch', { name: 'Show uptime figure' });
+    await toggle.focus();
+    await page.keyboard.press('Space');
+    await expect.poll(() => toggle.evaluate((el) => (el as HTMLInputElement).checked)).toBe(true);
+    const moving = (await transitionsIn(page)).filter((t) => MOVING.test(t.property));
+    expect(moving).toEqual([]);
+  });
+
+  test(`an open menu fades in without travelling in ${theme}`, async ({ page }) => {
+    await openStory(page, 'components-menu--default', theme);
+    await page.getByRole('button', { name: 'Payments API' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    const transitions = await transitionsIn(page);
+    expect(transitions.filter((t) => MOVING.test(t.property))).toEqual([]);
+    expect(transitions.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
   });
 }

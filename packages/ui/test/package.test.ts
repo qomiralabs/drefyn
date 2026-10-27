@@ -65,6 +65,21 @@ describe('package manifest', () => {
     expect(pkg.devDependencies['playwright-core']).toBe(pkg.devDependencies['@playwright/test']);
   });
 
+  it('builds every interactive component on React Aria Components alone, exactly pinned', () => {
+    expect(pkg.dependencies ?? {}).toEqual({ 'react-aria-components': '1.22.1' });
+  });
+
+  it('lists no other primitives, command, toast, sheet, motion or icon library', () => {
+    const banned =
+      /^(?:@radix-ui\/|radix-ui$|cmdk$|sonner$|vaul$|@base-ui-components\/|@base-ui\/|@mui\/base$|motion$|framer-motion$|@motionone\/|lucide|@heroicons\/|react-icons$)/;
+    const names = [
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.devDependencies),
+      ...Object.keys(pkg.peerDependencies ?? {}),
+    ];
+    expect(names.filter((name) => banned.test(name))).toEqual([]);
+  });
+
   it('exposes the typed tokens, the contrast helpers, the head script and the chart themes', () => {
     expect(Object.keys(ui).sort()).toEqual(
       [

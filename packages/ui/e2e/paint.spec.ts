@@ -1,0 +1,171 @@
+import type { Page } from '@playwright/test';
+import { tokens } from '../src/index.ts';
+import { expect, openStory, rgb, storiesTagged, storyIds, test, THEMES } from './fixtures.ts';
+
+interface DisabledLook {
+  name: string;
+  color: string;
+  fill: string;
+  // Every opacity from the element up to the root, so a dimmed wrapper is caught too.
+  opacities: string[];
+}
+
+// Every element marked aria-disabled, with the label colour a reader sees: for a hidden
+// input that is its label's, otherwise its own.
+async function disabledLooks(page: Page): Promise<DisabledLook[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[aria-disabled="true"]')].map((el) => {
+      const shown = el instanceof HTMLInputElement ? (el.closest('label') ?? el) : el;
+      const opacities: string[] = [];
+      for (let node: Element | null = el; node !== null; node = node.parentElement) {
+        opacities.push(getComputedStyle(node).opacity);
+      }
+      return {
+        name: shown.textContent.trim(),
+        color: getComputedStyle(shown).color,
+        fill: getComputedStyle(el).backgroundColor,
+        opacities,
+      };
+    }),
+  );
+}
+
+const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+
+test('the disabled tag is used, so the checks below have stories to run on', () => {
+  expect(storiesTagged('disabled').length).toBeGreaterThanOrEqual(4);
+});
+
+for (const theme of THEMES) {
+  for (const id of storiesTagged('disabled')) {
+    test(`${id} paints disabled controls with the disabled family and full opacity in ${theme}`, async ({
+      page,
+    }) => {
+      await openStory(page, id, theme);
+      const looks = await disabledLooks(page);
+      expect(looks.length, 'disabled controls in the story').toBeGreaterThan(0);
+      for (const look of looks) {
+        expect(
+          look.opacities.every((o) => o === '1'),
+          `${look.name} opacity`,
+        ).toBe(true);
+        expect(look.color, `${look.name} colour`).toBe(rgb(tokens.color.disabled.text[theme]));
+        expect(
+          [rgb(tokens.color.disabled.fill[theme]), TRANSPARENT],
+          `${look.name} fill`,
+        ).toContain(look.fill);
+      }
+    });
+  }
+
+  test(`no story shows a disabled control without the disabled tag in ${theme}`, async ({
+    page,
+  }) => {
+    const tagged = new Set(storiesTagged('disabled'));
+    const untagged: string[] = [];
+    for (const id of storyIds()) {
+      if (tagged.has(id)) continue;
+      await openStory(page, id, theme);
+      const count = await page.locator('[aria-disabled="true"]').count();
+      if (count > 0) untagged.push(`${id} (${count})`);
+    }
+    expect(untagged).toEqual([]);
+  });
+
+  test(`icons draw with the icon stroke token, no fill and a stroke that does not scale in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, 'components-icons--all', theme);
+    const shapes = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          '#storybook-root svg [d], #storybook-root svg rect, #storybook-root svg circle, #storybook-root svg line',
+        ),
+      ].map((el) => {
+        const style = getComputedStyle(el);
+        return {
+          icon: el.closest('svg')?.getAttribute('data-icon') ?? '',
+          width: style.strokeWidth,
+          fill: style.fill,
+          effect: style.getPropertyValue('vector-effect'),
+        };
+      }),
+    );
+    // Seven icons, three sizes each, at least one shape per icon.
+    expect(shapes.length).toBeGreaterThanOrEqual(21);
+    for (const shape of shapes) {
+      expect(shape, shape.icon).toEqual({
+        icon: shape.icon,
+        width: `${tokens.stroke.icon}px`,
+        fill: 'none',
+        effect: 'non-scaling-stroke',
+      });
+    }
+  });
+
+  test(`icons take the three icon sizes in ${theme}`, async ({ page }) => {
+    await openStory(page, 'components-icons--all', theme);
+    const sizes = await page.evaluate(() =>
+      [
+        ...new Set(
+          [...document.querySelectorAll('#storybook-root svg')].map(
+            (svg) => `${svg.getBoundingClientRect().width}x${svg.getBoundingClientRect().height}`,
+          ),
+        ),
+      ].sort(),
+    );
+    const { sm, md, lg } = tokens.size.icon;
+    expect(sizes).toEqual([`${sm}x${sm}`, `${md}x${md}`, `${lg}x${lg}`].sort());
+  });
+
+  test(`skeletons paint the skeleton fill and never animate in ${theme}`, async ({ page }) => {
+    for (const id of [
+      'components-skeleton--shapes',
+      'components-skeleton--loading-text',
+      'components-skeleton--loading-rows',
+    ]) {
+      await openStory(page, id, theme);
+      const blocks = await page.evaluate(() =>
+        [...document.querySelectorAll('#storybook-root span[aria-hidden="true"]')].map((el) => {
+          const style = getComputedStyle(el);
+          return {
+            fill: style.backgroundColor,
+            animation: style.animationName,
+            height: el.getBoundingClientRect().height,
+          };
+        }),
+      );
+      expect(blocks.length, id).toBeGreaterThan(0);
+      for (const block of blocks) {
+        expect(block.fill, id).toBe(rgb(tokens.color.skeleton.fill[theme]));
+        expect(block.animation, id).toBe('none');
+        expect(block.height, id).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test(`badges set the word in state text on paper and in body text on a fill in ${theme}`, async ({
+    page,
+  }) => {
+    const words = {
+      fresh: 'Verified 2 days ago',
+      stale: 'Out of date for 2 days',
+      broken: 'Wrong',
+      neutral: 'Maintenance',
+    } as const;
+    for (const [id, onFill] of [
+      ['components-badge--states', false],
+      ['components-badge--on-fill', true],
+    ] as const) {
+      await openStory(page, id, theme);
+      for (const [state, word] of Object.entries(words) as [keyof typeof words, string][]) {
+        const badge = page.locator(`#storybook-root [data-state="${state}"]`);
+        await expect(badge, `${id} ${state}`).toHaveText(word);
+        await expect(badge, `${id} ${state}`).toHaveCSS(
+          'color',
+          rgb(onFill ? tokens.color.text.body[theme] : tokens.color.state[state].text[theme]),
+        );
+      }
+    }
+  });
+}

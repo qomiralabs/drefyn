@@ -13,7 +13,14 @@ const fixture = (name: string) => readTree(join(root, 'test', 'fixtures', 'split
 const details = (name: string) => checkSplit(fixture(name)).map((f) => `${f.file}: ${f.detail}`);
 
 // Props a server safe component needs to render; anything not listed renders with none.
-const serverRenderProps: Record<string, Record<string, unknown>> = {};
+const serverRenderProps: Record<string, Record<string, unknown>> = {
+  Badge: { state: 'fresh', children: 'Verified 2 days ago' },
+  Button: { children: 'Save draft' },
+  ButtonLink: { href: '/history', children: 'View history' },
+  EmptyState: { title: 'No components yet', children: 'Add one to start.' },
+  StatusDot: { state: 'live', children: 'Syncing' },
+  StatusPip: { state: 'fresh', label: 'Operational' },
+};
 
 function renderServerSafe(module: Record<string, unknown>): Map<string, string> {
   const rendered = new Map<string, string>();
@@ -102,7 +109,7 @@ describe('server safe components', () => {
       throw new Error('a client component is never rendered here');
     };
     expect(Object.fromEntries(renderServerSafe({ Badge, IconCheck, Menu }))).toEqual({
-      Badge: '<span>Fresh</span>',
+      Badge: '<span>Verified 2 days ago</span>',
       IconCheck: '<svg aria-hidden="true"></svg>',
     });
   });

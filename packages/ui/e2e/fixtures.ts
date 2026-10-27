@@ -44,6 +44,29 @@ export const docsIds = (): string[] =>
     .filter((entry) => entry.type === 'docs')
     .map((entry) => entry.id);
 
+// Story ids carrying a tag, such as 'disabled' for stories that show a disabled control.
+export function storiesTagged(tag: string): string[] {
+  if (!existsSync(INDEX)) {
+    throw new Error('No static Storybook. Run pnpm --filter @drefyn/ui storybook:build first.');
+  }
+  const { entries } = JSON.parse(readFileSync(INDEX, 'utf8')) as {
+    entries: Record<string, { id: string; type: string; tags?: string[] }>;
+  };
+  return Object.values(entries)
+    .filter((entry) => entry.type === 'story' && (entry.tags ?? []).includes(tag))
+    .map((entry) => entry.id)
+    .sort();
+}
+
+export const rgb = (hex: string): string => {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+};
+
+// Safari moves focus to links and buttons only with Option held, unless the user changed it.
+export const tabKey = (browserName: string): string =>
+  browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
   const mode = entry.type === 'docs' ? 'docs' : 'story';
   await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);

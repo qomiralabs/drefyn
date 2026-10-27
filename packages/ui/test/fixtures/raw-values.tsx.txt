@@ -1,0 +1,7 @@
+const a = 'text-[#4F46E5]';
+const b = 'shadow-[0_1px_2px_rgb(0_0_0)]';
+const c = 'w-[13px] h-[1.5rem]';
+const d = `duration-[150ms] delay-[1s]`;
+const e = <p>Fine: 24 hours, 3 of 6 regions</p>;
+const f = <path d="M4 12.5L9.5 18L20 6" />;
+// #FFFFFF in a comment is not shipped
