@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
+import { NEEDS_YOU, needsYouSentence } from '../../fixtures/shell.ts';
 import { IconLock } from '../../shell/icons.tsx';
 import { Answer, Calm, Eyebrow, Head, Ranked, TextLink } from '../../views/calm.tsx';
 
@@ -51,6 +52,21 @@ const ROWS: readonly ProductRow[] = [
   },
 ];
 
+// How each kind of item is marked and explained on the overview.
+const MARKS: Readonly<Record<string, ReactNode>> = {
+  'review-pages': <StatusPip state="stale" label="Out of date" />,
+  'read-only': (
+    <span role="img" aria-label="Read only" className="inline-flex text-secondary">
+      <IconLock />
+    </span>
+  ),
+};
+
+const DETAILS: Readonly<Record<string, string>> = {
+  'review-pages': 'Docs. Your API changed on 24 Oct and these pages still show the old fields.',
+  'read-only': 'Partner API docs is read only. Nothing was deleted.',
+};
+
 // The organization overview answers "does anything need me?" in one sentence, then one row
 // per product, the ranked list and the plan line.
 export default function Overview() {
@@ -58,7 +74,10 @@ export default function Overview() {
     <Calm>
       <Head>
         <Eyebrow>{organization.name}</Eyebrow>
-        <Answer claim="Two things need you." rest="Everything else is fresh and running." />
+        <Answer
+          claim={needsYouSentence(NEEDS_YOU.length)}
+          rest="Everything else is fresh and running."
+        />
       </Head>
       <ul aria-label="Products" className="border-t border-rule">
         {ROWS.map((row) => (
@@ -79,28 +98,14 @@ export default function Overview() {
       </ul>
       <Ranked
         label="Needs you"
-        items={[
-          {
-            id: 'review',
-            mark: <StatusPip state="stale" label="Out of date" />,
-            title: 'Review 3 out of date pages',
-            href: `/${org}/docs/payments-api`,
-            detail: 'Docs. Your API changed on 24 Oct and these pages still show the old fields.',
-            when: <time dateTime="2026-10-27T12:20:00Z">2 h ago</time>,
-          },
-          {
-            id: 'read-only',
-            mark: (
-              <span role="img" aria-label="Read only" className="inline-flex text-secondary">
-                <IconLock />
-              </span>
-            ),
-            title: 'Choose which docs project stays editable',
-            href: `/${org}/settings/plan`,
-            detail: 'Partner API docs is read only. Nothing was deleted.',
-            when: <time dateTime="2026-10-26T09:00:00Z">Yesterday</time>,
-          },
-        ]}
+        items={NEEDS_YOU.map((item) => ({
+          id: item.id,
+          mark: MARKS[item.id] ?? null,
+          title: item.title,
+          href: item.href,
+          detail: DETAILS[item.id] ?? item.where,
+          when: item.when,
+        }))}
       />
       <p className="text-body-s text-secondary">
         {organization.name} is on <span className="font-medium text-ink">{organization.plan}</span>:

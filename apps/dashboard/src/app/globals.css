@@ -4,17 +4,6 @@
 @import '@drefyn/ui/react.css';
 @source '../';
 
-/* Shell layout values the owner accepted with the shell spike, waiting for their place in
-   tokens.ts. The breakpoint is the one value CSS cannot read from a custom property. */
-@theme {
-  /* Below it the sidebar is a 48 px icon rail. */
-  --breakpoint-md: 64rem;
-  /* Calm landings read like a page: about 50 characters of the answer sentence a line. */
-  --container-landing: 45rem;
-  /* Wider than the sidebar, so long project names fit, and it leaves scrim to tap. */
-  --container-shell-drawer: 18rem;
-}
-
 /* Shell measures read from the existing shell tokens, so the sidebar can sit under the bar. */
 @theme inline {
   --spacing-shell-bar: var(--dr-shell-bar);

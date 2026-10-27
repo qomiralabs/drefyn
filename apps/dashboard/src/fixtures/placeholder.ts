@@ -3,7 +3,7 @@
 export const PLACEHOLDER = {
   organization: { id: 'org_acme', slug: 'acme', name: 'Acme', plan: 'Starter' },
   person: { name: 'Maya Okafor', initials: 'MO', email: 'maya@acme.dev' },
-  inbox: { needsYou: 3 },
+  inbox: { needsYou: 2 },
   projects: {
     // Success: the calm home with an answer.
     'payments-api': { id: 'prj_payments', product: 'docs', name: 'Payments API docs' },
