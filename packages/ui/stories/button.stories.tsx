@@ -152,11 +152,11 @@ export const Busy: Story = {
       <Counted>
         {(press) => (
           <>
-            <Button variant="primary" busy onClick={press}>
-              Publishing
+            <Button variant="primary" busy busyLabel="Publishing" onClick={press}>
+              Publish update
             </Button>
-            <Button busy onClick={press}>
-              Saving draft
+            <Button busy busyLabel="Saving draft" onClick={press}>
+              Save draft
             </Button>
           </>
         )}
@@ -165,13 +165,16 @@ export const Busy: Story = {
   ),
 };
 
-// Pressing starts the work: the button shows the verb in progress and the region it changes
-// is busy. The work never finishes here, so the state can be read and checked.
+// Pressing starts the work: the button shows the verb in progress at the same width and the
+// region it changes is busy. One busy label is longer than its rest label and one shorter,
+// so both directions of the width rule are on screen. The work never finishes here, so the
+// state can be read and checked.
 function Publishing() {
-  const [busy, setBusy] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [saving, setSaving] = useState(false);
   return (
     <Frame>
-      <section aria-labelledby="update" aria-busy={busy} className="max-w-measure">
+      <section aria-labelledby="update" aria-busy={publishing || saving} className="max-w-measure">
         <h2 id="update" className="text-title text-ink">
           Incident update
         </h2>
@@ -179,15 +182,25 @@ function Publishing() {
           Payments API is degraded in two regions. We are rolling back the last deploy.
         </p>
       </section>
-      <div className="mt-24">
+      <div className="mt-24 flex flex-wrap items-center gap-12">
         <Button
           variant="primary"
-          busy={busy}
+          busy={publishing}
+          busyLabel="Publishing update"
           onClick={() => {
-            setBusy(true);
+            setPublishing(true);
           }}
         >
-          {busy ? 'Publishing' : 'Publish update'}
+          Publish
+        </Button>
+        <Button
+          busy={saving}
+          busyLabel="Saving"
+          onClick={() => {
+            setSaving(true);
+          }}
+        >
+          Save draft and close
         </Button>
       </div>
     </Frame>

@@ -1,7 +1,14 @@
+import { readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Button } from '../src/react/index.ts';
 import { tokens } from '../src/index.ts';
 import {
   expect,
+  ORIGIN,
   openStory,
   rgb,
   storiesTagged,
@@ -229,3 +236,51 @@ for (const theme of THEMES) {
     }
   });
 }
+
+// With JS off the server markup alone has to keep the width, so it is rendered here in node
+// and loaded with the built stylesheets and scripts disabled.
+const assets = join(dirname(fileURLToPath(import.meta.url)), '..', 'storybook-static', 'assets');
+const PAIRS = [
+  ['Publish', 'Publishing update'],
+  ['Save draft and close', 'Saving'],
+] as const;
+
+test.describe('with JS off', () => {
+  test.use({ javaScriptEnabled: false });
+
+  for (const theme of THEMES) {
+    test(`a button that can be busy has the same width at rest and busy from server markup in ${theme}`, async ({
+      page,
+    }) => {
+      const sheets = readdirSync(assets).filter((file) => file.endsWith('.css'));
+      expect(sheets.length).toBeGreaterThan(0);
+      const markup = PAIRS.map(([rest, busy]) =>
+        [false, true]
+          .map((state) =>
+            renderToStaticMarkup(
+              createElement(Button, { busy: state, busyLabel: busy, name: rest, children: rest }),
+            ),
+          )
+          .join(''),
+      ).join('');
+      const html = `<!doctype html><html lang="en" data-theme="${theme}"><head>${sheets
+        .map((file) => `<link rel="stylesheet" href="/assets/${file}">`)
+        .join('')}</head><body><main>${markup}</main></body></html>`;
+      await page.route(`${ORIGIN}/no-js.html`, (route) =>
+        route.fulfill({ contentType: 'text/html', body: html }),
+      );
+      await page.goto('/no-js.html');
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      for (const [rest, busy] of PAIRS) {
+        const pair = page.locator(`button[name="${rest}"]`);
+        await expect(pair, rest).toHaveCount(2);
+        const [a, b] = [await pair.nth(0).boundingBox(), await pair.nth(1).boundingBox()];
+        expect(a, rest).not.toBeNull();
+        expect(b?.width, `${rest} and ${busy}`).toBe(a?.width);
+        expect(b?.height, `${rest} and ${busy}`).toBe(a?.height);
+      }
+    });
+  }
+});

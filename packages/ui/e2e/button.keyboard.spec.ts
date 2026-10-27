@@ -113,9 +113,9 @@ for (const theme of THEMES) {
     const region = page.getByRole('region', { name: 'Incident update' });
     await expect(region).not.toHaveAttribute('aria-busy', 'true');
     await page.keyboard.press(tabKey(browserName));
-    await expect(page.getByRole('button', { name: 'Publish update' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
-    const busy = page.getByRole('button', { name: 'Publishing' });
+    const busy = page.getByRole('button', { name: 'Publishing update' });
     await expect(busy).toBeFocused();
     await expect(busy).toHaveAttribute('aria-disabled', 'true');
     await expect(busy).toHaveAttribute('data-busy');
@@ -123,6 +123,53 @@ for (const theme of THEMES) {
     await expect(busy.locator('svg, [role="progressbar"]')).toHaveCount(0);
     await expect.poll(() => busy.evaluate((el) => getComputedStyle(el).cursor)).toBe('progress');
     await expect.poll(() => fill(busy)).toBe(rgb(tokens.color.accent.ink[theme]));
+  });
+
+  test(`a button keeps its width when it turns busy, with a longer or a shorter busy label, in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, 'components-button--becomes-busy', theme);
+    for (const [rest, busy] of [
+      ['Publish', 'Publishing update'],
+      ['Save draft and close', 'Saving'],
+    ] as const) {
+      const before = page.getByRole('button', { name: rest, exact: true });
+      const box = await before.boundingBox();
+      expect(box, rest).not.toBeNull();
+      await before.click();
+      const after = page.getByRole('button', { name: busy, exact: true });
+      await expect(after, busy).toHaveAttribute('data-busy');
+      const boxAfter = await after.boundingBox();
+      expect(boxAfter?.width, `${rest} to ${busy}`).toBe(box?.width);
+      expect(boxAfter?.height, `${rest} to ${busy}`).toBe(box?.height);
+    }
+  });
+
+  test(`a button that can be busy names itself by the visible label only, in each state, in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, 'components-button--becomes-busy', theme);
+    const buttons = page.locator('#storybook-root').getByRole('button');
+    await expect(page.locator('#storybook-root')).toMatchAriaSnapshot(`
+      - button "Publish"
+      - button "Save draft and close"
+    `);
+    // The inactive label is laid out for width but not in the accessibility tree.
+    await expect(page.getByText('Publishing update', { exact: true })).toBeHidden();
+    await expect(page.getByText('Saving', { exact: true })).toBeHidden();
+    await page.getByRole('button', { name: 'Publish', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft and close' }).click();
+    await expect(page.locator('#storybook-root')).toMatchAriaSnapshot(`
+      - button "Publishing update" [disabled]
+      - button "Saving" [disabled]
+    `);
+    await expect(page.getByText('Publish', { exact: true })).toBeHidden();
+    await expect(page.getByText('Save draft and close', { exact: true })).toBeHidden();
+    await expect(buttons).toHaveCount(2);
+    for (const el of await buttons.all()) {
+      await expect(el).not.toHaveAttribute('aria-live', /.*/);
+      await expect(el.locator('[aria-live]')).toHaveCount(0);
+    }
   });
 
   test(`Tab walks the button links in order and Enter follows one in ${theme}`, async ({

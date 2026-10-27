@@ -33,13 +33,34 @@ describe('server rendered markup', () => {
 
   it('never lets a busy submit button submit twice, even with JS off', () => {
     const html = renderToStaticMarkup(
-      <Button type="submit" busy>
-        Publishing
+      <Button type="submit" busy busyLabel="Publishing">
+        Publish update
       </Button>,
     );
     expect(html).toContain('type="button"');
     expect(html).toContain('aria-disabled="true"');
     expect(html).toMatch(/\sdata-busy(=|\s|>)/);
+  });
+
+  it('writes both labels of a button that can be busy, at rest and busy, with only the inactive one hidden', () => {
+    const rest = renderToStaticMarkup(<Button busyLabel="Publishing">Publish update</Button>);
+    const busy = renderToStaticMarkup(
+      <Button busy busyLabel="Publishing">
+        Publish update
+      </Button>,
+    );
+    for (const html of [rest, busy]) {
+      expect(html).toContain('Publish update');
+      expect(html).toContain('Publishing');
+      expect(html).not.toContain('aria-live');
+      expect(html.match(/\binvisible\b/g)).toHaveLength(1);
+    }
+    expect(rest).toMatch(
+      /data-label="busy"[^>]*class="[^"]*\binvisible\b|class="[^"]*\binvisible\b[^"]*"[^>]*data-label="busy"/,
+    );
+    expect(busy).toMatch(
+      /data-label="rest"[^>]*class="[^"]*\binvisible\b|class="[^"]*\binvisible\b[^"]*"[^>]*data-label="rest"/,
+    );
   });
 
   it('keeps a live submit button a submit button', () => {

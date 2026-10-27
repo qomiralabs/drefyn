@@ -3,7 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import { createRef, type ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Button, IconCheck } from '../../src/react/index.ts';
-import { classesOf, FORBIDDEN_LOOKS } from './classes.ts';
+import { classesOf, FORBIDDEN_LOOKS, only } from './classes.ts';
 
 afterEach(cleanup);
 
@@ -258,16 +258,29 @@ describe('a disabled Button', () => {
   });
 });
 
+// Both labels are always in the markup, so a test with no stylesheet cannot ask for the
+// button by name; the browser specs check the name and the accessibility tree.
+const theButton = () => screen.getByRole('button');
+
+// The two label elements a button that can be busy lays over each other.
+function labels(el: HTMLElement) {
+  const rest = [...el.querySelectorAll('[data-label="rest"]')];
+  const busy = [...el.querySelectorAll('[data-label="busy"]')];
+  expect(rest, 'rest label').toHaveLength(1);
+  expect(busy, 'busy label').toHaveLength(1);
+  return { rest: only(rest), busy: only(busy) };
+}
+
 describe('a busy Button', () => {
-  it('keeps its label, sets aria-disabled and data-busy, and ignores activation', async () => {
+  it('sets aria-disabled and data-busy, stays focusable and ignores activation', async () => {
     const onClick = vi.fn();
     const user = userEvent.setup();
     render(
-      <Button variant="primary" busy onClick={onClick}>
-        Publishing
+      <Button variant="primary" busy busyLabel="Publishing" onClick={onClick}>
+        Publish update
       </Button>,
     );
-    const el = button('Publishing');
+    const el = theButton();
     expect(el.getAttribute('aria-disabled')).toBe('true');
     expect(el.hasAttribute('data-busy')).toBe(true);
     expect(el.hasAttribute('disabled')).toBe(false);
@@ -279,15 +292,74 @@ describe('a busy Button', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('shows no spinner', () => {
-    render(
-      <Button variant="primary" busy>
-        Publishing
+  it('cannot be busy without a busy label', () => {
+    // @ts-expect-error busy needs busyLabel, so the width can be kept.
+    const a = <Button busy>Publish update</Button>;
+    // @ts-expect-error Same when busy is false: a button that can be busy always passes it.
+    const b = <Button busy={false}>Publish update</Button>;
+    const c = (
+      <Button busy={false} busyLabel="Publishing">
+        Publish update
+      </Button>
+    );
+    const d = <Button busyLabel="Publishing">Publish update</Button>;
+    expect([a, b, c, d]).toHaveLength(4);
+  });
+
+  it('lays both labels in one grid cell and hides the inactive one with visibility', () => {
+    const { rerender } = render(<Button busyLabel="Publishing">Publish update</Button>);
+    const atRest = labels(theButton());
+    expect(classesOf(theButton())).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^(inline-)?grid$/)]),
+    );
+    for (const label of [atRest.rest, atRest.busy]) {
+      expect(classesOf(label)).toEqual(expect.arrayContaining(['col-start-1', 'row-start-1']));
+      expect(classesOf(label).filter((c) => /^(hidden|sr-only)$/.test(c))).toEqual([]);
+    }
+    expect(atRest.rest.textContent).toBe('Publish update');
+    expect(atRest.busy.textContent).toBe('Publishing');
+    expect(classesOf(atRest.rest)).not.toContain('invisible');
+    expect(classesOf(atRest.busy)).toContain('invisible');
+    rerender(
+      <Button busy busyLabel="Publishing">
+        Publish update
       </Button>,
     );
-    const el = button('Publishing');
-    expect(el.querySelectorAll('svg, [role="progressbar"], [role="status"]')).toHaveLength(0);
-    expect(el.textContent).toBe('Publishing');
+    const busy = labels(theButton());
+    expect(classesOf(busy.rest)).toContain('invisible');
+    expect(classesOf(busy.busy)).not.toContain('invisible');
+  });
+
+  it('keeps the icon with the rest label', () => {
+    render(
+      <Button busyLabel="Saving" icon={<IconCheck />}>
+        Mark as verified
+      </Button>,
+    );
+    const { rest, busy } = labels(theButton());
+    expect(rest.querySelectorAll('svg')).toHaveLength(1);
+    expect(busy.querySelectorAll('svg')).toHaveLength(0);
+  });
+
+  it('announces nothing itself: no live region on or in the button', () => {
+    render(
+      <Button busy busyLabel="Publishing">
+        Publish update
+      </Button>,
+    );
+    const el = theButton();
+    expect(el.hasAttribute('aria-live')).toBe(false);
+    expect(el.querySelectorAll('[aria-live], [role="status"], [role="alert"]')).toHaveLength(0);
+    expect(el.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('shows no spinner', () => {
+    render(
+      <Button variant="primary" busy busyLabel="Publishing">
+        Publish update
+      </Button>,
+    );
+    expect(theButton().querySelectorAll('svg, [role="progressbar"]')).toHaveLength(0);
   });
 
   it('keeps its variant paint, with a progress cursor and no hover or pressed change', () => {
@@ -296,17 +368,13 @@ describe('a busy Button', () => {
       secondary: ['bg-ground', 'border-rule-strong', 'text-body'],
       quiet: ['text-secondary'],
     };
-    render(
-      <>
-        {VARIANTS.map((variant) => (
-          <Button key={variant} variant={variant} busy>
-            {variant}
-          </Button>
-        ))}
-      </>,
-    );
     for (const variant of VARIANTS) {
-      const classes = classesOf(button(variant));
+      render(
+        <Button variant={variant} busy busyLabel="Working">
+          {variant}
+        </Button>,
+      );
+      const classes = classesOf(theButton());
       expect(classes, variant).toEqual(expect.arrayContaining(rest[variant]));
       expect(
         classes.filter((c) => c.includes('disabled-')),
@@ -326,6 +394,7 @@ describe('a busy Button', () => {
         variant,
       ).toEqual([]);
       expect(classes, variant).toContain('focus-visible:focus-ring');
+      cleanup();
     }
   });
 
@@ -339,12 +408,12 @@ describe('a busy Button', () => {
           submitted.push(event.nativeEvent.submitter?.textContent ?? '');
         }}
       >
-        <Button type="submit" variant="primary" busy>
-          Publishing
+        <Button type="submit" variant="primary" busy busyLabel="Publishing">
+          Publish update
         </Button>
       </form>,
     );
-    const el = button('Publishing');
+    const el = theButton();
     expect(el.getAttribute('type')).toBe('button');
     await userEvent.setup().click(el);
     expect(submitted).toEqual([]);
@@ -354,23 +423,31 @@ describe('a busy Button', () => {
 describe('a submit Button that changes state', () => {
   it('is a button while disabled or busy and a submit button again once live', () => {
     const { rerender } = render(
-      <Button type="submit" disabled>
+      <Button type="submit" disabled busyLabel="Publishing">
         Publish update
       </Button>,
     );
-    expect(button('Publish update').getAttribute('type')).toBe('button');
-    rerender(<Button type="submit">Publish update</Button>);
-    expect(button('Publish update').getAttribute('type')).toBe('submit');
+    expect(theButton().getAttribute('type')).toBe('button');
     rerender(
-      <Button type="submit" busy>
+      <Button type="submit" busyLabel="Publishing">
         Publish update
       </Button>,
     );
-    expect(button('Publish update').getAttribute('type')).toBe('button');
-    rerender(<Button type="submit">Publish update</Button>);
-    expect(button('Publish update').getAttribute('type')).toBe('submit');
-    expect(button('Publish update').hasAttribute('data-busy')).toBe(false);
-    expect(button('Publish update').hasAttribute('aria-disabled')).toBe(false);
+    expect(theButton().getAttribute('type')).toBe('submit');
+    rerender(
+      <Button type="submit" busy busyLabel="Publishing">
+        Publish update
+      </Button>,
+    );
+    expect(theButton().getAttribute('type')).toBe('button');
+    rerender(
+      <Button type="submit" busy={false} busyLabel="Publishing">
+        Publish update
+      </Button>,
+    );
+    expect(theButton().getAttribute('type')).toBe('submit');
+    expect(theButton().hasAttribute('data-busy')).toBe(false);
+    expect(theButton().hasAttribute('aria-disabled')).toBe(false);
   });
 });
 
