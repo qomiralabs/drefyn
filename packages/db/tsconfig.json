@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "src",
+    "test",
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "vitest.integration.serial.config.ts",
+    "vitest.coverage.ts",
+    "vitest.merged.config.ts"
+  ]
+}

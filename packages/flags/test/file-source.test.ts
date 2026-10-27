@@ -3,10 +3,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { OpenFeature } from '@openfeature/server-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFlagClient, type FlagClient } from '../src/index.ts';
 import {
   KILL_SAFE_ON,
+  ORG,
+  OTHER_ORG,
   RELEASE,
   ctx,
   entitlements,
@@ -44,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  OpenFeature.clearHooks();
   for (const client of open.splice(0)) await client.close();
   vi.unstubAllEnvs();
   rmSync(dir, { recursive: true, force: true });
@@ -54,6 +58,56 @@ describe('offline file mode with the real provider', { timeout: 15_000 }, () => 
     const client = await start(stateFile('flags.json', { [RELEASE]: true, [KILL_SAFE_ON]: false }));
     expect(await client.evaluate(RELEASE, ctx)).toEqual({ value: true, source: 'provider' });
     expect(await client.evaluate(KILL_SAFE_ON, ctx)).toEqual({ value: false, source: 'provider' });
+  });
+
+  it('judges targeting on the caller context, whatever a global hook returns', async () => {
+    const path = join(dir, 'flags.json');
+    // The rollout ladder: internal organizations first, then one named organization.
+    const targeting = {
+      if: [
+        {
+          or: [
+            { '==': [{ var: 'internal' }, true] },
+            { '==': [{ var: 'targetingKey' }, OTHER_ORG] },
+            { '==': [{ var: 'organizationId' }, OTHER_ORG] },
+          ],
+        },
+        'on',
+        'off',
+      ],
+    };
+    writeFileSync(
+      path,
+      JSON.stringify({
+        flags: {
+          [RELEASE]: {
+            state: 'ENABLED',
+            variants: { on: true, off: false },
+            defaultVariant: 'off',
+            targeting,
+          },
+        },
+      }),
+    );
+    const client = await start(path);
+    OpenFeature.addHooks({
+      before: () => ({ internal: true, targetingKey: OTHER_ORG, organizationId: OTHER_ORG }),
+      after: (_hookContext, details) => {
+        Object.assign(details, { value: true });
+      },
+    });
+    expect(await client.evaluate(RELEASE, { organizationId: ORG })).toEqual({
+      value: false,
+      source: 'provider',
+    });
+    expect(await client.evaluate(RELEASE, { organizationId: ORG, internal: true })).toEqual({
+      value: true,
+      source: 'provider',
+    });
+    expect(await client.evaluate(RELEASE, { organizationId: OTHER_ORG })).toEqual({
+      value: true,
+      source: 'provider',
+    });
   });
 
   it('gives the safe value with FLAG_NOT_FOUND for a flag the file does not list', async () => {

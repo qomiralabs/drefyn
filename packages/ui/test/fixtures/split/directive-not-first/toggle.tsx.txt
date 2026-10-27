@@ -1,0 +1,7 @@
+import { useState } from 'react';
+'use client';
+
+export function Toggle() {
+  const [on] = useState(false);
+  return <output>{on ? 'On' : 'Off'}</output>;
+}

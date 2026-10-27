@@ -1,0 +1,9 @@
+// Names that start with "use" but are not hooks.
+const user = (id: string) => `user ${id}`;
+const used = new Set<string>();
+const useful = { label: (id: string) => id };
+
+export function label(id: string): string {
+  used.add(id);
+  return user(id) + useful.label(id) + String(used.size);
+}
