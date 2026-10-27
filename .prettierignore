@@ -7,3 +7,5 @@ packages/ui/src/generated/
 storybook-static/
 test-results/
 playwright-report/
+.next/
+next-env.d.ts

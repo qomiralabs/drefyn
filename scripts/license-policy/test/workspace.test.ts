@@ -55,12 +55,21 @@ describe('policy.json', () => {
   it.each([
     ['axe-core', 'MPL-2.0'],
     ['@axe-core/playwright', 'MPL-2.0'],
-    ['caniuse-lite', 'CC-BY-4.0'],
   ])('excepts %s under %s as dev only', (name, license) => {
     const exception = real.exceptions.find((e) => e.name === name);
     expect(exception?.license).toBe(license);
     expect(exception?.devOnly).toBe(true);
     expect(exception?.reason).toMatch(/^Dev only, never shipped\. \S/);
+  });
+
+  // The dashboard ships Next, and Next ships browserslist data from caniuse-lite.
+  it('excepts caniuse-lite under CC-BY-4.0 in production, with the reason and its notice', () => {
+    const exception = real.exceptions.find((e) => e.name === 'caniuse-lite');
+    expect(exception?.license).toBe('CC-BY-4.0');
+    expect(exception?.devOnly).toBeUndefined();
+    expect(exception?.reason).not.toMatch(/dev only/i);
+    expect(exception?.reason).toMatch(/\bNext\b/);
+    expect(exception?.reason).toMatch(/THIRD_PARTY_NOTICES\.md/);
   });
 
   it('forbids sharp by name and @img packages by an anchored pattern', () => {
@@ -289,15 +298,17 @@ describe('dev only exceptions in the production tree', () => {
     expect(checkProduction({}, real)).toEqual([]);
   });
 
-  it.each(['axe-core', '@axe-core/playwright', 'caniuse-lite'])(
-    'refuses %s in the production tree',
-    (name) => {
-      const report = { 'MPL-2.0': [pkg(name, 'MPL-2.0')], MIT: [pkg('left-pad', 'MIT')] };
-      expect(checkProduction(report, real)).toEqual([
-        { name, versions: ['1.0.0'], license: 'MPL-2.0', devOnly: true },
-      ]);
-    },
-  );
+  it.each(['axe-core', '@axe-core/playwright'])('refuses %s in the production tree', (name) => {
+    const report = { 'MPL-2.0': [pkg(name, 'MPL-2.0')], MIT: [pkg('left-pad', 'MIT')] };
+    expect(checkProduction(report, real)).toEqual([
+      { name, versions: ['1.0.0'], license: 'MPL-2.0', devOnly: true },
+    ]);
+  });
+
+  it('allows caniuse-lite in the production tree', () => {
+    const report = { 'CC-BY-4.0': [pkg('caniuse-lite', 'CC-BY-4.0', '1.0.30001750')] };
+    expect(checkProduction(report, real)).toEqual([]);
+  });
 
   it('ignores exceptions without devOnly', () => {
     expect(checkProduction({ 'MPL-2.0': [pkg('lightningcss', 'MPL-2.0')] }, real)).toEqual([]);

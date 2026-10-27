@@ -1,0 +1,9 @@
+{
+  "flags": {
+    "dashboard.shell": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off"
+    }
+  }
+}

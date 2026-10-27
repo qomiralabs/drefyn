@@ -289,3 +289,11 @@ export function checkLockfile(text: string, policy: Policy): Violation[] {
   }
   return violations;
 }
+
+// TODO(#59): names of production packages outside the allow list that have no
+// `## <name>` entry stating their licence in the third party notices.
+export const checkNotices: (
+  report: LicenseReport,
+  policy: Policy,
+  notices: string,
+) => string[] = () => [];
