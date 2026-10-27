@@ -1,5 +1,10 @@
 import type { ComponentPropsWithRef, ReactNode } from 'react';
-import type { ButtonSize, ButtonVariant } from './button-classes.ts';
+import {
+  buttonClasses,
+  LABEL_CELL,
+  type ButtonSize,
+  type ButtonVariant,
+} from './button-classes.ts';
 
 interface ButtonBase extends Omit<
   ComponentPropsWithRef<'button'>,
@@ -21,5 +26,45 @@ interface ButtonBase extends Omit<
 export type ButtonProps = ButtonBase &
   ({ busy?: never; busyLabel?: never } | { busy?: boolean; busyLabel: string });
 
-// TODO(#58): native button, server safe.
-export const Button: (props: ButtonProps) => ReactNode = () => null;
+// A native button with no hooks, so it renders on the server and works with JS off.
+// Disabled and busy drop the click handler and render type="button": there is no script to
+// cancel a submit, and that is the only way a focusable button cannot post its form.
+export function Button({
+  variant = 'secondary',
+  size = 'md',
+  type = 'button',
+  disabled = false,
+  busy = false,
+  busyLabel,
+  icon,
+  children,
+  onClick,
+  ...rest
+}: ButtonProps): ReactNode {
+  const inert = disabled || busy;
+  const label = (
+    <span data-label="rest" className={busy ? `${LABEL_CELL} invisible` : LABEL_CELL}>
+      {icon}
+      {children}
+    </span>
+  );
+  return (
+    <button
+      {...rest}
+      type={inert ? 'button' : type}
+      aria-disabled={inert ? true : undefined}
+      data-busy={busy ? '' : undefined}
+      onClick={inert ? undefined : onClick}
+      className={buttonClasses({ variant, size, disabled, busy })}
+    >
+      {label}
+      {busyLabel === undefined ? null : (
+        // visibility, not display or a visually hidden class: the hidden label keeps its
+        // size and leaves the accessibility tree, so the name is only the visible label.
+        <span data-label="busy" className={busy ? LABEL_CELL : `${LABEL_CELL} invisible`}>
+          {busyLabel}
+        </span>
+      )}
+    </button>
+  );
+}
