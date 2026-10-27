@@ -16,6 +16,7 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts && vitest run --config vitest.integration.serial.config.ts",
+    "test:merged": "vitest run --coverage --coverage.exclude='test/**' --coverage.thresholds.lines=0 --coverage.reportsDirectory=coverage/unit --reporter=blob --outputFile=coverage/blobs/unit.json && vitest run --config vitest.integration.config.ts --coverage --coverage.include='src/**/*.ts' --coverage.reportsDirectory=coverage/integration --reporter=blob --outputFile=coverage/blobs/integration.json && vitest run --config vitest.integration.serial.config.ts --coverage --coverage.include='src/**/*.ts' --coverage.reportsDirectory=coverage/serial --reporter=blob --outputFile=coverage/blobs/serial.json && vitest --config vitest.merged.config.ts --merge-reports=coverage/blobs --coverage",
     "check:types": "node src/check-types.ts",
     "check:catalog": "node src/check-catalog.ts",
     "check:sources": "node src/check-sources.ts"
