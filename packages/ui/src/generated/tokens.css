@@ -76,6 +76,8 @@
   --dr-state-neutral-text: #475569;
   --dr-focus-ring: #4F46E5;
   --dr-skeleton-fill: #E7E5E4;
+  --dr-meter-track: #E7E5E4;
+  --dr-meter-fill: #475569;
   --dr-overlay-scrim: rgb(11 17 32 / 0.24);
   --dr-shadow-0: none;
   --dr-shadow-1: 0 1px 2px rgb(11 17 32 / 0.06), 0 8px 24px rgb(11 17 32 / 0.1);
@@ -159,12 +161,15 @@
   --dr-timer-toast: 6000ms;
   --dr-timer-toast-undo: 10000ms;
   --dr-page-max: 1200px;
+  --dr-landing: 45rem;
   --dr-docs-nav: 240px;
   --dr-docs-content: 640px;
   --dr-docs-toc: 220px;
   --dr-shell-bar: 3rem;
   --dr-shell-nav: 15rem;
   --dr-shell-nav-collapsed: 3rem;
+  --dr-shell-drawer: 18rem;
+  --dr-shell-inspector: 20rem;
   --dr-gutter: 1.5rem;
 }
 :where(time, data, output, td, th, [data-numeric]) {
@@ -210,6 +215,8 @@
     --dr-state-neutral-text: #A8A29E;
     --dr-focus-ring: #818CF8;
     --dr-skeleton-fill: #292524;
+    --dr-meter-track: #292524;
+    --dr-meter-fill: #A8A29E;
     --dr-overlay-scrim: rgb(0 0 0 / 0.5);
     --dr-shadow-0: none;
     --dr-shadow-1: none;
@@ -250,6 +257,8 @@
   --dr-state-neutral-text: #A8A29E;
   --dr-focus-ring: #818CF8;
   --dr-skeleton-fill: #292524;
+  --dr-meter-track: #292524;
+  --dr-meter-fill: #A8A29E;
   --dr-overlay-scrim: rgb(0 0 0 / 0.5);
   --dr-shadow-0: none;
   --dr-shadow-1: none;

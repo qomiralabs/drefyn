@@ -205,7 +205,7 @@ describe('Tailwind theme', () => {
     const css = await build(['sm:p-8', 'md:p-8', 'lg:p-8', 'xl:p-8', '2xl:p-8']);
     const width = (cls: string) =>
       new RegExp(
-        `${escapeRegExp(selector(cls))}\\s*\\{\\s*@media \\(width >= ([\\d.]+rem)\\)`,
+        `@media \\(width >= ([\\d.]+rem)\\)\\s*\\{\\s*${escapeRegExp(selector(cls))}\\s*\\{`,
       ).exec(css)?.[1];
     expect(['sm', 'md', 'lg'].map((b) => width(`${b}:p-8`))).toEqual(['40rem', '64rem', '80rem']);
     expect(hasRule(css, 'xl:p-8')).toBe(false);

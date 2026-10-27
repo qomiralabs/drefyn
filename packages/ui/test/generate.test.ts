@@ -77,7 +77,7 @@ describe('tokens.css', () => {
   it('redefines every colour role in dark and nothing that does not change', () => {
     const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
     const colorNames = [...root.declarations.keys()].filter((n) =>
-      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|skeleton|overlay|shadow)-/.test(
+      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|skeleton|meter|overlay|shadow)-/.test(
         n,
       ),
     );

@@ -63,6 +63,9 @@ const required = [
   ['light', 'focus.ring', 'surface.ground', 'non-text', 6.02],
   ['light', 'focus.ring', 'surface.raised', 'non-text', 5.76],
   ['light', 'focus.ring', 'surface.sunken', 'non-text', 5.76],
+  // Light, usage meters
+  ['light', 'meter.fill', 'meter.track', 'non-text', 6.03],
+  ['light', 'meter.fill', 'surface.ground', 'non-text', 7.25],
   ['light', 'state.fresh.mark', 'surface.ground', 'non-text', 3.15],
   ['light', 'state.fresh.mark', 'surface.raised', 'non-text', 3.02],
   ['light', 'state.fresh.mark', 'surface.sunken', 'non-text', 3.02],
@@ -152,6 +155,9 @@ const required = [
   ['dark', 'focus.ring', 'surface.ground', 'non-text', 6.26],
   ['dark', 'focus.ring', 'surface.raised', 'non-text', 5.82],
   ['dark', 'focus.ring', 'surface.sunken', 'non-text', 5.37],
+  // Dark, usage meters
+  ['dark', 'meter.fill', 'meter.track', 'non-text', 6.01],
+  ['dark', 'meter.fill', 'surface.ground', 'non-text', 7.4],
   ['dark', 'signal.mark', 'surface.ground', 'non-text', 7.5],
   ['dark', 'signal.mark', 'surface.raised', 'non-text', 6.97],
   ['dark', 'signal.mark', 'surface.sunken', 'non-text', 6.43],
