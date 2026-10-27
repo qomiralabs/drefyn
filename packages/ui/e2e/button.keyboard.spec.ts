@@ -1,6 +1,6 @@
 import type { Locator } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import { expect, openStory, rgb, sameSize, tabKey, test, THEMES } from './fixtures.ts';
 
 const ring = (el: Locator) =>
   el.evaluate((node) => {
@@ -145,8 +145,10 @@ for (const theme of THEMES) {
       const after = page.getByRole('button', { name: busy, exact: true });
       await expect(after, busy).toHaveAttribute('data-busy');
       const boxAfter = await after.boundingBox();
-      expect(boxAfter?.width, `${rest} to ${busy}`).toBe(box?.width);
-      expect(boxAfter?.height, `${rest} to ${busy}`).toBe(box?.height);
+      expect(
+        sameSize(box, boxAfter),
+        `${rest} to ${busy}: ${JSON.stringify([box, boxAfter])}`,
+      ).toBe(true);
     }
   });
 

@@ -64,25 +64,33 @@ const SPACING_SCALE = new Set([
   '96',
   '128',
 ]);
-const TRANSLATE = /^translate-(?:[xyz]-)?(?<v>.+)$/;
-const ROTATE = /^rotate-(?:[xyz]-)?(?<v>.+)$/;
-const SCALE = /^scale-(?:[xyz]-)?(?<v>.+)$/;
+// The 3D axes (translate-z, rotate-x, rotate-y, scale-z) match too, with no allowed value,
+// so they are refused: flat UI has no depth to move along.
+const TRANSLATE = /^translate-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
+const ROTATE = /^rotate-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
+const SCALE = /^scale-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
 const ASPECT = /^aspect-(?<v>.+)$/;
 
 function transformProblem(utility: string, negative: boolean): boolean {
   const v = (pattern: RegExp) => pattern.exec(utility)?.groups?.['v'];
+  const axis = (pattern: RegExp) => pattern.exec(utility)?.groups?.['axis'];
   const translate = v(TRANSLATE);
   if (translate !== undefined) {
+    if (axis(TRANSLATE) === 'z') return true;
     if (translate === 'none') return negative;
     return !(SPACING_SCALE.has(translate) || translate === '1/2' || translate === 'full');
   }
   const rotate = v(ROTATE);
   if (rotate !== undefined) {
+    if (axis(ROTATE) !== undefined) return true;
     if (negative) return rotate !== '90';
     return !['0', '90', '180', 'none'].includes(rotate);
   }
   const scale = v(SCALE);
-  if (scale !== undefined) return negative || !(scale === '100' || scale === 'none');
+  if (scale !== undefined) {
+    if (axis(SCALE) === 'z') return true;
+    return negative || !(scale === '100' || scale === 'none');
+  }
   const aspect = v(ASPECT);
   if (aspect !== undefined) return negative || !(aspect === 'auto' || aspect === 'square');
   return false;

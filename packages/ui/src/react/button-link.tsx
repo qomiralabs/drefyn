@@ -23,8 +23,11 @@ export function ButtonLink({
   children,
   target,
   rel,
-  ...rest
+  ...props
 }: ButtonLinkProps): ReactNode {
+  // The type refuses style; a caller without types still never ships an inline one.
+  const rest: typeof props & { style?: undefined } = { ...props };
+  delete rest.style;
   const newTab = target === '_blank';
   // A new tab gets no window.opener and no referrer, whatever rel the caller passed.
   const relation = newTab

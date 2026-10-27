@@ -15,7 +15,13 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { goodPackage, repoRoot, tempWorkspace, type TempWorkspace } from './helpers.ts';
+import {
+  GIT_INIT_HOOK_TIMEOUT_MS,
+  goodPackage,
+  repoRoot,
+  tempWorkspace,
+  type TempWorkspace,
+} from './helpers.ts';
 
 const guard = join(repoRoot, 'scripts/lint-rules/guard.sh');
 const NO_EGRESS = 'drefyn/' + 'no-raw-egress';
@@ -28,7 +34,7 @@ beforeEach(() => {
   ws.write('.gitignore', 'node_modules/\ndist/\ncoverage/\n');
   ws.manifest('packages/a', goodPackage('a'));
   ws.write('packages/a/src/index.ts', 'export const a = 1;\n');
-});
+}, GIT_INIT_HOOK_TIMEOUT_MS);
 afterEach(() => {
   ws.cleanup();
 });

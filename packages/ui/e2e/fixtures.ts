@@ -73,6 +73,19 @@ export const tabKey = (browserName: string): string =>
 export const PAGE_BUDGET_MS = 2_000;
 export const sweepTimeout = (pages: number): number => 30_000 + pages * PAGE_BUDGET_MS;
 
+// Firefox lays out in sixtieths of a pixel and reports a width as right minus left in
+// floating point, so two equal boxes can differ in the fifth decimal depending on where they
+// sit. A hundredth of a pixel is far below anything visible.
+export const SAME_SIZE_PX = 0.01;
+export const sameSize = (
+  a: { width: number; height: number } | null,
+  b: { width: number; height: number } | null,
+): boolean =>
+  a !== null &&
+  b !== null &&
+  Math.abs(a.width - b.width) < SAME_SIZE_PX &&
+  Math.abs(a.height - b.height) < SAME_SIZE_PX;
+
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
   const mode = entry.type === 'docs' ? 'docs' : 'story';
   await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);

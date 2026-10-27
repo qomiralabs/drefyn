@@ -32,6 +32,7 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     // and identities are tokens or geometry. Anything else compiles to nothing under the
     // reset theme, or is a design value.
     `const c = 'translate-x-8 -translate-x-8 translate-y-16 -translate-y-2 translate-x-0';`,
+    `const c = 'translate-y-128 -translate-x-128';`,
     `const c = 'motion-safe:translate-x-12 aria-checked:translate-x-12 hover:-translate-y-4';`,
     `const c = 'translate-x-1/2 -translate-x-1/2 translate-y-1/2 -translate-y-1/2';`,
     `const c = 'translate-x-full -translate-x-full translate-y-full -translate-y-full';`,
@@ -173,6 +174,14 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       'hover:scale-105',
       'aspect-16/9',
       'aspect-video',
+      // 3D axes and negated identities are not on any token scale.
+      'rotate-x-90',
+      'rotate-y-180',
+      'translate-z-8',
+      'scale-z-100',
+      '-scale-x-100',
+      '-scale-100',
+      '-translate-none',
     ].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'transform' as const, data: { token } }],
