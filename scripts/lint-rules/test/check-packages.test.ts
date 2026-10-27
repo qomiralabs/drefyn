@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { main } from '../src/check-packages.ts';
-import { goodPackage, tempWorkspace, type TempWorkspace } from './helpers.ts';
+import {
+  GIT_INIT_HOOK_TIMEOUT_MS,
+  goodPackage,
+  tempWorkspace,
+  type TempWorkspace,
+} from './helpers.ts';
 
 let ws: TempWorkspace;
 let out: string;
@@ -21,7 +26,7 @@ beforeEach(() => {
   ws = tempWorkspace();
   out = '';
   err = '';
-});
+}, GIT_INIT_HOOK_TIMEOUT_MS);
 afterEach(() => {
   ws.cleanup();
 });

@@ -12,8 +12,10 @@ const edit = (line: number, text: string) =>
     .map((l, i) => (i === line ? text : l))
     .join('\n');
 
-let template: Repo;
+let template: Repo | undefined;
 let repo: Repo;
+// Set only once a copy exists, so cleanup after a failed setup has nothing to trip on.
+let copy: Repo | undefined;
 // R is the root on development; D1 and D2 move development on; X is the approved PR commit.
 let R: string;
 let D1: string;
@@ -24,12 +26,18 @@ let X: string;
 // time is mostly process start up and grows as the host starves. With the test process
 // group held to 2 percent of a CPU, the 47 tests took 9.5 s median, 19.9 s p95 and 37.4 s
 // at most; at 1 percent they took up to 67 s. The 5 s default failed at a load average of
-// 277. 120 s is 3.2 times the 2 percent maximum.
+// 277. The maximum stands in for the p99, which 47 samples cannot give: 120 s is 3.2
+// times the 2 percent maximum.
 const GIT_TEST_TIMEOUT_MS = 120_000;
 // Building the shared history is about 30 git processes: 0.4 s here, 17.6 to 36.1 s over
 // 10 builds at 2 percent, which is why the old per test build broke the 10 s hook default.
-// The per test file copy took 0.4 to 2.2 s at 2 percent, so that hook keeps the default.
+// 120 s is 3.3 times that maximum, used as the p99. The per test file copy took 0.4 to
+// 2.2 s at 2 percent, so that hook keeps the 10 s default.
 const FIXTURE_HOOK_TIMEOUT_MS = 120_000;
+// Removing a copy or the shared history took 0.2 to 0.5 s over 11 runs at 2 percent; the
+// maximum is used as the p99 and 30 s is 60 times it. The one removal that passed 10 s ran
+// while the laptop slept, which no timeout should try to cover.
+const REMOVE_HOOK_TIMEOUT_MS = 30_000;
 
 // Commits have fixed dates, so the shared history has the same SHAs on every run. Each test
 // works on its own copy, since many move development or write config, refs and grafts.
@@ -46,17 +54,21 @@ beforeAll(() => {
   X = template.commit(R, { 'src/app.ts': 'app v2\n' });
 }, FIXTURE_HOOK_TIMEOUT_MS);
 
+// A failed build leaves no template; its own error should be the one reported.
 afterAll(() => {
-  template.remove();
-});
+  template?.remove();
+}, REMOVE_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
+  if (template === undefined) throw new Error('the shared history was not built');
   repo = template.clone();
+  copy = repo;
 });
 
 afterEach(() => {
-  repo.remove();
-});
+  copy?.remove();
+  copy = undefined;
+}, REMOVE_HOOK_TIMEOUT_MS);
 
 const carry = (head: string, options: { maxMerges?: number; git?: GitRunner } = {}) =>
   carryOver({ cwd: repo.dir, head, base: BASE_REF, ...options });
@@ -219,7 +231,7 @@ describe('carryOver: author changes never carry', { timeout: GIT_TEST_TIMEOUT_MS
     const tree = repo.treeOf(X);
     const raw = `tree ${tree}\nparent ${X}\nparent ${X}\nauthor T <t@t> 1 +0000\ncommitter T <t@t> 1 +0000\n\ndup\n`;
     const H = repo.gitWith(raw, 'hash-object', '-t', 'commit', '-w', '--stdin', '--literally');
-    expect((await carry(H)).carried).toEqual([]);
+    expect(await carry(H)).toEqual({ carried: [], stop: `${H} lists the same parent twice` });
   });
 });
 
