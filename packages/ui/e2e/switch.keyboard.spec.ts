@@ -80,7 +80,7 @@ for (const theme of THEMES) {
       await page.keyboard.press('Space');
       // Playwright treats the label of an aria-disabled input as not enabled and would wait;
       // force still sends a real pointer click, which the switch must ignore.
-      await page.getByText(name).click({ force: true });
+      await page.getByText(name, { exact: true }).click({ force: true });
       expect(await checked(toggle), name).toBe(on);
     }
   });
