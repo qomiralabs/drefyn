@@ -192,6 +192,12 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
   });
 
+  it('clears the bottom safe area with a spacing utility on the token', async () => {
+    const css = await build(['mb-safe-bottom', 'pb-safe-bottom']);
+    expect(ruleBody(css, 'mb-safe-bottom')).toMatch(/margin-bottom: var\(--dr-safe-bottom\)/);
+    expect(ruleBody(css, 'pb-safe-bottom')).toMatch(/padding-bottom: var\(--dr-safe-bottom\)/);
+  });
+
   it('makes a shell utility for every shell key, so a new one cannot be left out', () => {
     const theme = renderTailwindCss();
     for (const k of Object.keys(tokens.layout.shell)) {

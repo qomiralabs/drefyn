@@ -4,6 +4,7 @@
 export { Badge } from './badge.tsx';
 export { Button } from './button.tsx';
 export { ButtonLink } from './button-link.tsx';
+export { Dialog } from './dialog.tsx';
 export { EmptyState } from './empty-state.tsx';
 export { Menu } from './menu.tsx';
 export { MenuItem } from './menu-item.tsx';
@@ -13,6 +14,9 @@ export { Skeleton } from './skeleton.tsx';
 export { StatusDot } from './status-dot.tsx';
 export { StatusPip } from './status-pip.tsx';
 export { Switch } from './switch.tsx';
+export { TextField } from './text-field.tsx';
+export { toast, ToastRegion } from './toast.tsx';
+export { Tooltip } from './tooltip.tsx';
 export { IconAlert } from './icons/alert.tsx';
 export { IconCheck } from './icons/check.tsx';
 export { IconChevronDown } from './icons/chevron-down.tsx';

@@ -140,3 +140,11 @@ export const test = base.extend<{ outside: string[] }>({
 });
 
 export { expect };
+
+// Toasts close on a timer, so a screenshot of one would race it. The pointer over the
+// notifications holds every timer; the toasts draw no hover state, so nothing else changes.
+export async function holdToasts(page: Page): Promise<void> {
+  const notifications = page.getByRole('region', { name: /notification/i });
+  await expect(notifications).toBeVisible();
+  await notifications.hover({ position: { x: 1, y: 1 } });
+}

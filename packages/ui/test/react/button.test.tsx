@@ -506,6 +506,10 @@ describe('press handlers on a Button that cannot act', () => {
     'onTouchEnd',
     'onKeyDown',
     'onKeyUp',
+    'onContextMenu',
+    'onClickCapture',
+    'onPointerDownCapture',
+    'onKeyDownCapture',
   ] as const;
 
   for (const state of ['disabled', 'busy'] as const) {
@@ -530,6 +534,7 @@ describe('press handlers on a Button that cannot act', () => {
       await user.hover(el);
       await user.click(el);
       await user.dblClick(el);
+      await user.pointer({ keys: '[MouseRight]', target: el });
       el.focus();
       await user.keyboard('{Enter}');
       await user.keyboard(' ');
