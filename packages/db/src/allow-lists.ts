@@ -18,10 +18,24 @@ export interface AllowLists {
   readonly readerFunctions: readonly AllowEntry[];
 }
 
-export const GLOBAL_TABLES: readonly AllowEntry[] = [];
+const BOOKKEEPING = 'migration bookkeeping, owner only, no tenant data';
+
+export const GLOBAL_TABLES: readonly AllowEntry[] = [
+  { name: 'app.pgmigrations', reason: BOOKKEEPING },
+  { name: 'app.migration_checksums', reason: BOOKKEEPING },
+];
+
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
+
 export const PUBLISHED_TABLES: readonly AllowEntry[] = [];
-export const READER_FUNCTIONS: readonly AllowEntry[] = [];
+
+export const READER_FUNCTIONS: readonly AllowEntry[] = [
+  { name: 'app.current_org()', reason: 'reads the transaction setting the reader policies need' },
+  {
+    name: 'app.current_project()',
+    reason: 'reads the transaction setting the reader policies need',
+  },
+];
 
 export const ALLOW_LISTS: AllowLists = {
   globalTables: GLOBAL_TABLES,
