@@ -25,8 +25,8 @@ Everything other packages may use is exported from `src/index.ts`, plus the test
 - `ReleaseFlag` and `ExperimentFlag` have `safeValue: false` by type. `KillSwitch` must
   declare `safeValue`; it is named for what it keeps running, so on means running and off
   means stopped. `PlanFlag` names an entitlements `feature`.
-- `flags` is the package registry: `product.docs`, `product.studio` and `product.status`,
-  all release flags. `FlagName` is the union of their names, so an unregistered name fails
+- `flags` is the package registry: `product.docs`, `product.studio`, `product.status` and
+  `dashboard.shell`, all release flags. `FlagName` is the union of their names, so an unregistered name fails
   typecheck.
 
 ### Client

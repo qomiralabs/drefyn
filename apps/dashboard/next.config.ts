@@ -1,6 +1,13 @@
 import type { NextConfig } from 'next';
 
-// TODO(#59): transpile @drefyn/ui and serve images unoptimized.
-const config: NextConfig = {};
+const config: NextConfig = {
+  // Workspace packages ship TypeScript source, so Next compiles them with the app.
+  transpilePackages: ['@drefyn/ui', '@drefyn/flags', '@drefyn/entitlements', '@drefyn/tenancy'],
+  // sharp is removed from the install tree (its binaries are LGPL), so nothing may ask the
+  // image optimiser for it.
+  images: { unoptimized: true },
+  poweredByHeader: false,
+  reactStrictMode: true,
+};
 
 export default config;

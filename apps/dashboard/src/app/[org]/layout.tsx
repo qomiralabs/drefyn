@@ -1,6 +1,45 @@
+import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
+import { PLACEHOLDER_SHELL } from '../../fixtures/shell.ts';
+import { requireDashboard } from '../../server/gate.ts';
+import { ShellFrame } from '../../shell/frame.tsx';
+import { parseShellPath } from '../../shell/route.ts';
+import { Sidebar } from '../../shell/sidebar.tsx';
+import { TopBar } from '../../shell/top-bar.tsx';
 
-// TODO(#59): the shell (skip link, top bar, sidebar, main) behind the release flag.
-export default function OrgLayout({ children }: { children: ReactNode }) {
-  return children;
+// The shell: skip link, top bar, sidebar and main. The bar and sidebar render from the
+// layout at once and are never skeletons; only main waits for data.
+export default async function OrgLayout({
+  children,
+  params,
+}: {
+  children: ReactNode;
+  params: Promise<{ org: string }>;
+}) {
+  const { org } = await params;
+  if (parseShellPath(`/${org}`) === null || org !== PLACEHOLDER.organization.slug) notFound();
+  await requireDashboard(PLACEHOLDER.organization.id);
+  return (
+    <ShellFrame org={org}>
+      <a
+        href="#main"
+        data-skip=""
+        className="fixed start-8 top-8 z-toast -translate-y-64 rounded-sm border border-rule-strong bg-overlay px-12 py-8 text-ink focus-visible:translate-y-0 focus-visible:focus-ring"
+      >
+        Skip to content
+      </a>
+      <TopBar data={PLACEHOLDER_SHELL} />
+      <div className="flex">
+        <Sidebar data={PLACEHOLDER_SHELL} />
+        <main
+          id="main"
+          tabIndex={-1}
+          className="min-w-0 flex-1 outline-none focus-visible:focus-ring-inset"
+        >
+          {children}
+        </main>
+      </div>
+    </ShellFrame>
+  );
 }

@@ -24,15 +24,39 @@ export interface BaselineReport {
   readonly ok: boolean;
 }
 
-// TODO(#59)
-export const routeReport: (
+// Scripts are counted once per URL, as the browser caches them. Only scripts the baseline
+// route does not load count against the budget.
+export function routeReport(
   route: string,
   scripts: readonly ScriptSize[],
   baseline: readonly ScriptSize[],
-) => RouteReport = (route) => ({ route, totalBytes: 0, beyondBaselineBytes: 0, overBudget: false });
+): RouteReport {
+  const unique = new Map(scripts.map((s) => [s.url, s.gzipBytes]));
+  const framework = new Set(baseline.map((s) => s.url));
+  let totalBytes = 0;
+  let beyondBaselineBytes = 0;
+  for (const [url, bytes] of unique) {
+    totalBytes += bytes;
+    if (!framework.has(url)) beyondBaselineBytes += bytes;
+  }
+  return {
+    route,
+    totalBytes,
+    beyondBaselineBytes,
+    overBudget: beyondBaselineBytes > ROUTE_BUDGET_BYTES,
+  };
+}
 
-// TODO(#59)
-export const baselineReport: (recordedBytes: number, measuredBytes: number) => BaselineReport = (
-  recordedBytes,
-  measuredBytes,
-) => ({ recordedBytes, measuredBytes, growth: 0, ok: true });
+export function baselineReport(recordedBytes: number, measuredBytes: number): BaselineReport {
+  if (!Number.isSafeInteger(recordedBytes) || recordedBytes <= 0) {
+    throw new RangeError('The recorded baseline must be a positive whole number of bytes.');
+  }
+  const grown = measuredBytes - recordedBytes;
+  return {
+    recordedBytes,
+    measuredBytes,
+    growth: grown / recordedBytes,
+    // Compared in whole bytes, so 5 percent exactly passes without float rounding.
+    ok: grown <= recordedBytes * BASELINE_GROWTH_LIMIT,
+  };
+}
