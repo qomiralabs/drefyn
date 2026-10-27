@@ -31,17 +31,17 @@ export default defineConfig({
   projects: [
     {
       name: 'keyboard-chromium',
-      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'keyboard-firefox',
-      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'keyboard-webkit',
-      testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     // The network specs run here too, so the axe job itself proves the outside request guard.

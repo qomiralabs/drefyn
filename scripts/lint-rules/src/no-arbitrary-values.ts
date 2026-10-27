@@ -45,6 +45,56 @@ const BLEND = /^(mix|bg)-blend-(?!normal$)/;
 // The theme narrows these three to fades under reduced motion, but a variant raises the
 // specificity above motion-reduce:transition-none, so the author's opt out loses.
 const MOVING_TRANSITION = /^transition(-all|-transform)?$/;
+// Under the reset theme a bare transform number resolves only on the spacing scale; any
+// other number compiles to nothing, which is a silent bug. Half and full are fractions of
+// the element's own box, used for centring. Rotation is geometry only in quarter turns, and
+// a reverse half turn ends where rotate-180 does, so spin direction stays with the motion
+// helpers. Each family keeps its identity values.
+const SPACING_SCALE = new Set([
+  '0',
+  '2',
+  '4',
+  '8',
+  '12',
+  '16',
+  '24',
+  '32',
+  '48',
+  '64',
+  '96',
+  '128',
+]);
+// The 3D axes (translate-z, rotate-x, rotate-y, scale-z) match too, with no allowed value,
+// so they are refused: flat UI has no depth to move along.
+const TRANSLATE = /^translate-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
+const ROTATE = /^rotate-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
+const SCALE = /^scale-(?:(?<axis>[xyz])-)?(?<v>.+)$/;
+const ASPECT = /^aspect-(?<v>.+)$/;
+
+function transformProblem(utility: string, negative: boolean): boolean {
+  const v = (pattern: RegExp) => pattern.exec(utility)?.groups?.['v'];
+  const axis = (pattern: RegExp) => pattern.exec(utility)?.groups?.['axis'];
+  const translate = v(TRANSLATE);
+  if (translate !== undefined) {
+    if (axis(TRANSLATE) === 'z') return true;
+    if (translate === 'none') return negative;
+    return !(SPACING_SCALE.has(translate) || translate === '1/2' || translate === 'full');
+  }
+  const rotate = v(ROTATE);
+  if (rotate !== undefined) {
+    if (axis(ROTATE) !== undefined) return true;
+    if (negative) return rotate !== '90';
+    return !['0', '90', '180', 'none'].includes(rotate);
+  }
+  const scale = v(SCALE);
+  if (scale !== undefined) {
+    if (axis(SCALE) === 'z') return true;
+    return negative || !(scale === '100' || scale === 'none');
+  }
+  const aspect = v(ASPECT);
+  if (aspect !== undefined) return negative || !(aspect === 'auto' || aspect === 'square');
+  return false;
+}
 
 // Splits on ":" outside brackets and parentheses, so data-[state=open]:p-4 keeps its variant.
 function parts(token: string): string[] {
@@ -75,6 +125,7 @@ export type Problem =
   | 'filter'
   | 'blend'
   | 'motion'
+  | 'transform'
   | 'layer';
 
 const value = (match: RegExpExecArray | null) =>
@@ -82,7 +133,9 @@ const value = (match: RegExpExecArray | null) =>
 
 export function classify(token: string): Problem | null {
   const segments = parts(token);
-  const utility = (segments.pop() ?? '').replace(/^!|!$/g, '').replace(/^-/, '');
+  const signed = (segments.pop() ?? '').replace(/^!|!$/g, '');
+  const negative = signed.startsWith('-');
+  const utility = signed.replace(/^-/, '');
   if (segments.some((v) => VALUE_VARIANT.test(v))) return 'arbitrary';
   if (ARBITRARY_PROPERTY.test(utility)) return 'arbitrary';
   if (ARBITRARY.test(utility) || ARBITRARY_MODIFIER.test(utility)) return 'arbitrary';
@@ -109,6 +162,7 @@ export function classify(token: string): Problem | null {
   if (MOVING_TRANSITION.test(utility) && segments.length > 0 && !segments.includes('motion-safe')) {
     return 'motion';
   }
+  if (transformProblem(utility, negative)) return 'transform';
   if (BARE_LAYER.test(utility)) return 'layer';
   return null;
 }
@@ -136,6 +190,8 @@ export const noArbitraryValues: Rule.RuleModule = {
         "'{{token}}' blends with whatever is underneath, so the colour shown is one the contrast tests never measured. Use a colour role as it is.",
       motion:
         "'{{token}}' transitions movement behind a variant. Put transition or transition-colors on the element itself and only the colour behind the variant (transition-colors hover:bg-hover). Use motion-safe: only for a transition that really is scoped, such as motion-safe:sm:transition.",
+      transform:
+        "'{{token}}' is a transform off the token scales. Translate on the spacing scale, by 1/2 or full; rotate by rotate-0, rotate-90, rotate-180 or -rotate-90; scale only with scale-100; aspect-square or aspect-auto. Add a size token for anything else.",
       layer: "'{{token}}' is a raw stacking order. Use z-base, z-raised, z-overlay or z-toast.",
     },
   },

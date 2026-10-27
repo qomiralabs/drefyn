@@ -1,3 +1,14 @@
 /* Import after tailwindcss and @drefyn/ui/tailwind.css, so the app's Tailwind build also
    reads the class names the components use. */
 @source "./";
+
+/* Icons draw with the stroke token at every size. Stroke width is inherited, so it sits on
+   the svg; vector-effect is not, so it sits on each shape. Tailwind has no utility for
+   either without a bracket value. */
+[data-icon] {
+  stroke-width: var(--dr-stroke-icon);
+}
+
+[data-icon] * {
+  vector-effect: non-scaling-stroke;
+}

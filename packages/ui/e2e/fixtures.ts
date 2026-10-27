@@ -44,6 +44,48 @@ export const docsIds = (): string[] =>
     .filter((entry) => entry.type === 'docs')
     .map((entry) => entry.id);
 
+// Story ids carrying a tag, such as 'disabled' for stories that show a disabled control.
+export function storiesTagged(tag: string): string[] {
+  if (!existsSync(INDEX)) {
+    throw new Error('No static Storybook. Run pnpm --filter @drefyn/ui storybook:build first.');
+  }
+  const { entries } = JSON.parse(readFileSync(INDEX, 'utf8')) as {
+    entries: Record<string, { id: string; type: string; tags?: string[] }>;
+  };
+  return Object.values(entries)
+    .filter((entry) => entry.type === 'story' && (entry.tags ?? []).includes(tag))
+    .map((entry) => entry.id)
+    .sort();
+}
+
+export const rgb = (hex: string): string => {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+};
+
+// Safari moves focus to links and buttons only with Option held, unless the user changed it.
+export const tabKey = (browserName: string): string =>
+  browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+
+// A test that opens every story gets this much time per page on top of the default, so the
+// budget grows with the build instead of failing when a story is added. Measured under
+// amd64 emulation on Apple Silicon, the slowest place these run.
+export const PAGE_BUDGET_MS = 2_000;
+export const sweepTimeout = (pages: number): number => 30_000 + pages * PAGE_BUDGET_MS;
+
+// Firefox lays out in sixtieths of a pixel and reports a width as right minus left in
+// floating point, so two equal boxes can differ in the fifth decimal depending on where they
+// sit. A hundredth of a pixel is far below anything visible.
+export const SAME_SIZE_PX = 0.01;
+export const sameSize = (
+  a: { width: number; height: number } | null,
+  b: { width: number; height: number } | null,
+): boolean =>
+  a !== null &&
+  b !== null &&
+  Math.abs(a.width - b.width) < SAME_SIZE_PX &&
+  Math.abs(a.height - b.height) < SAME_SIZE_PX;
+
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
   const mode = entry.type === 'docs' ? 'docs' : 'story';
   await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);

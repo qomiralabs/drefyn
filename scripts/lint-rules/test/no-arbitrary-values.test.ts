@@ -27,7 +27,26 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
     `const c = 'p-16 bg-ground text-ink rounded-md shadow-1';`,
     `const c = 'sm:p-8 hover:bg-raised focus-visible:outline';`,
     `const c = 'data-[state=open]:bg-raised group-aria-[selected=true]:text-ink';`,
-    `const c = 'w-1/2 aspect-16/9 grid-cols-3 duration-base ease-enter';`,
+    `const c = 'w-1/2 aspect-square grid-cols-3 duration-base ease-enter';`,
+    // Transforms on the spacing scale, half and full of the element's own box, quarter turns
+    // and identities are tokens or geometry. Anything else compiles to nothing under the
+    // reset theme, or is a design value.
+    `const c = 'translate-x-8 -translate-x-8 translate-y-16 -translate-y-2 translate-x-0';`,
+    `const c = 'translate-y-128 -translate-x-128';`,
+    `const c = 'motion-safe:translate-x-12 aria-checked:translate-x-12 hover:-translate-y-4';`,
+    `const c = 'translate-x-1/2 -translate-x-1/2 translate-y-1/2 -translate-y-1/2';`,
+    `const c = 'translate-x-full -translate-x-full translate-y-full -translate-y-full';`,
+    `const c = 'rotate-0 rotate-90 rotate-180 -rotate-90 group-aria-expanded:rotate-180';`,
+    // Each identity on its own, so none of them can be dropped by accident.
+    `const c = 'scale-100';`,
+    `const c = 'scale-x-100';`,
+    `const c = 'scale-y-100';`,
+    `const c = 'scale-none';`,
+    `const c = 'rotate-none';`,
+    `const c = 'translate-none';`,
+    `const c = 'aspect-auto';`,
+    `const c = 'aspect-square';`,
+    `const c = 'hover:scale-100 sm:aspect-auto';`,
     // Zero is not a size, and full or no opacity is the measured colour or nothing.
     `const c = 'border-0 outline-0 opacity-0 opacity-100 delay-0 duration-0';`,
     `const c = 'border border-rule outline outline-focus-ring ring-accent-ink';`,
@@ -138,6 +157,35 @@ tester.run('no-arbitrary-values', noArbitraryValues, {
       code: `const c = '${token}';`,
       errors: [{ messageId: 'motion' as const, data: { token } }],
     })),
+    ...[
+      'translate-x-3',
+      'translate-x-5',
+      '-translate-x-40',
+      'translate-x-1/3',
+      '-translate-y-2/3',
+      'hover:translate-x-px',
+      'rotate-45',
+      '-rotate-180',
+      'rotate-270',
+      'group-hover:rotate-12',
+      'scale-50',
+      'scale-x-50',
+      'scale-y-110',
+      'hover:scale-105',
+      'aspect-16/9',
+      'aspect-video',
+      // 3D axes and negated identities are not on any token scale.
+      'rotate-x-90',
+      'rotate-y-180',
+      'translate-z-8',
+      'scale-z-100',
+      '-scale-x-100',
+      '-scale-100',
+      '-translate-none',
+    ].map((token) => ({
+      code: `const c = '${token}';`,
+      errors: [{ messageId: 'transform' as const, data: { token } }],
+    })),
     ...['z-10', 'z-0', '-z-10', 'hover:z-50'].map((token) => ({
       code: `const c = '${token}';`,
       errors: [{ messageId: 'layer' as const, data: { token } }],
@@ -241,6 +289,14 @@ describe('fixture', () => {
 });
 
 describe('no-arbitrary-values messages', () => {
+  it('names the transforms that are allowed', () => {
+    const message = noArbitraryValues.meta?.messages?.['transform'] ?? '';
+    expect(message).toMatch(/spacing/);
+    expect(message).toMatch(/rotate-90/);
+    expect(message).toMatch(/scale-100/);
+    expect(message).toMatch(/aspect-square/);
+  });
+
   it('points a variant transition at the element, and motion-safe: at scoped transitions only', () => {
     const message = noArbitraryValues.meta?.messages?.['motion'] ?? '';
     expect(message).toMatch(/on the element/);
