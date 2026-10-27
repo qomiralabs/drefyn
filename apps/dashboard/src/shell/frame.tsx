@@ -1,5 +1,4 @@
 'use client';
-import { LazyMotion, MotionConfig } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import {
   createContext,
@@ -15,9 +14,6 @@ import {
 import type { CommandBarProps } from './command-bar.tsx';
 import { isTyping, nextRegion, sequenceTarget } from './keys.ts';
 import { ShellToasts, toast } from './toast.tsx';
-
-// Motion's animation features load after first paint; only movement the shell owns uses them.
-const motionFeatures = () => import('motion/react').then((mod) => mod.domAnimation);
 
 interface ShellState {
   readonly org: string;
@@ -142,15 +138,11 @@ export function ShellFrame({ org, children }: { org: string; children: ReactNode
 
   return (
     <ShellContext value={state}>
-      <MotionConfig reducedMotion="user">
-        <LazyMotion features={motionFeatures} strict>
-          {children}
-          {CommandBar === null ? null : (
-            <CommandBar org={org} open={commandOpen} onOpenChange={setCommandOpen} />
-          )}
-          <ShellToasts />
-        </LazyMotion>
-      </MotionConfig>
+      {children}
+      {CommandBar === null ? null : (
+        <CommandBar org={org} open={commandOpen} onOpenChange={setCommandOpen} />
+      )}
+      <ShellToasts />
     </ShellContext>
   );
 }
