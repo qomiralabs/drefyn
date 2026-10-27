@@ -270,8 +270,12 @@ select ${GRANTEE} as grantee, a.privilege_type as privilege
  order by 1, 2`;
 
 const DEFAULT_ACLS = `
-select pg_get_userbyid(d.defaclrole)::text as role, coalesce(n.nspname::text, '') as schema_name,
-       d.defaclobjtype::text as objtype, ${GRANTEE} as grantee, a.privilege_type as privilege
+select pg_get_userbyid(d.defaclrole)::text as role,
+       coalesce(' in schema ' || n.nspname::text, '') as in_schema,
+       case d.defaclobjtype when 'r' then 'tables' when 'S' then 'sequences'
+            when 'f' then 'functions' when 'T' then 'types' when 'n' then 'schemas'
+            when 'L' then 'large objects' else 'objects of type ' || d.defaclobjtype::text end as what,
+       ${GRANTEE} as grantee, a.privilege_type as privilege
   from pg_default_acl d
   left join pg_namespace n on n.oid = d.defaclnamespace
   cross join lateral aclexplode(d.defaclacl) a
@@ -291,7 +295,7 @@ select r.rolname::text as role_name, d.datname::text as database_name, s.setconf
   from pg_db_role_setting s
   join pg_roles r on r.oid = s.setrole
   left join pg_database d on d.oid = s.setdatabase
- where r.rolname in ('${APP_ROLE}', '${READER_ROLE}')
+ where r.rolname in ('${APP_ROLE}', '${READER_ROLE}') and cardinality(s.setconfig) > 0
  order by 1, 2 nulls first`;
 
 const DATABASE_SETTINGS = `
@@ -299,18 +303,10 @@ select current_database()::text as database_name,
        coalesce((select s.setconfig from pg_db_role_setting s join pg_database d on d.oid = s.setdatabase
                   where s.setrole = 0 and d.datname = current_database()), '{}'::text[]) as settings`;
 
-const OBJECT_TYPES: Readonly<Record<string, string>> = {
-  r: 'tables',
-  S: 'sequences',
-  f: 'functions',
-  T: 'types',
-  n: 'schemas',
-  L: 'large objects',
-};
-
 interface TableFacts {
   readonly name: string;
-  readonly organizationColumn: string | null;
+  // Type and nullability of organization_id, for example "uuid not null".
+  readonly organizationColumn: string;
   readonly projectColumn: string | null;
 }
 
@@ -321,7 +317,7 @@ function tenantColumnProblems(table: TableFacts): CatalogProblem[] {
       problem(
         'tenant_column',
         table.name,
-        `${table.name}.organization_id must be uuid not null, found ${table.organizationColumn ?? 'none'}`,
+        `${table.name}.organization_id must be uuid not null, found ${table.organizationColumn}`,
       ),
     );
   }
@@ -421,14 +417,11 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
   const withoutTenantColumn: string[] = [];
   const rlsByTable = new Map<string, { rls: boolean; forced: boolean }>();
   for (const row of await rows(client, TABLES)) {
-    const table: TableFacts = {
-      name: text(row, 'name'),
-      organizationColumn: maybeText(row, 'organization_column'),
-      projectColumn: maybeText(row, 'project_column'),
-    };
-    rlsByTable.set(table.name, { rls: flag(row, 'rls'), forced: flag(row, 'forced') });
-    if (table.organizationColumn === null) withoutTenantColumn.push(table.name);
-    else tables.push(table);
+    const name = text(row, 'name');
+    const organizationColumn = maybeText(row, 'organization_column');
+    rlsByTable.set(name, { rls: flag(row, 'rls'), forced: flag(row, 'forced') });
+    if (organizationColumn === null) withoutTenantColumn.push(name);
+    else tables.push({ name, organizationColumn, projectColumn: maybeText(row, 'project_column') });
   }
   out.push(...globalTableProblems(withoutTenantColumn, allow.globalTables));
   // Allow listed global tables hold no tenant rows; every other table needs forced RLS.
@@ -468,16 +461,11 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     const table = text(row, 'table_name');
     if (!tenantTables.has(table)) continue;
     const columns = texts(row, 'columns');
-    const expressions = flag(row, 'has_expressions');
     if (columns.includes('organization_id')) continue;
-    if (!expressions && columns.length === 1 && columns[0] === 'id') continue;
+    if (!flag(row, 'has_expressions') && columns.length === 1 && columns[0] === 'id') continue;
     const index = text(row, 'index_name');
     out.push(
-      problem(
-        'tenant_unique',
-        table,
-        `${table} has unique index ${index} on (${columns.join(', ')}${expressions ? ', expressions' : ''}) without organization_id`,
-      ),
+      problem('tenant_unique', table, `${table} has unique index ${index} without organization_id`),
     );
   }
   return out;
@@ -543,16 +531,15 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     const grantee = text(row, 'grantee');
     const privilege = text(row, 'privilege');
     const target = column === null ? object : `${object}.${column}`;
+    // The owner itself is left out by the query, so any grant here is one too many.
     if (BOOKKEEPING.has(object)) {
-      if (grantee !== MIGRATION_ROLE) {
-        out.push(
-          problem(
-            'bookkeeping_grant',
-            object,
-            `${target} grants ${privilege} to ${grantee}; only ${MIGRATION_ROLE} may touch it`,
-          ),
-        );
-      }
+      out.push(
+        problem(
+          'bookkeeping_grant',
+          object,
+          `${target} grants ${privilege} to ${grantee}; only ${MIGRATION_ROLE} may touch it`,
+        ),
+      );
       continue;
     }
     if (grantee !== READER_ROLE && grantee !== 'public') continue;
@@ -612,14 +599,11 @@ async function defaultPrivilegeProblems(client: pg.ClientBase): Promise<CatalogP
   for (const row of await rows(client, DEFAULT_ACLS)) {
     const grantee = text(row, 'grantee');
     if (grantee !== READER_ROLE && grantee !== 'public') continue;
-    const schema = text(row, 'schema_name');
-    const objtype = text(row, 'objtype');
-    const what = OBJECT_TYPES[objtype] ?? `objects of type ${objtype}`;
     out.push(
       problem(
         'default_privileges',
         grantee,
-        `default privileges for ${text(row, 'role')}${schema === '' ? '' : ` in schema ${schema}`} grant ${text(row, 'privilege')} on new ${what} to ${grantee}; grants to it must be explicit`,
+        `default privileges for ${text(row, 'role')}${text(row, 'in_schema')} grant ${text(row, 'privilege')} on new ${text(row, 'what')} to ${grantee}; grants to it must be explicit`,
       ),
     );
   }
@@ -640,11 +624,9 @@ async function settingProblems(client: pg.ClientBase): Promise<CatalogProblem[]>
   const out: CatalogProblem[] = [];
   for (const row of await rows(client, ROLE_SETTINGS)) {
     const role = text(row, 'role_name');
-    const settings = texts(row, 'settings');
-    if (settings.length === 0) continue;
     const description = describeRoleSetting({
       database: maybeText(row, 'database_name'),
-      settings,
+      settings: texts(row, 'settings'),
     });
     out.push(
       problem(
@@ -654,8 +636,7 @@ async function settingProblems(client: pg.ClientBase): Promise<CatalogProblem[]>
       ),
     );
   }
-  const [database] = await rows(client, DATABASE_SETTINGS);
-  if (database !== undefined) {
+  for (const database of await rows(client, DATABASE_SETTINGS)) {
     const name = text(database, 'database_name');
     for (const setting of unexpectedDatabaseSettings(texts(database, 'settings'))) {
       out.push(
@@ -699,8 +680,7 @@ export interface CheckCatalogIo {
 
 function describeError(error: unknown): string {
   const mapped = toDbError(error, 'DREFYN_MIGRATION_DATABASE_URL');
-  if (mapped instanceof DbError) return `${mapped.code}: ${mapped.message}`;
-  return mapped instanceof Error ? mapped.message : String(mapped);
+  return mapped instanceof DbError ? `${mapped.code}: ${mapped.message}` : String(mapped);
 }
 
 // Connects with DREFYN_MIGRATION_DATABASE_URL; exits 0 when clean, 1 with one line per problem.

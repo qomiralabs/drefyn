@@ -10,6 +10,7 @@ import {
   type CompiledQuery,
   type DatabaseConnection,
   type Dialect,
+  type Kysely,
   type QueryResult,
 } from 'kysely';
 import pg from 'pg';
@@ -125,7 +126,7 @@ class IsolatedClient extends pg.Client {
   }
 }
 
-function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfig {
+export function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfig {
   const url = new URL(config.url);
   const password = decodeURIComponent(url.password);
   return {
@@ -148,6 +149,8 @@ function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfig {
   };
 }
 
+// For failures to get a connection at all. Anything the mapping does not know, such as a TLS
+// handshake the server refused, still means no connection.
 function unavailable(error: unknown, kind: PoolKind): unknown {
   const mapped = toDbError(error, URL_KEYS[kind]);
   if (mapped instanceof DbError) return mapped;
@@ -169,15 +172,15 @@ async function open(config: DatabaseConfig, kind: PoolKind): Promise<object> {
   try {
     client = await pool.connect();
   } catch (error) {
-    await pool.end().catch(() => undefined);
+    await Promise.allSettled([pool.end()]);
     throw unavailable(error, kind);
   }
   try {
     assertRoleSafe(await readRoleFacts(client), kind);
   } catch (error) {
     client.release(true);
-    await pool.end().catch(() => undefined);
-    throw unavailable(error, kind);
+    await Promise.allSettled([pool.end()]);
+    throw toDbError(error, URL_KEYS[kind]);
   }
   client.release();
   const handle = Object.freeze({});
@@ -241,10 +244,10 @@ class TransactionConnection implements DatabaseConnection {
         ...compiled.parameters,
       ]);
       const counted = ['INSERT', 'UPDATE', 'DELETE', 'MERGE'].includes(result.command);
-      return {
-        rows: result.rows,
-        ...(counted ? { numAffectedRows: BigInt(result.rowCount ?? 0) } : {}),
-      };
+      const affected = counted ? result.rowCount : null;
+      return affected === null
+        ? { rows: result.rows }
+        : { rows: result.rows, numAffectedRows: BigInt(affected) };
     } catch (error) {
       this.#failure ??= error;
       throw error;
@@ -258,15 +261,30 @@ class TransactionConnection implements DatabaseConnection {
   }
 }
 
-const adapter = new PostgresAdapter();
-const compiler = new PostgresQueryCompiler();
-const driver = new DummyDriver();
-const dialect: Dialect = {
-  createAdapter: () => adapter,
-  createDriver: () => driver,
-  createIntrospector: (db) => new PostgresIntrospector(db),
-  createQueryCompiler: () => compiler,
-};
+// Compiles Postgres SQL and never connects: the driver is a dummy, because the connection
+// comes from runTransaction.
+class TransactionDialect implements Dialect {
+  createAdapter(): PostgresAdapter {
+    return new PostgresAdapter();
+  }
+
+  createDriver(): DummyDriver {
+    return new DummyDriver();
+  }
+
+  createIntrospector(db: Kysely<unknown>): PostgresIntrospector {
+    return new PostgresIntrospector(db);
+  }
+
+  createQueryCompiler(): PostgresQueryCompiler {
+    return new PostgresQueryCompiler();
+  }
+}
+
+const dialect = new TransactionDialect();
+const adapter = dialect.createAdapter();
+const compiler = dialect.createQueryCompiler();
+const driver = dialect.createDriver();
 
 // Kysely only builds and compiles the work's queries. The transaction itself (begin, the
 // settings, commit) is run here on the raw client, so nothing in Kysely decides when the
@@ -294,6 +312,13 @@ async function runTransaction<DB, T>(
     throw unavailable(error, state.kind);
   }
   const connection = new TransactionConnection(client);
+  // pg-pool drops its own error listener while a client is checked out, so a connection
+  // lost between two statements of the work would otherwise crash the process.
+  const events = { lost: false };
+  const onError = () => {
+    events.lost = true;
+  };
+  client.on('error', onError);
   // A client whose state is unknown is destroyed instead of going back to the pool.
   let discard = true;
   try {
@@ -337,7 +362,8 @@ async function runTransaction<DB, T>(
     throw toDbError(error, URL_KEYS[state.kind]);
   } finally {
     connection.close();
-    client.release(discard ? true : undefined);
+    client.removeListener('error', onError);
+    client.release(discard || events.lost ? true : undefined);
   }
 }
 

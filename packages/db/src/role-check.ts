@@ -99,7 +99,7 @@ select r.rolname::text as current_user_name,
        array(select coalesce(d.datname::text, '') || '|' || array_to_string(s.setconfig, chr(31))
                from pg_catalog.pg_db_role_setting s
                left join pg_catalog.pg_database d on d.oid = s.setdatabase
-              where s.setrole = r.oid
+              where s.setrole = r.oid and cardinality(s.setconfig) > 0
               order by 1) as role_settings,
        coalesce((select s.setconfig
                    from pg_catalog.pg_db_role_setting s
@@ -129,7 +129,7 @@ function parseRoleSetting(row: string): RoleSetting {
   const rest = row.slice(bar + 1);
   return {
     database: database === '' ? null : database,
-    settings: rest === '' ? [] : rest.split('\u001f'),
+    settings: rest.split('\u001f'),
   };
 }
 

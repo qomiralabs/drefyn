@@ -77,23 +77,19 @@ function tokenize(sql: string): Token[] {
         end: i,
       });
     } else if (c === '$' && DOLLAR_TAG.test(sql.slice(i, i + 66))) {
-      const tag = DOLLAR_TAG.exec(sql.slice(i, i + 66))?.[0] ?? '$$';
+      const tag = sql.slice(i, sql.indexOf('$', i + 1) + 1);
       const start = i;
       const close = sql.indexOf(tag, i + tag.length);
-      const end = close === -1 ? n : close + tag.length;
-      tokens.push({
-        kind: 'body',
-        value: sql.slice(i + tag.length, close === -1 ? n : close),
-        start,
-        end,
-      });
+      const valueEnd = close === -1 ? n : close;
+      const end = Math.min(valueEnd + tag.length, n);
+      tokens.push({ kind: 'body', value: sql.slice(i + tag.length, valueEnd), start, end });
       i = end;
     } else if (WORD_START.test(c)) {
       const start = i;
       while (i < n && WORD_PART.test(sql.charAt(i))) i += 1;
       const word = sql.slice(start, i);
       // E'...' strings take backslash escapes.
-      if ((word === 'e' || word === 'E') && sql.charAt(i) === "'") {
+      if (word.toLowerCase() === 'e' && sql.charAt(i) === "'") {
         i = endOfString(sql, i + 1, true);
         tokens.push({ kind: 'string', value: sql.slice(start + 2, i - 1), start, end: i });
       } else {
