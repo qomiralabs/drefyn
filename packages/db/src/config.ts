@@ -1,5 +1,4 @@
 import { DbError } from './errors.ts';
-import { notImplemented } from './not-implemented.ts';
 
 export type SslMode = 'require' | 'verify-full' | 'disable';
 
@@ -19,6 +18,9 @@ export interface MigrationConfig {
 }
 
 const SSL_MODES: readonly SslMode[] = ['require', 'verify-full', 'disable'];
+
+// Public paths serve cached, published content, so a slow query there is a fault.
+const READER_STATEMENT_TIMEOUT_MS = 2000;
 
 // Each check returns a reason that names no value: a value may be a password pasted into
 // the wrong key, and a URL carries one.
@@ -155,7 +157,29 @@ export function parseMigrationConfig(env: Env): MigrationConfig {
 }
 
 // Reads DREFYN_PUBLIC_READER_DATABASE_URL with the same pool and SSL keys as the app pool and
-// a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL.
+// a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL: a missing reader
+// URL must not become a reader pool with the app role's grants on drafts.
 export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
-  return notImplemented(`parsePublishedReaderConfig(${typeof env})`);
+  const c = new Collector();
+  const config: DatabaseConfig = {
+    url: c.take(
+      'DREFYN_PUBLIC_READER_DATABASE_URL',
+      checkUrl(env['DREFYN_PUBLIC_READER_DATABASE_URL']),
+      '',
+    ),
+    poolMax: c.take(
+      'DREFYN_DATABASE_POOL_MAX',
+      checkPositiveInteger(env['DREFYN_DATABASE_POOL_MAX'], 10),
+      0,
+    ),
+    poolWaitMs: c.take(
+      'DREFYN_DATABASE_POOL_WAIT_MS',
+      checkPositiveInteger(env['DREFYN_DATABASE_POOL_WAIT_MS'], 2000),
+      0,
+    ),
+    statementTimeoutMs: READER_STATEMENT_TIMEOUT_MS,
+    ssl: c.take('DREFYN_DATABASE_SSL', checkSsl(env['DREFYN_DATABASE_SSL']), 'verify-full'),
+  };
+  c.throwIfAny();
+  return config;
 }
