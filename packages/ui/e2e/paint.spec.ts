@@ -11,6 +11,7 @@ import {
   ORIGIN,
   openStory,
   rgb,
+  sameSize,
   storiesTagged,
   storyIds,
   sweepTimeout,
@@ -275,19 +276,15 @@ test.describe('with JS off', () => {
       for (const [rest, busy] of PAIRS) {
         const pair = page.locator(`button[name="${rest}"]`);
         await expect(pair, rest).toHaveCount(2);
-        const widths = async () => {
-          const boxes = [await pair.nth(0).boundingBox(), await pair.nth(1).boundingBox()];
-          return boxes.map((box) => (box === null ? null : `${box.width}x${box.height}`));
-        };
         await expect
           .poll(
             async () => {
-              const [a, b] = await widths();
-              return a !== null && a === b;
+              const [a, b] = [await pair.nth(0).boundingBox(), await pair.nth(1).boundingBox()];
+              return sameSize(a, b) ? 'same' : JSON.stringify([a, b]);
             },
             { message: `${rest} and ${busy}` },
           )
-          .toBe(true);
+          .toBe('same');
       }
     });
   }
