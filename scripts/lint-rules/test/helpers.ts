@@ -49,6 +49,14 @@ export interface TempWorkspace {
   cleanup: () => void;
 }
 
+// For any hook that calls tempWorkspace, which runs git init. Hooks keep vitest's 10 s
+// default while this package gives tests 60 s, and git init is what timed out. Over 30
+// runs with the process held to 0.5 percent of a CPU on a busy host it took 4.5 s median,
+// over 10 s in 5 runs and 32 s at most (one further run stalled with the whole host); at
+// 2 percent, 4.3 s at most. The maximum is used as the p99: 60 s matches the test timeout
+// and is 1.9 times the 0.5 percent maximum.
+export const GIT_INIT_HOOK_TIMEOUT_MS = 60_000;
+
 export function tempWorkspace(patterns = ['packages/*', 'apps/*', 'scripts/*']): TempWorkspace {
   const root = mkdtempSync(join(tmpdir(), 'drefyn-lint-rules-'));
   const write = (path: string, content: string) => {

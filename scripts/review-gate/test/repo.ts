@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -86,6 +86,17 @@ export class Repo {
   // A merge commit whose tree is the clean result with extra edits on top.
   evilMerge(ours: string, theirs: string, files: Files): string {
     return this.commitTree(this.tree(this.cleanMergeTree(ours, theirs), files), [ours, theirs]);
+  }
+
+  // A private copy made with a file copy, not git: building the shared history spawns about
+  // thirty git processes, which a starved host runs at seconds each. Commit numbering
+  // carries on so a new commit never repeats an old message and collides with its SHA.
+  clone(): Repo {
+    const dir = mkdtempSync(join(tmpdir(), 'review-gate-repo-'));
+    cpSync(this.dir, dir, { recursive: true });
+    const copy = new Repo(dir);
+    copy.#count = this.#count;
+    return copy;
   }
 
   setBranch(name: string, sha: string): void {

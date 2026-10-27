@@ -8,12 +8,19 @@ import {
   REVIEWED_PREFIXES,
   REVIEWED_ROOT_FILES,
 } from '../src/manifest.ts';
-import { goodPackage, repoRoot, SCRIPTS, tempWorkspace, type TempWorkspace } from './helpers.ts';
+import {
+  GIT_INIT_HOOK_TIMEOUT_MS,
+  goodPackage,
+  repoRoot,
+  SCRIPTS,
+  tempWorkspace,
+  type TempWorkspace,
+} from './helpers.ts';
 
 let ws: TempWorkspace;
 beforeEach(() => {
   ws = tempWorkspace();
-});
+}, GIT_INIT_HOOK_TIMEOUT_MS);
 afterEach(() => {
   ws.cleanup();
 });
