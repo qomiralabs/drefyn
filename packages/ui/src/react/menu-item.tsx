@@ -20,6 +20,15 @@ const BASE =
 const LIVE = 'cursor-default text-body data-focused:bg-hover data-pressed:bg-pressed';
 const DISABLED = 'cursor-not-allowed text-disabled-text';
 
+// The key is a shortcut, not part of the name, so screen readers get it from
+// aria-keyshortcuts. React Aria filters that attribute out of an item's props, so it is
+// written here.
+const markShortcut = (shortcut: string | undefined) => (item: HTMLDivElement | null) => {
+  if (item === null) return;
+  if (shortcut === undefined) item.removeAttribute('aria-keyshortcuts');
+  else item.setAttribute('aria-keyshortcuts', shortcut);
+};
+
 export function MenuItem({
   id,
   children,
@@ -33,6 +42,7 @@ export function MenuItem({
       id={id}
       isDisabled={disabled}
       {...(onAction === undefined ? {} : { onAction })}
+      ref={markShortcut(shortcut)}
       {...(typeof children === 'string' ? { textValue: children } : {})}
       className={`${BASE} ${disabled ? DISABLED : LIVE}`}
     >
