@@ -87,6 +87,12 @@ string that holds a Tailwind class which mints a value outside the tokens:
   fades in, snaps back out, and drops the colour fade under reduced motion. Use
   `motion-safe:` only for a transition that really is scoped, such as
   `motion-safe:sm:transition` (`sm` is the only breakpoint)
+- transforms off the token scales: `translate-x-5`, `translate-x-1/3`, `rotate-45`,
+  `-rotate-180`, `scale-50`, `aspect-video`. Translates take the spacing scale (`translate-x-12`,
+  `-translate-y-4`), `1/2` or `full`; rotation takes `rotate-0`, `rotate-90`, `rotate-180` and
+  `-rotate-90`; scale only `scale-100`; aspect only `aspect-square`. The identities
+  (`scale-none`, `rotate-none`, `translate-none`, `aspect-auto`) are allowed. Under the reset
+  theme any other number compiles to nothing
 - bare stacking orders: `z-10`. Use `z-base`, `z-raised`, `z-overlay` or `z-toast`
 
 Every bare number may have decimals. Zero is allowed for lengths and delays (`border-0`,
