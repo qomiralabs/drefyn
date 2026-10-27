@@ -597,13 +597,50 @@ describe('aliases', () => {
   });
 
   it('declares each alias with the roles it resolves to, in both modes', () => {
-    expect(aliasRoles.map((a) => a.role)).toEqual(['surface.overlay']);
+    expect(aliasRoles.map((a) => a.role)).toEqual(['surface.overlay', 'meter.track', 'meter.fill']);
     for (const a of aliasRoles) {
       for (const mode of ['light', 'dark'] as const) {
         expect(colorOf(a.role, mode), `${a.role} ${mode}`).toBe(colorOf(a.resolves[mode], mode));
       }
       expect(a.why.length, a.role).toBeGreaterThan(10);
     }
+  });
+});
+
+// A plan limit is a business fact, not a health state, so meters never take a state colour:
+// secondary ink on the rule at every level.
+describe('usage meters', () => {
+  const ratio = (fg: 'meter.fill', bg: 'meter.track' | 'surface.ground', mode: 'light' | 'dark') =>
+    floor2(contrast(colorOf(fg, mode), colorOf(bg, mode)));
+
+  it('are secondary ink on the rule track, in both modes', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      expect(colorOf('meter.fill', mode)).toBe(colorOf('text.secondary', mode));
+      expect(colorOf('meter.track', mode)).toBe(colorOf('border.rule', mode));
+    }
+  });
+
+  it('measure as the shell spike did, on the track and on the ground', () => {
+    expect([
+      ratio('meter.fill', 'meter.track', 'light'),
+      ratio('meter.fill', 'meter.track', 'dark'),
+    ]).toEqual([6.03, 6.01]);
+    expect([
+      ratio('meter.fill', 'surface.ground', 'light'),
+      ratio('meter.fill', 'surface.ground', 'dark'),
+    ]).toEqual([7.25, 7.4]);
+  });
+
+  it('are required pairs at 3:1 in both modes', () => {
+    const pairs = expandPairs(requiredPairs).filter((p) => p.fg === 'meter.fill');
+    expect(pairs.map((p) => `${p.mode} ${p.bg} ${p.kind}`).sort()).toEqual(
+      [
+        'dark meter.track non-text',
+        'dark surface.ground non-text',
+        'light meter.track non-text',
+        'light surface.ground non-text',
+      ].sort(),
+    );
   });
 });
 

@@ -192,6 +192,30 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
   });
 
+  it('lays out the landing column, the drawer and the inspector from the tokens', async () => {
+    const css = await build(['max-w-landing', 'w-shell-drawer', 'w-shell-inspector']);
+    expect(ruleBody(css, 'max-w-landing')).toMatch(/max-width: var\(--dr-landing\)/);
+    expect(ruleBody(css, 'w-shell-drawer')).toMatch(/width: var\(--dr-shell-drawer\)/);
+    expect(ruleBody(css, 'w-shell-inspector')).toMatch(/width: var\(--dr-shell-inspector\)/);
+  });
+
+  // A media query cannot read a custom property, so the breakpoints are literal in the theme.
+  // The reset still removes Tailwind's own: md and lg exist at our widths, xl and 2xl not at all.
+  it('breaks at sm 40rem, md 64rem and lg 80rem, and nowhere else', async () => {
+    const css = await build(['sm:p-8', 'md:p-8', 'lg:p-8', 'xl:p-8', '2xl:p-8']);
+    const width = (cls: string) =>
+      new RegExp(
+        `${escapeRegExp(selector(cls))}\\s*\\{\\s*@media \\(width >= ([\\d.]+rem)\\)`,
+      ).exec(css)?.[1];
+    expect(['sm', 'md', 'lg'].map((b) => width(`${b}:p-8`))).toEqual(['40rem', '64rem', '80rem']);
+    expect(hasRule(css, 'xl:p-8')).toBe(false);
+    expect(hasRule(css, '2xl:p-8')).toBe(false);
+    const declared = [...renderTailwindCss().matchAll(/--breakpoint-([\w-]+): ([^;]+);/g)].map(
+      ([, name, value]) => `${name ?? ''} ${value ?? ''}`,
+    );
+    expect(declared).toEqual(['sm 40rem', 'md 64rem', 'lg 80rem']);
+  });
+
   it('makes a shell utility for every shell key, so a new one cannot be left out', () => {
     const theme = renderTailwindCss();
     for (const k of Object.keys(tokens.layout.shell)) {
@@ -200,9 +224,9 @@ describe('Tailwind theme', () => {
     }
     const extra = {
       ...tokens,
-      layout: { ...tokens.layout, shell: { ...tokens.layout.shell, inspector: 320 } },
+      layout: { ...tokens.layout, shell: { ...tokens.layout.shell, unplaced: 320 } },
     } as unknown as typeof tokens;
-    expect(() => renderTailwindCss(extra)).toThrow(/shell\.inspector/);
+    expect(() => renderTailwindCss(extra)).toThrow(/shell\.unplaced/);
   });
 
   it('makes no utility from a timer', async () => {
@@ -325,7 +349,9 @@ describe('Tailwind theme', () => {
       'leading-6',
       'max-w-prose',
       'ease-in-out',
-      'md:p-8',
+      // Tailwind's xl and 2xl breakpoints; md and lg are ours, at our widths.
+      'xl:p-8',
+      '2xl:p-8',
       'blur-sm',
       'h-10',
       'size-5',
