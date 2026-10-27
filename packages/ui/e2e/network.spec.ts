@@ -1,4 +1,12 @@
-import { docsIds, expect, FOUNDATIONS, openStory, storyIds, test } from './fixtures.ts';
+import {
+  docsIds,
+  expect,
+  FOUNDATIONS,
+  openStory,
+  storyIds,
+  sweepTimeout,
+  test,
+} from './fixtures.ts';
 
 // The fixture fails any test that asks another host for anything. These pages load the
 // parts of the build a story iframe does not: the manager and a docs page.
@@ -18,7 +26,9 @@ test('a docs page loads only from the static build', async ({ page }) => {
 });
 
 test('every story iframe loads only from the static build', async ({ page }) => {
-  for (const id of storyIds()) {
+  const ids = storyIds();
+  test.setTimeout(sweepTimeout(ids.length));
+  for (const id of ids) {
     await openStory(page, id, 'light');
     await page.waitForLoadState('networkidle');
   }

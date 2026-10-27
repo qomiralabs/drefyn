@@ -1,6 +1,14 @@
 import { reducedFadeCapMs, tokens } from '../src/index.ts';
 import type { Page } from '@playwright/test';
-import { expect, FOUNDATIONS, openStory, storyIds, test, THEMES } from './fixtures.ts';
+import {
+  expect,
+  FOUNDATIONS,
+  openStory,
+  storyIds,
+  sweepTimeout,
+  test,
+  THEMES,
+} from './fixtures.ts';
 
 // Properties that move or resize something; under reduced motion none of them may animate.
 const MOVING =
@@ -79,6 +87,7 @@ for (const theme of THEMES) {
   test(`no component story moves anything or fades past the cap in ${theme}`, async ({ page }) => {
     const ids = storyIds().filter((id) => id.startsWith('components-'));
     expect(ids.length).toBeGreaterThan(0);
+    test.setTimeout(sweepTimeout(ids.length));
     const bad: string[] = [];
     let fades = 0;
     for (const id of ids) {

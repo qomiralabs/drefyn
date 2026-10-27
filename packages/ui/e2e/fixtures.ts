@@ -67,6 +67,12 @@ export const rgb = (hex: string): string => {
 export const tabKey = (browserName: string): string =>
   browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
 
+// A test that opens every story gets this much time per page on top of the default, so the
+// budget grows with the build instead of failing when a story is added. Measured under
+// amd64 emulation on Apple Silicon, the slowest place these run.
+export const PAGE_BUDGET_MS = 2_000;
+export const sweepTimeout = (pages: number): number => 30_000 + pages * PAGE_BUDGET_MS;
+
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
   const mode = entry.type === 'docs' ? 'docs' : 'story';
   await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);

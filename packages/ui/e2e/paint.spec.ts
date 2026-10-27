@@ -1,6 +1,15 @@
 import type { Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, openStory, rgb, storiesTagged, storyIds, test, THEMES } from './fixtures.ts';
+import {
+  expect,
+  openStory,
+  rgb,
+  storiesTagged,
+  storyIds,
+  sweepTimeout,
+  test,
+  THEMES,
+} from './fixtures.ts';
 
 interface DisabledLook {
   name: string;
@@ -60,20 +69,6 @@ for (const theme of THEMES) {
     });
   }
 
-  test(`no story shows a disabled control without the disabled tag in ${theme}`, async ({
-    page,
-  }) => {
-    const tagged = new Set(storiesTagged('disabled'));
-    const untagged: string[] = [];
-    for (const id of storyIds()) {
-      if (tagged.has(id)) continue;
-      await openStory(page, id, theme);
-      const count = await page.locator('[aria-disabled="true"]:not([data-busy])').count();
-      if (count > 0) untagged.push(`${id} (${count})`);
-    }
-    expect(untagged).toEqual([]);
-  });
-
   test(`a busy button keeps its variant's paint, a progress cursor and full opacity in ${theme}`, async ({
     page,
   }) => {
@@ -116,14 +111,23 @@ for (const theme of THEMES) {
     }
   });
 
-  test(`no story shows a busy button without the busy tag in ${theme}`, async ({ page }) => {
-    const tagged = new Set(storiesTagged('busy'));
+  test(`no story shows a disabled or busy control without its tag in ${theme}`, async ({
+    page,
+  }) => {
+    const ids = storyIds();
+    test.setTimeout(sweepTimeout(ids.length));
+    const disabled = new Set(storiesTagged('disabled'));
+    const busy = new Set(storiesTagged('busy'));
     const untagged: string[] = [];
-    for (const id of storyIds()) {
-      if (tagged.has(id)) continue;
+    for (const id of ids) {
       await openStory(page, id, theme);
-      const count = await page.locator('[data-busy]').count();
-      if (count > 0) untagged.push(`${id} (${count})`);
+      const found = {
+        disabled: await page.locator('[aria-disabled="true"]:not([data-busy])').count(),
+        busy: await page.locator('[data-busy]').count(),
+      };
+      if (found.disabled > 0 && !disabled.has(id))
+        untagged.push(`${id} disabled (${found.disabled})`);
+      if (found.busy > 0 && !busy.has(id)) untagged.push(`${id} busy (${found.busy})`);
     }
     expect(untagged).toEqual([]);
   });
