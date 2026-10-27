@@ -81,6 +81,11 @@ describe('Menu', () => {
     await userEvent.setup().click(trigger());
     const item = screen.getByRole('menuitem', { name: 'Open monitor' });
     expect(item.querySelector('kbd')?.textContent).toBe('O');
+    // The key reaches screen readers as a shortcut, not as part of the name.
+    expect(item.getAttribute('aria-keyshortcuts')).toBe('O');
+    expect(
+      screen.getByRole('menuitem', { name: 'Start incident' }).hasAttribute('aria-keyshortcuts'),
+    ).toBe(false);
   });
 
   it('runs the item and the menu handler, then closes', async () => {

@@ -80,7 +80,7 @@ revoke all on sequence ${MIGRATIONS}_id_seq from public, drefyn_app, drefyn_publ
 ${ORPHANS};
 `;
 
-function sslOption(mode: SslMode): pg.ClientConfig['ssl'] {
+export function sslOption(mode: SslMode): pg.ClientConfig['ssl'] {
   switch (mode) {
     case 'disable':
       return false;
@@ -114,15 +114,22 @@ export function clientConfig(config: MigrationConfig): pg.ClientConfig {
 }
 
 // pg reads PGOPTIONS, PGREPLICATION, PGBINARY and others for any setting the config leaves
-// empty, and PGOPTIONS could set session settings for the migrate role. The constructor
+// empty, and PGOPTIONS could set session settings for the role. The client constructor
 // reads them synchronously, so they are hidden for exactly that call and put back.
-export function createClient(config: MigrationConfig): pg.Client {
+export function hidePgEnvironment(): () => void {
   const hidden = Object.entries(process.env).filter(([key]) => key.startsWith('PG'));
   for (const [key] of hidden) Reflect.deleteProperty(process.env, key);
+  return () => {
+    for (const [key, value] of hidden) process.env[key] = value;
+  };
+}
+
+export function createClient(config: MigrationConfig): pg.Client {
+  const restore = hidePgEnvironment();
   try {
     return new pg.Client(clientConfig(config));
   } finally {
-    for (const [key, value] of hidden) process.env[key] = value;
+    restore();
   }
 }
 

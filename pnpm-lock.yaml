@@ -105,6 +105,12 @@ importers:
 
   packages/db:
     dependencies:
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+      kysely:
+        specifier: 0.29.7
+        version: 0.29.7
       node-pg-migrate:
         specifier: 9.0.0
         version: 9.0.0(@types/pg@8.23.1)(pg@8.23.1)
@@ -1961,6 +1967,10 @@ packages:
 
   keyv@5.6.0:
     resolution: {integrity: sha512-CYDD3SOtsHtyXeEORYRx2qBtpDJFjRTGXUtmNEMGyzYOKj1TE3tycdlho7kA1Ufx9OYWZzg52QFBGALTirzDSw==}
+
+  kysely@0.29.7:
+    resolution: {integrity: sha512-fmIq+7kv4WbFm2tcfznRzikqB4cuNpgZ40PSU2fAJ2/OO5XhojqnTPrmgrCjYSRJVwBln03XcRXJGnw9H099IQ==}
+    engines: {node: '>=22.0.0'}
 
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
@@ -4287,6 +4297,8 @@ snapshots:
   keyv@5.6.0:
     dependencies:
       '@keyv/serialize': 1.1.1
+
+  kysely@0.29.7: {}
 
   levn@0.4.1:
     dependencies:

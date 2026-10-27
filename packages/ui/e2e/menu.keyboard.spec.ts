@@ -163,6 +163,10 @@ for (const theme of THEMES) {
         - menuitem "Hide from audience" [disabled]
         - menuitem "Copy ID"
     `);
+    // Aria snapshots do not print aria-keyshortcuts, so the shortcut is read directly.
+    await expect(item(page, 'Open monitor')).toHaveAttribute('aria-keyshortcuts', 'O');
+    await expect(item(page, 'Start incident')).toHaveAttribute('aria-keyshortcuts', 'I');
+    await expect(item(page, 'Copy ID')).not.toHaveAttribute('aria-keyshortcuts', /.*/);
   });
 
   test(`an icon trigger is named, opens by keyboard and returns focus in ${theme}`, async ({

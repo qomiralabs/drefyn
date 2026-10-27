@@ -41,9 +41,13 @@ jobs:
         env:
           DREFYN_SELFHOST_WAIT_SECONDS: 90
         run: bash scripts/selfhost.sh up
-      # CI is set on the runner, so an unreachable stack fails here rather than skipping.
-      - name: Integration tests
-        run: pnpm exec turbo run test:integration --filter @drefyn/db
+      # CI is set on the runner, so an unreachable stack fails here rather than skipping. The
+      # unit, integration and serial runs each leave a coverage blob, and the merge holds the
+      # tenancy files to 95 percent: some of them only run against a real Postgres.
+      - name: Unit and integration tests with merged coverage
+        run: pnpm --filter @drefyn/db test:merged
+      - name: check:sources passes on the shipped migrations and the repository
+        run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the
       # bootstrapped database with its grants and search_path.
       - name: Fresh databases for check:types
@@ -63,6 +67,13 @@ jobs:
           echo "::add-mask::$owner"
           export DREFYN_MIGRATION_DATABASE_URL="postgres://drefyn_owner:${owner}@127.0.0.1:${DREFYN_POSTGRES_PORT}/drefyn_types_clean"
           pnpm --filter @drefyn/db check:types
+      # Reads the catalog of the database check:types just migrated.
+      - name: check:catalog passes on the shipped migrations
+        run: |
+          owner="$(grep '^DREFYN_OWNER_PASSWORD=' deploy/.env | cut -d= -f2)"
+          echo "::add-mask::$owner"
+          export DREFYN_MIGRATION_DATABASE_URL="postgres://drefyn_owner:${owner}@127.0.0.1:${DREFYN_POSTGRES_PORT}/drefyn_types_clean"
+          pnpm --filter @drefyn/db check:catalog
       - name: check:types fails on a migration without regenerated types
         run: |
           owner="$(grep '^DREFYN_OWNER_PASSWORD=' deploy/.env | cut -d= -f2)"
