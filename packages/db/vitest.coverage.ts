@@ -16,4 +16,4 @@ export const TENANCY_FILES: readonly string[] = [
 
 // Files only a real Postgres exercises. The unit run excludes exactly these, and each one is
 // a tenancy file, so leaving the unit run always means the 95 percent bar in the merged run.
-export const INTEGRATION_COVERED: readonly string[] = [];
+export const INTEGRATION_COVERED: readonly string[] = ['src/database.ts', 'src/catalog-check.ts'];
