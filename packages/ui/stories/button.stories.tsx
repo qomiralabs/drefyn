@@ -144,20 +144,59 @@ export const Disabled: Story = {
   ),
 };
 
-// The verb in progress, no spinner. The region the change lands in carries aria-busy.
+// The verb in progress, in the variant's own paint with a progress cursor. No spinner.
 export const Busy: Story = {
-  tags: ['disabled'],
+  tags: ['busy'],
   render: () => (
     <Frame>
       <Counted>
         {(press) => (
-          <Button variant="primary" busy onClick={press}>
-            Publishing
-          </Button>
+          <>
+            <Button variant="primary" busy onClick={press}>
+              Publishing
+            </Button>
+            <Button busy onClick={press}>
+              Saving draft
+            </Button>
+          </>
         )}
       </Counted>
     </Frame>
   ),
+};
+
+// Pressing starts the work: the button shows the verb in progress and the region it changes
+// is busy. The work never finishes here, so the state can be read and checked.
+function Publishing() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Frame>
+      <section aria-labelledby="update" aria-busy={busy} className="max-w-measure">
+        <h2 id="update" className="text-title text-ink">
+          Incident update
+        </h2>
+        <p className="mt-8 text-body-m text-body">
+          Payments API is degraded in two regions. We are rolling back the last deploy.
+        </p>
+      </section>
+      <div className="mt-24">
+        <Button
+          variant="primary"
+          busy={busy}
+          onClick={() => {
+            setBusy(true);
+          }}
+        >
+          {busy ? 'Publishing' : 'Publish update'}
+        </Button>
+      </div>
+    </Frame>
+  );
+}
+
+export const BecomesBusy: Story = {
+  name: 'Becomes busy',
+  render: () => <Publishing />,
 };
 
 export const Links: Story = {

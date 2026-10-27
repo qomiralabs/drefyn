@@ -259,7 +259,7 @@ describe('a disabled Button', () => {
 });
 
 describe('a busy Button', () => {
-  it('keeps its label, sets aria-disabled and ignores activation', async () => {
+  it('keeps its label, sets aria-disabled and data-busy, and ignores activation', async () => {
     const onClick = vi.fn();
     const user = userEvent.setup();
     render(
@@ -269,10 +269,13 @@ describe('a busy Button', () => {
     );
     const el = button('Publishing');
     expect(el.getAttribute('aria-disabled')).toBe('true');
+    expect(el.hasAttribute('data-busy')).toBe(true);
     expect(el.hasAttribute('disabled')).toBe(false);
     await user.click(el);
     el.focus();
+    expect(document.activeElement).toBe(el);
     await user.keyboard('{Enter}');
+    await user.keyboard(' ');
     expect(onClick).not.toHaveBeenCalled();
   });
 
@@ -285,5 +288,100 @@ describe('a busy Button', () => {
     const el = button('Publishing');
     expect(el.querySelectorAll('svg, [role="progressbar"], [role="status"]')).toHaveLength(0);
     expect(el.textContent).toBe('Publishing');
+  });
+
+  it('keeps its variant paint, with a progress cursor and no hover or pressed change', () => {
+    const rest: Record<Variant, string[]> = {
+      primary: ['bg-accent-ink', 'text-accent-on'],
+      secondary: ['bg-ground', 'border-rule-strong', 'text-body'],
+      quiet: ['text-secondary'],
+    };
+    render(
+      <>
+        {VARIANTS.map((variant) => (
+          <Button key={variant} variant={variant} busy>
+            {variant}
+          </Button>
+        ))}
+      </>,
+    );
+    for (const variant of VARIANTS) {
+      const classes = classesOf(button(variant));
+      expect(classes, variant).toEqual(expect.arrayContaining(rest[variant]));
+      expect(
+        classes.filter((c) => c.includes('disabled-')),
+        variant,
+      ).toEqual([]);
+      expect(
+        classes.filter((c) => /^(hover|active):/.test(c)),
+        variant,
+      ).toEqual([]);
+      // Styled from the busy attribute, not from aria-disabled, which disabled uses.
+      expect(
+        classes.some((c) => /^(data-busy:)?cursor-progress$/.test(c)),
+        variant,
+      ).toBe(true);
+      expect(
+        classes.filter((c) => c.startsWith('aria-disabled:')),
+        variant,
+      ).toEqual([]);
+      expect(classes, variant).toContain('focus-visible:focus-ring');
+    }
+  });
+
+  it('does not submit its form, so a second press cannot post twice', async () => {
+    const submitted: string[] = [];
+    render(
+      <form
+        aria-label="Incident"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted.push(event.nativeEvent.submitter?.textContent ?? '');
+        }}
+      >
+        <Button type="submit" variant="primary" busy>
+          Publishing
+        </Button>
+      </form>,
+    );
+    const el = button('Publishing');
+    expect(el.getAttribute('type')).toBe('button');
+    await userEvent.setup().click(el);
+    expect(submitted).toEqual([]);
+  });
+});
+
+describe('a submit Button that changes state', () => {
+  it('is a button while disabled or busy and a submit button again once live', () => {
+    const { rerender } = render(
+      <Button type="submit" disabled>
+        Publish update
+      </Button>,
+    );
+    expect(button('Publish update').getAttribute('type')).toBe('button');
+    rerender(<Button type="submit">Publish update</Button>);
+    expect(button('Publish update').getAttribute('type')).toBe('submit');
+    rerender(
+      <Button type="submit" busy>
+        Publish update
+      </Button>,
+    );
+    expect(button('Publish update').getAttribute('type')).toBe('button');
+    rerender(<Button type="submit">Publish update</Button>);
+    expect(button('Publish update').getAttribute('type')).toBe('submit');
+    expect(button('Publish update').hasAttribute('data-busy')).toBe(false);
+    expect(button('Publish update').hasAttribute('aria-disabled')).toBe(false);
+  });
+});
+
+describe('prop names', () => {
+  it('uses DOM names and never the React Aria is* or onPress names', () => {
+    // @ts-expect-error disabled, not isDisabled.
+    const a = <Button isDisabled>Save</Button>;
+    // @ts-expect-error onClick, not onPress.
+    const b = <Button onPress={() => undefined}>Save</Button>;
+    // @ts-expect-error busy, not isPending.
+    const c = <Button isPending>Save</Button>;
+    expect([a, b, c]).toHaveLength(3);
   });
 });

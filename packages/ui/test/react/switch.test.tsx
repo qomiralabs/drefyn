@@ -58,12 +58,32 @@ describe('Switch', () => {
     expect(onChange.mock.calls).toEqual([[true], [false]]);
   });
 
-  it('flips on Space', async () => {
+  it('flips on Space and not on Enter, which a checkbox in a form leaves to submit', async () => {
     const user = userEvent.setup();
     render(<Switch>{LABEL}</Switch>);
     toggle().focus();
+    await user.keyboard('{Enter}');
+    expect(isOn()).toBe(false);
     await user.keyboard(' ');
     expect(isOn()).toBe(true);
+  });
+
+  it('reports a boolean, not an event', async () => {
+    const onChange = vi.fn();
+    render(<Switch onChange={onChange}>{LABEL}</Switch>);
+    await userEvent.setup().click(toggle());
+    expect(onChange.mock.calls).toEqual([[true]]);
+    expect(typeof onChange.mock.calls[0]?.[0]).toBe('boolean');
+  });
+
+  it('uses DOM names and never the React Aria is* names', () => {
+    // @ts-expect-error checked, not isSelected.
+    const a = <Switch isSelected>{LABEL}</Switch>;
+    // @ts-expect-error disabled, not isDisabled.
+    const b = <Switch isDisabled>{LABEL}</Switch>;
+    // @ts-expect-error defaultChecked, not defaultSelected.
+    const c = <Switch defaultSelected>{LABEL}</Switch>;
+    expect([a, b, c]).toHaveLength(3);
   });
 
   it('follows its checked prop when controlled', async () => {

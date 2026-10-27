@@ -31,6 +31,17 @@ describe('server rendered markup', () => {
     expect(html).toContain('type="button"');
   });
 
+  it('never lets a busy submit button submit twice, even with JS off', () => {
+    const html = renderToStaticMarkup(
+      <Button type="submit" busy>
+        Publishing
+      </Button>,
+    );
+    expect(html).toContain('type="button"');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toMatch(/\sdata-busy(=|\s|>)/);
+  });
+
   it('keeps a live submit button a submit button', () => {
     expect(renderToStaticMarkup(<Button type="submit">Publish update</Button>)).toContain(
       'type="submit"',

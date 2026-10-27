@@ -16,6 +16,7 @@ type Focused = 'button' | 'a' | 'switch' | 'menuitem';
 const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-button--primary', keys: ['Tab'], focused: 'button' },
   { id: 'components-button--disabled', keys: ['Tab'], focused: 'button' },
+  { id: 'components-button--busy', keys: ['Tab'], focused: 'button' },
   { id: 'components-button--links', keys: ['Tab'], focused: 'a' },
   { id: 'components-switch--off', keys: ['Tab'], focused: 'switch' },
   { id: 'components-switch--disabled', keys: ['Tab'], focused: 'switch' },

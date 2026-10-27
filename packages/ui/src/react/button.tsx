@@ -10,7 +10,8 @@ export interface ButtonProps extends Omit<
   type?: 'button' | 'submit' | 'reset';
   // Rendered as aria-disabled so the control stays focusable and its reason can be read.
   disabled?: boolean;
-  // The label shows the verb in progress; the button ignores activation until it is done.
+  // The label shows the verb in progress; the button keeps its variant's paint, renders
+  // data-busy and ignores activation until it is done.
   busy?: boolean;
   icon?: ReactNode;
   children: ReactNode;

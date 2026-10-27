@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Badge, StatusDot, StatusPip } from '../../src/react/index.ts';
 import { classesOf, FORBIDDEN_LOOKS, only, rootOf } from './classes.ts';
 
@@ -74,14 +74,21 @@ describe('Badge', () => {
     }
   });
 
-  it('keeps a time inside the word', () => {
-    const { container } = render(
-      <Badge state="stale">
-        Out of date for <time dateTime="P2D">2 days</time>
-      </Badge>,
-    );
-    expect(container.querySelector('time')?.textContent).toBe('2 days');
-    expect(container.textContent).toBe('Out of date for 2 days');
+  it('takes the word as a string, so a component or fragment cannot stand in for it', () => {
+    const span = <span>Fresh</span>;
+    // @ts-expect-error The word is plain text.
+    const badge = <Badge state="fresh" children={span} />;
+    expect(badge).toBeDefined();
+  });
+
+  it('refuses an empty word', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const word of ['', '   ']) {
+      expect(() => render(<Badge state="broken">{word}</Badge>), JSON.stringify(word)).toThrow(
+        /word/i,
+      );
+      cleanup();
+    }
   });
 });
 
@@ -157,13 +164,21 @@ describe('StatusDot', () => {
     }
   });
 
-  it('keeps a number in the word readable as data', () => {
-    const { container } = render(
-      <StatusDot state="live">
-        <data value="3">3</data> viewing
-      </StatusDot>,
-    );
-    expect(container.textContent).toBe('3 viewing');
-    expect(container.querySelector('data')?.getAttribute('value')).toBe('3');
+  it('takes the word as a string, so a component or fragment cannot stand in for it', () => {
+    const data = <data value="3">3</data>;
+    // @ts-expect-error The word is plain text.
+    const dot = <StatusDot state="live" children={data} />;
+    expect(dot).toBeDefined();
+  });
+
+  it('refuses an empty word', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const word of ['', '   ']) {
+      expect(
+        () => render(<StatusDot state="live">{word}</StatusDot>),
+        JSON.stringify(word),
+      ).toThrow(/word/i);
+      cleanup();
+    }
   });
 });

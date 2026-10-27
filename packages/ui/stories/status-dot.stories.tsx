@@ -48,9 +48,7 @@ export const Live: Story = {
           <StatusDot state="live">Agent drafting an update</StatusDot>
         </li>
         <li>
-          <StatusDot state="live">
-            <data value="3">3</data> viewing
-          </StatusDot>
+          <StatusDot state="live">3 viewing</StatusDot>
         </li>
       </ul>
     </div>

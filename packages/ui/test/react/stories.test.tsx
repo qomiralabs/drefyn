@@ -33,6 +33,7 @@ const storiesOf = (file: string): Record<string, Story> => {
 const REQUIRED: Record<string, string[]> = {
   button: [
     'Actions',
+    'BecomesBusy',
     'Busy',
     'Disabled',
     'Links',
@@ -55,9 +56,15 @@ const REQUIRED: Record<string, string[]> = {
 // Stories that show a disabled or busy control. The browser paint check opens each and
 // fails if it shows none, and fails on any untagged story that shows one.
 const DISABLED: Record<string, string[]> = {
-  button: ['Busy', 'Disabled'],
+  button: ['Disabled'],
   switch: ['Disabled'],
   menu: ['Open'],
+};
+
+// Stories that show a busy button at rest. Busy keeps its variant's paint, so it is checked
+// apart from disabled.
+const BUSY: Record<string, string[]> = {
+  button: ['Busy'],
 };
 
 describe('the component stories', () => {
@@ -72,6 +79,14 @@ describe('the component stories', () => {
         .map(([name]) => name)
         .sort();
       expect(tagged).toEqual(DISABLED[file] ?? []);
+    });
+
+    it(`${file} tags exactly its busy stories`, () => {
+      const tagged = Object.entries(storiesOf(file))
+        .filter(([, story]) => story.tags?.includes('busy') === true)
+        .map(([name]) => name)
+        .sort();
+      expect(tagged).toEqual(BUSY[file] ?? []);
     });
 
     it(`${file} renders every story`, () => {

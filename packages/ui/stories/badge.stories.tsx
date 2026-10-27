@@ -26,7 +26,7 @@ function All({ onFill = false }: { onFill?: boolean }) {
       </li>
       <li>
         <Badge state="stale" onFill={onFill}>
-          Out of date for <time dateTime="P2D">2 days</time>
+          Out of date for 2 days
         </Badge>
       </li>
       <li>

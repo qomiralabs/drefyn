@@ -3,8 +3,9 @@ import type { State } from './state.ts';
 
 export interface BadgeProps {
   state: State;
-  // The state word, always visible.
-  children: ReactNode;
+  // The state word, always visible. A string, so it can never be empty markup; an empty
+  // word throws.
+  children: string;
   // Set when the badge sits on anything that can be hovered, pressed or selected.
   onFill?: boolean;
 }

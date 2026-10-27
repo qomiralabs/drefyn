@@ -40,8 +40,14 @@ for (const theme of THEMES) {
     await expect(toggle).toBeFocused();
     await expect.poll(() => ringsInside(page, name)).toEqual([expectedRing]);
     expect(await checked(toggle)).toBe(false);
+    // Space only: Enter on a checkbox in a form is the browser's submit key.
+    await page.keyboard.press('Enter');
+    expect(await checked(toggle)).toBe(false);
+    await expect(toggle).toBeFocused();
     await page.keyboard.press('Space');
     await expect.poll(() => checked(toggle)).toBe(true);
+    await page.keyboard.press('Enter');
+    expect(await checked(toggle)).toBe(true);
     await page.keyboard.press('Space');
     await expect.poll(() => checked(toggle)).toBe(false);
   });

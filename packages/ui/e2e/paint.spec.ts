@@ -11,10 +11,11 @@ interface DisabledLook {
 }
 
 // Every element marked aria-disabled, with the label colour a reader sees: for a hidden
-// input that is its label's, otherwise its own.
+// input that is its label's, otherwise its own. Busy buttons are aria-disabled too, but keep
+// their variant's paint, so they are checked on their own below.
 async function disabledLooks(page: Page): Promise<DisabledLook[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll('[aria-disabled="true"]')].map((el) => {
+    [...document.querySelectorAll('[aria-disabled="true"]:not([data-busy])')].map((el) => {
       const shown = el instanceof HTMLInputElement ? (el.closest('label') ?? el) : el;
       const opacities: string[] = [];
       for (let node: Element | null = el; node !== null; node = node.parentElement) {
@@ -32,8 +33,9 @@ async function disabledLooks(page: Page): Promise<DisabledLook[]> {
 
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
 
-test('the disabled tag is used, so the checks below have stories to run on', () => {
-  expect(storiesTagged('disabled').length).toBeGreaterThanOrEqual(4);
+test('the disabled and busy tags are used, so the checks below have stories to run on', () => {
+  expect(storiesTagged('disabled').length).toBeGreaterThanOrEqual(3);
+  expect(storiesTagged('busy').length).toBeGreaterThanOrEqual(1);
 });
 
 for (const theme of THEMES) {
@@ -66,7 +68,61 @@ for (const theme of THEMES) {
     for (const id of storyIds()) {
       if (tagged.has(id)) continue;
       await openStory(page, id, theme);
-      const count = await page.locator('[aria-disabled="true"]').count();
+      const count = await page.locator('[aria-disabled="true"]:not([data-busy])').count();
+      if (count > 0) untagged.push(`${id} (${count})`);
+    }
+    expect(untagged).toEqual([]);
+  });
+
+  test(`a busy button keeps its variant's paint, a progress cursor and full opacity in ${theme}`, async ({
+    page,
+  }) => {
+    const ids = storiesTagged('busy');
+    expect(ids).toContain('components-button--busy');
+    await openStory(page, 'components-button--busy', theme);
+    const expected = {
+      Publishing: {
+        fill: rgb(tokens.color.accent.ink[theme]),
+        color: rgb(tokens.color.accent.on[theme]),
+      },
+      'Saving draft': {
+        fill: rgb(tokens.color.surface.ground[theme]),
+        color: rgb(tokens.color.text.body[theme]),
+      },
+    };
+    for (const [name, paint] of Object.entries(expected)) {
+      const button = page.getByRole('button', { name });
+      await expect(button, name).toHaveAttribute('aria-disabled', 'true');
+      await expect(button, name).toHaveAttribute('data-busy');
+      const look = () =>
+        button.evaluate((el) => {
+          const opacities: string[] = [];
+          for (let node: Element | null = el; node !== null; node = node.parentElement) {
+            opacities.push(getComputedStyle(node).opacity);
+          }
+          const style = getComputedStyle(el);
+          return {
+            fill: style.backgroundColor,
+            color: style.color,
+            cursor: style.cursor,
+            dimmed: opacities.some((o) => o !== '1'),
+          };
+        });
+      const rest = { ...paint, cursor: 'progress', dimmed: false };
+      await expect.poll(look, { message: name }).toEqual(rest);
+      // No hover change: the fill under the pointer is the fill at rest.
+      await button.hover();
+      await expect.poll(look, { message: `${name} hovered` }).toEqual(rest);
+    }
+  });
+
+  test(`no story shows a busy button without the busy tag in ${theme}`, async ({ page }) => {
+    const tagged = new Set(storiesTagged('busy'));
+    const untagged: string[] = [];
+    for (const id of storyIds()) {
+      if (tagged.has(id)) continue;
+      await openStory(page, id, theme);
+      const count = await page.locator('[data-busy]').count();
       if (count > 0) untagged.push(`${id} (${count})`);
     }
     expect(untagged).toEqual([]);

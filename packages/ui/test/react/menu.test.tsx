@@ -171,6 +171,17 @@ describe('Menu', () => {
     expect(el.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('uses DOM names and React Aria names only where the DOM has none, never is* or onPress', () => {
+    // @ts-expect-error disabled, not isDisabled.
+    const a = <MenuItem id="x" isDisabled children="Open monitor" />;
+    // @ts-expect-error onAction, not onPress.
+    const b = <MenuItem id="x" onPress={() => undefined} children="Open monitor" />;
+    const item = <MenuItem id="x">Open monitor</MenuItem>;
+    // @ts-expect-error defaultOpen, not isOpen.
+    const c = <Menu trigger="More" isOpen children={item} />;
+    expect([a, b, c]).toHaveLength(3);
+  });
+
   it('can start open, for a story or a test of the open state', () => {
     render(
       <Menu trigger="Payments API" defaultOpen>

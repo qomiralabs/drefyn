@@ -92,13 +92,37 @@ for (const theme of THEMES) {
     browserName,
   }) => {
     await openStory(page, 'components-button--busy', theme);
-    const button = page.getByRole('button', { name: 'Publishing' });
-    await page.keyboard.press(tabKey(browserName));
-    await expect(button).toBeFocused();
-    await expect(button).toHaveAttribute('aria-disabled', 'true');
-    await page.keyboard.press('Enter');
-    await page.keyboard.press('Space');
+    for (const name of ['Publishing', 'Saving draft']) {
+      const button = page.getByRole('button', { name });
+      await page.keyboard.press(tabKey(browserName));
+      await expect(button, name).toBeFocused();
+      await expect(button, name).toHaveAttribute('aria-disabled', 'true');
+      await expect.poll(() => ring(button), { message: name }).toBe(expectedRing);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Space');
+      await button.click();
+    }
     await expect(page.getByText(/^Presses: \d+$/)).toHaveText('Presses: 0');
+  });
+
+  test(`pressing marks the region busy and the button shows the verb in progress, keeping focus in ${theme}`, async ({
+    page,
+    browserName,
+  }) => {
+    await openStory(page, 'components-button--becomes-busy', theme);
+    const region = page.getByRole('region', { name: 'Incident update' });
+    await expect(region).not.toHaveAttribute('aria-busy', 'true');
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Publish update' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    const busy = page.getByRole('button', { name: 'Publishing' });
+    await expect(busy).toBeFocused();
+    await expect(busy).toHaveAttribute('aria-disabled', 'true');
+    await expect(busy).toHaveAttribute('data-busy');
+    await expect(region).toHaveAttribute('aria-busy', 'true');
+    await expect(busy.locator('svg, [role="progressbar"]')).toHaveCount(0);
+    await expect.poll(() => busy.evaluate((el) => getComputedStyle(el).cursor)).toBe('progress');
+    await expect.poll(() => fill(busy)).toBe(rgb(tokens.color.accent.ink[theme]));
   });
 
   test(`Tab walks the button links in order and Enter follows one in ${theme}`, async ({
