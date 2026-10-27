@@ -10,6 +10,10 @@ import {
 } from '../src/index.ts';
 import { SEEDS } from './seeds.ts';
 
+// fc.webPath() takes a few hundred ms to construct, more on a loaded CI runner. Built once here so
+// collection pays for it, not whichever seed happens to run first.
+const anyPath = fc.oneof(fc.string(), fc.webPath(), fc.string({ unit: 'binary' }));
+
 describe('product labels', () => {
   it('are the short names, in suite order', () => {
     expect(PRODUCTS.map((p) => [p.id, p.label])).toEqual([
@@ -89,7 +93,7 @@ describe('parseShellPath', () => {
 
   it.each(SEEDS)('never throws on any string (seed %i)', (seed) => {
     fc.assert(
-      fc.property(fc.oneof(fc.string(), fc.webPath(), fc.string({ unit: 'binary' })), (path) => {
+      fc.property(anyPath, (path) => {
         const parsed = parseShellPath(path);
         if (parsed !== null) expect(shellHref(parsed)).toBe(path.replace(/\/$/, ''));
       }),

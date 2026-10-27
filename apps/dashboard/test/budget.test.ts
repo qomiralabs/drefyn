@@ -9,6 +9,12 @@ import {
 } from '../src/index.ts';
 import { SEEDS } from './seeds.ts';
 
+// Built once so no seed pays for constructing the arbitrary.
+const script = fc.record({
+  url: fc.constantFrom('/a.js', '/b.js', '/c.js', '/d.js', '/e.js'),
+  gzipBytes: fc.nat({ max: 500_000 }),
+});
+
 const framework = [
   { url: '/_next/static/chunks/framework.js', gzipBytes: 60_000 },
   { url: '/_next/static/chunks/main.js', gzipBytes: 71_800 },
@@ -45,10 +51,6 @@ describe('routeReport', () => {
   });
 
   it.each(SEEDS)('never reports more beyond the baseline than in total (seed %i)', (seed) => {
-    const script = fc.record({
-      url: fc.constantFrom('/a.js', '/b.js', '/c.js', '/d.js', '/e.js'),
-      gzipBytes: fc.nat({ max: 500_000 }),
-    });
     fc.assert(
       fc.property(fc.array(script), fc.array(script), (route, base) => {
         const report = routeReport('/r', route, base);
