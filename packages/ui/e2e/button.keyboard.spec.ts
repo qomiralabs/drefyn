@@ -134,6 +134,7 @@ for (const theme of THEMES) {
       ['Save draft and close', 'Saving'],
     ] as const) {
       const before = page.getByRole('button', { name: rest, exact: true });
+      await expect(before, rest).toBeVisible();
       const box = await before.boundingBox();
       expect(box, rest).not.toBeNull();
       await before.click();

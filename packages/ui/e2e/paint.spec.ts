@@ -269,17 +269,25 @@ test.describe('with JS off', () => {
       await page.route(`${ORIGIN}/no-js.html`, (route) =>
         route.fulfill({ contentType: 'text/html', body: html }),
       );
-      await page.goto('/no-js.html');
-      await page.evaluate(async () => {
-        await document.fonts.ready;
-      });
+      // Page scripts are off, so the fonts are not awaited from script; both buttons of a
+      // pair are measured together until the layout settles, and must then be equal.
+      await page.goto('/no-js.html', { waitUntil: 'load' });
       for (const [rest, busy] of PAIRS) {
         const pair = page.locator(`button[name="${rest}"]`);
         await expect(pair, rest).toHaveCount(2);
-        const [a, b] = [await pair.nth(0).boundingBox(), await pair.nth(1).boundingBox()];
-        expect(a, rest).not.toBeNull();
-        expect(b?.width, `${rest} and ${busy}`).toBe(a?.width);
-        expect(b?.height, `${rest} and ${busy}`).toBe(a?.height);
+        const widths = async () => {
+          const boxes = [await pair.nth(0).boundingBox(), await pair.nth(1).boundingBox()];
+          return boxes.map((box) => (box === null ? null : `${box.width}x${box.height}`));
+        };
+        await expect
+          .poll(
+            async () => {
+              const [a, b] = await widths();
+              return a !== null && a === b;
+            },
+            { message: `${rest} and ${busy}` },
+          )
+          .toBe(true);
       }
     });
   }
