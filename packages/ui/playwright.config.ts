@@ -44,7 +44,8 @@ export default defineConfig({
       testMatch: /(\.keyboard|theme|network)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
-    { name: 'axe', testMatch: /axe\.spec\.ts$/, use: { ...chromium } },
+    // The network specs run here too, so the axe job itself proves the outside request guard.
+    { name: 'axe', testMatch: /(axe|network)\.spec\.ts$/, use: { ...chromium } },
     { name: 'visual', testMatch: /visual\.spec\.ts$/, use: { ...chromium } },
     {
       name: 'reduced-motion',

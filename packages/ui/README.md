@@ -169,7 +169,22 @@ In an app that uses Tailwind:
 - `pnpm --filter @drefyn/ui test:visual` compares screenshots, but only inside the pinned
   Playwright Linux image, which it starts through Docker. It refuses to compare on a host,
   because fonts render differently there. `test:visual:update` writes the baselines, also in
-  the image.
+  the image. The image always runs as linux/amd64, the build CI uses; on Apple Silicon Docker
+  emulates it.
+- CI (`.github/workflows/ui.yml`) builds Storybook once and runs every Playwright project in the
+  same image with no network, three visual runs among them. A missing baseline fails.
+
+### Updating screenshot baselines
+
+1. Make the change and run `pnpm --filter @drefyn/ui storybook:build`.
+2. Run `pnpm --filter @drefyn/ui test:visual`. A failure writes the expected, actual and diff
+   images to `test-results/`; look at each one.
+3. If every difference is intended, run `pnpm --filter @drefyn/ui test:visual:update`. Its
+   output shows paths under `/work`, which is the image, not your machine.
+4. Commit the changed PNGs under `e2e/__screenshots__/` with the change and say in the PR why
+   each one moved. A new story adds three baselines: light, dark and light at 390 px.
+
+Docker must be running. Never copy a screenshot taken on a host into `e2e/__screenshots__/`.
 
 ## Preview
 
