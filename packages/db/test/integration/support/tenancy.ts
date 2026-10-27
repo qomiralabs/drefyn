@@ -222,14 +222,21 @@ export async function catalogProblems(
 }
 
 // SQLSTATE and message of a failure, from the error or what it wraps.
-export function failure(error: unknown): { code: string | undefined; message: string } {
+export function failure(error: unknown): {
+  code: string | undefined;
+  message: string;
+  routine?: string;
+} {
   const seen: unknown[] = [];
   let current: unknown = error;
   while (current instanceof Error && !seen.includes(current)) {
     seen.push(current);
     const code = (current as { code?: unknown }).code;
     if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
-      return { code, message: current.message };
+      const routine = (current as { routine?: unknown }).routine;
+      return typeof routine === 'string'
+        ? { code, message: current.message, routine }
+        : { code, message: current.message };
     }
     current = current.cause;
   }

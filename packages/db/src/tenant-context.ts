@@ -12,7 +12,13 @@ export function tenantSettings(ctx: unknown, scope: 'organization' | 'project'):
   return notImplemented(`tenantSettings(${typeof ctx}, ${scope})`);
 }
 
+// Ceilings per pool: an unbounded value would quietly turn the timeout off.
+export const APP_TIMEOUT_MAX_MS = 60_000;
+export const READER_TIMEOUT_MAX_MS = 10_000;
+
 // The statement timeout for one transaction. Throws DbError DB_CONFIG_INVALID.
-export function transactionTimeout(timeoutMs: unknown, fallbackMs: number): number {
-  return notImplemented(`transactionTimeout(${typeof timeoutMs}, ${String(fallbackMs)})`);
+export function transactionTimeout(timeoutMs: unknown, fallbackMs: number, maxMs: number): number {
+  return notImplemented(
+    `transactionTimeout(${typeof timeoutMs}, ${String(fallbackMs)}, ${String(maxMs)})`,
+  );
 }

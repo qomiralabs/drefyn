@@ -11,6 +11,7 @@ function facts(overrides: Partial<RoleFacts> = {}): RoleFacts {
     ownedTables: [],
     memberOf: [],
     settings: [],
+    databaseSettings: ['search_path=app, extensions'],
     ...overrides,
   };
 }
@@ -82,6 +83,39 @@ describe('roleProblems', () => {
     const problems = roleProblems(input, pool);
     expect(problems.length).toBeGreaterThan(0);
     expect(problems.join('\n')).toMatch(reason);
+  });
+
+  it('allows no database setting at all', () => {
+    expect(roleProblems(facts({ databaseSettings: [] }), 'app')).toEqual([]);
+  });
+
+  // A database setting follows every connection, so only the bootstrap's search_path is
+  // expected, and a default tenant must never come from one.
+  it.each([
+    ['another search_path', 'search_path=public', /search_path=public/],
+    ['a longer search_path', 'search_path=app, extensions, public', /search_path/],
+    [
+      'a default organization',
+      'drefyn.organization_id=01a14984-4476-77ce-9335-00000000000a',
+      /drefyn\.organization_id/,
+    ],
+    [
+      'a default project',
+      'drefyn.project_id=01a14984-4476-77ce-9335-0000000000a1',
+      /drefyn\.project_id/,
+    ],
+    ['an empty drefyn setting', 'drefyn.organization_id=', /drefyn\.organization_id/],
+    ['any other setting', 'work_mem=64MB', /work_mem/],
+    ['statement_timeout off', 'statement_timeout=0', /statement_timeout/],
+  ])('refuses %s set on the database', (_label, setting, reason) => {
+    for (const [pool, input] of [
+      ['app', facts({ databaseSettings: ['search_path=app, extensions', setting] })],
+      ['reader', reader({ databaseSettings: [setting] })],
+    ] as const) {
+      const problems = roleProblems(input, pool);
+      expect(problems.join('\n'), pool).toMatch(reason);
+      expect(problems.join('\n'), pool).toMatch(/database/i);
+    }
   });
 
   it('lists every problem, not only the first', () => {

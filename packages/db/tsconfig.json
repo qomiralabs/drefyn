@@ -5,6 +5,7 @@
     "test",
     "vitest.config.ts",
     "vitest.integration.config.ts",
-    "vitest.integration.serial.config.ts"
+    "vitest.integration.serial.config.ts",
+    "vitest.coverage.ts"
   ]
 }

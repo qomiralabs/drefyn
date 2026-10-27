@@ -7,6 +7,7 @@ import { rejected } from '../support.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
 import { query } from './support/sql.ts';
+import { superuser } from './support/stack.ts';
 import {
   failure,
   fixtureTemplate,
@@ -49,7 +50,7 @@ let reader: PublishedDatabase;
 async function asReader(
   settings: { org?: string; project?: string },
   statement: string,
-): Promise<{ rows?: unknown[]; code?: string | undefined; message?: string }> {
+): Promise<{ rows?: unknown[]; code?: string | undefined; message?: string; routine?: string }> {
   const client = await rawSession('reader', db.name);
   try {
     await client.query('begin');
@@ -93,6 +94,8 @@ describeWithStack('drefyn_public_reader', () => {
     );
     expect(result.code).toBe('42501');
     expect(result.message).toMatch(/permission denied for table fixture_drafts/);
+    // Same SQLSTATE as a policy failure, told apart by the routine.
+    expect(result.routine).not.toBe('ExecWithCheckOptions');
   });
 
   it.each([
@@ -110,7 +113,16 @@ describeWithStack('drefyn_public_reader', () => {
     expect(await asReader({}, 'select body from app.fixture_published')).toEqual({ rows: [] });
   });
 
-  it('sees zero published rows with an organization but no project', async () => {
+  // tenant_isolation is to drefyn_app only, so it cannot widen the reader to every project.
+  it('sees zero published rows with an organization but no project, though A has rows in two projects', async () => {
+    expect(
+      (
+        await superuser(
+          `select count(distinct project_id) from app.fixture_published where organization_id = '${ORG_A}';`,
+          db.name,
+        )
+      ).trim(),
+    ).toBe('2');
     expect(await asReader({ org: ORG_A }, 'select body from app.fixture_published')).toEqual({
       rows: [],
     });
@@ -125,6 +137,25 @@ describeWithStack('drefyn_public_reader', () => {
     ).toEqual({
       rows: [{ body: 'published a1' }],
     });
+  });
+
+  // The owner matches no policy, so under FORCE it sees no tenant rows even with context.
+  it('leaves the owner with zero rows even with full context', async () => {
+    const client = await rawSession('owner', db.name);
+    try {
+      await client.query('begin');
+      await client.query("select set_config('drefyn.organization_id', $1, true)", [ORG_A]);
+      await client.query("select set_config('drefyn.project_id', $1, true)", [PRJ_A1]);
+      for (const table of ['fixture_published', 'fixture_drafts', 'fixture_projects']) {
+        const { rows } = await client.query<{ n: number }>(
+          `select count(*)::int as n from app.${table}`,
+        );
+        expect(rows, table).toEqual([{ n: 0 }]);
+      }
+      await client.query('rollback');
+    } finally {
+      await client.end();
+    }
   });
 
   it('sees nothing with a project that belongs to another organization', async () => {
@@ -247,6 +278,30 @@ describeWithStack('withPublishedReader', () => {
     );
     expect((error as DbError).code).toBe('DB_TENANT_CONTEXT_MISSING');
     expect(ran).toBe(false);
+  });
+
+  it.each([0, 10_001, 60_000])('refuses a timeout of %s before running anything', async (ms) => {
+    let ran = false;
+    const error = await rejected(
+      withPublishedReader(
+        reader,
+        A1,
+        () => {
+          ran = true;
+          return Promise.resolve(1);
+        },
+        { timeoutMs: ms },
+      ),
+    );
+    expect((error as DbError).code).toBe('DB_CONFIG_INVALID');
+    expect(ran).toBe(false);
+  });
+
+  it('takes a timeout up to 10 s', async () => {
+    const timeout = sql<{ statement_timeout: string }>`show statement_timeout`;
+    expect(
+      await withPublishedReader(reader, A1, (tx) => one(tx, timeout), { timeoutMs: 10_000 }),
+    ).toEqual({ statement_timeout: '10s' });
   });
 
   it('times out with DB_TIMEOUT', async () => {

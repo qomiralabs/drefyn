@@ -101,3 +101,12 @@ describe('package shape', () => {
     for (const file of readdirSync(join(root, 'src'))) expect(file).toMatch(/\.ts$/);
   });
 });
+
+// A conflict on a guessed id would tell a caller the id exists in another tenant, which is
+// why ids are exempt from the organization_id rule on unique keys.
+describe('README rules for callers', () => {
+  it('says no insert path accepts a client chosen id', () => {
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    expect(readme).toMatch(/no insert (path )?accepts a client chosen `?id`?/i);
+  });
+});

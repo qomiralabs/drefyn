@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DbError } from '../src/errors.ts';
-import { tenantSettings, transactionTimeout } from '../src/tenant-context.ts';
+import {
+  APP_TIMEOUT_MAX_MS,
+  READER_TIMEOUT_MAX_MS,
+  tenantSettings,
+  transactionTimeout,
+} from '../src/tenant-context.ts';
 import { thrown } from './support.ts';
 
 const ORG = '01a14984-4476-77ce-9335-2c3c3a59aa8b';
@@ -83,12 +88,22 @@ describe('tenantSettings', () => {
 });
 
 describe('transactionTimeout', () => {
-  it('falls back when none is given', () => {
-    expect(transactionTimeout(undefined, 5000)).toBe(5000);
+  it('has a 60 s ceiling for withTenant and 10 s for the reader', () => {
+    expect(APP_TIMEOUT_MAX_MS).toBe(60_000);
+    expect(READER_TIMEOUT_MAX_MS).toBe(10_000);
   });
 
-  it.each([1, 100, 2000, 60_000])('takes %i ms', (ms) => {
-    expect(transactionTimeout(ms, 5000)).toBe(ms);
+  it('falls back when none is given', () => {
+    expect(transactionTimeout(undefined, 5000, APP_TIMEOUT_MAX_MS)).toBe(5000);
+    expect(transactionTimeout(undefined, 2000, READER_TIMEOUT_MAX_MS)).toBe(2000);
+  });
+
+  it.each([1, 100, 2000, 60_000])('takes %i ms for withTenant', (ms) => {
+    expect(transactionTimeout(ms, 5000, APP_TIMEOUT_MAX_MS)).toBe(ms);
+  });
+
+  it.each([1, 2000, 10_000])('takes %i ms for the reader', (ms) => {
+    expect(transactionTimeout(ms, 2000, READER_TIMEOUT_MAX_MS)).toBe(ms);
   });
 
   // Zero is no timeout to Postgres, which turns a bounded failure into a hang.
@@ -100,8 +115,19 @@ describe('transactionTimeout', () => {
     ['infinity', Number.POSITIVE_INFINITY],
     ['a string', '100'],
     ['null', null],
-    ['above one hour', 3_600_001],
-  ])('refuses %s with DB_CONFIG_INVALID', (_label, ms) => {
-    expect(code(() => transactionTimeout(ms, 5000))).toBe('DB_CONFIG_INVALID');
+    ['above 60 s', 60_001],
+    ['above the Postgres limit', 2 ** 31],
+  ])('refuses %s for withTenant with DB_CONFIG_INVALID', (_label, ms) => {
+    expect(code(() => transactionTimeout(ms, 5000, APP_TIMEOUT_MAX_MS))).toBe('DB_CONFIG_INVALID');
+  });
+
+  it.each([
+    ['above 10 s', 10_001],
+    ['the withTenant ceiling', 60_000],
+    ['zero', 0],
+  ])('refuses %s for the reader with DB_CONFIG_INVALID', (_label, ms) => {
+    expect(code(() => transactionTimeout(ms, 2000, READER_TIMEOUT_MAX_MS))).toBe(
+      'DB_CONFIG_INVALID',
+    );
   });
 });

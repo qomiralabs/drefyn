@@ -168,7 +168,7 @@ describeWithStack('tenant context on a reused pooled connection', () => {
     await idle(after.pid);
   });
 
-  it.each([0, -1, 1.5, Number.NaN])(
+  it.each([0, -1, 1.5, Number.NaN, 60_001])(
     'refuses a timeout of %s before running anything',
     async (ms) => {
       let ran = false;

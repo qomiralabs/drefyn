@@ -130,3 +130,50 @@ describeWithStack('role attributes changed after the bootstrap', () => {
     expect((await unsafe(createDatabase(appConfig(db.app)))).message).toContain('drefyn_owner');
   });
 });
+
+// Database wide settings apply to every role that connects, the pools included.
+describeWithStack('database wide settings', () => {
+  const restore = () => `
+alter database ${db.name} reset all;
+alter database ${db.name} set search_path = app, extensions;
+`;
+
+  beforeAll(async () => {
+    db = await dbs.fresh('migrated');
+  });
+
+  afterEach(async () => {
+    await superuser(restore());
+  });
+
+  it('allow the bootstrap search_path and nothing else', async () => {
+    const rows = await superuser(
+      `select array_to_string(setconfig, '|') from pg_db_role_setting
+        where setrole = 0 and setdatabase = (select oid from pg_database where datname = '${db.name}');`,
+    );
+    expect(rows.trim()).toBe('search_path=app, extensions');
+    await closeDatabase(await createDatabase(appConfig(db.app)));
+    await closeDatabase(await createPublishedDatabase(readerConfig(db.reader)));
+  });
+
+  it.each([
+    [
+      'a default organization',
+      "drefyn.organization_id = '01a14984-4476-77ce-9335-00000000000a'",
+      'drefyn.organization_id',
+    ],
+    [
+      'a default project',
+      "drefyn.project_id = '01a14984-4476-77ce-9335-0000000000a1'",
+      'drefyn.project_id',
+    ],
+    ['another search_path', 'search_path = public', 'search_path'],
+    ['any other setting', "work_mem = '64MB'", 'work_mem'],
+  ])('refuse %s at startup for both pools', async (_label, setting, name) => {
+    await superuser(`alter database ${db.name} set ${setting};`);
+    const app = await unsafe(createDatabase(appConfig(db.app)));
+    expect(app.message).toContain(name);
+    const reader = await unsafe(createPublishedDatabase(readerConfig(db.reader)));
+    expect(reader.message).toContain(name);
+  });
+});

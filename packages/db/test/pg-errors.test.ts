@@ -23,6 +23,33 @@ describe('toDbError', () => {
     expect(mapped(error).code).toBe('DB_RLS_VIOLATION');
   });
 
+  // lc_messages can translate the text on a self host, so the routine decides.
+  it('maps a policy violation by its routine whatever the message language', () => {
+    const error = serverError(
+      '42501',
+      'neue Zeile verletzt Policy fur Sicherheit auf Zeilenebene fur Tabelle "fixture_notes"',
+      { routine: 'ExecWithCheckOptions' },
+    );
+    expect(mapped(error).code).toBe('DB_RLS_VIOLATION');
+  });
+
+  it('leaves a translated permission error as it was', () => {
+    const error = serverError('42501', 'keine Berechtigung fur Tabelle fixture_drafts', {
+      routine: 'aclcheck_error',
+    });
+    expect(toDbError(error)).toBe(error);
+  });
+
+  // The message is only a fallback for a driver that gives no routine.
+  it('trusts the routine over English policy text', () => {
+    const error = serverError(
+      '42501',
+      'new row violates row-level security policy for table "fixture_notes"',
+      { routine: 'aclcheck_error' },
+    );
+    expect(toDbError(error)).toBe(error);
+  });
+
   // A missing grant is a different failure from a policy, and saying RLS would mislead.
   it('leaves a plain permission error as it was', () => {
     const error = serverError('42501', 'permission denied for table fixture_drafts');

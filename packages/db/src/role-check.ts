@@ -19,6 +19,8 @@ export interface RoleFacts {
   readonly memberOf: readonly string[];
   // pg_roles.rolconfig plus every pg_db_role_setting row for the role.
   readonly settings: readonly RoleSetting[];
+  // Database wide pg_db_role_setting entries (setrole = 0) for the current database.
+  readonly databaseSettings: readonly string[];
 }
 
 // One line per reason the connection is unsafe for this pool; empty when it is safe.

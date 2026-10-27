@@ -32,6 +32,7 @@ describe('newId', () => {
   });
 
   // Ids made later in one process sort later, which keeps index inserts at the right edge.
+  // After a step back the first 48 bits hold the last timestamp used, not the clock.
   it('increases strictly within one millisecond and across a clock step back', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-26T12:00:00.000Z'));
@@ -39,6 +40,9 @@ describe('newId', () => {
     for (let i = 0; i < 5000; i += 1) ids.push(newId('nod'));
     vi.setSystemTime(new Date('2026-10-26T11:59:59.000Z'));
     for (let i = 0; i < 10; i += 1) ids.push(newId('nod'));
+    expect(timestampOf(ids.at(-1) ?? '')).toBeGreaterThanOrEqual(
+      Date.parse('2026-10-26T12:00:00.000Z'),
+    );
     for (let i = 1; i < ids.length; i += 1) {
       expect((ids[i] ?? '') > (ids[i - 1] ?? ''), `id ${String(i)}`).toBe(true);
     }

@@ -103,6 +103,8 @@ describeWithStack('no tenant context on a plain app connection', () => {
       );
       expect(failure(insert).code).toBe('42501');
       expect(failure(insert).message).toMatch(/row-level security/);
+      // What toDbError keys on instead of the text, as PostgreSQL 18.6 reports it.
+      expect(failure(insert).routine).toBe('ExecWithCheckOptions');
       expect((await client.query("update app.fixture_notes set body = 'x'")).rowCount).toBe(0);
       expect((await client.query('delete from app.fixture_notes')).rowCount).toBe(0);
       expect((await client.query('delete from app.fixture_projects')).rowCount).toBe(0);
@@ -114,6 +116,24 @@ describeWithStack('no tenant context on a plain app connection', () => {
   });
 
   // The empty string a finished local setting leaves behind reads as no tenant, not an error.
+  it('reports ExecWithCheckOptions for an update that moves a row out of the tenant', async () => {
+    const client = await rawSession('app', db.name);
+    try {
+      await client.query('begin');
+      await client.query("select set_config('drefyn.organization_id', $1, true)", [ORG_A]);
+      const error = await rejected(
+        client.query('update app.fixture_notes set organization_id = $1 where id = $2', [
+          ORG_B,
+          NOTE_A1,
+        ]),
+      );
+      expect(failure(error)).toMatchObject({ code: '42501', routine: 'ExecWithCheckOptions' });
+      await client.query('rollback');
+    } finally {
+      await client.end();
+    }
+  });
+
   it('reads an empty setting as no tenant', async () => {
     const client = await rawSession('app', db.name);
     try {

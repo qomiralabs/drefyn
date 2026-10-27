@@ -101,6 +101,41 @@ create policy everyone on app.bad_open_policy using (true) with check (true);`,
 alter policy tenant_isolation on app.bad_weak_policy
   using (organization_id = app.current_org() or true) with check (true);`,
   },
+  // tenant_isolation is to drefyn_app: on PUBLIC it would widen the reader and the owner.
+  'a tenant_isolation for every role': {
+    rule: 'policy',
+    object: 'app.bad_policy_roles',
+    mentions: ['drefyn_app'],
+    up: () => `${orgTable('bad_policy_roles')}
+drop policy tenant_isolation on app.bad_policy_roles;
+create policy tenant_isolation on app.bad_policy_roles
+  using (organization_id = app.current_org()) with check (organization_id = app.current_org());`,
+  },
+  'a tenant_isolation for the reader too': {
+    rule: 'policy',
+    object: 'app.bad_policy_reader',
+    up: () => `${orgTable('bad_policy_reader')}
+alter policy tenant_isolation on app.bad_policy_reader to drefyn_app, drefyn_public_reader;`,
+  },
+  // published_read is the one extra permissive policy, and only on allow listed tables.
+  'a published_read on a table off the published list': {
+    rule: 'policy',
+    object: 'app.bad_published_read',
+    up: () => `${projectTable('bad_published_read')}
+create policy published_read on app.bad_published_read for select to drefyn_public_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());`,
+  },
+  'a published_read for every role': {
+    rule: 'policy',
+    object: 'app.fixture_published',
+    up: () => `alter policy published_read on app.fixture_published to public;`,
+  },
+  'a published_read without the project clause': {
+    rule: 'policy',
+    object: 'app.fixture_published',
+    up: () => `alter policy published_read on app.fixture_published
+  using (organization_id = app.current_org());`,
+  },
   'a project table with the project clause dropped': {
     rule: 'policy',
     object: 'app.bad_project_clause',
@@ -299,6 +334,18 @@ describeWithStack('catalog check passes', () => {
 
   it('on the fixture schema', async () => {
     const db = await fixture();
+    const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  // A restrictive policy can only narrow what tenant_isolation lets through.
+  it('with an extra restrictive policy on a tenant table', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `create policy non_empty on app.fixture_notes as restrictive to drefyn_app
+  using (body <> '') with check (body <> '');`,
+    );
     const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
