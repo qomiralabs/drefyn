@@ -1,7 +1,124 @@
 # `@drefyn/db`
 
-Postgres access for Drefyn: typed, validated database config and the `drefyn migrate`
-command, which runs reversible SQL migrations as `drefyn_owner`.
+Postgres access for Drefyn: tenant scoped transactions under forced row level security, typed,
+validated database config, and the `drefyn migrate` command, which runs reversible SQL
+migrations as `drefyn_owner`.
+
+## Tenant access
+
+There are exactly three ways in, and each needs a tenant. Nothing exported hands out a pool, a
+client, a Kysely instance or a transaction without context.
+
+- `createDatabase(config, { logger })` opens the app pool as `drefyn_app`.
+  `createPublishedDatabase(config, { logger })` opens the reader pool as
+  `drefyn_public_reader`. Both run a startup role check and fail with `DB_ROLE_UNSAFE`, naming
+  every problem, when the role is a superuser, has `BYPASSRLS`, owns anything in `app`, is a
+  member of another role, has any persisted role setting (in any database), when a setting is
+  stored for all roles, when the database has any setting other than the bootstrap's
+  `search_path=app, extensions`, or when the pool is on the wrong role. The optional logger
+  gets `warn(event, fields)` with ids and the pool kind, never SQL text or values.
+- `withTenant(db, tenant, work, { timeoutMs })` takes a `TenantRef`: the project is required.
+  It runs `work(tx)` in one transaction with `drefyn.organization_id` and `drefyn.project_id`
+  set for that transaction only. The default timeout is
+  `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms.
+- `withOrganization(db, org, work, { timeoutMs })` takes an `OrganizationRef` with no
+  `projectId` key at all, for organization work such as members, plans and the credit
+  ledger. Its transaction type holds only tables without `project_id`, and project tables
+  read as empty even through raw SQL, because their policy needs both settings. An
+  organization wide view of project data loops over the projects the caller may access, one
+  `withTenant` each, or reads a summary table written by a job.
+- `withPublishedReader(db, tenant, work, { timeoutMs })` needs a `TenantRef` and runs a read only
+  transaction whose type holds only the tables on the published allow list. Default 2000 ms, up
+  to 10000 ms.
+- `closeDatabase(db)` ends the pool. It is safe to call twice; later work fails with
+  `DB_UNAVAILABLE`.
+
+A context must be a plain object with only `organizationId` and `projectId` as own data
+properties. Getters, prototype values and extra fields are refused before any SQL is sent.
+
+Rules for the work:
+
+- Use `tx` only inside `work`. Once `work` settles, every query through that `tx` throws, so it
+  can never run on a connection that now carries another tenant.
+- Never end the transaction or change the tenant inside the work. The commit checks that both
+  settings are still the ones it set; if the work changed them, or committed or rolled back
+  itself, the call fails with `DB_TRANSACTION_INVALID` and the connection is replaced.
+  `check:sources` refuses `begin`, `commit`, `rollback` and session `SET` in raw SQL, and any
+  setting of a `drefyn.` value outside this package. Savepoints are fine.
+- If a statement fails, the transaction is over. Work that catches a SQL error and returns
+  still rejects with that error.
+- After every transaction the connection runs `DISCARD ALL` before it goes back to the pool,
+  so cursors held past commit, session settings, `LISTEN` and advisory locks never reach the
+  next tenant. It also drops prepared statements, so queries are never named.
+- Streaming is not supported inside a transaction.
+- No insert path accepts a client chosen `id`. Ids come from `uuidv7()` or `newId(kind)`, so a
+  primary key conflict can never tell a caller that an id exists in another tenant. This is
+  why unique keys other than `(id)` must include `organization_id`.
+
+Errors are `DbError` with a stable `code`; messages never carry query values, server detail or
+secrets.
+
+| Code                        | When                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `DB_CONFIG_INVALID`         | bad config or `timeoutMs`, or a login the server refused                      |
+| `DB_ROLE_UNSAFE`            | the startup role check failed                                                 |
+| `DB_TENANT_CONTEXT_MISSING` | no valid organization, or no valid project where one is required              |
+| `DB_TENANT_CONTEXT_INVALID` | a `projectId` key given to `withOrganization`, or a context that is not plain |
+| `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant                          |
+| `DB_RLS_VIOLATION`          | a row level security policy refused a write                                   |
+| `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                           |
+| `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                            |
+| `DB_TIMEOUT`                | a statement, lock or idle transaction timed out                               |
+| `DB_UNAVAILABLE`            | the server is unreachable or the pool stayed busy past its wait               |
+| `INTEGER_INVALID`           | a value is not a safe integer, including a `bigint` read past 2^53 - 1        |
+
+Other driver errors, such as a foreign key violation, come back unchanged.
+
+`toSafeInteger(value, field, { allowNegative })` takes a safe integer, a `bigint` or a canonical
+decimal string and refuses everything else with `INTEGER_INVALID`, naming the field and never
+the value. Negatives are refused unless asked for. `newId(kind)` returns a UUIDv7 that
+increases within the process.
+
+### Tables
+
+Tenant tables are built with `tenantTableSql` and published tables with `publishedTableSql`
+from `src/tenant-sql.ts`, in a migration. A tenant table gets `organization_id` (and
+`project_id` with a composite foreign key to its project), an index leading with
+`organization_id`, row level security enabled and forced, and the `tenant_isolation` policy to
+`drefyn_app` only. On a project table that policy needs both the organization and the
+project. A foreign key into a tenant table carries `organization_id`, and `project_id` too
+when both tables have one, against a matching composite unique key; a reference across
+projects of one organization needs a reviewed entry in the allow list. A published table also gets an explicit `select` grant to
+`drefyn_public_reader` and the `published_read` policy, which needs both organization and
+project. It must be added to the published allow list in `src/allow-lists.ts`.
+
+`drefyn_owner` matches no policy, so migrations cannot read or change tenant rows. Data
+changes run as jobs through `withTenant`, one transaction per tenant.
+
+## Checks
+
+```sh
+pnpm --filter @drefyn/db check:catalog   # DREFYN_MIGRATION_DATABASE_URL
+pnpm --filter @drefyn/db check:sources [--migrations-dir <dir>] [--root <dir>]
+```
+
+`check:catalog` reads the catalog of a migrated database and exits 1 with one line per problem:
+a table in `app` without `organization_id`, RLS or forced RLS that is not on the global table
+allow list; a weakened, extra or missing policy; a `numeric`, `real`, `double precision`,
+`money` or `timestamp without time zone` column; a `SECURITY DEFINER` function off its allow
+list; a view without `security_invoker = true`; a materialized view; a unique key on a tenant
+table without `organization_id`; any reader grant outside the published allow list; any grant
+on the bookkeeping tables; a function executable by `PUBLIC`; default privileges to the reader
+or `PUBLIC`; anything `drefyn_app` holds beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` on
+tables (`TRUNCATE` ignores RLS), `USAGE` and `SELECT` on sequences and `EXECUTE` on its
+allow list, including grant options, `CREATE`, `TEMP`, ownership and default privileges; a
+foreign key into a tenant table without the tenant columns; and any persisted setting on
+`drefyn_app` or `drefyn_public_reader`, for all roles, or on the database beyond the
+bootstrap's.
+
+`check:sources` fails on migration DDL aimed at an extension or schema `extensions`, and on a
+session level tenant setting (a plain or session `SET` of a `drefyn.` setting, or `set_config`
+with `is_local` false) in any tracked file.
 
 ## Public API
 
@@ -17,6 +134,11 @@ command, which runs reversible SQL migrations as `drefyn_owner`.
   `DREFYN_DATABASE_SSL`.
 - `parseMigrationConfig(env)`: reads `DREFYN_MIGRATION_DATABASE_URL` and `DREFYN_DATABASE_SSL`.
   It never falls back to the application URL.
+- `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same
+  pool and SSL keys and a fixed 2000 ms statement timeout. It never falls back to
+  `DREFYN_DATABASE_URL`.
+- `createDatabase`, `createPublishedDatabase`, `withTenant`, `withOrganization`,
+  `withPublishedReader`, `closeDatabase`, `toSafeInteger`, `newId`: see Tenant access.
 - `DbError`, `DbErrorCode`.
 
 ## `drefyn migrate`

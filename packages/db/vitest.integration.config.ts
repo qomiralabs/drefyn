@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/integration/**/*.test.ts'],
+    // Role settings are cluster wide; vitest.integration.serial.config.ts runs these alone.
+    exclude: ['test/integration/serial/**', '**/node_modules/**'],
     globalSetup: ['test/integration/support/global-setup.ts'],
     restoreMocks: true,
     testTimeout: 60_000,
