@@ -71,6 +71,8 @@ const USES: Use[] = [
   ...each('Switch track off', ['border.control'], ON, 'non-text'),
   ...each('Switch track on', ['accent.ink'], ON, 'non-text'),
   ...each('Switch label', ['text.body'], ON, 'text'),
+  // The description carries a disabled switch's reason, so it stays secondary, not disabled.
+  ...each('Switch description', ['text.secondary'], ON, 'text'),
   ...each('Switch disabled', ['disabled.edge'], ['disabled.fill', ...ON], 'non-text', 'disabled'),
   ...each('Switch disabled', ['disabled.text'], ON, 'text', 'disabled'),
   // Menus float on the overlay surface, an alias of ground in light and raised in dark.
