@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { StateIcon } from './state-icon.tsx';
-import type { State } from './state.ts';
+import { requireWord, type State } from './state.ts';
 
 export interface StatusPipProps {
   state: State;
@@ -12,7 +12,12 @@ export interface StatusPipProps {
 // label, so a screen reader hears the state and a sighted reader sees the shape.
 export function StatusPip({ state, label }: StatusPipProps): ReactNode {
   return (
-    <span role="img" aria-label={label} data-state={state} className="inline-flex shrink-0">
+    <span
+      role="img"
+      aria-label={requireWord('StatusPip', label)}
+      data-state={state}
+      className="inline-flex shrink-0"
+    >
       <StateIcon state={state} />
     </span>
   );

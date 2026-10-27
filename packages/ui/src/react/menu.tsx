@@ -1,5 +1,6 @@
 'use client';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { Button, Menu as AriaMenu, MenuTrigger, Popover } from 'react-aria-components';
 import { buttonClasses, LABEL_CELL, type ButtonSize } from './button-classes.ts';
 
@@ -37,45 +38,61 @@ export function Menu({
   const iconOnly = triggerLabel !== undefined;
   const labelId = useId();
   const [open, setOpen] = useState(defaultOpen);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLElement>(null);
+
+  // Tab and Shift+Tab close the menu and move on from the trigger, as if it had never opened,
+  // so a keyboard user keeps their place. React Aria handles Tab on the document in the
+  // capture phase and stops it there, steering focus to the end of the modal popover, so
+  // this listens on the window, which runs first. Closing synchronously unmounts the popover
+  // and its listener; focus goes back to the trigger and the browser's own Tab runs from
+  // there.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Option+Tab is how Safari moves to buttons by default, so it counts as Tab here.
+      if (event.key !== 'Tab' || event.ctrlKey || event.metaKey) return;
+      if (popoverRef.current?.contains(document.activeElement) !== true) return;
+      flushSync(() => {
+        setOpen(false);
+      });
+      triggerRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, []);
   return (
     <MenuTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
+        ref={triggerRef}
         {...(iconOnly ? { 'aria-label': triggerLabel } : {})}
         className={`${buttonClasses({ variant, size, disabled: false, iconOnly })} aria-expanded:bg-pressed`}
       >
         <span className={LABEL_CELL}>{trigger}</span>
       </Button>
       <Popover
+        ref={popoverRef}
         placement="bottom start"
         offset={4}
         className="z-overlay min-w-128 overflow-auto rounded-md border border-rule-strong bg-overlay p-4 shadow-1"
       >
-        {/* The popover keeps focus inside while open, so Tab would cycle through the items.
-            Tab leaves a menu instead, without running anything. React Aria's menu takes no
-            key handler, and lets Tab bubble to this wrapper. */}
-        <div
-          className="contents"
-          onKeyDown={(event) => {
-            if (event.key === 'Tab') setOpen(false);
-          }}
+        <AriaMenu
+          {...REACHABLE_WHEN_DISABLED}
+          // React Aria names the menu by its trigger, and an undefined prop does not override
+          // that, so a label of its own is a hidden element the menu points at instead.
+          {...(label === undefined ? {} : { 'aria-labelledby': labelId })}
+          {...(onAction === undefined
+            ? {}
+            : {
+                onAction: (key) => {
+                  onAction(String(key));
+                },
+              })}
+          className="flex flex-col outline-none"
         >
-          <AriaMenu
-            {...REACHABLE_WHEN_DISABLED}
-            // React Aria names the menu by its trigger, and an undefined prop does not override
-            // that, so a label of its own is a hidden element the menu points at instead.
-            {...(label === undefined ? {} : { 'aria-labelledby': labelId })}
-            {...(onAction === undefined
-              ? {}
-              : {
-                  onAction: (key) => {
-                    onAction(String(key));
-                  },
-                })}
-            className="flex flex-col outline-none"
-          >
-            {children}
-          </AriaMenu>
-        </div>
+          {children}
+        </AriaMenu>
         {label === undefined ? null : (
           <span id={labelId} hidden>
             {label}

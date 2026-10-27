@@ -51,9 +51,13 @@ export function MenuItem({
           {icon}
         </span>
       )}
-      <Text slot="label">{children}</Text>
+      <Text slot="label" className={shortcut === undefined ? undefined : 'flex-1 pe-16'}>
+        {children}
+      </Text>
       {shortcut === undefined ? null : (
-        <Keyboard className="ms-auto ps-16 font-mono text-caption text-secondary">
+        // A hairline keycap on paper, as in the spike: decoration only, the key is announced
+        // through aria-keyshortcuts.
+        <Keyboard className="inline-flex items-center justify-center rounded-sm border border-rule-strong bg-ground px-4 text-label text-secondary">
           {shortcut}
         </Keyboard>
       )}
