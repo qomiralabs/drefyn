@@ -73,12 +73,12 @@ describe('normalizeEmailAddress properties', () => {
   });
 });
 
-// Every default ignorable code point except the two joiners, which IDNA keeps and encodes.
-const DROPPED_IGNORABLES: readonly string[] = (() => {
+// Every default ignorable code point, the two joiners included.
+const IGNORABLES: readonly string[] = (() => {
   const found: string[] = [];
   for (let code = 0; code <= 0x10ffff; code += 1) {
     const unit = String.fromCodePoint(code);
-    if (/\p{Default_Ignorable_Code_Point}/u.test(unit) && !/[\u200c\u200d]/.test(unit)) {
+    if (/\p{Default_Ignorable_Code_Point}/u.test(unit)) {
       found.push(unit);
     }
   }
@@ -86,13 +86,13 @@ const DROPPED_IGNORABLES: readonly string[] = (() => {
 })();
 
 describe('default ignorable code points', () => {
-  it('refuses every one but the joiners anywhere inside the domain', () => {
-    expect(DROPPED_IGNORABLES.length).toBeGreaterThan(100);
+  it('refuses every one anywhere inside the domain', () => {
+    expect(IGNORABLES.length).toBeGreaterThan(100);
     fc.assert(
       fc.property(
         localPart,
         unicodeDomain,
-        fc.constantFrom(...DROPPED_IGNORABLES),
+        fc.constantFrom(...IGNORABLES),
         fc.nat(),
         (local, domain, ignorable, at) => {
           const i = 1 + (at % (domain.length - 1));

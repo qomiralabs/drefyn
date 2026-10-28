@@ -115,6 +115,43 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
   ['U+180B inside the domain', 'jane@exa\u180bmple.com', 'domain'],
   ['U+200C inside the domain', 'jane@exa\u200cmple.com', 'domain'],
   ['U+200D inside the domain', 'jane@exa\u200dmple.com', 'domain'],
+  // Node checks the joiner context only for the first joiner in a label and the browsers
+  // check every one, so a joiner is refused before IDNA until the two agree.
+  [
+    'a Persian ZWNJ the script needs',
+    'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir',
+    'domain',
+  ],
+  ['a Devanagari ZWJ after a virama', 'jane@\u0915\u094d\u200d\u0937.in', 'domain'],
+  ['only valid Devanagari joiners', 'jane@\u0915\u094d\u200d\u0937\u0915\u094d\u200d.in', 'domain'],
+  [
+    'a trailing ZWNJ after a valid one',
+    'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u200c.ir',
+    'domain',
+  ],
+  [
+    'two trailing ZWNJ after a valid one',
+    'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u200c\u200c.ir',
+    'domain',
+  ],
+  [
+    'a ZWNJ after a non joining alef',
+    'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u0627\u200c\u062e.ir',
+    'domain',
+  ],
+  ['meem ZWNJ meem ZWNJ', 'jane@\u0645\u200c\u0645\u200c.ir', 'domain'],
+  ['a second ZWJ after a valid one', 'jane@\u0915\u094d\u200d\u0937\u200d.in', 'domain'],
+  [
+    'a ZWJ without a virama after a valid one',
+    'jane@\u0915\u094d\u200d\u0937\u0915\u200d\u0937.in',
+    'domain',
+  ],
+  ['a ZWNJ after a valid ZWJ', 'jane@\u0915\u094d\u200d\u0937\u200c.in', 'domain'],
+  [
+    'a Latin letter and ZWJ after a valid one',
+    'jane@\u0915\u094d\u200d\u0937\u0061\u200d.in',
+    'domain',
+  ],
 ];
 
 describe('normalizeEmailAddress refusals', () => {
@@ -185,10 +222,6 @@ describe('normalizeEmailAddress accepted forms', () => {
   });
 
   it('still accepts real internationalised domains after the compatibility check', () => {
-    expect(valueOf('jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir')).toBe(
-      'jane@xn--mgbn2ecje63gr19l.ir',
-    );
-    expect(valueOf('jane@\u0915\u094d\u200d\u0937.in')).toBe('jane@xn--11b2ezcw70k.in');
     expect(valueOf('jane@m%sn.de'.replace('%s', '\u00fcnche'))).toBe('jane@xn--mnchen-3ya.de');
     expect(valueOf('jane@stra%se.de'.replace('%s', '\u00df'))).toBe('jane@xn--strae-oqa.de');
     expect(
@@ -201,15 +234,18 @@ describe('normalizeEmailAddress accepted forms', () => {
     expect(valueOf('jane@example%scom'.replace('%s', '\uff61'))).toBe('jane@example.com');
   });
 
-  // IDNA keeps a joiner where the script needs it and encodes it, so the spelling with
-  // one is a different domain, not a hidden copy of the spelling without.
-  it('stores a ZWNJ spelling apart from the joiner free one', () => {
-    expect(valueOf('jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir')).not.toBe(
-      valueOf('jane@\u0645\u06cc\u062e\u0648\u0627\u0647\u0645.ir'),
-    );
+  // The cost of refusing joiners: a real Persian domain is accepted only in its joiner
+  // free spelling, which is a different DNS name from the one with the ZWNJ.
+  it('accepts the joiner free spelling but refuses the ZWNJ one', () => {
     expect(valueOf('jane@\u0645\u06cc\u062e\u0648\u0627\u0647\u0645.ir')).toBe(
       'jane@xn--mgbn2ecje63g.ir',
     );
+    expect(
+      normalizeEmailAddress('jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir'),
+    ).toEqual({
+      ok: false,
+      error: { code: 'address.invalid', reason: 'domain' },
+    });
   });
 
   it('accepts digits and hyphens inside labels', () => {

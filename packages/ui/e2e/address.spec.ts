@@ -115,6 +115,34 @@ const BYPASSES = FORMS.flatMap((form) => [
   `jane@foo${form}example.com`,
 ]);
 
+// Joiner labels. Node 24 checks the joiner context only for the first joiner in a label
+// and the browsers check every one, so the package refuses joiners before IDNA.
+const JOINER_LABELS = [
+  // a Persian ZWNJ the script needs
+  '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir',
+  // a Devanagari ZWJ after a virama
+  '\u0915\u094d\u200d\u0937.in',
+  // only valid Devanagari joiners
+  '\u0915\u094d\u200d\u0937\u0915\u094d\u200d.in',
+  // a trailing ZWNJ after a valid one
+  '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u200c.ir',
+  // two trailing ZWNJ after a valid one
+  '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u200c\u200c.ir',
+  // a ZWNJ after a non joining alef
+  '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\u0627\u200c\u062e.ir',
+  // meem ZWNJ meem ZWNJ
+  '\u0645\u200c\u0645\u200c.ir',
+  // a second ZWJ after a valid one
+  '\u0915\u094d\u200d\u0937\u200d.in',
+  // a ZWJ without a virama after a valid one
+  '\u0915\u094d\u200d\u0937\u0915\u200d\u0937.in',
+  // a ZWNJ after a valid ZWJ
+  '\u0915\u094d\u200d\u0937\u200c.in',
+  // a Latin letter and ZWJ after a valid one
+  '\u0915\u094d\u200d\u0937\u0061\u200d.in',
+];
+const JOINERS = JOINER_LABELS.map((domain) => `jane@${domain}`);
+
 const REAL = [
   'a.b+c@Example.COM',
   '  Jane.Doe+Docs@Example.COM ',
@@ -129,8 +157,6 @@ const REAL = [
   'jane@example\u3002com',
   'jane@example\uff61com',
   'jane@mail-1.example2.co',
-  'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir',
-  'jane@\u0915\u094d\u200d\u0937.in',
   "!#$%&'*+-/=?^_`{|}~@example.com",
   `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`,
 ];
@@ -139,8 +165,9 @@ test('every engine refuses the delimiter and ignorable bypasses, as Node does', 
   page,
 }) => {
   const elsewhere = await openPackage(page);
-  const got = await inBrowser(page, BYPASSES);
-  BYPASSES.forEach((input, i) => {
+  const refused = [...BYPASSES, ...JOINERS];
+  const got = await inBrowser(page, refused);
+  refused.forEach((input, i) => {
     const node = answer(address, input);
     expect(node.result.ok, `Node accepted ${JSON.stringify(input)}`).toBe(false);
     expect(got[i], JSON.stringify(input)).toEqual(node);
@@ -156,5 +183,21 @@ test('every engine agrees with Node on real addresses', async ({ page }) => {
     expect(node.result.ok, `Node refused ${JSON.stringify(input)}`).toBe(true);
     expect(got[i], JSON.stringify(input)).toEqual(node);
   });
+  expect(elsewhere).toEqual([]);
+});
+
+// The joiner refusal stays until this fails. It compares the raw host conversion, with no
+// package checks in front, and passes while this engine and Node still disagree on a
+// joiner label. When it fails, the two agree and joiners can be left to IDNA again.
+test('Node and this engine still disagree on raw joiner host conversion', async ({ page }) => {
+  const elsewhere = await openPackage(page);
+  const convert = (domains: readonly string[]): string[] =>
+    domains.map((domain) => {
+      const url = new URL('ws://x');
+      url.hostname = domain;
+      return url.hostname;
+    });
+  const engine = await page.evaluate(convert, JOINER_LABELS);
+  expect(engine).not.toEqual(convert(JOINER_LABELS));
   expect(elsewhere).toEqual([]);
 });
