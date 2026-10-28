@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Page, type Request } from '@playwright/test';
 
 const STATIC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'storybook-static');
 
@@ -73,6 +73,11 @@ export const tabKey = (browserName: string): string =>
 export const PAGE_BUDGET_MS = 2_000;
 export const sweepTimeout = (pages: number): number => 30_000 + pages * PAGE_BUDGET_MS;
 
+// The manager loads its own bundles before it starts the preview iframe, so a story in it
+// appears seconds after one opened alone. Under amd64 emulation that has taken over 5 s,
+// the default wait for an assertion.
+export const MANAGER_READY_MS = 15_000;
+
 // Firefox lays out in sixtieths of a pixel and reports a width as right minus left in
 // floating point, so two equal boxes can differ in the fifth decimal depending on where they
 // sit. A hundredth of a pixel is far below anything visible.
@@ -115,8 +120,27 @@ function fileFor(url: URL): string | undefined {
 }
 
 // Every test gets the static build and fails on any request to another host, so
-// telemetry, web fonts or analytics added by an upgrade fail here first.
-export const test = base.extend<{ outside: string[] }>({
+// telemetry, web fonts or analytics added by an upgrade fail here first. `drained` waits
+// until every request a page has started has finished or failed, so one still on its way
+// is seen by the outside check below. It counts Playwright's own request events instead
+// of waiting for the network idle load state, which Firefox under emulation sometimes
+// never reports on a page with nothing left to load.
+export const test = base.extend<{ outside: string[]; drained: () => Promise<void> }>({
+  // Named provide, not use, so the React hooks lint rule does not take it for a hook.
+  drained: async ({ context }, provide) => {
+    const inFlight = new Set<Request>();
+    const done = (request: Request) => inFlight.delete(request);
+    context.on('request', (request) => inFlight.add(request));
+    context.on('requestfinished', done);
+    context.on('requestfailed', done);
+    await provide(async () => {
+      await expect
+        .poll(() => [...inFlight].map((request) => request.url()), {
+          message: 'requests still in flight',
+        })
+        .toEqual([]);
+    });
+  },
   outside: [
     async ({ context }, use) => {
       const outside: string[] = [];

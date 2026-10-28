@@ -2,6 +2,7 @@ import {
   docsIds,
   expect,
   FOUNDATIONS,
+  MANAGER_READY_MS,
   openStory,
   storyIds,
   sweepTimeout,
@@ -9,28 +10,43 @@ import {
 } from './fixtures.ts';
 
 // The fixture fails any test that asks another host for anything. These pages load the
-// parts of the build a story iframe does not: the manager and a docs page.
-test('the manager loads only from the static build', async ({ page }) => {
+// parts of the build a story iframe does not: the manager and a docs page. Each test waits
+// for the last thing its page draws, then for every request it started to end, so a
+// request made while loading is caught before the fixture checks.
+test('the manager loads only from the static build', async ({ page, drained }) => {
   await page.goto(`/index.html?path=/story/${FOUNDATIONS}`);
+  const sidebar = page.locator('#storybook-explorer-tree');
+  await expect(
+    sidebar.locator(`[data-item-id="${FOUNDATIONS}"][data-selected="true"]`),
+  ).toBeVisible({ timeout: MANAGER_READY_MS });
   const story = page.frameLocator('#storybook-preview-iframe');
-  await expect(story.locator('#storybook-root h1')).toBeVisible();
-  await page.waitForLoadState('networkidle');
+  await expect(story.locator('#storybook-root h1')).toBeVisible({ timeout: MANAGER_READY_MS });
+  for (const frame of [page.locator('html'), story.locator('html')]) {
+    await frame.evaluate(async () => {
+      await document.fonts.ready;
+    });
+  }
+  await drained();
 });
 
-test('a docs page loads only from the static build', async ({ page }) => {
+test('a docs page loads only from the static build', async ({ page, drained }) => {
   const [docs] = docsIds();
   expect(docs, 'the build has at least one docs page').toBeDefined();
   await page.goto(`/iframe.html?id=${docs ?? ''}&viewMode=docs`);
   await expect(page.locator('#storybook-docs .sbdocs').first()).toBeVisible();
-  await page.waitForLoadState('networkidle');
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await drained();
 });
 
-test('every story iframe loads only from the static build', async ({ page }) => {
+test('every story iframe loads only from the static build', async ({ page, drained }) => {
   const ids = storyIds();
   test.setTimeout(sweepTimeout(ids.length));
   for (const id of ids) {
+    // Waits for the story, its theme and its fonts.
     await openStory(page, id, 'light');
-    await page.waitForLoadState('networkidle');
+    await drained();
   }
 });
 
