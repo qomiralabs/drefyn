@@ -86,6 +86,35 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
   ['a character IDNA forbids', 'jane@exa\uff0fmple.com', 'domain'],
   ['a lone surrogate', 'jane@exa\ud800mple.com', 'domain'],
   ['only ignorable characters in a label', 'jane@\u200b.com', 'domain'],
+  // Compatibility forms of the same delimiters. Some browsers fold them into the ASCII
+  // character before splitting the host, so the check also runs on the NFKC form.
+  ['a full width solidus', 'jane@example.com\uff0fevil', 'domain'],
+  ['a full width question mark', 'jane@example.com\uff1fx', 'domain'],
+  ['a full width number sign', 'jane@example.com\uff03x', 'domain'],
+  ['a full width reverse solidus', 'jane@example.com\uff3cx', 'domain'],
+  ['a full width colon', 'jane@example.com\uff1a25', 'domain'],
+  ['a full width commercial at', 'jane@foo\uff20example.com', 'domain'],
+  ['a small commercial at', 'jane@example.com\ufe6bevil.com', 'domain'],
+  ['a full width percent escape', 'jane@ex\uff0541mple.com', 'domain'],
+  ['a small percent escape', 'jane@ex\ufe6a41mple.com', 'domain'],
+  ['a full width semicolon', 'jane@example\uff1bcom', 'domain'],
+  ['an ideographic space', 'jane@exa\u3000mple.com', 'domain'],
+  ['a small question mark', 'jane@example.com\ufe56x', 'domain'],
+  ['a small number sign', 'jane@example.com\ufe5fx', 'domain'],
+  ['a small reverse solidus', 'jane@example.com\ufe68x', 'domain'],
+  ['a small colon', 'jane@example.com\ufe5525', 'domain'],
+  ['an equals sign hidden by a combining overlay', 'jane@exa=\u0338mple.com', 'domain'],
+  // Default ignorable code points vanish in IDNA, so a look alike input would match
+  // another address without any visible sign.
+  ['U+00AD inside the domain', 'jane@exa\u00admple.com', 'domain'],
+  ['U+200B inside the domain', 'jane@exa\u200bmple.com', 'domain'],
+  ['U+2060 inside the domain', 'jane@exa\u2060mple.com', 'domain'],
+  ['U+FEFF inside the domain', 'jane@exa\ufeffmple.com', 'domain'],
+  ['U+FE0F inside the domain', 'jane@exa\ufe0fmple.com', 'domain'],
+  ['U+034F inside the domain', 'jane@exa\u034fmple.com', 'domain'],
+  ['U+180B inside the domain', 'jane@exa\u180bmple.com', 'domain'],
+  ['U+200C inside the domain', 'jane@exa\u200cmple.com', 'domain'],
+  ['U+200D inside the domain', 'jane@exa\u200dmple.com', 'domain'],
 ];
 
 describe('normalizeEmailAddress refusals', () => {
@@ -99,6 +128,20 @@ describe('normalizeEmailAddress refusals', () => {
   it('sizes the length cases as described', () => {
     expect(at254).toHaveLength(254);
     expect(growing.length).toBeLessThanOrEqual(254);
+  });
+
+  it('hands out refusals no caller can change for the next one', () => {
+    const first = normalizeEmailAddress('jane@localhost');
+    expect(first.ok).toBe(false);
+    if (first.ok) return;
+    expect(Object.isFrozen(first.error)).toBe(true);
+    expect(() => {
+      (first.error as { reason: string }).reason = 'tampered';
+    }).toThrow(TypeError);
+    expect(normalizeEmailAddress('jane@example')).toEqual({
+      ok: false,
+      error: { code: 'address.invalid', reason: 'domain' },
+    });
   });
 
   it('never echoes the input in the error', () => {
@@ -139,6 +182,19 @@ describe('normalizeEmailAddress accepted forms', () => {
   it('applies the IDNA mapping to full width forms', () => {
     expect(valueOf('jane@\uff45xample.com')).toBe('jane@example.com');
     expect(valueOf('jane@example\u3002com')).toBe('jane@example.com');
+  });
+
+  it('still accepts real internationalised domains after the compatibility check', () => {
+    expect(valueOf('jane@m%sn.de'.replace('%s', '\u00fcnche'))).toBe('jane@xn--mnchen-3ya.de');
+    expect(valueOf('jane@stra%se.de'.replace('%s', '\u00df'))).toBe('jane@xn--strae-oqa.de');
+    expect(
+      valueOf(
+        'ivan@%s.%s'
+          .replace('%s', '\u043f\u0440\u0438\u043c\u0435\u0440')
+          .replace('%s', '\u0440\u0444'),
+      ),
+    ).toBe('ivan@xn--e1afmkfd.xn--p1ai');
+    expect(valueOf('jane@example%scom'.replace('%s', '\uff61'))).toBe('jane@example.com');
   });
 
   it('accepts digits and hyphens inside labels', () => {
