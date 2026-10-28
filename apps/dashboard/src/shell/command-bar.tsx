@@ -1,6 +1,5 @@
 'use client';
 import { Badge } from '@drefyn/ui/react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
@@ -43,8 +42,11 @@ export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps
     onOpenChange(false);
     setQuery('');
   };
-  // Where the next steps on no results lead until search and creation exist.
-  const pages = `/${org}/docs/payments-api/pages`;
+  // Rows the filter leaves, counted the same way the list filters, for the status line.
+  const matches = useMemo(
+    () => entries.filter((e) => filter(`${e.name}, ${e.kind}`, query, { key: e.id })).length,
+    [entries, filter, query],
+  );
 
   return (
     // No enter fade: React Aria keeps an overlay open if it is closed mid transition, and
@@ -105,24 +107,11 @@ export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps
                 close();
                 router.push(entry.href);
               }}
+              // React Aria wraps this in a role option, so it holds text only.
               renderEmptyState={() => (
-                <div className="flex flex-col items-start gap-8 px-8 py-12 text-body-s">
-                  <p className="text-secondary">Nothing matches &ldquo;{query}&rdquo;.</p>
-                  <Link
-                    href={`${pages}?q=${encodeURIComponent(query)}`}
-                    onClick={close}
-                    className="text-accent-ink underline hover:text-accent-press focus-visible:focus-ring"
-                  >
-                    Search Payments API docs for &ldquo;{query}&rdquo;
-                  </Link>
-                  <Link
-                    href={`${pages}?new=${encodeURIComponent(query)}`}
-                    onClick={close}
-                    className="text-accent-ink underline hover:text-accent-press focus-visible:focus-ring"
-                  >
-                    Create a page called &ldquo;{query}&rdquo;
-                  </Link>
-                </div>
+                <p className="px-8 py-12 text-body-s text-secondary">
+                  Nothing matches &ldquo;{query}&rdquo;.
+                </p>
               )}
               className="flex min-h-0 flex-col overflow-auto p-4 outline-none"
             >
@@ -154,6 +143,11 @@ export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps
               }}
             </ListBox>
           </Autocomplete>
+          {/* Always mounted, so a screen reader hears it when the list empties; the empty
+              state itself is never the active row, so it is not read on its own. */}
+          <p role="status" className="sr-only">
+            {query.trim() !== '' && matches === 0 ? `No results for “${query}”` : ''}
+          </p>
           <p className="hidden items-center gap-16 border-t border-rule px-16 py-8 text-caption text-secondary sm:flex">
             <span className="inline-flex items-center gap-4">
               <kbd className={KEYCAP}>↑</kbd>
