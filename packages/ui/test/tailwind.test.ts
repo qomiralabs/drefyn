@@ -113,6 +113,19 @@ describe('Tailwind theme', () => {
     }
   });
 
+  // Tailwind's text-* utilities carry size, line height, tracking and weight but no family, so a
+  // step set in mono (labels, code) would fall back to the page's sans without this.
+  it('sets the family on every type step that is not the default sans', async () => {
+    const classes = Object.keys(tokens.type).map((step) => `text-${kebab(step)}`);
+    const css = await build(classes);
+    for (const [step, s] of Object.entries(tokens.type)) {
+      const body = ruleBody(css, `text-${kebab(step)}`);
+      if (s.family === 'sans') expect(body, step).not.toMatch(/font-family:/);
+      else expect(body, step).toMatch(new RegExp(`font-family: var\\(--dr-font-${s.family}\\)`));
+    }
+    expect(ruleBody(css, 'text-label')).toMatch(/font-family: var\(--dr-font-mono\)/);
+  });
+
   it('gives every colour role a text-* utility that sets the colour and nothing else', async () => {
     const names = [...renderTailwindCss().matchAll(/--color-([a-z0-9-]+):/g)].map((m) => m[1]);
     expect(names.length).toBeGreaterThan(20);
