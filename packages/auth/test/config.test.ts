@@ -486,6 +486,30 @@ describe('parseApiAuthConfig', () => {
     );
   });
 
+  it('refuses every other DREFYN_AUTH_ key on the API service, each by name', () => {
+    for (const key of [
+      'DREFYN_AUTH_SECRET_PREVIOUS',
+      'DREFYN_AUTH_GITHUB_CLIENT_ID',
+      'DREFYN_AUTH_GITHUB_CLIENT_SECRET',
+      'DREFYN_AUTH_GOOGLE_CLIENT_ID',
+      'DREFYN_AUTH_GOOGLE_CLIENT_SECRET',
+      'DREFYN_AUTH_DATABASE_POOL_MAX',
+      'DREFYN_AUTH_SIGNUP',
+      'DREFYN_AUTH_RATE_EMAIL_SEND',
+      'DREFYN_AUTH_SOMETHING_NEW',
+    ] as const) {
+      expectAuthError(
+        () => parseApiAuthConfig(apiEnv({ [key]: 'value-that-is-set' })),
+        'AUTH_CONFIG_INVALID',
+        key,
+      );
+    }
+    // Compose passes an unset variable as an empty string.
+    expect(parseApiAuthConfig(apiEnv({ DREFYN_AUTH_SECRET_PREVIOUS: '' })).apiKeyFail).toHaveLength(
+      1,
+    );
+  });
+
   it('derives the failure key from its own secret, never from the auth secret', () => {
     const one = parseApiAuthConfig(apiEnv()).failureKey(['x']);
     const two = parseApiAuthConfig(apiEnv({ DREFYN_API_RATE_LIMIT_KEY: SECRET })).failureKey(['x']);

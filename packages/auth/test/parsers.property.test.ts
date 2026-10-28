@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { idOf, organizationId, toPublicId } from '@drefyn/tenancy';
+import { idOf, organizationId, toPublicId, userId } from '@drefyn/tenancy';
 import {
   decodeSecret,
   encodeSecret,
@@ -61,7 +61,9 @@ const formats: readonly Case[] = [
     name: 'session token',
     valid: fc
       .tuple(anyUuid, anyUuid, secretBytes)
-      .map(([u, s, b]) => formatSessionToken({ userId: idOf('usr', u), sessionId: s, secret: b })),
+      .map(([u, s, b]) =>
+        formatSessionToken({ userId: userId(u), sessionId: idOf('ses', s), secret: b }),
+      ),
     parse: parseSessionToken,
     format: formatSessionToken,
     length: 109,
@@ -79,11 +81,13 @@ const formats: readonly Case[] = [
   }),
   erase<NonNullable<ReturnType<typeof parseInvitationToken>>>({
     name: 'invitation token',
-    valid: fc
-      .tuple(anyUuid, anyUuid, secretBytes)
-      .map(([o, i, b]) =>
-        formatInvitationToken({ organizationId: organizationId(o), invitationId: i, secret: b }),
-      ),
+    valid: fc.tuple(anyUuid, anyUuid, secretBytes).map(([o, i, b]) =>
+      formatInvitationToken({
+        organizationId: organizationId(o),
+        invitationId: idOf('inv', i),
+        secret: b,
+      }),
+    ),
     parse: parseInvitationToken,
     format: formatInvitationToken,
     length: 106,
@@ -197,7 +201,11 @@ describe('id bodies inside tokens', () => {
         secretBytes,
         fc.constantFrom(...Array.from(CROCKFORD.slice(8))),
         (u, s, b, c) => {
-          const token = formatSessionToken({ userId: idOf('usr', u), sessionId: s, secret: b });
+          const token = formatSessionToken({
+            userId: userId(u),
+            sessionId: idOf('ses', s),
+            secret: b,
+          });
           expect(parseSessionToken(`v1.${c}${token.slice(4)}`)).toBeNull();
           expect(parseSessionToken(`${token.slice(0, 30)}${c}${token.slice(31)}`)).toBeNull();
         },

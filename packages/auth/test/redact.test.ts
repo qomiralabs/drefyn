@@ -1,12 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { idOf, organizationId } from '@drefyn/tenancy';
+import { idOf, organizationId, userId } from '@drefyn/tenancy';
 import {
   REDACTED,
   encodeSecret,
   formatApiKey,
   formatInvitationToken,
   formatSessionToken,
+  formatVerifyFragment,
   redact,
   redactText,
 } from '../src/index.ts';
@@ -14,23 +15,30 @@ import { UUID_A, UUID_B, anyUuid, runs, secretBytes } from './support.ts';
 
 const sessionToken = fc
   .tuple(anyUuid, anyUuid, secretBytes)
-  .map(([u, s, b]) => formatSessionToken({ userId: idOf('usr', u), sessionId: s, secret: b }));
+  .map(([u, s, b]) =>
+    formatSessionToken({ userId: userId(u), sessionId: idOf('ses', s), secret: b }),
+  );
 const apiKey = fc
   .tuple(anyUuid, anyUuid, secretBytes)
   .map(([o, k, b]) =>
     formatApiKey({ organizationId: organizationId(o), keyId: idOf('key', k), secret: b }),
   );
-const invitationToken = fc
-  .tuple(anyUuid, anyUuid, secretBytes)
-  .map(([o, i, b]) =>
-    formatInvitationToken({ organizationId: organizationId(o), invitationId: i, secret: b }),
-  );
+const invitationToken = fc.tuple(anyUuid, anyUuid, secretBytes).map(([o, i, b]) =>
+  formatInvitationToken({
+    organizationId: organizationId(o),
+    invitationId: idOf('inv', i),
+    secret: b,
+  }),
+);
 const freeText = fc.string({
   unit: fc.constantFrom(...Array.from('abcdefghijklmnopqrstuvwxyz0123456789 -')),
   minLength: 12,
   maxLength: 30,
 });
 const code = fc.stringMatching(/^[0-9]{8}$/);
+// The verify link fragment: the challenge body, a dot, then the code.
+const fragmentOf = (challenge: string, c: string) =>
+  formatVerifyFragment({ challengeId: challenge, code: c });
 const state = secretBytes.map(encodeSecret);
 
 // A secret kind, the value that must vanish, and how it shows up in a log object.
@@ -55,6 +63,36 @@ const placements: fc.Arbitrary<Placement> = fc.oneof(
     `https://app.test/auth/oauth/github/callback?code=${c}&x=1`,
   ]),
   state.map((s): Placement => [s, 'url', `/auth/oauth/google/callback?x=1&state=${s}`]),
+  fc
+    .tuple(anyUuid, code)
+    .map(([u, c]) => [fragmentOf(u, c), c] as const)
+    .chain(([f, c]) =>
+      fc.constantFrom<Placement>(
+        [c, 'link', `https://app.drefyn.test/sign-in/verify#${f}`],
+        [c, 'url', `/sign-in/verify#${f}`],
+        [c, 'message', `sent sign in link /sign-in/verify#${f} to the inbox`],
+        [c, 'error', new Error(`could not send /sign-in/verify#${f}`)],
+        [c, 'fragment', f],
+      ),
+    ),
+  code.chain((c) =>
+    fc.constantFrom<Placement>(
+      [c, 'body', `code=${c}&challenge=abc`],
+      [c, 'message', `got code=${c} from the form`],
+      [c, 'message', `a=1;code=${c}`],
+      [c, 'message', `first line\ncode=${c}`],
+      [c, 'url', `/cb?CODE=${c}&x=1`],
+      [c, 'url', `/cb?Code=${c}`],
+      [c, 'body', `x=1&Code=${c}`],
+    ),
+  ),
+  state.chain((s) =>
+    fc.constantFrom<Placement>(
+      [s, 'body', `state=${s}`],
+      [s, 'url', `/cb?x=1&STATE=${s}`],
+      [s, 'message', `then state=${s} came back`],
+    ),
+  ),
   invitationToken.chain((t) =>
     fc.constantFrom<Placement>(
       [t, 'invitation', t],
@@ -159,7 +197,7 @@ describe('redact', () => {
   it('survives cycles, maps, sets, dates and very deep values without leaking', () => {
     const token = formatSessionToken({
       userId: idOf('usr', UUID_A),
-      sessionId: UUID_B,
+      sessionId: idOf('ses', UUID_B),
       secret: new Uint8Array(32).fill(2),
     });
     const cyclic: Record<string, unknown> = { password: 'hunter2hunter2' };
@@ -194,6 +232,47 @@ describe('redact', () => {
   });
 });
 
+describe('redact on hostile objects', () => {
+  it('replaces a value whose getter throws, and keeps its siblings', () => {
+    const log = {
+      event: 'auth.test',
+      get broken(): string {
+        throw new Error('boom');
+      },
+    };
+    const out = redact(log) as Record<string, unknown>;
+    expect(out['broken']).toBe(REDACTED);
+    expect(out['event']).toBe('auth.test');
+  });
+
+  it('replaces a Proxy whose traps throw instead of throwing', () => {
+    const trap = () => {
+      throw new Error('trap');
+    };
+    const hostile = new Proxy({}, { ownKeys: trap, get: trap, getOwnPropertyDescriptor: trap });
+    expect(() => redact({ event: 'x', hostile })).not.toThrow();
+    expect((redact({ event: 'x', hostile }) as Record<string, unknown>)['hostile']).toBe(REDACTED);
+    expect(redact(hostile)).toBe(REDACTED);
+  });
+
+  it('never lets an own toJSON put a secret back when serialised', () => {
+    const secret = 'Hunter2-Is-Secret!';
+    const shapes: unknown[] = [
+      { toJSON: () => ({ password: secret }) },
+      { nested: { toJSON: () => secret } },
+      [{ toJSON: () => ({ token: secret }) }],
+      Object.assign(new Error('x'), { toJSON: () => ({ password: secret }) }),
+    ];
+    for (const shape of shapes) {
+      expect(JSON.stringify(redact(shape))).not.toContain(secret);
+    }
+  });
+
+  it('turns functions into the placeholder', () => {
+    expect((redact({ f: () => 1 }) as Record<string, unknown>)['f']).toBe(REDACTED);
+  });
+});
+
 describe('redactText', () => {
   it('removes token shaped values from free text', () => {
     fc.assert(
@@ -211,6 +290,16 @@ describe('redactText', () => {
     );
   });
 
+  it('removes the sign in code from the verify link, whatever surrounds it', () => {
+    const link = 'https://app.drefyn.test/sign-in/verify#01h455vb4pex5vsknk084sn02q.48213907';
+    expect(redactText(link)).toBe(`https://app.drefyn.test/sign-in/verify#${REDACTED}`);
+    expect(redactText('code 01h455vb4pex5vsknk084sn02q.48213907 sent')).toBe(
+      `code ${REDACTED} sent`,
+    );
+    const out = redact({ err: new Error(`failed ${link}`) }) as { err: { message: string } };
+    expect(out.err.message).not.toContain('48213907');
+  });
+
   it('removes the OAuth code and state from a query string, and cookie values by name', () => {
     expect(redactText('/cb?code=abc123&state=xyz789&ok=1')).toBe(
       `/cb?code=${REDACTED}&state=${REDACTED}&ok=1`,
@@ -219,5 +308,11 @@ describe('redactText', () => {
       `__Host-drefyn_pre=${REDACTED}; theme=dark`,
     );
     expect(redactText('Authorization: Bearer abc.def')).toBe(`Authorization: Bearer ${REDACTED}`);
+    expect(redactText('code=48213907&challenge=abc')).toBe(`code=${REDACTED}&challenge=abc`);
+    expect(redactText('got code=48213907')).toBe(`got code=${REDACTED}`);
+    expect(redactText('a=1;state=xyz\ncode=1')).toBe(`a=1;state=${REDACTED}\ncode=${REDACTED}`);
+    expect(redactText('/cb?CODE=abc&State=def')).toBe(`/cb?CODE=${REDACTED}&State=${REDACTED}`);
+    // Only a whole parameter name counts, so other words ending in code stay readable.
+    expect(redactText('zipcode=12345 errorcode=E1')).toBe('zipcode=12345 errorcode=E1');
   });
 });
