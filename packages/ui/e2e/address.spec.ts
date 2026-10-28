@@ -129,6 +129,8 @@ const REAL = [
   'jane@example\u3002com',
   'jane@example\uff61com',
   'jane@mail-1.example2.co',
+  'jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir',
+  'jane@\u0915\u094d\u200d\u0937.in',
   "!#$%&'*+-/=?^_`{|}~@example.com",
   `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`,
 ];

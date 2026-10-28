@@ -185,6 +185,10 @@ describe('normalizeEmailAddress accepted forms', () => {
   });
 
   it('still accepts real internationalised domains after the compatibility check', () => {
+    expect(valueOf('jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir')).toBe(
+      'jane@xn--mgbn2ecje63gr19l.ir',
+    );
+    expect(valueOf('jane@\u0915\u094d\u200d\u0937.in')).toBe('jane@xn--11b2ezcw70k.in');
     expect(valueOf('jane@m%sn.de'.replace('%s', '\u00fcnche'))).toBe('jane@xn--mnchen-3ya.de');
     expect(valueOf('jane@stra%se.de'.replace('%s', '\u00df'))).toBe('jane@xn--strae-oqa.de');
     expect(
@@ -195,6 +199,17 @@ describe('normalizeEmailAddress accepted forms', () => {
       ),
     ).toBe('ivan@xn--e1afmkfd.xn--p1ai');
     expect(valueOf('jane@example%scom'.replace('%s', '\uff61'))).toBe('jane@example.com');
+  });
+
+  // IDNA keeps a joiner where the script needs it and encodes it, so the spelling with
+  // one is a different domain, not a hidden copy of the spelling without.
+  it('stores a ZWNJ spelling apart from the joiner free one', () => {
+    expect(valueOf('jane@\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir')).not.toBe(
+      valueOf('jane@\u0645\u06cc\u062e\u0648\u0627\u0647\u0645.ir'),
+    );
+    expect(valueOf('jane@\u0645\u06cc\u062e\u0648\u0627\u0647\u0645.ir')).toBe(
+      'jane@xn--mgbn2ecje63g.ir',
+    );
   });
 
   it('accepts digits and hyphens inside labels', () => {
