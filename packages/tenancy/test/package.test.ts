@@ -91,6 +91,7 @@ describe('package shape', () => {
         'projectId',
         'surrogateKey',
         'toPublicId',
+        'userId',
       ].sort(),
     );
   });
@@ -102,6 +103,9 @@ describe('package shape', () => {
       'ProjectId',
       'OrganizationRef',
       'TenantRef',
+      'UserId',
+      'UserRef',
+      'userId',
       'CacheKey',
       'cacheKey',
       'surrogateKey',
