@@ -29,6 +29,37 @@ export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 export const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 export const MAX_UUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
+export const V7 = '01928c3e-7a9b-7c3d-8e4f-0123456789ab';
+export const V4 = '9b2f6a1e-4c3d-4b8a-9f7e-6d5c4b3a2918';
+
+// Shared so every named constructor is held to the same list of refusals.
+export const NOT_UUIDS: readonly [string, unknown][] = [
+  ['empty', ''],
+  ['uppercase', V7.toUpperCase()],
+  ['one uppercase letter', '01928C3e-7a9b-7c3d-8e4f-0123456789ab'],
+  ['no hyphens', V7.replaceAll('-', '')],
+  ['braces', `{${V7}}`],
+  ['urn form', `urn:uuid:${V7}`],
+  ['leading space', ` ${V7}`],
+  ['trailing space', `${V7} `],
+  ['trailing newline', `${V7}\n`],
+  ['leading newline', `\n${V7}`],
+  ['one short', V7.slice(0, -1)],
+  ['one long', `${V7}0`],
+  ['hyphen moved', '01928c3e7-a9b-7c3d-8e4f-0123456789ab'],
+  ['non hex letter', '01928c3e-7a9b-7c3d-8e4f-0123456789ag'],
+  ['public id form', 'org_01arz3ndektsv4rrffq69g5fav'],
+  ['user public id form', 'usr_01arz3ndektsv4rrffq69g5fav'],
+  ['fullwidth digit', '\uff101928c3e-7a9b-7c3d-8e4f-0123456789ab'],
+  ['nul byte', `${V7.slice(0, -1)}\u0000`],
+  ['number', 42],
+  ['null', null],
+  ['undefined', undefined],
+  ['object', { toString: () => V7 }],
+  ['boxed string', new String(V7)],
+  ['array', [V7]],
+];
+
 export const CROCKFORD = '0123456789abcdefghjkmnpqrstvwxyz';
 
 export const PREFIXES = [
@@ -46,6 +77,8 @@ export const PREFIXES = [
   'whk',
   'evt',
   'crd',
+  'ses',
+  'inv',
 ] as const;
 
 export const SCOPES = ['page', 'nav', 'search', 'retrieval', 'render', 'asset'] as const;

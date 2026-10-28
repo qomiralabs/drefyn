@@ -16,6 +16,8 @@ export const ID_KINDS = Object.freeze([
   'whk',
   'evt',
   'crd',
+  'ses',
+  'inv',
 ] as const);
 
 export type IdKind = (typeof ID_KINDS)[number];
@@ -26,6 +28,7 @@ declare const idBrand: unique symbol;
 export type IdOf<K extends IdKind> = string & { readonly [idBrand]: K };
 export type OrganizationId = IdOf<'org'>;
 export type ProjectId = IdOf<'prj'>;
+export type UserId = IdOf<'usr'>;
 
 export interface OrganizationRef {
   readonly organizationId: OrganizationId;
@@ -33,6 +36,12 @@ export interface OrganizationRef {
 
 export interface TenantRef extends OrganizationRef {
   readonly projectId: ProjectId;
+}
+
+// Deliberately not an OrganizationRef: a user belongs to many organizations, so a user
+// context must never be mistaken for a tenant context.
+export interface UserRef {
+  readonly userId: UserId;
 }
 
 const KINDS: ReadonlySet<string> = new Set(ID_KINDS);
@@ -68,4 +77,8 @@ export function organizationId(value: string): OrganizationId {
 
 export function projectId(value: string): ProjectId {
   return idOf('prj', value);
+}
+
+export function userId(value: string): UserId {
+  return idOf('usr', value);
 }
