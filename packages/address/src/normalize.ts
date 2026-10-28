@@ -27,17 +27,23 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 // keeping what came before. Only letters, digits, dots and hyphens may reach it in ASCII;
 // anything else ASCII is refused here, and non ASCII is left to IDNA.
 const ASCII_OUTSIDE_HOST = /[\0-,/:-@[-`{-\x7f]/;
+// IDNA drops these without a trace, so a look alike input would match another address.
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 // C0, DEL and C1 controls, plus the two Unicode line breaks some mail clients honour.
 const CONTROL = /[\p{Cc}\u2028\u2029]/u;
 const NUMERIC_LAST_LABEL = /\.[0-9]+$/;
 
-const refusals = {
-  length: { code: 'address.invalid', reason: 'length' },
-  local_part: { code: 'address.invalid', reason: 'local_part' },
-  domain: { code: 'address.invalid', reason: 'domain' },
-  control: { code: 'address.invalid', reason: 'control' },
-  shape: { code: 'address.invalid', reason: 'shape' },
-} as const satisfies Record<AddressError['reason'], AddressError>;
+const refusal = (reason: AddressError['reason']): AddressError =>
+  Object.freeze({ code: 'address.invalid', reason });
+
+// Shared by every caller, so frozen: one caller editing its error cannot change the next.
+const refusals: Readonly<Record<AddressError['reason'], AddressError>> = Object.freeze({
+  length: refusal('length'),
+  local_part: refusal('local_part'),
+  domain: refusal('domain'),
+  control: refusal('control'),
+  shape: refusal('shape'),
+});
 
 function refuse(reason: AddressError['reason']): Result<never, AddressError> {
   return { ok: false, error: refusals[reason] };
@@ -48,8 +54,9 @@ function validLocal(local: string): boolean {
   return local.split('.').every((atom) => ATOM.test(atom));
 }
 
-// The WHATWG host setter is what node:url domainToASCII runs internally, and it exists
-// in browsers too, so this file needs no Node import. A failed set leaves the host as
+// The WHATWG host setter is what node:url domainToASCII runs internally, and browsers
+// have it too, so this file needs no Node import. Engines still differ in which
+// compatibility characters they fold, which the checks before it account for. A failed set leaves the host as
 // the placeholder, a single label that the checks below refuse.
 function toAscii(domain: string): string {
   const url = new URL('ws://x');
@@ -58,7 +65,13 @@ function toAscii(domain: string): string {
 }
 
 function asciiDomain(domain: string): string | null {
-  if (ASCII_OUTSIDE_HOST.test(domain)) return null;
+  if (IGNORABLE.test(domain)) return null;
+  // Browsers fold full width and small forms such as U+FF0F and U+FE6B into the ASCII
+  // character before splitting the host, and Node does not, so the NFKC form is checked
+  // too. The raw form still matters: NFKC turns = plus U+0338 into one non ASCII sign.
+  if (ASCII_OUTSIDE_HOST.test(domain) || ASCII_OUTSIDE_HOST.test(domain.normalize('NFKC'))) {
+    return null;
+  }
   const ascii = toAscii(domain.toLowerCase());
   if (ascii.length > MAX_DOMAIN) return null;
   const labels = ascii.split('.');

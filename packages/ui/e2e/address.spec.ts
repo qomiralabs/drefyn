@@ -15,8 +15,12 @@ const pkgDir = dirname(manifestPath);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
   exports: Record<string, string>;
 };
-const entry = manifest.exports['.'];
-if (entry === undefined) throw new Error('@drefyn/address has no main entry');
+function mainEntry(): string {
+  const entry = manifest.exports['.'];
+  if (entry === undefined) throw new Error('@drefyn/address has no main entry');
+  return entry;
+}
+const entryUrl = `${ORIGIN}${mainEntry().slice(1)}`;
 
 // Each served module is the package source with its types removed and nothing else, so
 // the browser resolves the package's own relative imports exactly as a bundler would.
@@ -69,7 +73,7 @@ async function inBrowser(page: Page, inputs: readonly string[]): Promise<Answer[
         return { result, guard: result.ok ? module.isNormalizedEmailAddress(result.value) : null };
       });
     },
-    { url: `${ORIGIN}${entry.slice(1)}`, inputs },
+    { url: entryUrl, inputs },
   );
 }
 
@@ -142,7 +146,7 @@ test('every engine refuses the delimiter and ignorable bypasses, as Node does', 
   expect(elsewhere).toEqual([]);
 });
 
-test('every engine gives Node answer for real addresses', async ({ page }) => {
+test('every engine agrees with Node on real addresses', async ({ page }) => {
   const elsewhere = await openPackage(page);
   const got = await inBrowser(page, REAL);
   REAL.forEach((input, i) => {
