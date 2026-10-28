@@ -103,7 +103,9 @@ describe('the upgrade scripts', () => {
     ]) {
       expect(upgrade, column).toContain(column);
     }
-    expect(upgrade).toMatch(/as attributes_ok \\gset/);
+    expect(upgrade).toMatch(
+      /as attributes_ok\s+from pg_catalog\.pg_roles r where rolname = 'drefyn_auth' \\gset/,
+    );
     expect(upgrade).toMatch(/\\if :attributes_ok/);
   });
 });

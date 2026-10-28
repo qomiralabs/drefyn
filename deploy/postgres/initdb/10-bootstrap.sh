@@ -25,7 +25,8 @@ unset postgres_password
 DREFYN_OWNER_PASSWORD="$(read_secret drefyn_owner_password)"
 DREFYN_APP_PASSWORD="$(read_secret drefyn_app_password)"
 DREFYN_PUBLIC_READER_PASSWORD="$(read_secret drefyn_public_reader_password)"
-export DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD DREFYN_PUBLIC_READER_PASSWORD
+DREFYN_AUTH_PASSWORD="$(read_secret drefyn_auth_password)"
+export DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD
 
 psql --no-psqlrc --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --file /etc/drefyn/bootstrap.sql

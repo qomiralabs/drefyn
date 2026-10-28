@@ -59,7 +59,7 @@ reset_stack() {
 secret() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
 # Values in the shell win over deploy/.env.
 export DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
-  DREFYN_PUBLIC_READER_PASSWORD
+  DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD
 DREFYN_STACK_ID="$(secret)"
 good_superuser="$(secret)"
 
@@ -142,6 +142,7 @@ bad_start() {
 DREFYN_OWNER_PASSWORD="$(secret)"
 DREFYN_APP_PASSWORD="$(secret)"
 DREFYN_PUBLIC_READER_PASSWORD="$(secret)"
+DREFYN_AUTH_PASSWORD="$(secret)"
 
 DREFYN_POSTGRES_PASSWORD=""
 bad_start "an empty superuser password" "superuser password is not specified" \
@@ -283,7 +284,8 @@ if ! out="$(pgss_sql -c 'create extension if not exists pg_stat_statements' 2>&1
   fail "the test can read pg_stat_statements" "$out"
 fi
 leaked=0
-for value in "$DREFYN_OWNER_PASSWORD" "$DREFYN_APP_PASSWORD" "$DREFYN_PUBLIC_READER_PASSWORD"; do
+for value in "$DREFYN_OWNER_PASSWORD" "$DREFYN_APP_PASSWORD" "$DREFYN_PUBLIC_READER_PASSWORD" \
+  "$DREFYN_AUTH_PASSWORD"; do
   # The value goes in as a psql variable, so this query's own text never holds it.
   # psql only substitutes variables in input it reads, not in -c.
   count="$(pgss_sql -v needle="$value" 2>&1 \
@@ -294,7 +296,7 @@ if [ "$leaked" = 0 ]; then
   pass "pg_stat_statements holds none of the role passwords after the first start"
 else
   fail "pg_stat_statements holds none of the role passwords after the first start" \
-    "$leaked of 3 passwords found"
+    "$leaked of 4 passwords found"
 fi
 # A master user that cannot change pg_stat_statements.track_utility must stop, even when the
 # server logs nothing.
@@ -313,7 +315,7 @@ fi
 pgss_canary="pgsscanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 if out="$("${compose[@]}" exec -T -e PGPASSWORD="$pgss_master_password" \
   -e DREFYN_OWNER_PASSWORD="$pgss_canary" -e DREFYN_APP_PASSWORD="$pgss_canary" \
-  -e DREFYN_PUBLIC_READER_PASSWORD="$pgss_canary" postgres \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$pgss_canary" -e DREFYN_AUTH_PASSWORD="$pgss_canary" postgres \
   psql --no-psqlrc --host 127.0.0.1 --username pgss_master --dbname drefyn \
   --file /etc/drefyn/bootstrap.sql 2>&1)"; then
   fail "the bootstrap stops when pg_stat_statements would keep the passwords" "it exited 0: $out"
@@ -356,7 +358,7 @@ if out="$(docker compose -p "$project" -f "$root/deploy/compose.yaml" -f "$scrat
   if ! out="$("${compose[@]}" exec -T \
     -e PGOPTIONS='-c debug_print_parse=on -c debug_print_rewritten=on -c debug_print_plan=on' \
     -e DREFYN_OWNER_PASSWORD="$debug_canary" -e DREFYN_APP_PASSWORD="$debug_canary" \
-    -e DREFYN_PUBLIC_READER_PASSWORD="$debug_canary" postgres \
+    -e DREFYN_PUBLIC_READER_PASSWORD="$debug_canary" -e DREFYN_AUTH_PASSWORD="$debug_canary" postgres \
     psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1)"; then
     fail "a bootstrap run by hand with debug_print settings on completes" "$out"
   fi
@@ -474,7 +476,8 @@ fi
 canary="pwtestcanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 run_as_master() {
   "${compose[@]}" exec -T -e PGPASSWORD="$master_password" -e DREFYN_OWNER_PASSWORD="$canary" \
-    -e DREFYN_APP_PASSWORD="$canary" -e DREFYN_PUBLIC_READER_PASSWORD="$canary" "$@" postgres \
+    -e DREFYN_APP_PASSWORD="$canary" -e DREFYN_PUBLIC_READER_PASSWORD="$canary" \
+    -e DREFYN_AUTH_PASSWORD="$canary" "$@" postgres \
     psql --no-psqlrc --host 127.0.0.1 --username password_test_master --dbname drefyn \
     --file /etc/drefyn/bootstrap.sql 2>&1
 }

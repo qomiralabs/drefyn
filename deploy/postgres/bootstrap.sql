@@ -5,89 +5,31 @@
 --
 -- Passwords are read from the environment so they never live in a SQL file or in psql's
 -- command line:
---   DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD
+--   DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD,
+--   DREFYN_AUTH_PASSWORD
 --
 --   psql --no-psqlrc --dbname drefyn --file bootstrap.sql
 
 \set ON_ERROR_STOP on
 
--- These print every parse tree and plan, password literals included, to the server log. Any
--- session may turn them off, so no check is needed.
-set debug_print_parse = off;
-set debug_print_rewritten = off;
-set debug_print_plan = off;
-
--- Keep passwords out of the server log. Statement logging, duration logging and sampling
--- would record the statements below that carry one, and an error would record the statement
--- that failed. This has to come before any of them.
-select has_parameter_privilege('log_statement', 'SET')
-  and has_parameter_privilege('log_min_error_statement', 'SET')
-  and has_parameter_privilege('log_min_duration_statement', 'SET')
-  and has_parameter_privilege('log_min_duration_sample', 'SET')
-  and has_parameter_privilege('log_transaction_sample_rate', 'SET') as can_quiet_log \gset
-\if :can_quiet_log
-  set log_statement = 'none';
-  set log_min_error_statement = 'panic';
-  set log_min_duration_statement = -1;
-  set log_min_duration_sample = -1;
-  set log_transaction_sample_rate = 0;
-\endif
-
--- pg_stat_statements keeps the text of utility statements, create role ... password included,
--- as soon as each one completes, even if the transaction later rolls back, and monitoring
--- roles can read it. Its setting only exists when the module is loaded.
-select current_setting('pg_stat_statements.track_utility', true) is not null as pgss_loaded \gset
-\if :pgss_loaded
-  select has_parameter_privilege('pg_stat_statements.track_utility', 'SET') as pgss_can_set \gset
-  \if :pgss_can_set
-    set pg_stat_statements.track_utility = off;
-  \endif
-\endif
-
--- A managed database's master user may not be allowed to change these, and pgaudit and
--- auto_explain log whatever the session says. Stop unless this session really logs and keeps
--- no statements, failed ones included, or the operator has checked and says so. A library is
--- matched anywhere in the preload lists, so $libdir/pgaudit, pgaudit.so and quoted names
--- count, and a list this role cannot read counts as unsafe.
-select current_setting('log_statement') = 'none'
-  and current_setting('log_min_error_statement') in ('log', 'fatal', 'panic')
-  and current_setting('log_min_duration_statement') = '-1'
-  and current_setting('log_min_duration_sample') = '-1'
-  and current_setting('log_transaction_sample_rate') = '0'
-  and coalesce(current_setting('pg_stat_statements.track_utility', true), 'off') = 'off'
-  and coalesce((
-    select count(*) = 3 and bool_and(setting !~* '(pgaudit|auto_explain)')
-    from pg_settings
-    where name in ('shared_preload_libraries', 'session_preload_libraries',
-      'local_preload_libraries')), false) as log_is_quiet \gset
-\if :log_is_quiet
-\else
-  \getenv log_checked DREFYN_BOOTSTRAP_LOG_CHECKED
-  \if :{?log_checked}
-    select :'log_checked' = 'yes' as log_checked_yes \gset
-  \else
-    \set log_checked_yes false
-  \endif
-  \if :log_checked_yes
-    \echo 'bootstrap: DREFYN_BOOTSTRAP_LOG_CHECKED=yes, so running with the server log settings as they are'
-  \else
-    do $$ begin raise exception 'bootstrap: statement logging, failed statement logging, duration logging or sampling, pgaudit, auto_explain or pg_stat_statements may record the passwords this file sets, and this role cannot turn them off. Check them, then set DREFYN_BOOTSTRAP_LOG_CHECKED=yes to run anyway'; end $$;
-  \endif
-\endif
+-- Turns off everything that could log or keep a password, or stops. Before any \getenv.
+\ir quiet-log.sql
 
 \getenv owner_password DREFYN_OWNER_PASSWORD
 \getenv app_password DREFYN_APP_PASSWORD
 \getenv reader_password DREFYN_PUBLIC_READER_PASSWORD
+\getenv auth_password DREFYN_AUTH_PASSWORD
 
-select :{?owner_password} and :{?app_password} and :{?reader_password} as have_passwords \gset
+select :{?owner_password} and :{?app_password} and :{?reader_password} and :{?auth_password}
+  as have_passwords \gset
 \if :have_passwords
 \else
-  do $$ begin raise exception 'set DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD and DREFYN_PUBLIC_READER_PASSWORD'; end $$;
+  do $$ begin raise exception 'set DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD and DREFYN_AUTH_PASSWORD'; end $$;
 \endif
 
 -- An empty password would leave a role that cannot log in, and a short one is a guess away.
-select least(length(:'owner_password'), length(:'app_password'), length(:'reader_password')) >= 16
-  as long_enough \gset
+select least(length(:'owner_password'), length(:'app_password'), length(:'reader_password'),
+    length(:'auth_password')) >= 16 as long_enough \gset
 \if :long_enough
 \else
   do $$ begin raise exception 'each role password must be at least 16 characters'; end $$;
@@ -96,7 +38,8 @@ select least(length(:'owner_password'), length(:'app_password'), length(:'reader
 -- The file runs once. Checking first means a second run stops with a plain message and never
 -- reaches a statement that carries a password.
 select exists (
-    select from pg_roles where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
+    select from pg_roles where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader',
+      'drefyn_auth')
   ) or exists (select from pg_namespace where nspname in ('app', 'extensions'))
   as already_run \gset
 \if :already_run
@@ -115,6 +58,11 @@ create role drefyn_app login nosuperuser nobypassrls nocreaterole nocreatedb noi
   password :'app_password';
 create role drefyn_public_reader login nosuperuser nobypassrls nocreaterole nocreatedb noinherit
   password :'reader_password';
+-- Sign in looks people up before anyone is known, so it gets a role that can read identity
+-- tables and nothing else. upgrade/0001-auth-role.sql creates it the same way on older
+-- databases; keep the two in step.
+create role drefyn_auth login nosuperuser nobypassrls nocreaterole nocreatedb noinherit
+  password :'auth_password';
 
 create schema app authorization drefyn_owner;
 
@@ -141,7 +89,7 @@ revoke all on schema public from public;
 -- connect without a grant, and temp tables are a place to stage data outside row level
 -- security.
 revoke all on database :"dbname" from public;
-grant connect on database :"dbname" to drefyn_owner, drefyn_app, drefyn_public_reader;
+grant connect on database :"dbname" to drefyn_owner, drefyn_app, drefyn_public_reader, drefyn_auth;
 
 -- Every cluster also has postgres and template1, open to PUBLIC the same way. New databases
 -- do not copy these rights from template1. On a managed database the master user may not own
@@ -168,3 +116,4 @@ commit;
 \unset owner_password
 \unset app_password
 \unset reader_password
+\unset auth_password

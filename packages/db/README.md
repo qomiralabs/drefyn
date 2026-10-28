@@ -256,6 +256,11 @@ Migrations never create or change an extension, because `drefyn_owner` owns neit
 extension nor its schema. The message gives the one statement to run as the superuser on
 compose or the master user on managed Postgres.
 
+The same check stops when a role added after the first bootstrap, today `drefyn_auth`, is
+missing or has no `CONNECT` on the database, before any migration that might grant to it.
+The message names the role and the upgrade: `bash scripts/selfhost.sh upgrade` on compose, or
+`deploy/postgres/upgrade/0001-auth-role.sql` run with psql by the master user.
+
 ## `check:types`
 
 ```sh

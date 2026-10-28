@@ -95,10 +95,11 @@ else
   fail "the old volume has three roles and the old deploy/.env no auth password" "roles [$roles]"
 fi
 
-# The current files, in the same place, as a pull would leave them.
-rm -rf "$root/deploy/postgres" "$root/scripts"
-cp -R "$src/scripts" "$root/scripts"
-cp -R "$src/deploy/postgres" "$root/deploy/postgres"
+# The current files, in the same place, as a pull would leave them. Copied over the old ones
+# rather than after removing them: Docker Desktop cannot remount a bind mounted file whose
+# folder was deleted under it.
+cp -R "$src/scripts/." "$root/scripts/"
+cp -R "$src/deploy/postgres/." "$root/deploy/postgres/"
 cp "$src/deploy/compose.yaml" "$src/deploy/.env.example" "$src/deploy/README.md" "$root/deploy/"
 make_loud
 
@@ -196,16 +197,19 @@ server_log_now() {
 # sends the password to the server.
 pgss_texts() { superuser_sql <<<'select query from public.pg_stat_statements;'; }
 
-# expect_no_leak <when> <password> <statement pattern>
+# expect_no_leak <when> <password> <statement pattern>: the pattern is matched against the
+# statements the server logged, not against psql's own output that init leaves in the log.
 expect_no_leak() {
-  local when="$1" secret="$2" pattern="$3" log texts
+  local when="$1" secret="$2" pattern="$3" log texts statements
   if ! log="$(server_log_now)"; then
     fail "$when: the server log holds no password" "the marker never reached docker logs"
   elif grep -qF -- "$secret" <<<"$log"; then
     fail "$when: the server log holds no password" \
       "$(grep -cF -- "$secret" <<<"$log") line(s) hold it"
-  elif grep -qiE -- "$pattern" <<<"$log"; then
-    fail "$when: the server log holds no password clause" "$(grep -iE -- "$pattern" <<<"$log" | head -n 3)"
+  elif statements="$(grep -E '(statement|STATEMENT|execute [^:]*):' <<<"$log" || true)" &&
+    grep -qiE -- "$pattern" <<<"$statements"; then
+    fail "$when: the server log holds no password clause" \
+      "$(grep -iE -- "$pattern" <<<"$statements" | head -n 3)"
   else
     pass "$when: the server log holds neither the password nor a password clause"
   fi
@@ -228,6 +232,7 @@ expect_no_leak "after two upgrades" "$auth_password" 'create role|alter role|pas
 # The same create, from a session that asks for every kind of logging the preamble knows.
 superuser_sql <<'SQL' >/dev/null
 set log_statement = 'none';
+set log_min_duration_statement = -1;
 set pg_stat_statements.track_utility = off;
 revoke connect on database drefyn from drefyn_auth;
 drop role drefyn_auth;
@@ -248,6 +253,7 @@ expect_no_leak "after a create with every log setting on" "$auth_password" \
 # A role that exists with other attributes is refused, not skipped, and nothing is changed.
 superuser_sql <<'SQL' >/dev/null
 set log_statement = 'none';
+set log_min_duration_statement = -1;
 set pg_stat_statements.track_utility = off;
 revoke connect on database drefyn from drefyn_auth;
 drop role drefyn_auth;
@@ -309,6 +315,7 @@ master_password="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 if ! out="$("${compose[@]}" exec -T -e MASTER_PASSWORD="$master_password" postgres \
   psql --no-psqlrc -v ON_ERROR_STOP=1 -q --username postgres --dbname drefyn 2>&1 <<'SQL'
 set log_statement = 'none';
+set log_min_duration_statement = -1;
 set pg_stat_statements.track_utility = off;
 \getenv master_password MASTER_PASSWORD
 create role upgrade_test_master login createrole password :'master_password';
