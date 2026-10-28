@@ -27,10 +27,11 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 // keeping what came before. Only letters, digits, dots and hyphens may reach it in ASCII;
 // anything else ASCII is refused here, and non ASCII is left to IDNA.
 const ASCII_OUTSIDE_HOST = /[\0-,/:-@[-`{-\x7f]/;
-// IDNA drops these without a trace, so a look alike input would match another address.
-// ZWNJ and ZWJ are left to IDNA: under CONTEXTJ it refuses them or keeps them, and a kept
-// joiner changes the punycode, so Persian and Indic spellings store as different domains.
-const IGNORABLE = /(?![\u200c\u200d])\p{Default_Ignorable_Code_Point}/u;
+// IDNA drops most of these without a trace, so a look alike input would match another
+// address. ZWNJ and ZWJ are refused too: engines disagree on the joiner context rule for
+// labels with more than one joiner (Node checks only the first), so joiners are refused
+// until IDNA behaviour is consistent. Persian and Indic domains that need one are refused.
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 // C0, DEL and C1 controls, plus the two Unicode line breaks some mail clients honour.
 const CONTROL = /[\p{Cc}\u2028\u2029]/u;
 const NUMERIC_LAST_LABEL = /\.[0-9]+$/;

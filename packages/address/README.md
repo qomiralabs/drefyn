@@ -50,9 +50,14 @@ In order, with the refusal reason for each step:
    strings, comments, spaces, escapes and non ASCII are refused: `local_part`.
 8. The domain may not hold a default ignorable code point (soft hyphen, zero width space,
    word joiner, variation selectors and the like), since IDNA would drop it silently. ZWNJ
-   (U+200C) and ZWJ (U+200D) are the exception: IDNA refuses them unless the script needs
-   them, as in Persian and after an Indic virama, and then keeps them in the punycode, so
-   the spelling with a joiner is a different domain. In ASCII the domain may hold only
+   (U+200C) and ZWJ (U+200D) are refused too, at a cost: real Persian and Indic domains
+   that need a joiner (after a virama, or between Persian letters) cannot be used, and only
+   their joiner free spelling, a different domain, is accepted. The reason is that the
+   runtimes disagree on the joiner context rule. Node 24 checks only the first joiner in a
+   label and stores labels with later invalid joiners, while every browser refuses them,
+   and the split also runs the other way (U+1715 before a joiner). The browser spec test
+   "Node and this engine still disagree on raw joiner host conversion" fails once they
+   agree; that is the moment to revisit. In ASCII the domain may hold only
    letters, digits, dots and hyphens, checked both as typed and in its NFKC form; other non
    ASCII is left to IDNA. It is lower cased and converted to ASCII with the WHATWG URL host
    rules (the same conversion as `node:url` `domainToASCII`). The result needs two or more
