@@ -62,30 +62,36 @@ select not exists (
   -- Someone made the role by hand or with other settings. Carrying on would hand the sign in
   -- path whatever it has, so stop and say what differs. The startup role check is the second
   -- line, but it only runs when the auth pool opens.
-  select concat_ws(', ',
-      case when not rolcanlogin then 'nologin' end,
-      case when rolsuper then 'superuser' end,
-      case when rolbypassrls then 'bypassrls' end,
-      case when rolcreaterole then 'createrole' end,
-      case when rolcreatedb then 'createdb' end,
-      case when rolinherit then 'inherit' end,
-      case when rolreplication then 'replication' end,
-      case when rolconfig is not null then 'role settings' end,
-      case when exists (select from pg_catalog.pg_db_role_setting s where s.setrole = r.oid)
-        then 'per database settings' end,
-      case when exists (select from pg_catalog.pg_auth_members m where m.member = r.oid)
-        then 'membership in another role' end) as differences,
-    rolcanlogin and not rolsuper and not rolbypassrls and not rolcreaterole
-      and not rolcreatedb and not rolinherit and not rolreplication and rolconfig is null
-      and not exists (select from pg_catalog.pg_db_role_setting s where s.setrole = r.oid)
-      and not exists (select from pg_catalog.pg_auth_members m where m.member = r.oid)
-      as attributes_ok
-  from pg_catalog.pg_roles r where rolname = 'drefyn_auth' \gset
+  -- One list of differences, and the verdict is only whether it is empty, so the two can
+  -- never disagree. alter role ... set lives in pg_db_role_setting with database 0 and shows
+  -- as rolconfig; only rows for one database count as per database settings.
+  select differences, differences = '' as attributes_ok,
+    'upgrade: drefyn_auth already exists with other attributes (' || differences
+      || '); expected login nosuperuser nobypassrls nocreaterole nocreatedb noinherit'
+      || ' noreplication and no settings or memberships. Nothing was changed. Fix it as the'
+      || ' superuser with alter role, revoke and reset, then run this again' as refusal
+  from (
+    select concat_ws(', ',
+        case when not rolcanlogin then 'nologin' end,
+        case when rolsuper then 'superuser' end,
+        case when rolbypassrls then 'bypassrls' end,
+        case when rolcreaterole then 'createrole' end,
+        case when rolcreatedb then 'createdb' end,
+        case when rolinherit then 'inherit' end,
+        case when rolreplication then 'replication' end,
+        case when rolconfig is not null then 'role settings' end,
+        case when exists (select from pg_catalog.pg_db_role_setting s
+            where s.setrole = r.oid and s.setdatabase <> 0)
+          then 'per database settings' end,
+        case when exists (select from pg_catalog.pg_auth_members m where m.member = r.oid)
+          then 'membership in another role' end) as differences
+    from pg_catalog.pg_roles r where rolname = 'drefyn_auth'
+  ) found \gset
   \if :attributes_ok
     grant connect on database :"dbname" to drefyn_auth;
     \echo 'upgrade: drefyn_auth already exists with the expected attributes; CONNECT on' :"dbname" 'is granted'
   \else
-    \warn 'upgrade: drefyn_auth already exists with other attributes (' :differences '); expected login nosuperuser nobypassrls nocreaterole nocreatedb noinherit noreplication and no settings or memberships. Nothing was changed. Fix it as the superuser with alter role, revoke and reset, then run this again'
+    \warn :refusal
     select where false \gset
   \endif
 \endif

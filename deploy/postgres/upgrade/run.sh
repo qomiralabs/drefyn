@@ -8,7 +8,7 @@ set -eu
 
 secret=/run/secrets/drefyn_auth_password
 if [ ! -s "$secret" ]; then
-  echo "upgrade: secret drefyn_auth_password is missing or empty: add DREFYN_AUTH_PASSWORD to deploy/.env (bash scripts/selfhost.sh upgrade does) and recreate the container" >&2
+  echo "upgrade: secret drefyn_auth_password is missing or empty: set DREFYN_AUTH_PASSWORD in deploy/.env to at least 16 random characters, then run bash scripts/selfhost.sh upgrade, which also fills in the key when it is absent" >&2
   exit 1
 fi
 DREFYN_AUTH_PASSWORD="$(cat "$secret")"

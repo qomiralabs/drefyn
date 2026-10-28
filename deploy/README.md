@@ -164,15 +164,16 @@ On a managed database, run the same file once as the master user, with
 psql --no-psqlrc --dbname drefyn --file deploy/postgres/bootstrap.sql
 ```
 
-It stops before changing anything if the roles or schemas already exist. A managed database
-bootstrapped before `drefyn_auth` gets it from the upgrade script instead, run the same way
-as the master user with `DREFYN_AUTH_PASSWORD` set:
-
-````sh
-psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0001-auth-role.sql
-``` On `postgres` and
+It stops before changing anything if the roles or schemas already exist. On `postgres` and
 `template1` it only revokes `PUBLIC` rights where the master user owns the database, and
 prints a notice for any it skips.
+
+A managed database bootstrapped before `drefyn_auth` gets it from the upgrade script instead,
+run the same way as the master user with `DREFYN_AUTH_PASSWORD` set:
+
+```sh
+psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0001-auth-role.sql
+```
 
 Both files turn off statement logging for their own session before they read a password. A
 master user that is not a real superuser may not be allowed to, and then the file stops
@@ -224,4 +225,3 @@ stack, labelled with the compose file path, can only be removed: `reset --yes` d
 Set `COMPOSE_PROJECT_NAME` (in the shell or in `deploy/.env`) and a different
 `DREFYN_POSTGRES_PORT` to run this stack beside another one, for example from another
 worktree.
-````

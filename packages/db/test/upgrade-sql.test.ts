@@ -104,8 +104,9 @@ describe('the upgrade scripts', () => {
       expect(upgrade, column).toContain(column);
     }
     expect(upgrade).toMatch(
-      /as attributes_ok\s+from pg_catalog\.pg_roles r where rolname = 'drefyn_auth' \\gset/,
+      /from pg_catalog\.pg_roles r where rolname = 'drefyn_auth'\s+\) found \\gset/,
     );
+
     expect(upgrade).toMatch(/\\if :attributes_ok/);
     // One rule: the verdict is derived from the list it prints, so the two cannot drift.
     expect(upgrade).toMatch(/differences = '' as attributes_ok/);

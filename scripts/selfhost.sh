@@ -87,6 +87,10 @@ add_missing_passwords() {
         say <<<"selfhost: could not generate a random value for $key; deploy/.env was not changed."
         exit 1
       fi
+      # A hand written file may end without a newline; the key must not join its last value.
+      if [ -z "$added" ] && [ -s "$env_file" ] && [ -n "$(tail -c1 "$env_file")" ]; then
+        printf '\n' >>"$env_file"
+      fi
       printf '%s=%s\n' "$key" "$value" >>"$env_file"
       added+=" $key"
     fi
