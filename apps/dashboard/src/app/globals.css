@@ -41,3 +41,8 @@
 @utility animate-fade-in {
   animation: dr-fade-in var(--dr-duration-base) var(--dr-ease-enter);
 }
+
+/* The command bar draws its own clear button, so the browser's is hidden. */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}

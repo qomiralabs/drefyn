@@ -11,6 +11,7 @@ const entry: Command = {
   id: 'docs',
   name: 'Docs',
   kind: 'product',
+  icon: 'page',
   keywords: ['Pages', 'API'],
   href: '/acme/docs',
   permission: 'docs.read',

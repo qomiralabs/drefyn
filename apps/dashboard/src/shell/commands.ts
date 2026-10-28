@@ -1,3 +1,5 @@
+import type { SectionIcon } from './sections.ts';
+
 // The command registry: places and actions the command bar can reach, as data. Products add
 // their own entries; the code that runs an action loads with the action, never with the shell.
 export interface Command {
@@ -6,6 +8,13 @@ export interface Command {
   readonly name: string;
   // The kind of thing, said in the row while results are flat ("Docs project").
   readonly kind: string;
+  // Drawn at the start of the row, so kinds tell apart at a glance.
+  readonly icon: CommandIcon;
+  // For objects: their state now, as a word beside its mark.
+  readonly state?: {
+    readonly state: 'fresh' | 'stale' | 'broken' | 'neutral';
+    readonly word: string;
+  };
   readonly keywords?: readonly string[];
   // Where it goes. Every entry needs a target the keyboard can reach.
   readonly href: string;
@@ -19,6 +28,8 @@ export interface Command {
 
 export type CommandProblem =
   'name_missing' | 'target_missing' | 'permission_missing' | 'undo_and_confirm';
+
+export type CommandIcon = SectionIcon | 'schema';
 
 export class CommandError extends Error {
   readonly problem: CommandProblem;

@@ -4,40 +4,15 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
-import {
-  IconCard,
-  IconChart,
-  IconClose,
-  IconCode,
-  IconCommit,
-  IconGlobe,
-  IconHome,
-  IconIncident,
-  IconPage,
-  IconPulse,
-  IconSchema,
-  IconSettings,
-  IconUsers,
-} from './icons.tsx';
+import { ICON_BY_NAME, IconClose, IconPage, IconPulse, IconSchema } from './icons.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
 import { parseShellPath, shellHref } from './route.ts';
 import { ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
 import { OrganizationMenu } from './top-bar.tsx';
 
-const ICONS: Record<SectionIcon, (props: { tone?: 'current' | 'secondary' }) => ReactNode> = {
-  home: IconHome,
-  page: IconPage,
-  commit: IconCommit,
-  code: IconCode,
-  chart: IconChart,
-  settings: IconSettings,
-  incident: IconIncident,
-  pulse: IconPulse,
-  globe: IconGlobe,
-  users: IconUsers,
-  card: IconCard,
-};
+const ICONS: Record<SectionIcon, (props: { tone?: 'current' | 'secondary' }) => ReactNode> =
+  ICON_BY_NAME;
 
 const PRODUCT_ICON: Record<ProductId, (props: { tone?: 'current' | 'secondary' }) => ReactNode> = {
   docs: IconPage,

@@ -37,7 +37,15 @@ const loadCommandBar = () => import('./command-bar.tsx').then((mod) => mod.Comma
 // person can see at each width.
 const REGIONS = ['[data-region="bar"]', '[data-region="nav"]', '#main'];
 
-export function ShellFrame({ org, children }: { org: string; children: ReactNode }): ReactNode {
+export function ShellFrame({
+  org,
+  orgName,
+  children,
+}: {
+  org: string;
+  orgName: string;
+  children: ReactNode;
+}): ReactNode {
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -140,7 +148,7 @@ export function ShellFrame({ org, children }: { org: string; children: ReactNode
     <ShellContext value={state}>
       {children}
       {CommandBar === null ? null : (
-        <CommandBar org={org} open={commandOpen} onOpenChange={setCommandOpen} />
+        <CommandBar org={org} orgName={orgName} open={commandOpen} onOpenChange={setCommandOpen} />
       )}
       <ShellToasts />
     </ShellContext>

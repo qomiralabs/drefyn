@@ -6,6 +6,7 @@ export function places(org: string): readonly Command[] {
   return defineCommands([
     {
       id: 'overview',
+      icon: 'home',
       name: 'Overview',
       kind: 'organization',
       href: at(''),
@@ -14,6 +15,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'docs',
+      icon: 'page',
       name: 'Docs',
       kind: 'product',
       href: at('/docs'),
@@ -22,6 +24,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'studio',
+      icon: 'schema',
       name: 'Studio',
       kind: 'product',
       href: at('/studio'),
@@ -30,6 +33,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'status',
+      icon: 'pulse',
       name: 'Status',
       kind: 'product',
       href: at('/status'),
@@ -38,6 +42,8 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'payments-api',
+      icon: 'page',
+      state: { state: 'stale', word: 'Out of date' },
       name: 'Payments API docs',
       kind: 'Docs project',
       href: at('/docs/payments-api'),
@@ -45,6 +51,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'pages',
+      icon: 'page',
       name: 'Pages in Payments API docs',
       kind: 'Docs section',
       keywords: ['pages'],
@@ -53,6 +60,8 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'acme-status',
+      icon: 'pulse',
+      state: { state: 'fresh', word: 'Running' },
       name: 'Acme status',
       kind: 'status page',
       href: at('/status/acme-status'),
@@ -60,6 +69,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'plan',
+      icon: 'card',
       name: 'Plan and usage',
       kind: 'organization',
       keywords: ['billing', 'limits'],
@@ -68,6 +78,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'members',
+      icon: 'users',
       name: 'Members',
       kind: 'organization',
       keywords: ['seats', 'invite'],
@@ -76,6 +87,7 @@ export function places(org: string): readonly Command[] {
     },
     {
       id: 'settings',
+      icon: 'settings',
       name: 'Organization settings',
       kind: 'organization',
       href: at('/settings'),

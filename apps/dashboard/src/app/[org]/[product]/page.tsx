@@ -72,7 +72,10 @@ export default async function ProductHome({ params }: Params) {
             <span role="img" aria-label="Read only" className="inline-flex text-secondary">
               <IconLock />
             </span>
-          ) : null,
+          ) : (
+            // Keeps every row's name on one line with the marked ones.
+            <span aria-hidden="true" className="inline-block size-icon-sm" />
+          ),
           title: p.name,
           href: shellHref({ org, product: product.id, project: p.slug }),
           detail: p.answer,

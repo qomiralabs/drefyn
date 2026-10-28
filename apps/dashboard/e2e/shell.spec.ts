@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   ANSWERS,
   banner,
@@ -306,7 +306,7 @@ test.describe('JavaScript off', () => {
 });
 
 test.describe('command bar content', () => {
-  const open = async (page: import('@playwright/test').Page) => {
+  const open = async (page: Page) => {
     await openShell(page, ROUTES.overview);
     await page.keyboard.press('ControlOrMeta+k');
     await expect(commandBar(page)).toBeVisible();
@@ -327,7 +327,7 @@ test.describe('command bar content', () => {
     const bar = await open(page);
     const options = bar.getByRole('option');
     for (const option of await options.all()) {
-      await expect(option.locator('svg[data-icon]')).toHaveCount(1);
+      await expect(option.locator(':scope > svg[data-icon]')).toHaveCount(1);
     }
     await expect(options.filter({ hasText: 'Payments API docs, Docs project' })).toContainText(
       'Out of date',

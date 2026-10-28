@@ -15,9 +15,9 @@ export default async function OrgLayout({
   params: Promise<{ org: string }>;
 }) {
   const { org } = await params;
-  await guardOrganization(org);
+  const organization = await guardOrganization(org);
   return (
-    <ShellFrame org={org}>
+    <ShellFrame org={org} orgName={organization.name}>
       <a
         href="#main"
         data-skip=""
