@@ -51,3 +51,28 @@ test('success: the project home shows its answer and the evidence under it', asy
   // Depth is a ranked list, never a card grid.
   await expect(main(page).getByRole('list').first()).toBeVisible();
 });
+
+test('the sidebar names the project with a plain link, not a menu it does not have', async ({
+  page,
+}) => {
+  await openShell(page, ROUTES.project);
+  const side = page.getByRole('navigation', { name: 'Payments API docs' });
+  const project = side.getByRole('link', { name: /^Payments API docs/ });
+  await expect(project).toHaveAttribute('href', '/acme/docs');
+  await expect(project).not.toHaveAttribute('aria-haspopup', /.*/);
+  await expect(side.locator('[data-icon="up-down"]')).toHaveCount(0);
+});
+
+test('the product home gives each project its own answer and says which is read only', async ({
+  page,
+}) => {
+  await openShell(page, '/acme/docs');
+  const rows = main(page).getByRole('listitem');
+  const row = (name: string) => rows.filter({ has: page.getByRole('link', { name }) });
+  await expect(row('Payments API docs')).toContainText('3 pages are out of date');
+  await expect(row('New docs')).toContainText('No pages yet');
+  const partner = row('Partner API docs');
+  await expect(partner).toContainText('Read only. Nothing was deleted.');
+  await expect(partner.getByRole('img', { name: 'Read only' })).toBeVisible();
+  await expect(main(page).getByText('Docs project', { exact: true })).toHaveCount(0);
+});
