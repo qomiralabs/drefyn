@@ -1,5 +1,14 @@
 import { tokens } from '../src/index.ts';
-import { docsIds, expect, FOUNDATIONS, openPage, openStory, test, THEMES } from './fixtures.ts';
+import {
+  docsEntry,
+  docsIds,
+  expect,
+  FOUNDATIONS,
+  openPage,
+  openStory,
+  test,
+  THEMES,
+} from './fixtures.ts';
 
 const rgb = (hex: string) => {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -38,7 +47,7 @@ for (const theme of THEMES) {
     const ids = docsIds();
     expect(ids.length).toBeGreaterThan(0);
     for (const id of ids) {
-      await openPage(page, { id, type: 'docs' }, theme);
+      await openPage(page, docsEntry(id), theme);
       const look = await page.evaluate(() => {
         const wrapper = document.querySelector('#storybook-docs .sbdocs-wrapper');
         const content = document.querySelector('#storybook-docs .sbdocs-content');

@@ -17,6 +17,8 @@ export const THEMES: readonly Theme[] = ['light', 'dark'];
 export interface IndexEntry {
   id: string;
   type: 'story' | 'docs';
+  // The component title, which a docs page shares with its stories.
+  title: string;
 }
 
 export const INDEX = join(STATIC, 'index.json');
@@ -27,12 +29,19 @@ export function indexEntries(): IndexEntry[] {
     throw new Error('No static Storybook. Run pnpm --filter @drefyn/ui storybook:build first.');
   }
   const { entries } = JSON.parse(readFileSync(INDEX, 'utf8')) as {
-    entries: Record<string, { id: string; type: string }>;
+    entries: Record<string, { id: string; type: string; title: string }>;
   };
   return Object.values(entries)
     .filter((entry): entry is IndexEntry => entry.type === 'story' || entry.type === 'docs')
-    .map(({ id, type }) => ({ id, type }))
+    .map(({ id, type, title }) => ({ id, type, title }))
     .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+// A docs page as the build lists it, so the ready signal knows its title.
+export function docsEntry(id: string): IndexEntry {
+  const entry = indexEntries().find((e) => e.id === id && e.type === 'docs');
+  if (entry === undefined) throw new Error(`no docs page ${id} in the build`);
+  return entry;
 }
 
 export const storyIds = (): string[] =>
@@ -86,19 +95,89 @@ export const sameSize = (
   Math.abs(a.width - b.width) < SAME_SIZE_PX &&
   Math.abs(a.height - b.height) < SAME_SIZE_PX;
 
+// Stories on a docs page with the same title, which is how many story blocks it must show.
+export function storiesOnDocsPage(title: string): number {
+  return indexEntries().filter((entry) => entry.type === 'story' && entry.title === title).length;
+}
+
+export const DOCS_READY_CEILING_MS = 20_000;
+
+export interface DocsReadiness {
+  ready: boolean;
+  anchors: number;
+  emptyRoots: number;
+  heights: [number, number];
+}
+
+// Storybook shows the docs wrapper first and mounts each story into its block afterwards, so a
+// visible wrapper is not a finished page. Ready means every story block exists and has content,
+// the fonts are in, and the page height holds across two animation frames.
+export async function docsReadiness(
+  page: Page,
+  stories: number,
+  ceiling = DOCS_READY_CEILING_MS,
+): Promise<DocsReadiness> {
+  return page.evaluate(
+    async ({ stories: wanted, ceiling: limit }) => {
+      const frame = () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      const started = performance.now();
+      await document.fonts.ready;
+      for (;;) {
+        const anchors = document.querySelectorAll('#storybook-docs [id^="anchor--"]').length;
+        // Each block's .sb-story always holds a wrapper; the story itself mounts into the
+        // story--<id>-inner element, which stays empty until it renders.
+        const emptyRoots = [
+          ...document.querySelectorAll('#storybook-docs [id^="story--"][id$="-inner"]'),
+        ].filter((el) => el.childElementCount === 0).length;
+        const before = document.documentElement.scrollHeight;
+        await frame();
+        const after = document.documentElement.scrollHeight;
+        const heights: [number, number] = [before, after];
+        if (anchors >= wanted && emptyRoots === 0 && before === after) {
+          return { ready: true, anchors, emptyRoots, heights };
+        }
+        if (performance.now() - started > limit) {
+          return { ready: false, anchors, emptyRoots, heights };
+        }
+        await frame();
+      }
+    },
+    { stories, ceiling },
+  );
+}
+
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
   const mode = entry.type === 'docs' ? 'docs' : 'story';
   await page.goto(`/iframe.html?id=${entry.id}&viewMode=${mode}&globals=theme:${theme}`);
   const root = entry.type === 'docs' ? '#storybook-docs .sbdocs-wrapper' : '#storybook-root > *';
-  await expect(page.locator(root).first()).toBeVisible();
+  // A docs page loads every story's module before its wrapper shows, so it gets the same
+  // ceiling as the ready signal.
+  await expect(page.locator(root).first()).toBeVisible(
+    entry.type === 'docs' ? { timeout: DOCS_READY_CEILING_MS } : {},
+  );
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  if (entry.type === 'docs') {
+    const stories = storiesOnDocsPage(entry.title);
+    const state = await docsReadiness(page, stories);
+    if (!state.ready) {
+      throw new Error(
+        `${entry.id} was not ready after ${DOCS_READY_CEILING_MS} ms: ${state.anchors} of ${stories} story anchors, ${state.emptyRoots} empty story roots, last heights ${state.heights.join(' and ')}`,
+      );
+    }
+    return;
+  }
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
 }
 
 export const openStory = (page: Page, id: string, theme: Theme): Promise<void> =>
-  openPage(page, { id, type: 'story' }, theme);
+  openPage(page, { id, type: 'story', title: '' }, theme);
 
 function fileFor(url: URL): string | undefined {
   let path: string;
