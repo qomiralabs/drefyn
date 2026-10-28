@@ -73,6 +73,14 @@ describe('parseAuthDatabaseConfig', () => {
     },
   );
 
+  it('reports a broken URL once, not as a TLS problem as well', () => {
+    const error = configError(() =>
+      parseAuthDatabaseConfig({ DREFYN_AUTH_DATABASE_URL: 'nope', DREFYN_DATABASE_SSL: 'require' }),
+    );
+    expect(error.message).toContain('DREFYN_AUTH_DATABASE_URL');
+    expect(error.message).not.toContain('DREFYN_DATABASE_SSL');
+  });
+
   it.each(['db.example.com', '10.0.0.5'])('refuses disable for %s too', (host) => {
     const error = configError(() =>
       parseAuthDatabaseConfig({

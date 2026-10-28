@@ -115,7 +115,7 @@ describe('withUser refuses a bad context before any SQL', () => {
       })(),
       'DB_TENANT_CONTEXT_INVALID',
     ],
-    ['an inherited id', Object.create({ userId: USR }) as unknown, 'DB_TENANT_CONTEXT_MISSING'],
+    ['an inherited id', Object.create({ userId: USR }) as unknown, 'DB_TENANT_CONTEXT_INVALID'],
     ['no userId', {}, 'DB_TENANT_CONTEXT_MISSING'],
     ['a userId of undefined', { userId: undefined }, 'DB_TENANT_CONTEXT_MISSING'],
     ['null', null, 'DB_TENANT_CONTEXT_MISSING'],
@@ -216,7 +216,7 @@ describe('a user transaction', () => {
     await expect(withUser(db, USER, () => Promise.resolve('ok'))).resolves.toBe('ok');
     const sent = clients[0]?.sent ?? [];
     expect(sent[0]?.text).toBe('begin; set local statement_timeout = 2000');
-    expect(sent.slice(1, 4).map((q) => [q.text.match(/drefyn\.[a-z_]+/)?.[0], q.values])).toEqual([
+    expect(sent.slice(1, 4).map((q) => [/drefyn\.[a-z_]+/.exec(q.text)?.[0], q.values])).toEqual([
       ['drefyn.organization_id', ['']],
       ['drefyn.project_id', ['']],
       ['drefyn.user_id', [USR]],

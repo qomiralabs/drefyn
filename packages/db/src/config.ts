@@ -183,3 +183,61 @@ export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
   c.throwIfAny();
   return config;
 }
+
+// Sign in work should take milliseconds; a slow query on this path is a fault, and a pool of
+// 4 must not be held by one.
+const AUTH_STATEMENT_TIMEOUT_MS = 2000;
+const AUTH_POOL_MAX = 4;
+
+// Hosts where the connection never leaves the machine or the compose network.
+function isLocalHost(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === 'postgres' || hostname === '[::1]') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+}
+
+// require skips the certificate check and disable has no TLS at all, so off the machine
+// either would hand every address and password hash to whoever sits on the path.
+function checkAuthSsl(raw: string | undefined, url: string): Check<SslMode> {
+  const mode = checkSsl(raw);
+  if (!mode.ok || mode.value === 'verify-full') return mode;
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    // The URL check reports this one.
+    return mode;
+  }
+  if (isLocalHost(hostname)) return mode;
+  return bad(
+    `must be verify-full for the auth pool unless its host is loopback or the compose service postgres (found ${mode.value})`,
+  );
+}
+
+// Reads DREFYN_AUTH_DATABASE_URL, DREFYN_AUTH_DATABASE_POOL_MAX (default 4), the shared wait
+// and SSL keys, and a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL:
+// the sign in role and the app role must never stand in for each other.
+export function parseAuthDatabaseConfig(env: Env): DatabaseConfig {
+  const c = new Collector();
+  const url = c.take('DREFYN_AUTH_DATABASE_URL', checkUrl(env['DREFYN_AUTH_DATABASE_URL']), '');
+  const config: DatabaseConfig = {
+    url,
+    poolMax: c.take(
+      'DREFYN_AUTH_DATABASE_POOL_MAX',
+      checkPositiveInteger(env['DREFYN_AUTH_DATABASE_POOL_MAX'], AUTH_POOL_MAX),
+      0,
+    ),
+    poolWaitMs: c.take(
+      'DREFYN_DATABASE_POOL_WAIT_MS',
+      checkPositiveInteger(env['DREFYN_DATABASE_POOL_WAIT_MS'], 2000),
+      0,
+    ),
+    statementTimeoutMs: AUTH_STATEMENT_TIMEOUT_MS,
+    ssl: c.take(
+      'DREFYN_DATABASE_SSL',
+      checkAuthSsl(env['DREFYN_DATABASE_SSL'], url),
+      'verify-full',
+    ),
+  };
+  c.throwIfAny();
+  return config;
+}

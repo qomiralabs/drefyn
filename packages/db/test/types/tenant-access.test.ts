@@ -191,8 +191,10 @@ describe('tenant access types', () => {
   });
 
   it('build AuthSchema and UserSchema from their table lists only', () => {
+    /* eslint-disable @typescript-eslint/no-generated-empty-object-type -- empty until the identity tables exist */
     expectTypeOf<AuthSchema>().toEqualTypeOf<NamedTables<Schema, AuthTableName>>();
     expectTypeOf<UserSchema>().toEqualTypeOf<NamedTables<Schema, UserTableName>>();
+    /* eslint-enable @typescript-eslint/no-generated-empty-object-type */
     expectTypeOf<
       keyof NamedTables<FixtureSchema, 'fixture_drafts'>
     >().toEqualTypeOf<'fixture_drafts'>();

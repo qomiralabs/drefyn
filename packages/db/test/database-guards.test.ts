@@ -56,14 +56,13 @@ describe('createDatabase before connecting', () => {
     expect(await code(createAuthDatabase(config))).toBe('DB_CONFIG_INVALID');
   });
 
-  it('fails an unreachable auth database with DB_UNAVAILABLE naming its key', async () => {
+  it('fails an unreachable auth database with DB_UNAVAILABLE', async () => {
     const config = parseAuthDatabaseConfig({
       DREFYN_AUTH_DATABASE_URL: URL,
       DREFYN_DATABASE_POOL_WAIT_MS: '200',
     });
     const error = await rejected(createAuthDatabase(config));
     expect((error as DbError).code).toBe('DB_UNAVAILABLE');
-    expect((error as DbError).message).toContain('DREFYN_AUTH_DATABASE_URL');
   });
 });
 

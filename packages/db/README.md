@@ -6,8 +6,9 @@ migrations as `drefyn_owner`.
 
 ## Tenant access
 
-There are exactly three ways in, and each needs a tenant. Nothing exported hands out a pool, a
-client, a Kysely instance or a transaction without context.
+There are five ways in: three need a tenant, one needs a signed in user and one is the sign in
+path itself. Nothing exported hands out a pool, a client, a Kysely instance or a transaction
+without one of those.
 
 - `createDatabase(config, { logger })` opens the app pool as `drefyn_app`.
   `createPublishedDatabase(config, { logger })` opens the reader pool as
@@ -30,18 +31,34 @@ client, a Kysely instance or a transaction without context.
 - `withPublishedReader(db, tenant, work, { timeoutMs })` needs a `TenantRef` and runs a read only
   transaction whose type holds only the tables on the published allow list. Default 2000 ms, up
   to 10000 ms.
+- `withUser(db, { userId }, work, { timeoutMs })` takes a `UserRef` and nothing else, for work
+  that belongs to the person rather than an organization: their own rows and the organizations
+  they belong to. It runs as `drefyn_app` with only `drefyn.user_id` set, so tenant tables read
+  as empty, and policies read the user with `app.current_user_id()`. Its transaction type,
+  `UserSchema`, names only the tables on the user list. Before the work runs only `BEGIN` and
+  the settings are sent, so a caller that must prove a credential first can make that read its
+  first statement.
+- `createAuthDatabase(config, { logger })` opens the auth pool as `drefyn_auth`, with the same
+  startup role check, and refuses any other role with `DB_ROLE_UNSAFE`.
+  `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
+  known, with every setting empty. `drefyn_auth` holds grants only on the identity tables and
+  its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `closeDatabase(db)` ends the pool. It is safe to call twice; later work fails with
   `DB_UNAVAILABLE`.
 
-A context must be a plain object with only `organizationId` and `projectId` as own data
-properties. Getters, prototype values and extra fields are refused before any SQL is sent.
+A context must be a plain object with only its own keys as own data properties:
+`organizationId` and `projectId` for the tenant entry points, `userId` for `withUser`.
+Getters, prototype values and extra fields are refused before any SQL is sent. The entry
+points refuse each other's keys, so a user and an organization are never set in one
+transaction, where their permissive policies would combine.
 
 Rules for the work:
 
 - Use `tx` only inside `work`. Once `work` settles, every query through that `tx` throws, so it
   can never run on a connection that now carries another tenant.
-- Never end the transaction or change the tenant inside the work. The commit checks that both
-  settings are still the ones it set; if the work changed them, or committed or rolled back
+- Never end the transaction or change the tenant or user inside the work. Every transaction
+  sets all three settings, empty where unused, and the commit checks that they are still the
+  ones it set; if the work changed them, or committed or rolled back
   itself, the call fails with `DB_TRANSACTION_INVALID` and the connection is replaced.
   `check:sources` refuses `begin`, `commit`, `rollback` and session `SET` in raw SQL, and any
   setting of a `drefyn.` value outside this package. Savepoints are fine.
@@ -58,19 +75,19 @@ Rules for the work:
 Errors are `DbError` with a stable `code`; messages never carry query values, server detail or
 secrets.
 
-| Code                        | When                                                                          |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `DB_CONFIG_INVALID`         | bad config or `timeoutMs`, or a login the server refused                      |
-| `DB_ROLE_UNSAFE`            | the startup role check failed                                                 |
-| `DB_TENANT_CONTEXT_MISSING` | no valid organization, or no valid project where one is required              |
-| `DB_TENANT_CONTEXT_INVALID` | a `projectId` key given to `withOrganization`, or a context that is not plain |
-| `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant                          |
-| `DB_RLS_VIOLATION`          | a row level security policy refused a write                                   |
-| `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                           |
-| `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                            |
-| `DB_TIMEOUT`                | a statement, lock or idle transaction timed out                               |
-| `DB_UNAVAILABLE`            | the server is unreachable or the pool stayed busy past its wait               |
-| `INTEGER_INVALID`           | a value is not a safe integer, including a `bigint` read past 2^53 - 1        |
+| Code                        | When                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------- |
+| `DB_CONFIG_INVALID`         | bad config or `timeoutMs`, or a login the server refused                                       |
+| `DB_ROLE_UNSAFE`            | the startup role check failed                                                                  |
+| `DB_TENANT_CONTEXT_MISSING` | no valid organization, no valid project where one is required, or no user                      |
+| `DB_TENANT_CONTEXT_INVALID` | a key that belongs to another entry point, a malformed user id, or a context that is not plain |
+| `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant                                           |
+| `DB_RLS_VIOLATION`          | a row level security policy refused a write                                                    |
+| `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                                            |
+| `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                                             |
+| `DB_TIMEOUT`                | a statement, lock or idle transaction timed out                                                |
+| `DB_UNAVAILABLE`            | the server is unreachable or the pool stayed busy past its wait                                |
+| `INTEGER_INVALID`           | a value is not a safe integer, including a `bigint` read past 2^53 - 1                         |
 
 Other driver errors, such as a foreign key violation, come back unchanged.
 
@@ -113,8 +130,19 @@ or `PUBLIC`; anything `drefyn_app` holds beyond `SELECT`, `INSERT`, `UPDATE` and
 tables (`TRUNCATE` ignores RLS), `USAGE` and `SELECT` on sequences and `EXECUTE` on its
 allow list, including grant options, `CREATE`, `TEMP`, ownership and default privileges; a
 foreign key into a tenant table without the tenant columns; and any persisted setting on
-`drefyn_app` or `drefyn_public_reader`, for all roles, or on the database beyond the
-bootstrap's.
+`drefyn_app`, `drefyn_public_reader` or `drefyn_auth`, for all roles, or on the database
+beyond the bootstrap's.
+
+For the identity tables it also refuses: any `drefyn_auth` grant on a table with
+`organization_id`, even one on the auth table list, or on a table off that list; `EXECUTE` on
+any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; default
+privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and
+`published_read` unless it matches its `userPolicies` entry exactly (command, roles, `USING`
+and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alike; any policy
+to `PUBLIC`, restrictive ones included; a unique key without `organization_id` on a tenant table
+unless it is on the global unique list; and on `users` and `password_credentials`, any table
+level `SELECT` or `UPDATE` and any column grant off the column grant list, so a new column is
+closed until someone grants it.
 
 `check:sources` fails on migration DDL aimed at an extension or schema `extensions`, and on a
 session level tenant setting (a plain or session `SET` of a `drefyn.` setting, or `set_config`
@@ -137,8 +165,16 @@ with `is_local` false) in any tracked file.
 - `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same
   pool and SSL keys and a fixed 2000 ms statement timeout. It never falls back to
   `DREFYN_DATABASE_URL`.
-- `createDatabase`, `createPublishedDatabase`, `withTenant`, `withOrganization`,
-  `withPublishedReader`, `closeDatabase`, `toSafeInteger`, `newId`: see Tenant access.
+- `parseAuthDatabaseConfig(env)`: reads `DREFYN_AUTH_DATABASE_URL`,
+  `DREFYN_AUTH_DATABASE_POOL_MAX` (4), `DREFYN_DATABASE_POOL_WAIT_MS` and `DREFYN_DATABASE_SSL`,
+  with a fixed 2000 ms statement timeout. It never falls back to `DREFYN_DATABASE_URL`. This
+  pool carries every address and password hash, so `require` and `disable` are refused unless
+  the host is loopback (`localhost`, `127.0.0.0/8`, `[::1]`) or the compose service
+  `postgres`; anywhere else it must be `verify-full`.
+- `createDatabase`, `createPublishedDatabase`, `createAuthDatabase`, `withTenant`,
+  `withOrganization`, `withPublishedReader`, `withUser`, `withAuth`, `closeDatabase`,
+  `toSafeInteger`, `newId`: see Tenant access. `AuthSchema` and `UserSchema` are the
+  transaction types; both stay empty until the identity tables exist.
 - `DbError`, `DbErrorCode`.
 
 ## `drefyn migrate`

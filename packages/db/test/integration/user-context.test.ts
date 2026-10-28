@@ -39,14 +39,15 @@ const USR = userId('01a14984-4476-77ce-9335-1270000000f1');
 const OTHER = userId('01a14984-4476-77ce-9335-1270000000f2');
 const USER: UserRef = { userId: USR };
 
-// The session scoped call the source check bans, kept in its fixture so no source file holds it.
+// The session scoped call the source check bans, kept in its fixture so no source file holds
+// it. Same user as the transaction, so the commit check passes and only the reset can clear it.
 const LEAK_USER = readFileSync(
   join(import.meta.dirname, '..', 'fixtures', 'session-settings', 'bad', 'leak_project.sql'),
   'utf8',
 )
   .trim()
   .replace('drefyn.project_id', 'drefyn.user_id')
-  .replace('$1', `'${OTHER}'`);
+  .replace('$1', `'${USR}'`);
 
 const currentUser = sql<{ user_id: string | null; pid: number }>`
   select app.current_user_id()::text as user_id, pg_backend_pid() as pid`;
@@ -173,7 +174,6 @@ describeWithStack('a connection released after withUser', () => {
     expect(after.user_id ?? '').toBe('');
   });
 
-  // Only the reset can clear a session value the work left behind.
   it('drops a session value of drefyn.user_id the work left behind', async () => {
     const inside = await withUser(raw, USER, async (tx) => {
       await sql.raw(LEAK_USER).execute(tx);

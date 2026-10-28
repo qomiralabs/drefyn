@@ -1,5 +1,11 @@
 import type pg from 'pg';
-import { ALLOW_LISTS, type AllowEntry, type AllowLists } from './allow-lists.ts';
+import {
+  ALLOW_LISTS,
+  type AllowEntry,
+  type AllowLists,
+  type ColumnGrantEntry,
+  type PolicyEntry,
+} from './allow-lists.ts';
 import { parseMigrationConfig } from './config.ts';
 import {
   CHECKSUMS_TABLE,
@@ -29,7 +35,10 @@ export type CatalogRule =
   | 'default_privileges'
   | 'role_setting'
   | 'app_privilege'
-  | 'tenant_foreign_key';
+  | 'tenant_foreign_key'
+  | 'auth_grant'
+  | 'column_grant'
+  | 'public_policy';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -41,6 +50,7 @@ export interface CatalogProblem {
 
 const APP_ROLE = POOL_ROLES.app;
 const READER_ROLE = POOL_ROLES.reader;
+const AUTH_ROLE = POOL_ROLES.auth;
 
 const BOOKKEEPING = new Set([
   `${MIGRATIONS_SCHEMA}.${MIGRATIONS_TABLE}`,
@@ -68,18 +78,72 @@ const problem = (rule: CatalogRule, object: string, message: string): CatalogPro
   message,
 });
 
-// Problems with the allow lists themselves: an empty reason or a duplicate entry.
+const grantKey = (name: string, grantee: string, privilege: string) =>
+  `${name}|${grantee}|${privilege}`;
+
+interface ListSpec {
+  readonly label: string;
+  readonly entries: readonly AllowEntry[];
+  readonly shape: RegExp;
+  // What makes two entries the same; the name unless given.
+  readonly key?: (entry: AllowEntry) => string;
+  // A reason the entry itself is unsafe, if any.
+  readonly unsafe?: (entry: AllowEntry) => string | undefined;
+}
+
+function policyUnsafe(entry: PolicyEntry): string | undefined {
+  if (entry.roles.length === 0) return 'names no role';
+  if (entry.roles.includes('public')) return 'is for public, which every role inherits';
+  return undefined;
+}
+
+// Problems with the allow lists themselves: an empty reason, a bad name, a duplicate entry,
+// or an entry that is unsafe whatever the catalog says.
 export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] {
-  const lists: readonly [string, readonly AllowEntry[], RegExp][] = [
-    ['global table', allow.globalTables, TABLE_NAME],
-    ['SECURITY DEFINER function', allow.securityDefinerFunctions, FUNCTION_NAME],
-    ['published table', allow.publishedTables, TABLE_NAME],
-    ['reader function', allow.readerFunctions, FUNCTION_NAME],
-    ['app function', allow.appFunctions, FUNCTION_NAME],
-    ['cross project foreign key', allow.crossProjectForeignKeys, CONSTRAINT_NAME],
+  const lists: readonly ListSpec[] = [
+    { label: 'global table', entries: allow.globalTables, shape: TABLE_NAME },
+    {
+      label: 'SECURITY DEFINER function',
+      entries: allow.securityDefinerFunctions,
+      shape: FUNCTION_NAME,
+    },
+    { label: 'published table', entries: allow.publishedTables, shape: TABLE_NAME },
+    { label: 'reader function', entries: allow.readerFunctions, shape: FUNCTION_NAME },
+    { label: 'app function', entries: allow.appFunctions, shape: FUNCTION_NAME },
+    {
+      label: 'cross project foreign key',
+      entries: allow.crossProjectForeignKeys,
+      shape: CONSTRAINT_NAME,
+    },
+    { label: 'auth table', entries: allow.authTables, shape: TABLE_NAME },
+    {
+      label: 'user policy',
+      entries: allow.userPolicies,
+      shape: CONSTRAINT_NAME,
+      unsafe: (entry) => policyUnsafe(entry as PolicyEntry),
+    },
+    {
+      label: 'global unique key',
+      entries: allow.globalUniqueConstraints,
+      shape: CONSTRAINT_NAME,
+    },
+    { label: 'column grant table', entries: allow.columnGrantTables, shape: TABLE_NAME },
+    {
+      label: 'column grant',
+      entries: allow.columnGrants,
+      shape: CONSTRAINT_NAME,
+      key: (entry) => {
+        const grant = entry as ColumnGrantEntry;
+        return grantKey(grant.name, grant.grantee, grant.privilege);
+      },
+      unsafe: (entry) =>
+        (entry as ColumnGrantEntry).grantee === 'public'
+          ? 'is to public, which every role inherits'
+          : undefined,
+    },
   ];
   const problems: CatalogProblem[] = [];
-  for (const [label, entries, shape] of lists) {
+  for (const { label, entries, shape, key, unsafe } of lists) {
     const seen = new Set<string>();
     for (const entry of entries) {
       if (!shape.test(entry.name)) {
@@ -92,12 +156,17 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
           problem('allow_list', entry.name, `${label} entry ${entry.name} has no reason`),
         );
       }
-      if (seen.has(entry.name)) {
+      const id = key === undefined ? entry.name : key(entry);
+      if (seen.has(id)) {
         problems.push(
           problem('allow_list', entry.name, `${label} entry ${entry.name} is listed twice`),
         );
       }
-      seen.add(entry.name);
+      seen.add(id);
+      const why = unsafe?.(entry);
+      if (why !== undefined) {
+        problems.push(problem('allow_list', entry.name, `${label} entry ${entry.name} ${why}`));
+      }
     }
   }
   return problems;
@@ -241,16 +310,21 @@ select n.nspname || '.' || t.relname as table_name, i.relname::text as index_nam
  where n.nspname = 'app' and x.indisunique
  order by 1, 2`;
 
+const HAS_ORGANIZATION = `exists (select from pg_attribute o where o.attrelid = c.oid
+                 and o.attname = 'organization_id' and o.attnum > 0 and not o.attisdropped)`;
+
 const RELATION_GRANTS = `
 select n.nspname || '.' || c.relname as object, c.relkind::text as kind,
-       null::text as column_name, ${GRANTEE} as grantee, a.privilege_type as privilege
+       null::text as column_name, ${GRANTEE} as grantee, a.privilege_type as privilege,
+       ${HAS_ORGANIZATION} as tenant
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   cross join lateral aclexplode(c.relacl) a
  where n.nspname = 'app' and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
    and a.grantee <> c.relowner
 union all
-select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text, ${GRANTEE}, a.privilege_type
+select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text, ${GRANTEE}, a.privilege_type,
+       ${HAS_ORGANIZATION}
   from pg_attribute att
   join pg_class c on c.oid = att.attrelid
   join pg_namespace n on n.oid = c.relnamespace
@@ -301,7 +375,7 @@ select r.rolname::text as role_name, d.datname::text as database_name, s.setconf
   from pg_db_role_setting s
   join pg_roles r on r.oid = s.setrole
   left join pg_database d on d.oid = s.setdatabase
- where r.rolname in ('${APP_ROLE}', '${READER_ROLE}') and cardinality(s.setconfig) > 0
+ where r.rolname in ('${APP_ROLE}', '${READER_ROLE}', '${AUTH_ROLE}') and cardinality(s.setconfig) > 0
  order by 1, 2 nulls first`;
 
 // alter role all set ...: no role and no database, so it follows every connection.
@@ -393,10 +467,71 @@ function policyMismatches(policy: Policy, expected: ExpectedPolicy): string[] {
   return out;
 }
 
+const COMMAND_CODES: Readonly<Record<PolicyEntry['command'], string>> = {
+  all: '*',
+  select: 'r',
+  insert: 'a',
+  update: 'w',
+  delete: 'd',
+};
+
+const sortedRoles = (roles: readonly string[]) => [...roles].sort().join(', ');
+
+function entryMismatches(policy: Policy, entry: PolicyEntry): string[] {
+  const out: string[] = [];
+  if (policy.cmd !== COMMAND_CODES[entry.command]) {
+    out.push(`is for ${COMMANDS[policy.cmd] ?? policy.cmd}, not ${entry.command}`);
+  }
+  if (sortedRoles(policy.roles) !== sortedRoles(entry.roles)) {
+    out.push(`is to ${sortedRoles(policy.roles)}, not ${sortedRoles(entry.roles)}`);
+  }
+  if (policy.qual !== entry.using) out.push('has a USING clause other than its allow list entry');
+  if (policy.withCheck !== entry.withCheck) {
+    out.push('has a WITH CHECK clause other than its allow list entry');
+  }
+  return out;
+}
+
+// A permissive policy beyond the standard ones must match its reviewed entry exactly.
+// Returns undefined when there is no entry, so the caller can say why it is not allowed.
+function userPolicyProblem(
+  table: string,
+  policy: Policy,
+  userPolicies: ReadonlyMap<string, PolicyEntry>,
+): CatalogProblem | null | undefined {
+  const entry = userPolicies.get(`${table}.${policy.name}`);
+  if (entry === undefined) return undefined;
+  const wrong = entryMismatches(policy, entry);
+  if (wrong.length === 0) return null;
+  return problem('policy', table, `${table} policy ${policy.name} ${wrong.join('; ')}`);
+}
+
+function globalPolicyProblems(
+  table: string,
+  policies: readonly Policy[],
+  userPolicies: ReadonlyMap<string, PolicyEntry>,
+): CatalogProblem[] {
+  const out: CatalogProblem[] = [];
+  for (const policy of policies.filter((p) => p.permissive)) {
+    const listed = userPolicyProblem(table, policy, userPolicies);
+    if (listed === null) continue;
+    out.push(
+      listed ??
+        problem(
+          'policy',
+          table,
+          `${table} has the permissive policy ${policy.name}, which is not on the user policy allow list`,
+        ),
+    );
+  }
+  return out;
+}
+
 function policyProblems(
   table: TableFacts,
   policies: readonly Policy[],
   published: boolean,
+  userPolicies: ReadonlyMap<string, PolicyEntry>,
 ): CatalogProblem[] {
   const out: CatalogProblem[] = [];
   const clause = table.projectColumn === null ? ORGANIZATION_POLICY : PROJECT_POLICY;
@@ -405,12 +540,15 @@ function policyProblems(
   // Restrictive policies can only narrow what the permissive ones let through.
   for (const policy of policies.filter((p) => p.permissive)) {
     if (policy.name !== 'tenant_isolation' && policy.name !== 'published_read') {
+      const listed = userPolicyProblem(table.name, policy, userPolicies);
+      if (listed === null) continue;
       out.push(
-        problem(
-          'policy',
-          table.name,
-          `${table.name} has the extra permissive policy ${policy.name}; permissive policies are OR'd, so it can widen tenant_isolation`,
-        ),
+        listed ??
+          problem(
+            'policy',
+            table.name,
+            `${table.name} has the extra permissive policy ${policy.name}; permissive policies are OR'd, so it can widen tenant_isolation, and it is not on the user policy allow list`,
+          ),
       );
       continue;
     }
@@ -481,13 +619,36 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     });
     policies.set(table, list);
   }
+  const userPolicies = new Map(allow.userPolicies.map((e) => [e.name, e]));
   for (const table of tables) {
     out.push(...tenantColumnProblems(table));
     out.push(
-      ...policyProblems(table, policies.get(table.name) ?? [], publishedTables.has(table.name)),
+      ...policyProblems(
+        table,
+        policies.get(table.name) ?? [],
+        publishedTables.has(table.name),
+        userPolicies,
+      ),
     );
   }
+  for (const table of withoutTenantColumn) {
+    out.push(...globalPolicyProblems(table, policies.get(table) ?? [], userPolicies));
+  }
+  // With no TO clause a policy applies to every role, the pools and the owner included, and
+  // a restrictive one could be read as a guard it is not.
+  for (const [table, list] of policies) {
+    for (const policy of list.filter((p) => p.roles.includes('public'))) {
+      out.push(
+        problem(
+          'public_policy',
+          table,
+          `${table} policy ${policy.name} applies to public, so every role gets it; name the role`,
+        ),
+      );
+    }
+  }
   const tenantTables = new Set(tables.map((t) => t.name));
+  const globalUnique = new Set(allow.globalUniqueConstraints.map((e) => e.name));
   // A global unique key would tell one tenant that a value exists in another through the
   // conflict. Ids are exempt because no insert path takes a client chosen id.
   for (const row of await rows(client, UNIQUE_INDEXES)) {
@@ -497,6 +658,7 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     if (columns.includes('organization_id')) continue;
     if (!flag(row, 'has_expressions') && columns.length === 1 && columns[0] === 'id') continue;
     const index = text(row, 'index_name');
+    if (globalUnique.has(`${table}.${index}`)) continue;
     out.push(
       problem('tenant_unique', table, `${table} has unique index ${index} without organization_id`),
     );
@@ -555,9 +717,64 @@ async function definitionProblems(
   return out;
 }
 
+// The sign in role reaches only listed tables, and never one that holds tenant rows.
+function authGrantProblem(
+  target: string,
+  object: string,
+  privilege: string,
+  tenant: boolean,
+  authTables: ReadonlySet<string>,
+): CatalogProblem | undefined {
+  if (tenant) {
+    return problem(
+      'auth_grant',
+      object,
+      `${target} grants ${privilege} to ${AUTH_ROLE}; the sign in role may never reach a table with organization_id`,
+    );
+  }
+  if (authTables.has(object)) return undefined;
+  return problem(
+    'auth_grant',
+    object,
+    `${target} grants ${privilege} to ${AUTH_ROLE} and ${object} is not on the auth table allow list`,
+  );
+}
+
+const PER_COLUMN = new Set(['SELECT', 'UPDATE']);
+
+// On the column controlled tables, select and update go per column and only as listed.
+function columnGrantProblem(
+  object: string,
+  column: string | null,
+  grantee: string,
+  privilege: string,
+  columnGrants: ReadonlySet<string>,
+): CatalogProblem | undefined {
+  if (column === null) {
+    if (!PER_COLUMN.has(privilege)) return undefined;
+    return problem(
+      'column_grant',
+      object,
+      `${object} grants table level ${privilege} to ${grantee}; grant it per column, so a new column stays closed`,
+    );
+  }
+  const target = `${object}.${column}`;
+  if (columnGrants.has(grantKey(target, grantee, privilege))) return undefined;
+  return problem(
+    'column_grant',
+    object,
+    `${target} grants ${privilege} to ${grantee}, which is not on the column grant allow list`,
+  );
+}
+
 async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<CatalogProblem[]> {
   const out: CatalogProblem[] = [];
   const published = new Set(allow.publishedTables.map((e) => e.name));
+  const authTables = new Set(allow.authTables.map((e) => e.name));
+  const columnTables = new Set(allow.columnGrantTables.map((e) => e.name));
+  const columnGrants = new Set(
+    allow.columnGrants.map((e) => grantKey(e.name, e.grantee, e.privilege)),
+  );
   for (const row of await rows(client, RELATION_GRANTS)) {
     const object = text(row, 'object');
     const column = maybeText(row, 'column_name');
@@ -574,6 +791,14 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
         ),
       );
       continue;
+    }
+    if (grantee === AUTH_ROLE) {
+      const found = authGrantProblem(target, object, privilege, flag(row, 'tenant'), authTables);
+      if (found !== undefined) out.push(found);
+    }
+    if (columnTables.has(object)) {
+      const found = columnGrantProblem(object, column, grantee, privilege, columnGrants);
+      if (found !== undefined) out.push(found);
     }
     if (grantee !== READER_ROLE && grantee !== 'public') continue;
     const sequence = text(row, 'kind') === 'S';
@@ -600,6 +825,14 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
           `${object} is executable by public, so every role can call it`,
         ),
       );
+    } else if (grantee === AUTH_ROLE) {
+      out.push(
+        problem(
+          'auth_grant',
+          object,
+          `${object} grants EXECUTE to ${AUTH_ROLE}; the sign in role runs no function in app`,
+        ),
+      );
     } else if (grantee === READER_ROLE && !readerFunctions.has(object)) {
       out.push(
         problem(
@@ -614,6 +847,15 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     const grantee = text(row, 'grantee');
     const privilege = text(row, 'privilege');
     const reader = grantee === READER_ROLE && privilege === 'USAGE';
+    if (grantee === AUTH_ROLE && privilege !== 'USAGE') {
+      out.push(
+        problem(
+          'auth_grant',
+          MIGRATIONS_SCHEMA,
+          `schema app grants ${privilege} to ${AUTH_ROLE}; the sign in role may only use it`,
+        ),
+      );
+    }
     if (grantee === 'public' || (grantee === READER_ROLE && !reader)) {
       out.push(
         problem(
@@ -631,7 +873,7 @@ async function defaultPrivilegeProblems(client: pg.ClientBase): Promise<CatalogP
   const out: CatalogProblem[] = [];
   for (const row of await rows(client, DEFAULT_ACLS)) {
     const grantee = text(row, 'grantee');
-    if (grantee !== READER_ROLE && grantee !== 'public') continue;
+    if (grantee !== READER_ROLE && grantee !== AUTH_ROLE && grantee !== 'public') continue;
     out.push(
       problem(
         'default_privileges',
