@@ -21,9 +21,9 @@ fi
 export DREFYN_POSTGRES_PORT="${DREFYN_GUARD_TEST_PORT:-55439}"
 # Values in the shell win over deploy/.env, so the real file is never read or changed.
 export DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
-  DREFYN_PUBLIC_READER_PASSWORD
+  DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD
 for var in DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
-  DREFYN_PUBLIC_READER_PASSWORD; do
+  DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD; do
   value="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
   printf -v "$var" '%s' "$value"
 done
@@ -33,8 +33,8 @@ root="$scratch/checkout"
 mkdir -p "$root"
 cp -R "$src/scripts" "$src/deploy" "$root/"
 rm -f "$root/deploy/.env"
-commands=("selfhost.sh up" "selfhost.sh restart" "selfhost.sh down" "selfhost.sh reset --yes"
-  "selfhost-smoke.sh" "selfhost-smoke.sh --teardown")
+commands=("selfhost.sh up" "selfhost.sh restart" "selfhost.sh upgrade" "selfhost.sh down"
+  "selfhost.sh reset --yes" "selfhost-smoke.sh" "selfhost-smoke.sh --teardown")
 
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
@@ -293,7 +293,7 @@ projects+=("$project")
 docker volume create --label "com.docker.compose.project=$project" \
   --label "com.docker.compose.volume=pgdata" --label "com.docker.compose.version=2.30.3" \
   --label "com.drefyn.selfhost.compose-file=$root/deploy/compose.yaml" "${project}_pgdata" >/dev/null
-for cmd in "selfhost.sh up" "selfhost.sh restart" "selfhost-smoke.sh"; do
+for cmd in "selfhost.sh up" "selfhost.sh restart" "selfhost.sh upgrade" "selfhost-smoke.sh"; do
   expect_refusal "refuses a volume from an earlier build" "earlier build" "$cmd" \
     COMPOSE_PROJECT_NAME="$project"
 done
@@ -334,6 +334,31 @@ expect_same_volume() {
   fi
 }
 
+# expect_auth_role_health <project>: a stack whose volume lacks drefyn_auth, as one made before
+# the role existed, is unhealthy and names the upgrade; with the role back it is healthy again.
+# A rename keeps the SCRAM password and the grants, so nothing else needs restoring.
+expect_auth_role_health() {
+  local p=("${compose_args[@]}" -p "$1") out
+  docker compose "${p[@]}" exec -T postgres psql --no-psqlrc -q -U postgres -d drefyn \
+    -c 'alter role drefyn_auth rename to guard_test_auth' >/dev/null
+  if out="$(docker compose "${p[@]}" exec -T postgres sh /etc/drefyn/healthcheck.sh 2>&1)"; then
+    fail "the healthcheck fails while drefyn_auth is missing" "it passed: $out"
+  elif [[ "$out" == *"drefyn_auth"* ]] && [[ "$out" == *"scripts/selfhost.sh upgrade"* ]] &&
+    [[ "$out" != *"reset"* ]]; then
+    pass "the healthcheck fails while drefyn_auth is missing, names the upgrade and no reset"
+  else
+    fail "the healthcheck fails while drefyn_auth is missing, names the upgrade and no reset" "$out"
+  fi
+  docker compose "${p[@]}" exec -T postgres psql --no-psqlrc -q -U postgres -d drefyn \
+    -c 'alter role guard_test_auth rename to drefyn_auth' >/dev/null
+  if out="$(docker compose "${p[@]}" exec -T postgres sh /etc/drefyn/healthcheck.sh 2>&1)"; then
+    pass "the healthcheck passes once drefyn_auth exists"
+  else
+    fail "the healthcheck passes once drefyn_auth exists" "$out"
+  fi
+}
+compose_args=(-f "$root/deploy/compose.yaml")
+
 for order in scripts-first plain-first; do
   project="$base-$order"
   projects+=("$project")
@@ -368,6 +393,7 @@ for order in scripts-first plain-first; do
       "before [$before], after [$after]"
   fi
   expect_same_volume "$project" "$order: plain docker compose and the scripts label the volume alike"
+  if [ "$order" = scripts-first ]; then expect_auth_role_health "$project"; fi
   docker compose -p "$project" -f "$root/deploy/compose.yaml" down --volumes --timeout 5 \
     >/dev/null 2>&1 || true
   unset COMPOSE_PROJECT_NAME

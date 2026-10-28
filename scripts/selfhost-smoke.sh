@@ -149,12 +149,13 @@ host|all|all|scram-sha-256" "$hba_rules"
 roles="$(superuser_sql <<'SQL'
 select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolinherit, rolcanlogin
 from pg_roles
-where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
+where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader', 'drefyn_auth')
 order by rolname;
 SQL
 )"
 expect_rows "roles exist with no superuser, bypassrls, createrole or createdb" \
   "drefyn_app|f|f|f|f|f|t
+drefyn_auth|f|f|f|f|f|t
 drefyn_owner|f|f|f|f|t|t
 drefyn_public_reader|f|f|f|f|f|t" "$roles"
 
@@ -174,18 +175,19 @@ expect_rows "schema app is owned by drefyn_owner" "drefyn_owner" "$owner"
 owned="$(superuser_sql <<'SQL'
 select coalesce(string_agg(distinct r.rolname, ',' order by r.rolname), '')
 from pg_shdepend d join pg_roles r on r.oid = d.refobjid
-where d.deptype = 'o' and r.rolname in ('drefyn_app', 'drefyn_public_reader');
+where d.deptype = 'o' and r.rolname in ('drefyn_app', 'drefyn_public_reader', 'drefyn_auth');
 SQL
 )"
-expect_rows "app and public reader roles own nothing" "" "$owned"
+expect_rows "app, public reader and auth roles own nothing" "" "$owned"
 
 public_schema="$(superuser_sql <<'SQL'
 select r, has_schema_privilege(r, 'public', 'USAGE'), has_schema_privilege(r, 'public', 'CREATE')
-from unnest(array['drefyn_app', 'drefyn_public_reader']) as r order by r;
+from unnest(array['drefyn_app', 'drefyn_public_reader', 'drefyn_auth']) as r order by r;
 SQL
 )"
-expect_rows "app and public reader roles have no rights on schema public" \
+expect_rows "app, public reader and auth roles have no rights on schema public" \
   "drefyn_app|f|f
+drefyn_auth|f|f
 drefyn_public_reader|f|f" "$public_schema"
 
 # The extension is created once by the bootstrap, in its own schema, so migrations never need
@@ -202,7 +204,8 @@ expect_rows "pgvector 0.8.7 is installed in schema extensions, both owned by the
 # Exactly these entries: the three roles may use the schema, nobody but the superuser may
 # create in it, and PUBLIC has nothing.
 extension_acl="$(superuser_sql <<<"select nspacl from pg_namespace where nspname = 'extensions';")"
-expect_rows "only the three roles may use schema extensions, and only the superuser may create in it" \
+# drefyn_auth reads identity tables only and never needs pgvector, so it gets no entry here.
+expect_rows "only owner, app and reader may use schema extensions, and only the superuser may create in it" \
   "{postgres=UC/postgres,drefyn_owner=U/postgres,drefyn_app=U/postgres,drefyn_public_reader=U/postgres}" \
   "$extension_acl"
 
@@ -222,12 +225,13 @@ role_settings="$(superuser_sql <<'SQL'
 select r.rolname, r.rolconfig is null,
   (select count(*) from pg_db_role_setting s where s.setrole = r.oid)
 from pg_roles r
-where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader')
+where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader', 'drefyn_auth')
 order by r.rolname;
 SQL
 )"
 expect_rows "no role carries its own settings: rolconfig is null and pg_db_role_setting has no rows" \
   "drefyn_app|t|0
+drefyn_auth|t|0
 drefyn_owner|t|0
 drefyn_public_reader|t|0" "$role_settings"
 
@@ -243,8 +247,9 @@ from (
 ) entries;
 SQL
 )"
-expect_rows "only the three roles may connect, and PUBLIC has no rights on the database" \
-  "drefyn_app:CONNECT,drefyn_owner:CONNECT,drefyn_public_reader:CONNECT" "$database_acl"
+expect_rows "only the four roles may connect, and PUBLIC has no rights on the database" \
+  "drefyn_app:CONNECT,drefyn_auth:CONNECT,drefyn_owner:CONNECT,drefyn_public_reader:CONNECT" \
+  "$database_acl"
 
 # The same for the databases every cluster has, so a role made later has nowhere to go.
 other_acl="$(superuser_sql <<'SQL'
@@ -263,6 +268,8 @@ whoami="$(role_sql drefyn_app drefyn_app_password <<<'select current_user;' 2>&1
 expect_rows "drefyn_app logs in over TCP with its password" "drefyn_app" "$whoami"
 whoami="$(role_sql drefyn_public_reader drefyn_public_reader_password <<<'select current_user;' 2>&1 || true)"
 expect_rows "drefyn_public_reader logs in over TCP with its password" "drefyn_public_reader" "$whoami"
+whoami="$(role_sql drefyn_auth drefyn_auth_password <<<'select current_user;' 2>&1 || true)"
+expect_rows "drefyn_auth logs in over TCP with its password" "drefyn_auth" "$whoami"
 
 wrong="$("${compose[@]}" exec -T -e PGPASSWORD=not-the-password postgres \
   psql --no-psqlrc -qtA --host 127.0.0.1 --username drefyn_app --dbname drefyn -c 'select 1' 2>&1 || true)"
@@ -316,7 +323,8 @@ expect_denied() {
     fail "$name" "unexpected error: $out"
   fi
 }
-for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public_reader_password"; do
+for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public_reader_password" \
+  "drefyn_auth drefyn_auth_password"; do
   read -r role secret <<<"$pair"
   expect_denied "$role" "$secret" "create table app.smoke (id int);" "permission denied for schema app"
   expect_denied "$role" "$secret" "create table public.smoke (id int);" "permission denied for schema public"
@@ -367,7 +375,7 @@ done
 canary="smokecanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 rerun="$("${compose[@]}" exec -T -e PGOPTIONS='-c log_statement=all' \
   -e DREFYN_OWNER_PASSWORD="$canary" -e DREFYN_APP_PASSWORD="$canary" \
-  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" postgres \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" -e DREFYN_AUTH_PASSWORD="$canary" postgres \
   psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1 || true)"
 if [[ "$rerun" == *"the bootstrap has already run"* ]]; then
   pass "a second bootstrap stops before creating anything"
@@ -391,6 +399,17 @@ elif [[ "$server_log" == *"$canary"* ]]; then
     "$(grep -c "$canary" <<<"$server_log") log line(s) hold the canary password"
 else
   pass "the server log never shows a password"
+fi
+
+# The upgrade an older volume needs must be a no op on a stack the current bootstrap made.
+if out="$("${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh 2>&1)"; then
+  if [[ "$out" == *"drefyn_auth already exists"* ]]; then
+    pass "the upgrade is a no op on a fresh stack"
+  else
+    fail "the upgrade is a no op on a fresh stack" "$out"
+  fi
+else
+  fail "the upgrade is a no op on a fresh stack" "$out"
 fi
 
 if [ "$teardown" = true ]; then

@@ -21,7 +21,7 @@ fi
 query="select current_setting('hba_file') || '|'
   || (exists (select from pg_namespace where nspname = 'app'))::text || '|'
   || coalesce((select string_agg(r, ',' order by r)
-    from unnest(array['drefyn_owner', 'drefyn_app', 'drefyn_public_reader']) as r
+    from unnest(array['drefyn_owner', 'drefyn_app', 'drefyn_public_reader', 'drefyn_auth']) as r
     where r not in (select rolname from pg_roles)), '')"
 run_query() {
   PGOPTIONS='-c client_min_messages=error' psql --no-psqlrc -qtA --username postgres \
@@ -52,7 +52,7 @@ fi
 
 for role in $(printf '%s' "$missing" | tr ',' ' '); do
   case "$role" in
-    drefyn_owner | drefyn_app | drefyn_public_reader) ;;
+    drefyn_owner | drefyn_app | drefyn_public_reader | drefyn_auth) ;;
     *)
       echo "the role query returned something unexpected: $result"
       exit 1
@@ -63,6 +63,11 @@ if [ -n "$missing" ]; then
   # Schema app comes from the same transaction as the roles, so if it exists the bootstrap
   # ran and the data is real: someone renamed or dropped the role since.
   if [ "$bootstrapped" = true ]; then
+    # Volumes made before the sign in role existed lack only that one, and the upgrade adds it.
+    if [ "$missing" = drefyn_auth ]; then
+      echo "role drefyn_auth is missing because this volume predates it: run bash scripts/selfhost.sh upgrade; the data is still there"
+      exit 1
+    fi
     echo "role $missing is missing although the bootstrap ran, so it was renamed or dropped since: put it back as the superuser; the data is still there"
     exit 1
   fi
@@ -71,7 +76,7 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
-for role in drefyn_owner drefyn_app drefyn_public_reader; do
+for role in drefyn_owner drefyn_app drefyn_public_reader drefyn_auth; do
   secret="/run/secrets/${role}_password"
   if ! error="$(PGOPTIONS='-c client_min_messages=error' PGPASSWORD="$(cat "$secret")" \
     psql --no-psqlrc --no-password -qtA \

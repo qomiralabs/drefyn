@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePrerequisites } from '../src/prerequisites.ts';
+import {
+  UPGRADE_ROLES,
+  evaluatePrerequisites,
+  evaluateRoles,
+  type RoleAccess,
+} from '../src/prerequisites.ts';
 
 const COMPOSE_UPDATE =
   "docker compose -f deploy/compose.yaml exec -T postgres psql --no-psqlrc -U postgres -d drefyn -c 'alter extension vector update'";
@@ -127,5 +132,67 @@ describe('the missing vector message', () => {
   // The update command belongs to the too old case; here there is nothing to update.
   it('does not offer the update command', () => {
     expect(message()).not.toContain('alter extension vector update');
+  });
+});
+
+const UPGRADE_COMPOSE = 'bash scripts/selfhost.sh upgrade';
+const UPGRADE_FILE = 'deploy/postgres/upgrade/0001-auth-role.sql';
+
+function roleFailure(result: ReturnType<typeof evaluateRoles>) {
+  if (result.ok) throw new Error('expected the role check to fail');
+  return result;
+}
+
+// Roles added after the first bootstrap shipped. A database set up before then lacks them,
+// and drefyn_owner cannot create roles, so migrate stops and names the operator step.
+describe('evaluateRoles', () => {
+  const auth = (overrides: Partial<RoleAccess> = {}): RoleAccess => ({
+    role: 'drefyn_auth',
+    exists: true,
+    canConnect: true,
+    ...overrides,
+  });
+
+  it('lists drefyn_auth with its upgrade script', () => {
+    expect(UPGRADE_ROLES).toEqual([{ role: 'drefyn_auth', script: UPGRADE_FILE }]);
+  });
+
+  it('passes when every role exists and may connect', () => {
+    expect(evaluateRoles([auth()])).toEqual({ ok: true });
+  });
+
+  it('names a missing role, the compose command and the managed command', () => {
+    const result = roleFailure(evaluateRoles([auth({ exists: false, canConnect: false })]));
+    expect(result.problem).toBe('role_missing');
+    expect(result.message).toContain('drefyn_auth');
+    expect(result.message).toMatch(/does not exist/);
+    expect(result.message).toContain(UPGRADE_COMPOSE);
+    expect(result.message).toContain(`psql --no-psqlrc --dbname drefyn --file ${UPGRADE_FILE}`);
+    expect(result.message).toContain('DREFYN_AUTH_PASSWORD');
+    expect(result.message).toMatch(/never[^.]*drefyn_owner/i);
+    expect(result.message).toMatch(/safe to run again/i);
+  });
+
+  it('names a role that exists but cannot connect, and the same step', () => {
+    const result = roleFailure(evaluateRoles([auth({ canConnect: false })]));
+    expect(result.problem).toBe('role_cannot_connect');
+    expect(result.message).toContain('drefyn_auth');
+    expect(result.message).toContain('CONNECT');
+    expect(result.message).toContain(UPGRADE_COMPOSE);
+    expect(result.message).toContain(UPGRADE_FILE);
+  });
+
+  // The session reads exactly the listed roles; anything else means the query and the list
+  // drifted apart, which must not pass as healthy.
+  it('fails closed when a listed role was not read at all', () => {
+    const result = roleFailure(evaluateRoles([]));
+    expect(result.problem).toBe('role_missing');
+    expect(result.message).toContain('drefyn_auth');
+  });
+
+  it('puts the problem before the commands', () => {
+    const text = roleFailure(evaluateRoles([auth({ exists: false, canConnect: false })])).message;
+    expect(text.indexOf('does not exist')).toBeLessThan(text.indexOf(UPGRADE_COMPOSE));
+    expect(text.indexOf(UPGRADE_COMPOSE)).toBeLessThan(text.indexOf('psql --no-psqlrc'));
   });
 });

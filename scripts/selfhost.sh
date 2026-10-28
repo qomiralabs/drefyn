@@ -3,6 +3,7 @@
 #   up       create deploy/.env with random passwords if it is missing, then start and wait
 #   down     stop and remove the containers, keep the data volume
 #   restart  recreate the containers from deploy/.env and wait until healthy again
+#   upgrade  add what an older volume lacks (today the drefyn_auth role), then wait
 #   reset    remove the containers and the data volume (needs --yes)
 set -euo pipefail
 
@@ -17,7 +18,7 @@ env_tmp=""
 trap 'if [ -n "$env_tmp" ]; then rm -f "$env_tmp"; fi' EXIT
 
 usage() {
-  echo "usage: $0 up | down | restart | reset --yes" >&2
+  echo "usage: $0 up | down | restart | upgrade | reset --yes" >&2
   exit 64
 }
 
@@ -55,8 +56,8 @@ ensure_env() {
     fi
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
-    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 4 ]; then
-    say <<<"selfhost: $example does not list the stack ID and the four passwords; nothing was written."
+    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ]; then
+    say <<<"selfhost: $example does not list the stack ID and the five passwords; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
@@ -69,6 +70,32 @@ ensure_env() {
     say <<<"selfhost: could not create $env_file; nothing was written."
     exit 1
   fi
+}
+
+# A deploy/.env written before a role existed has no password for it. Append a generated one
+# for each password the example lists and the file does not name at all; an empty value is
+# left alone, since that is a choice the first start refuses anyway. Appending keeps the mode.
+add_missing_passwords() {
+  local line key value added=""
+  if [ ! -f "$env_file" ] || [ ! -r "$deploy/.env.example" ]; then return; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD)=$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      if grep -q "^$key=" "$env_file"; then continue; fi
+      value="$(random_secret)"
+      if [ "${#value}" -ne 48 ]; then
+        say <<<"selfhost: could not generate a random value for $key; deploy/.env was not changed."
+        exit 1
+      fi
+      # A hand written file may end without a newline; the key must not join its last value.
+      if [ -z "$added" ] && [ -s "$env_file" ] && [ -n "$(tail -c1 "$env_file")" ]; then
+        printf '\n' >>"$env_file"
+      fi
+      printf '%s=%s\n' "$key" "$value" >>"$env_file"
+      added+=" $key"
+    fi
+  done <"$deploy/.env.example"
+  if [ -n "$added" ]; then echo "selfhost: added a generated${added} to $env_file"; fi
 }
 
 # A hand written .env gets the umask default, which is usually readable by everyone.
@@ -84,10 +111,13 @@ warn_env_mode() {
 # Recreating, not just restarting, is what makes compose copy the passwords from deploy/.env
 # into the container again. The healthcheck then logs in as every role, so a password that
 # changed in deploy/.env but not in the database fails here instead of looking healthy.
+# wait_healthy [keep]: keep waits on the running container instead of recreating it.
 wait_healthy() {
   local start end compose_ok=true ids count state health status restarting problem="" first
+  local recreate=(--force-recreate)
+  if [ "${1:-}" = keep ]; then recreate=(); fi
   start="$(date +%s)"
-  if ! "${compose[@]}" up --detach --force-recreate --wait --wait-timeout "$wait_seconds"; then
+  if ! "${compose[@]}" up --detach ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout "$wait_seconds"; then
     compose_ok=false
   fi
   end="$(date +%s)"
@@ -129,12 +159,28 @@ wait_healthy() {
   exit 1
 }
 
+# The upgrade scripts run as the superuser over the local socket, so they need the server out of
+# its first start init, which only ever listens on the socket. TCP opens after init.
+wait_tcp() {
+  local deadline
+  deadline=$(($(date +%s) + wait_seconds))
+  until "${compose[@]}" exec -T postgres pg_isready --quiet --host 127.0.0.1 \
+    --username drefyn_owner --dbname drefyn >/dev/null 2>&1; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      say <<<"selfhost: postgres did not accept TCP connections within ${wait_seconds}s; nothing was upgraded. The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
 case "${1:-}" in
   # up writes deploy/.env first, because the stack ID the guard compares lives there. Two
   # statements, not &&, so a failure in ensure_env stops the script instead of skipping the guard.
-  up)
+  up | upgrade)
     ensure_env
-    guard_project up
+    add_missing_passwords
+    guard_project "$1"
     ;;
   down | restart | reset) guard_project "$1" ;;
   *) usage ;;
@@ -153,6 +199,20 @@ case "$1" in
   restart)
     warn_env_mode
     wait_healthy
+    ;;
+  upgrade)
+    warn_env_mode
+    "${compose[@]}" pull --quiet
+    # Recreating copies the new secrets into the container. It cannot be healthy yet, because
+    # the healthcheck logs in as the role the upgrade adds, so this waits for TCP only.
+    "${compose[@]}" up --detach --force-recreate
+    wait_tcp
+    if ! "${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh; then
+      say <<<"selfhost: the upgrade stopped; its reason is above. Nothing after the failed step ran."
+      exit 1
+    fi
+    # The same container, so its log still shows the upgrade.
+    wait_healthy keep
     ;;
   reset)
     if [ "${2:-}" != "--yes" ]; then

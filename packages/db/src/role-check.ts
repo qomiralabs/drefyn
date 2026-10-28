@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { DbError } from './errors.ts';
 
-export type PoolKind = 'app' | 'reader';
+export type PoolKind = 'app' | 'reader' | 'auth';
 
 export interface RoleSetting {
   // The database the setting applies to, or null for every database.
@@ -28,6 +28,7 @@ export interface RoleFacts {
 export const POOL_ROLES: Readonly<Record<PoolKind, string>> = {
   app: 'drefyn_app',
   reader: 'drefyn_public_reader',
+  auth: 'drefyn_auth',
 };
 
 // The bootstrap sets this one; any other database setting follows every connection.
