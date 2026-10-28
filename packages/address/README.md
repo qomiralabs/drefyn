@@ -48,13 +48,16 @@ In order, with the refusal reason for each step:
 7. The local part must be a dot atom of at most 64 characters: printable ASCII from
    ``A-Z a-z 0-9 ! # $ % & ' * + - / = ? ^ _ ` { | } ~``, dots only between atoms. Quoted
    strings, comments, spaces, escapes and non ASCII are refused: `local_part`.
-8. The domain may not hold a default ignorable code point (soft hyphen, zero width
-   characters, variation selectors and the like), since IDNA would drop it silently. In
-   ASCII it may hold only letters, digits, dots and hyphens, checked both as typed and in
-   its NFKC form; other non ASCII is left to IDNA. It is lower cased and converted to ASCII with the WHATWG URL host rules (the
-   same conversion as `node:url` `domainToASCII`). The result needs two or more labels,
-   each 1 to 63 letters, digits or inner hyphens, at most 253 characters in all, and a top
-   label that is not all digits, which rules out IP addresses: `domain`.
+8. The domain may not hold a default ignorable code point (soft hyphen, zero width space,
+   word joiner, variation selectors and the like), since IDNA would drop it silently. ZWNJ
+   (U+200C) and ZWJ (U+200D) are the exception: IDNA refuses them unless the script needs
+   them, as in Persian and after an Indic virama, and then keeps them in the punycode, so
+   the spelling with a joiner is a different domain. In ASCII the domain may hold only
+   letters, digits, dots and hyphens, checked both as typed and in its NFKC form; other non
+   ASCII is left to IDNA. It is lower cased and converted to ASCII with the WHATWG URL host
+   rules (the same conversion as `node:url` `domainToASCII`). The result needs two or more
+   labels, each 1 to 63 letters, digits or inner hyphens, at most 253 characters in all, and
+   a top label that is not all digits, which rules out IP addresses: `domain`.
 9. The local part is lower cased. If the joined address is now over 254 characters,
    because IDNA made the domain longer: `length`.
 

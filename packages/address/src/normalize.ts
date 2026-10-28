@@ -28,7 +28,9 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 // anything else ASCII is refused here, and non ASCII is left to IDNA.
 const ASCII_OUTSIDE_HOST = /[\0-,/:-@[-`{-\x7f]/;
 // IDNA drops these without a trace, so a look alike input would match another address.
-const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
+// ZWNJ and ZWJ are left to IDNA: under CONTEXTJ it refuses them or keeps them, and a kept
+// joiner changes the punycode, so Persian and Indic spellings store as different domains.
+const IGNORABLE = /(?![\u200c\u200d])\p{Default_Ignorable_Code_Point}/u;
 // C0, DEL and C1 controls, plus the two Unicode line breaks some mail clients honour.
 const CONTROL = /[\p{Cc}\u2028\u2029]/u;
 const NUMERIC_LAST_LABEL = /\.[0-9]+$/;
@@ -56,8 +58,8 @@ function validLocal(local: string): boolean {
 
 // The WHATWG host setter is what node:url domainToASCII runs internally, and browsers
 // have it too, so this file needs no Node import. Engines still differ in which
-// compatibility characters they fold, which the checks before it account for. A failed set leaves the host as
-// the placeholder, a single label that the checks below refuse.
+// compatibility characters they fold, which the checks before it account for. A failed
+// set leaves the host as the placeholder, a single label that the checks below refuse.
 function toAscii(domain: string): string {
   const url = new URL('ws://x');
   url.hostname = domain;
