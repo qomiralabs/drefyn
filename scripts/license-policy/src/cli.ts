@@ -4,8 +4,10 @@ import { basename } from 'node:path';
 import {
   checkLicenses,
   checkLockfile,
+  checkNotices,
   checkProduction,
   lockfilePackages,
+  outsideAllowList,
   parsePolicy,
   type LicenseReport,
   type Policy,
@@ -19,6 +21,7 @@ export interface Io {
 
 const USAGE = `usage: license-policy --input <pnpm-licenses.json> [--policy <policy.json>]
                       [--lockfile <pnpm-lock.yaml>] [--prod-input <pnpm-licenses-prod.json>]
+                      [--notices <THIRD_PARTY_NOTICES.md>]
 
   --input       output of \`pnpm licenses list --json\`; every package must have an
                 allowed license or a matching exception, and every exception must match
@@ -26,6 +29,8 @@ const USAGE = `usage: license-policy --input <pnpm-licenses.json> [--policy <pol
                 optional binaries this machine did not install
   --prod-input  output of \`pnpm licenses list --prod --json\`; refuses packages whose
                 exception is dev only
+  --notices     the third party notices; every production package outside the allow
+                list needs a \`## <name>\` entry with a \`Licence: <id>\` line. Needs --prod-input
   Forbidden packages (the policy's "forbidden" list) fail whatever their license.
 exit codes: 0 all allowed, 1 violations, 2 usage or input error
 `;
@@ -64,10 +69,15 @@ export function main(argv: string[], io: Io): number {
         policy: { type: 'string' },
         lockfile: { type: 'string' },
         'prod-input': { type: 'string' },
+        notices: { type: 'string' },
       },
     });
     if (values.input === undefined) {
       io.err(USAGE);
+      return 2;
+    }
+    if (values.notices !== undefined && values['prod-input'] === undefined) {
+      io.err(`licenses: error: --notices needs --prod-input to know what ships\n${USAGE}`);
       return 2;
     }
     const report = JSON.parse(readFileSync(values.input, 'utf8')) as LicenseReport;
@@ -102,6 +112,19 @@ export function main(argv: string[], io: Io): number {
       const count = Object.values(prod).reduce((n, list) => n + list.length, 0);
       io.out(`production: ${count} packages checked, ${found.length} dev only\n`);
       failed ||= found.length > 0;
+
+      if (values.notices !== undefined) {
+        const missing = checkNotices(prod, policy, readFileSync(values.notices, 'utf8'));
+        const shipped = outsideAllowList(prod, policy);
+        for (const name of missing) {
+          io.err(
+            `${name}: ships under ${shipped.get(name) ?? ''} with no entry in ${basename(values.notices)}\n`,
+          );
+        }
+        const noun = shipped.size === 1 ? 'exception' : 'exceptions';
+        io.out(`notices: ${shipped.size} shipped ${noun}, ${missing.length} missing\n`);
+        failed ||= missing.length > 0;
+      }
     }
     return failed ? 1 : 0;
   } catch (error) {

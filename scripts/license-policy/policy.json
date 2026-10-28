@@ -36,8 +36,7 @@
     {
       "name": "caniuse-lite",
       "license": "CC-BY-4.0",
-      "devOnly": true,
-      "reason": "Dev only, never shipped. Browser support data read by browserslist, pulled in through @babel/core by eslint-plugin-react-hooks and Storybook docgen."
+      "reason": "Browser support data that Next ships in the dashboard's server build through browserslist; it is read at build and server time and never sent to browsers. Reviewed under CC-BY-4.0, which allows commercial use with attribution, given in THIRD_PARTY_NOTICES.md."
     }
   ],
   "forbidden": [

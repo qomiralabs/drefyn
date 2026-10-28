@@ -33,6 +33,8 @@ export default tseslint.config(
       '**/storybook-static/**',
       '**/test-results/**',
       '**/playwright-report/**',
+      '**/.next/**',
+      '**/next-env.d.ts',
       // Broken on purpose: the lint rule tests run ESLint on them with their own config.
       'scripts/lint-rules/test/fixtures/**',
     ],

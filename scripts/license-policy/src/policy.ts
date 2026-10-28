@@ -289,3 +289,41 @@ export function checkLockfile(text: string, policy: Policy): Violation[] {
   }
   return violations;
 }
+
+// The `## <name>` sections of a notices file, each with the text under its heading.
+function noticeSections(notices: string): Map<string, string> {
+  const sections = new Map<string, string>();
+  for (const part of notices.split(/^## /m).slice(1)) {
+    const newline = part.indexOf('\n');
+    const heading = (newline === -1 ? part : part.slice(0, newline)).trim();
+    sections.set(heading, newline === -1 ? '' : part.slice(newline + 1));
+  }
+  return sections;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Names of production packages outside the allow list that have no `## <name>` entry
+// stating their licence on a `Licence: <id>` line. A mention elsewhere does not count:
+// attribution has to be findable by the package name.
+export function checkNotices(report: LicenseReport, policy: Policy, notices: string): string[] {
+  const sections = noticeSections(notices);
+  const missing: string[] = [];
+  for (const [name, license] of outsideAllowList(report, policy)) {
+    const body = sections.get(name);
+    const stated = new RegExp(`^Licence: ${escapeRegExp(license)}\\s*$`, 'm');
+    if (body === undefined || !stated.test(body)) missing.push(name);
+  }
+  return missing;
+}
+
+// Each package in a report whose licence is not on the allow list, with that licence.
+export function outsideAllowList(report: LicenseReport, policy: Policy): Map<string, string> {
+  const allowed = new Set(policy.allow);
+  const found = new Map<string, string>();
+  for (const [group, pkg] of packagesOf(report)) {
+    const license = pkg.license ?? group;
+    if (!satisfies(license, allowed)) found.set(pkg.name, license);
+  }
+  return found;
+}

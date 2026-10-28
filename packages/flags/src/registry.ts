@@ -28,6 +28,15 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'dashboard.shell',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'The dashboard shell: top bar, sidebar and product homes.',
+    created: '2026-10-27',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

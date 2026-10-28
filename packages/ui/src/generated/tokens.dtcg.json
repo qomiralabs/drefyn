@@ -412,6 +412,32 @@
         }
       }
     },
+    "meter": {
+      "track": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9059,
+            0.898,
+            0.8941
+          ],
+          "hex": "#e7e5e4"
+        }
+      },
+      "fill": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.2784,
+            0.3333,
+            0.4118
+          ],
+          "hex": "#475569"
+        }
+      }
+    },
     "overlay": {
       "scrim": {
         "$type": "color",
@@ -933,6 +959,32 @@
             0.1412
           ],
           "hex": "#292524"
+        }
+      }
+    },
+    "meter": {
+      "track": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1608,
+            0.1451,
+            0.1412
+          ],
+          "hex": "#292524"
+        }
+      },
+      "fill": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.6588,
+            0.6353,
+            0.6196
+          ],
+          "hex": "#a8a29e"
         }
       }
     },
@@ -1523,6 +1575,27 @@
         "unit": "px"
       }
     },
+    "landing": {
+      "$type": "dimension",
+      "$value": {
+        "value": 45,
+        "unit": "rem"
+      }
+    },
+    "breakpoint-md": {
+      "$type": "dimension",
+      "$value": {
+        "value": 64,
+        "unit": "rem"
+      }
+    },
+    "breakpoint-lg": {
+      "$type": "dimension",
+      "$value": {
+        "value": 80,
+        "unit": "rem"
+      }
+    },
     "gutter": {
       "$type": "dimension",
       "$value": {
@@ -1581,6 +1654,20 @@
       "$type": "dimension",
       "$value": {
         "value": 3,
+        "unit": "rem"
+      }
+    },
+    "shell-drawer": {
+      "$type": "dimension",
+      "$value": {
+        "value": 18,
+        "unit": "rem"
+      }
+    },
+    "shell-inspector": {
+      "$type": "dimension",
+      "$value": {
+        "value": 20,
         "unit": "rem"
       }
     }

@@ -77,7 +77,7 @@ describe('tokens.css', () => {
   it('redefines every colour role in dark and nothing that does not change', () => {
     const system = findRule(rules, DARK_SYSTEM, DARK_MEDIA);
     const colorNames = [...root.declarations.keys()].filter((n) =>
-      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|skeleton|overlay|shadow)-/.test(
+      /^--dr-(surface|border|text|disabled|accent|signal|state|focus|skeleton|meter|overlay|shadow)-/.test(
         n,
       ),
     );
@@ -170,6 +170,9 @@ describe('tokens.css', () => {
       '--dr-shell-bar': '3rem',
       '--dr-shell-nav': '15rem',
       '--dr-shell-nav-collapsed': '3rem',
+      '--dr-shell-drawer': '18rem',
+      '--dr-shell-inspector': '20rem',
+      '--dr-landing': '45rem',
     };
     for (const [name, value] of Object.entries(expected)) {
       expect(root.declarations.get(name), name).toBe(value);
@@ -332,6 +335,13 @@ describe('tokens.dtcg.json', () => {
       value: 3,
       unit: 'rem',
     });
+    expect(byPath.get('layout.landing')?.['$value']).toEqual({ value: 45, unit: 'rem' });
+    expect(byPath.get('layout.shell-drawer')?.['$value']).toEqual({ value: 18, unit: 'rem' });
+    expect(byPath.get('layout.shell-inspector')?.['$value']).toEqual({ value: 20, unit: 'rem' });
+    expect(byPath.get('layout.breakpoint-md')?.['$value']).toEqual({ value: 64, unit: 'rem' });
+    expect(byPath.get('layout.breakpoint-lg')?.['$value']).toEqual({ value: 80, unit: 'rem' });
+    expect(hex('light.meter.track')).toBe(hex('light.border.rule'));
+    expect(hex('dark.meter.fill')).toBe(hex('dark.text.secondary'));
     expect(byPath.get('timer.toast-undo')).toEqual({
       $type: 'duration',
       $value: { value: 10000, unit: 'ms' },

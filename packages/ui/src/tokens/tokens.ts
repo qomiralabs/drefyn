@@ -28,6 +28,7 @@ export interface ShadowLayer {
 const ground = { light: '#FAFAF9', dark: '#141210' } as const satisfies ModeColor;
 const raised = { light: '#F5F5F4', dark: '#1C1A17' } as const satisfies ModeColor;
 const rule = { light: '#E7E5E4', dark: '#292524' } as const satisfies ModeColor;
+const secondary = { light: '#475569', dark: '#A8A29E' } as const satisfies ModeColor;
 
 const color = {
   surface: {
@@ -51,7 +52,7 @@ const color = {
   text: {
     ink: { light: '#0B1120', dark: '#FAFAF9' },
     body: { light: '#1E293B', dark: '#D6D3D1' },
-    secondary: { light: '#475569', dark: '#A8A29E' },
+    secondary,
     // Light: on ground only. It measures 4.36 on raised and sunken.
     subtle: { light: '#64748B', dark: '#A8A29E' },
   },
@@ -101,6 +102,12 @@ const color = {
   // Placeholder blocks while content loads. Never under text, and it never shimmers or pulses.
   skeleton: {
     fill: rule,
+  },
+  // Usage meters. A plan limit is a business fact, not a health state, so a meter never turns
+  // amber or red: secondary ink on the rule at every level.
+  meter: {
+    track: rule,
+    fill: secondary,
   },
 } as const satisfies Record<string, Record<string, ModeColor | Record<string, ModeColor>>>;
 
@@ -269,6 +276,12 @@ const layout = {
   gutter: { wide: 24, compact: 16 },
   // Below this width the gutter tightens. Tailwind's sm breakpoint is the same width.
   compactBelow: 640,
+  // The dashboard's wider steps: below md the sidebar is an icon rail, from lg incident mode
+  // shows its third column. Pixels at the default root size, shipped in rem.
+  breakpoints: { md: 1024, lg: 1280 },
+  // Calm landings: narrower than working views, so a landing reads like a page. It holds the
+  // display-s answer sentence at about 50 characters a line.
+  landing: 720,
   // em, not ch: 66ch set 83 characters, because ch is the width of Inter's zero, and it
   // changes with the fallback font. 35em sets about 70 characters of Inter at every size.
   measure: 35, // em
@@ -276,7 +289,9 @@ const layout = {
   docs: { nav: 240, content: 640, toc: 220 },
   // The dashboard frame: top bar height and side nav widths. Pixels at the default root
   // size, shipped in rem so the frame keeps up with zoomed text.
-  shell: { bar: 48, nav: 240, navCollapsed: 48 },
+  // The drawer is wider than the nav so long project names and 32 px targets fit, and leaves
+  // 6rem of scrim to tap at 390 px. The inspector is incident mode's side column.
+  shell: { bar: 48, nav: 240, navCollapsed: 48, drawer: 288, inspector: 320 },
   // The device's own inset at the bottom edge, such as a phone's home indicator, so toasts and
   // the bottom sheet clear it. It is the device's value, not a design one, and 0 elsewhere.
   safeArea: { bottom: 'safe-area-inset-bottom' },

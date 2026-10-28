@@ -63,6 +63,9 @@ const required = [
   ['light', 'focus.ring', 'surface.ground', 'non-text', 6.02],
   ['light', 'focus.ring', 'surface.raised', 'non-text', 5.76],
   ['light', 'focus.ring', 'surface.sunken', 'non-text', 5.76],
+  // Light, usage meters
+  ['light', 'meter.fill', 'meter.track', 'non-text', 6.03],
+  ['light', 'meter.fill', 'surface.ground', 'non-text', 7.25],
   ['light', 'state.fresh.mark', 'surface.ground', 'non-text', 3.15],
   ['light', 'state.fresh.mark', 'surface.raised', 'non-text', 3.02],
   ['light', 'state.fresh.mark', 'surface.sunken', 'non-text', 3.02],
@@ -152,6 +155,9 @@ const required = [
   ['dark', 'focus.ring', 'surface.ground', 'non-text', 6.26],
   ['dark', 'focus.ring', 'surface.raised', 'non-text', 5.82],
   ['dark', 'focus.ring', 'surface.sunken', 'non-text', 5.37],
+  // Dark, usage meters
+  ['dark', 'meter.fill', 'meter.track', 'non-text', 6.01],
+  ['dark', 'meter.fill', 'surface.ground', 'non-text', 7.4],
   ['dark', 'signal.mark', 'surface.ground', 'non-text', 7.5],
   ['dark', 'signal.mark', 'surface.raised', 'non-text', 6.97],
   ['dark', 'signal.mark', 'surface.sunken', 'non-text', 6.43],
@@ -597,13 +603,50 @@ describe('aliases', () => {
   });
 
   it('declares each alias with the roles it resolves to, in both modes', () => {
-    expect(aliasRoles.map((a) => a.role)).toEqual(['surface.overlay']);
+    expect(aliasRoles.map((a) => a.role)).toEqual(['surface.overlay', 'meter.track', 'meter.fill']);
     for (const a of aliasRoles) {
       for (const mode of ['light', 'dark'] as const) {
         expect(colorOf(a.role, mode), `${a.role} ${mode}`).toBe(colorOf(a.resolves[mode], mode));
       }
       expect(a.why.length, a.role).toBeGreaterThan(10);
     }
+  });
+});
+
+// A plan limit is a business fact, not a health state, so meters never take a state colour:
+// secondary ink on the rule at every level.
+describe('usage meters', () => {
+  const ratio = (fg: 'meter.fill', bg: 'meter.track' | 'surface.ground', mode: 'light' | 'dark') =>
+    floor2(contrast(colorOf(fg, mode), colorOf(bg, mode)));
+
+  it('are secondary ink on the rule track, in both modes', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      expect(colorOf('meter.fill', mode)).toBe(colorOf('text.secondary', mode));
+      expect(colorOf('meter.track', mode)).toBe(colorOf('border.rule', mode));
+    }
+  });
+
+  it('measure as the shell spike did, on the track and on the ground', () => {
+    expect([
+      ratio('meter.fill', 'meter.track', 'light'),
+      ratio('meter.fill', 'meter.track', 'dark'),
+    ]).toEqual([6.03, 6.01]);
+    expect([
+      ratio('meter.fill', 'surface.ground', 'light'),
+      ratio('meter.fill', 'surface.ground', 'dark'),
+    ]).toEqual([7.25, 7.4]);
+  });
+
+  it('are required pairs at 3:1 in both modes', () => {
+    const pairs = expandPairs(requiredPairs).filter((p) => p.fg === 'meter.fill');
+    expect(pairs.map((p) => `${p.mode} ${p.bg} ${p.kind}`).sort()).toEqual(
+      [
+        'dark meter.track non-text',
+        'dark surface.ground non-text',
+        'light meter.track non-text',
+        'light surface.ground non-text',
+      ].sort(),
+    );
   });
 });
 

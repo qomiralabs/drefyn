@@ -70,7 +70,13 @@ The tests fail if they drift.
 - Selection: `border-l-indicator` or `border-b-indicator` marks the selected row, the current
   nav item and the selected tab. Put the stroke on every item, `border-transparent` at rest and
   `border-accent-ink` when selected, so labels do not jump when the selection moves.
-- Shell: `h-shell-bar`, `w-shell-nav` and `w-shell-nav-collapsed`.
+- Shell: `h-shell-bar`, `w-shell-nav`, `w-shell-nav-collapsed`, `w-shell-drawer` (the phone
+  drawer) and `w-shell-inspector` (incident mode's side column). Calm landings use
+  `max-w-landing` (45rem).
+- Breakpoints: `sm` 40rem, `md` 64rem and `lg` 80rem, literal in `tailwind.css` because a
+  media query cannot read a custom property. Tailwind's own `xl` and `2xl` do not exist.
+- Meters: `bg-meter-track` and `bg-meter-fill`, aliases of the rule and secondary ink. A plan
+  limit never takes a state colour.
 - Safe area: `mb-safe-bottom` and `pb-safe-bottom` clear the device's bottom inset, such as a
   phone's home indicator, from `env(safe-area-inset-bottom)`. Only things pinned to the
   bottom edge use them: toasts and the dialog's bottom sheet. Design tools get no value for
@@ -87,7 +93,7 @@ The tests fail if they drift.
   `transition-colors hover:bg-hover`, or a bare `transition` with `hover:text-ink`. A
   transition behind `hover:` fades in and snaps back out, and under reduced motion it loses the
   colour fade too. Keep `motion-safe:` for transitions that really are scoped, such as
-  `motion-safe:sm:transition` (`sm` is the only breakpoint). The lint rule rejects
+  `motion-safe:sm:transition`. The lint rule rejects
   `hover:transition` because the variant would outrank `motion-reduce:transition-none`.
 - Numbers: `time`, `data`, `output`, table cells and `[data-numeric]` get tabular figures from
   `tokens.css`.

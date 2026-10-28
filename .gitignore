@@ -19,3 +19,6 @@ dist/
 storybook-static/
 test-results/
 playwright-report/
+# Next writes these on every build and dev start.
+.next/
+next-env.d.ts

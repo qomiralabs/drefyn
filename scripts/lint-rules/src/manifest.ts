@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
+import { checkAppTheme } from './app-theme.ts';
 import {
   DEPENDENCY_FIELDS,
   exportEntries,
@@ -433,6 +434,34 @@ function sourceFiles(root: string, entries: readonly IndexEntry[]): string[] {
     .filter((file) => existsSync(file));
 }
 
+// Stylesheets under apps/*/src may only compose tokens in their Tailwind theme.
+const APP_STYLESHEET = /^apps\/[^/]+\/src\/.+\.css$/;
+
+function checkAppStyles(
+  workspace: Workspace,
+  root: string,
+  entries: readonly IndexEntry[],
+): Finding[] {
+  const findings: Finding[] = [];
+  for (const { path } of entries) {
+    if (!APP_STYLESHEET.test(path)) continue;
+    const file = join(root, ...path.split('/'));
+    if (!existsSync(file)) continue;
+    const owner = ownerOf(workspace, file);
+    const where = relative(owner?.dir ?? workspace.root, file)
+      .split(sep)
+      .join('/');
+    for (const finding of checkAppTheme(readFileSync(file, 'utf8'))) {
+      findings.push({
+        package: owner === undefined ? path : label(owner),
+        field: where,
+        detail: finding.detail,
+      });
+    }
+  }
+  return findings;
+}
+
 function checkDirectives(workspace: Workspace, files: string[]): Finding[] {
   const findings: Finding[] = [];
   for (const file of files) {
@@ -487,5 +516,6 @@ export function checkWorkspace(root: string): CheckResult {
   findings.push(...checkIndex(workspace, entries));
   const files = sourceFiles(root, entries);
   findings.push(...checkDirectives(workspace, files));
+  findings.push(...checkAppStyles(workspace, root, entries));
   return { findings, workspace: workspace.packages.length, packages, files: files.length };
 }

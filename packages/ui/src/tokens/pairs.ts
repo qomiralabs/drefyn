@@ -54,6 +54,13 @@ const READING = [
 const FILLS = ['surface.hover', 'surface.pressed'] as const;
 
 export const requiredPairs: readonly PairGroup[] = [
+  {
+    fg: ['meter.fill'],
+    bg: ['meter.track', 'surface.ground'],
+    kind: 'non-text',
+    modes: BOTH,
+    why: 'A usage meter is read from its fill, against its track and the page',
+  },
   { fg: READING, bg: SURFACES, kind: 'text', modes: BOTH, why: 'Reading text on every surface' },
   {
     fg: ['text.subtle'],
@@ -373,6 +380,16 @@ export const aliasRoles: readonly {
     role: 'surface.overlay',
     resolves: { light: 'surface.ground', dark: 'surface.raised' },
     why: 'Floating things are paper with a shadow in light, raised with the strong rule in dark',
+  },
+  {
+    role: 'meter.track',
+    resolves: { light: 'border.rule', dark: 'border.rule' },
+    why: 'A usage meter track is a hairline drawn wide; plan limits never take a state colour',
+  },
+  {
+    role: 'meter.fill',
+    resolves: { light: 'text.secondary', dark: 'text.secondary' },
+    why: 'A usage meter fill is secondary ink at every level, so a limit never reads as health',
   },
 ];
 

@@ -38,6 +38,8 @@
   --color-state-neutral-text: var(--dr-state-neutral-text);
   --color-focus-ring: var(--dr-focus-ring);
   --color-skeleton-fill: var(--dr-skeleton-fill);
+  --color-meter-track: var(--dr-meter-track);
+  --color-meter-fill: var(--dr-meter-fill);
   --color-overlay-scrim: var(--dr-overlay-scrim);
   --spacing-0: var(--dr-space-0);
   --spacing-2: var(--dr-space-2);
@@ -132,6 +134,8 @@
   --height-shell-bar: var(--dr-shell-bar);
   --container-shell-nav: var(--dr-shell-nav);
   --container-shell-nav-collapsed: var(--dr-shell-nav-collapsed);
+  --container-shell-drawer: var(--dr-shell-drawer);
+  --container-shell-inspector: var(--dr-shell-inspector);
   --border-width-indicator: var(--dr-stroke-indicator);
   --shadow-0: var(--dr-shadow-0);
   --shadow-1: var(--dr-shadow-1);
@@ -146,8 +150,11 @@
   --transition-duration-move-slow: var(--dr-duration-move-slow);
   --transition-duration-brand-reveal: var(--dr-duration-brand-reveal);
   --breakpoint-sm: 40rem;
+  --breakpoint-md: 64rem;
+  --breakpoint-lg: 80rem;
   --container-page: var(--dr-page-max);
   --container-measure: var(--dr-measure);
+  --container-landing: var(--dr-landing);
   --default-font-family: var(--dr-font-sans);
   --default-mono-font-family: var(--dr-font-mono);
   --default-border-width: var(--dr-stroke-hairline);
@@ -162,6 +169,12 @@
 @utility focus-ring-inset {
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-inset);
+}
+@utility text-code {
+  font-family: var(--dr-font-mono);
+}
+@utility text-label {
+  font-family: var(--dr-font-mono);
 }
 @utility transition {
   @media (prefers-reduced-motion: reduce) {
