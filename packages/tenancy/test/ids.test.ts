@@ -1,35 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { ID_KINDS, TenancyError, idOf, organizationId, projectId } from '../src/index.ts';
-import { MAX_UUID, NIL_UUID, PREFIXES, expectCode } from './support.ts';
-
-const V7 = '01928c3e-7a9b-7c3d-8e4f-0123456789ab';
-const V4 = '9b2f6a1e-4c3d-4b8a-9f7e-6d5c4b3a2918';
-
-const notUuids: readonly [string, unknown][] = [
-  ['empty', ''],
-  ['uppercase', V7.toUpperCase()],
-  ['one uppercase letter', '01928C3e-7a9b-7c3d-8e4f-0123456789ab'],
-  ['no hyphens', V7.replaceAll('-', '')],
-  ['braces', `{${V7}}`],
-  ['urn form', `urn:uuid:${V7}`],
-  ['leading space', ` ${V7}`],
-  ['trailing space', `${V7} `],
-  ['trailing newline', `${V7}\n`],
-  ['leading newline', `\n${V7}`],
-  ['one short', V7.slice(0, -1)],
-  ['one long', `${V7}0`],
-  ['hyphen moved', '01928c3e7-a9b-7c3d-8e4f-0123456789ab'],
-  ['non hex letter', '01928c3e-7a9b-7c3d-8e4f-0123456789ag'],
-  ['public id form', 'org_01arz3ndektsv4rrffq69g5fav'],
-  ['fullwidth digit', '\uff101928c3e-7a9b-7c3d-8e4f-0123456789ab'],
-  ['nul byte', `${V7.slice(0, -1)}\u0000`],
-  ['number', 42],
-  ['null', null],
-  ['undefined', undefined],
-  ['object', { toString: () => V7 }],
-  ['boxed string', new String(V7)],
-  ['array', [V7]],
-];
+import {
+  MAX_UUID,
+  NIL_UUID,
+  NOT_UUIDS as notUuids,
+  PREFIXES,
+  V4,
+  V7,
+  expectCode,
+} from './support.ts';
 
 describe('organizationId and projectId', () => {
   it.each([
