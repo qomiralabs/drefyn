@@ -1,4 +1,12 @@
-import { idOf, parsePublicId, toPublicId, type IdOf, type OrganizationId } from '@drefyn/tenancy';
+import {
+  idOf,
+  parsePublicId,
+  toPublicId,
+  type IdKind,
+  type IdOf,
+  type OrganizationId,
+  type UserId,
+} from '@drefyn/tenancy';
 
 // The public id alphabet: lowercase Crockford base32 without i, l, o and u.
 const ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz';
@@ -56,28 +64,36 @@ export function decodeSecret(text: unknown): Buffer | null {
   return out;
 }
 
-// The body format is the same for every id kind and tenancy owns the codec, so bodies of
-// kinds tenancy does not list yet (sessions, invitations, challenges) decode through it
-// too and come back as canonical UUIDs.
-function decodeBody(text: string, start: number): string | null {
+// Tokens carry id bodies without their prefix; the kind comes from the position, and the
+// tenancy codec, which owns the format, validates and brands it.
+function decodeBody<K extends IdKind>(kind: K, text: string, start: number): IdOf<K> | null {
   const body = text.slice(start, start + BODY_LENGTH);
   if (body.length !== BODY_LENGTH) return null;
   try {
-    return parsePublicId('usr', `usr_${body}`);
+    return parsePublicId(kind, `${kind}_${body}`);
   } catch {
     return null;
   }
 }
 
-const bodyOf = (uuid: string) => toPublicId('usr', idOf('usr', uuid)).slice(4);
+const bodyOf = <K extends IdKind>(kind: K, id: IdOf<K>) =>
+  toPublicId(kind, id).slice(kind.length + 1);
 
-interface Layout {
+// Email challenges have no public id kind; their body decodes through the user kind,
+// since the format is shared, and comes back as a canonical UUID.
+const challengeBody = (uuid: string) => bodyOf('usr', idOf('usr', uuid));
+
+interface Layout<A extends IdKind, B extends IdKind> {
   readonly prefix: string;
   readonly separator: string;
+  readonly kinds: readonly [A, B];
 }
 
 // prefix, body, separator, body, separator, secret: the shape every credential shares.
-function parseTriple(value: unknown, layout: Layout): [string, string, Buffer] | null {
+function parseTriple<A extends IdKind, B extends IdKind>(
+  value: unknown,
+  layout: Layout<A, B>,
+): [IdOf<A>, IdOf<B>, Buffer] | null {
   const length = layout.prefix.length + BODY_LENGTH * 2 + 2 + SECRET_LENGTH;
   if (typeof value !== 'string' || value.length !== length) return null;
   if (!value.startsWith(layout.prefix)) return null;
@@ -87,30 +103,36 @@ function parseTriple(value: unknown, layout: Layout): [string, string, Buffer] |
   if (value.charAt(b - 1) !== layout.separator || value.charAt(c - 1) !== layout.separator) {
     return null;
   }
-  const first = decodeBody(value, a);
-  const second = decodeBody(value, b);
+  const first = decodeBody(layout.kinds[0], value, a);
+  const second = decodeBody(layout.kinds[1], value, b);
   const secret = decodeSecret(value.slice(c));
   if (first === null || second === null || secret === null) return null;
   return [first, second, secret];
 }
 
-const formatTriple = (layout: Layout, first: string, second: string, secret: Uint8Array) =>
-  `${layout.prefix}${bodyOf(first)}${layout.separator}${bodyOf(second)}${layout.separator}${encodeSecret(secret)}`;
+function formatTriple<A extends IdKind, B extends IdKind>(
+  layout: Layout<A, B>,
+  first: IdOf<A>,
+  second: IdOf<B>,
+  secret: Uint8Array,
+): string {
+  const [a, b] = layout.kinds;
+  return `${layout.prefix}${bodyOf(a, first)}${layout.separator}${bodyOf(b, second)}${layout.separator}${encodeSecret(secret)}`;
+}
 
-const SESSION: Layout = { prefix: 'v1.', separator: '.' };
-const API_KEY: Layout = { prefix: 'drf_ak_', separator: '_' };
-const INVITATION: Layout = { prefix: '', separator: '.' };
+const SESSION: Layout<'usr', 'ses'> = { prefix: 'v1.', separator: '.', kinds: ['usr', 'ses'] };
+const API_KEY: Layout<'org', 'key'> = { prefix: 'drf_ak_', separator: '_', kinds: ['org', 'key'] };
+const INVITATION: Layout<'org', 'inv'> = { prefix: '', separator: '.', kinds: ['org', 'inv'] };
 
 export interface SessionToken {
-  readonly userId: IdOf<'usr'>;
-  // A canonical UUID; the sessions code brands it once tenancy has the session kind.
-  readonly sessionId: string;
+  readonly userId: UserId;
+  readonly sessionId: IdOf<'ses'>;
   readonly secret: Buffer;
 }
 
 export interface SessionTokenInput {
-  readonly userId: IdOf<'usr'>;
-  readonly sessionId: string;
+  readonly userId: UserId;
+  readonly sessionId: IdOf<'ses'>;
   readonly secret: Uint8Array;
 }
 
@@ -121,7 +143,7 @@ export function formatSessionToken(token: SessionTokenInput): string {
 export function parseSessionToken(value: unknown): SessionToken | null {
   const parts = parseTriple(value, SESSION);
   if (parts === null) return null;
-  return { userId: idOf('usr', parts[0]), sessionId: parts[1], secret: parts[2] };
+  return { userId: parts[0], sessionId: parts[1], secret: parts[2] };
 }
 
 export interface ApiKeyParts {
@@ -141,7 +163,7 @@ export function formatApiKey(key: {
 export function parseApiKey(value: unknown): ApiKeyParts | null {
   const parts = parseTriple(value, API_KEY);
   if (parts === null) return null;
-  return { organizationId: idOf('org', parts[0]), keyId: idOf('key', parts[1]), secret: parts[2] };
+  return { organizationId: parts[0], keyId: parts[1], secret: parts[2] };
 }
 
 const MAX_HEADER_BYTES = 512;
@@ -156,13 +178,13 @@ export function parseBearer(header: unknown): ApiKeyParts | null {
 
 export interface InvitationToken {
   readonly organizationId: OrganizationId;
-  readonly invitationId: string;
+  readonly invitationId: IdOf<'inv'>;
   readonly secret: Buffer;
 }
 
 export function formatInvitationToken(token: {
   readonly organizationId: OrganizationId;
-  readonly invitationId: string;
+  readonly invitationId: IdOf<'inv'>;
   readonly secret: Uint8Array;
 }): string {
   return formatTriple(INVITATION, token.organizationId, token.invitationId, token.secret);
@@ -171,7 +193,7 @@ export function formatInvitationToken(token: {
 export function parseInvitationToken(value: unknown): InvitationToken | null {
   const parts = parseTriple(value, INVITATION);
   if (parts === null) return null;
-  return { organizationId: idOf('org', parts[0]), invitationId: parts[1], secret: parts[2] };
+  return { organizationId: parts[0], invitationId: parts[1], secret: parts[2] };
 }
 
 const CODE = /^[0-9]{8}$/;
@@ -186,14 +208,14 @@ export interface VerifyFragment {
 }
 
 export function formatVerifyFragment(fragment: VerifyFragment): string {
-  return `${bodyOf(fragment.challengeId)}.${fragment.code}`;
+  return `${challengeBody(fragment.challengeId)}.${fragment.code}`;
 }
 
 // The part after # in the sign in link: the challenge body, a dot, the 8 digit code.
 export function parseVerifyFragment(value: unknown): VerifyFragment | null {
   if (typeof value !== 'string' || value.length !== BODY_LENGTH + 1 + 8) return null;
   if (value.charAt(BODY_LENGTH) !== '.') return null;
-  const challengeId = decodeBody(value, 0);
+  const challengeId = decodeBody('usr', value, 0);
   const code = parseCode(value.slice(BODY_LENGTH + 1));
   if (challengeId === null || code === null) return null;
   return { challengeId, code };

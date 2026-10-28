@@ -392,11 +392,15 @@ export interface ApiAuthConfig {
   readonly apiKeyFail: readonly RateLimit[];
 }
 
-// The API service's side: its own failure key and limit, and a refusal to start with the
-// auth secret or the auth database, which read every address and password hash.
+// The API service's side: its own failure key and limit. Every other auth key is refused,
+// by allow list so keys added later are refused too: the secrets (current, previous and
+// OAuth) prove sign ins, and the auth database reads every address and password hash.
 export function parseApiAuthConfig(env: Env): ApiAuthConfig {
-  for (const key of ['DREFYN_AUTH_SECRET', 'DREFYN_AUTH_DATABASE_URL'] as const) {
-    if (read(env, key) !== undefined) invalid(key, 'must not be set on the API service');
+  for (const key of Object.keys(env).sort()) {
+    if (!key.startsWith('DREFYN_AUTH_') || key === 'DREFYN_AUTH_RATE_API_KEY_FAIL') continue;
+    if (read(env, key) !== undefined) {
+      invalid(key as AuthConfigKey, 'must not be set on the API service');
+    }
   }
   const key = secretKey(env, 'DREFYN_API_RATE_LIMIT_KEY');
   if (key === undefined) invalid('DREFYN_API_RATE_LIMIT_KEY', 'is required');

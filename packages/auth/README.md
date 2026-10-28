@@ -42,8 +42,10 @@ const api = parseApiAuthConfig(process.env); // API service
   `DREFYN_AUTH_DATABASE_URL` and `DREFYN_AUTH_DATABASE_POOL_MAX` belong to `@drefyn/db`
   and are ignored here.
 - `parseApiAuthConfig(env)` needs `DREFYN_API_RATE_LIMIT_KEY` and refuses to start when
-  `DREFYN_AUTH_SECRET` or `DREFYN_AUTH_DATABASE_URL` is set, so the API service never
-  holds identity data. `failureKey(parts)` makes the HMAC for `api_key_failures`.
+  any `DREFYN_AUTH_` key other than `DREFYN_AUTH_RATE_API_KEY_FAIL` is set, among them
+  the current and previous secrets, the OAuth client secrets and the auth database URL,
+  so the API service never holds identity data. `failureKey(parts)` makes the HMAC for
+  `api_key_failures`.
 - OAuth client secrets are `SecretValue`s: `reveal()` returns the string, while
   `toString`, `toJSON` and `util.inspect` all show `[redacted]`.
 
@@ -75,9 +77,11 @@ All bodies use the lowercase Crockford base32 of the tenancy id codec. A secret 
 
 Each `parse*` function returns `null` for anything but the canonical form, and each has
 a matching `format*`. `parseBearer(header)` reads exactly `Bearer <key>` and refuses
-headers over 512 bytes. Session, invitation and challenge ids come back as canonical
-UUID strings. The user id is `IdOf<'usr'>`, the organization id `OrganizationId` and the
-key id `IdOf<'key'>`. `cookieNames(secure)` gives the four cookie names.
+headers over 512 bytes. The scheme is case sensitive on purpose for now, so `bearer`
+is refused; accepting it later is additive. Ids carry their tenancy brands: `UserId`,
+`IdOf<'ses'>`, `IdOf<'inv'>`, `OrganizationId` and `IdOf<'key'>`. Email challenges
+have no id kind, so the challenge id comes back as a canonical UUID string.
+`cookieNames(secure)` gives the four cookie names.
 
 ## Validators
 
@@ -108,10 +112,12 @@ key id `IdOf<'key'>`. `cookieNames(secure)` gives the four cookie names.
 `redact(value)` returns a copy of a structured log value with secrets removed at any
 depth. It replaces values under secret or personal keys: password, secret, token,
 cookie, authorization, API key, email, code, state, OTP, pre, invitation and IP.
-Session tokens, invitation tokens, API keys, bare secrets, bearer values, Drefyn cookie
-values and OAuth `code` and `state` query parameters are removed from any string.
-Binary values and anything past 64 levels deep become `[redacted]`, and cycles become
-`[circular]`. Errors keep their name, an upper case error `code` and redacted message
+Session tokens, invitation tokens, API keys, verify link fragments, bare secrets, bearer
+values and Drefyn cookie values are removed from any string, and so is the value of a
+`code=` or `state=` parameter in any case at the start, after `?`, `&`, `#`, `;` or
+whitespace. Binary values, functions (an own `toJSON` included), values whose getter or
+Proxy trap throws, and anything past 64 levels deep become `[redacted]`, and cycles
+become `[circular]`, so a log call never throws. Errors keep their name, an upper case error `code` and redacted message
 and stack. `redactText(text)` applies the string rules alone.
 
 ## Permissions

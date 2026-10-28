@@ -10,11 +10,15 @@ const TEXT_RULES: readonly [RegExp, string][] = [
   [/drf_[a-z]{2}_[0-9a-z_]+/g, REDACTED],
   // Session tokens (v1. prefix) and invitation tokens share the triple shape.
   [new RegExp(`(?:v1\\.)?${B}{26}\\.${B}{26}\\.${B}{52}`, 'g'), REDACTED],
+  // The verify link fragment, <challenge>.<code>: the code signs in for 10 minutes.
+  [new RegExp(`${B}{26}\\.[0-9]{8}`, 'g'), REDACTED],
   // A bare 32 byte secret: pre sign in binding, OAuth state.
   [new RegExp(`${B}{52}`, 'g'), REDACTED],
   [/(Bearer\s+)\S+/g, `$1${REDACTED}`],
   [/((?:__Host-)?drefyn_(?:session|pre|oauth|invite)=)[^;\s]*/g, `$1${REDACTED}`],
-  [/([?&#](?:code|state)=)[^&#\s]*/g, `$1${REDACTED}`],
+  // Any case, in a query, a form body or free text, but only as a whole parameter name,
+  // so errorcode= and zipcode= stay readable.
+  [/((?:^|[?&#;\s])(?:code|state)=)[^&#;\s]*/gi, `$1${REDACTED}`],
 ];
 
 export function redactText(text: string): string {
@@ -61,9 +65,29 @@ function sensitive(key: string): boolean {
 
 const ERROR_CODE = /^[A-Z][A-Z0-9_]*$/;
 
+// A log call must never throw, so anything that cannot be read safely becomes the
+// placeholder: a throwing getter, a Proxy trap, or a function (an own toJSON would
+// otherwise decide what JSON.stringify writes).
 function walk(value: unknown, depth: number, seen: WeakSet<object>): unknown {
   if (typeof value === 'string') return redactText(value);
+  if (typeof value === 'function') return REDACTED;
   if (typeof value !== 'object' || value === null) return value;
+  try {
+    return walkObject(value, depth, seen);
+  } catch {
+    return REDACTED;
+  }
+}
+
+function read(value: object, key: string): unknown {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return REDACTED;
+  }
+}
+
+function walkObject(value: object, depth: number, seen: WeakSet<object>): unknown {
   if (depth >= MAX_DEPTH) return REDACTED;
   if (value instanceof Date) return value;
   // Bytes in a log context are hashes or secrets; neither belongs there.
@@ -91,9 +115,9 @@ function walk(value: unknown, depth: number, seen: WeakSet<object>): unknown {
     if (typeof code === 'string' && ERROR_CODE.test(code)) out['code'] = code;
     if (value.cause !== undefined) out['cause'] = next(value.cause);
   }
-  for (const [key, inner] of Object.entries(value)) {
+  for (const key of Object.keys(value)) {
     if (key in out) continue;
-    out[key] = sensitive(key) ? REDACTED : next(inner);
+    out[key] = sensitive(key) ? REDACTED : next(read(value, key));
   }
   return out;
 }
