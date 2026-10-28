@@ -328,6 +328,20 @@ describe('session queries', () => {
     expect(await sessionFor(fakeClient().client).vectorExtension()).toBeUndefined();
   });
 
+  it('reads each upgrade role by name, passing the names as a parameter', async () => {
+    const { client, sent } = fakeClient((text, values) => {
+      if (!text.includes('pg_roles') || text.includes('current_user')) return undefined;
+      expect(values).toEqual([['drefyn_auth']]);
+      return [{ role: 'drefyn_auth', exists: true, can_connect: false }];
+    });
+    expect(await sessionFor(client).requiredRoles()).toEqual([
+      { role: 'drefyn_auth', exists: true, canConnect: false },
+    ]);
+    // A missing role must not reach has_database_privilege by name, which would raise.
+    const text = sent.find((s) => s.includes('has_database_privilege')) ?? '';
+    expect(text).toMatch(/has_database_privilege\(\s*p\.oid/);
+  });
+
   it('tries the shared lock key and reports whether it got it', async () => {
     const got = fakeClient((text, values) => {
       if (text.includes('pg_try_advisory_lock')) {

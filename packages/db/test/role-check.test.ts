@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DbError } from '../src/errors.ts';
-import { assertRoleSafe, roleProblems, type PoolKind, type RoleFacts } from '../src/role-check.ts';
+import {
+  POOL_ROLES,
+  assertRoleSafe,
+  roleProblems,
+  type PoolKind,
+  type RoleFacts,
+} from '../src/role-check.ts';
 import { thrown } from './support.ts';
 
 function facts(overrides: Partial<RoleFacts> = {}): RoleFacts {
@@ -20,10 +26,27 @@ function facts(overrides: Partial<RoleFacts> = {}): RoleFacts {
 const reader = (overrides: Partial<RoleFacts> = {}) =>
   facts({ currentUser: 'drefyn_public_reader', ...overrides });
 
+const auth = (overrides: Partial<RoleFacts> = {}) =>
+  facts({ currentUser: 'drefyn_auth', ...overrides });
+
+describe('POOL_ROLES', () => {
+  it('names one role per pool, the pre sign in role included', () => {
+    expect(POOL_ROLES).toEqual({
+      app: 'drefyn_app',
+      reader: 'drefyn_public_reader',
+      auth: 'drefyn_auth',
+    });
+  });
+});
+
 describe('roleProblems', () => {
   it('passes drefyn_app on the app pool and the reader on the reader pool', () => {
     expect(roleProblems(facts(), 'app')).toEqual([]);
     expect(roleProblems(reader(), 'reader')).toEqual([]);
+  });
+
+  it('passes drefyn_auth on the auth pool', () => {
+    expect(roleProblems(auth(), 'auth')).toEqual([]);
   });
 
   it.each<[string, RoleFacts, PoolKind, RegExp]>([
@@ -47,6 +70,23 @@ describe('roleProblems', () => {
       facts(),
       'reader',
       /drefyn_public_reader.*drefyn_app|drefyn_app.*drefyn_public_reader/,
+    ],
+    ['the auth role on the app pool', auth(), 'app', /drefyn_app.*drefyn_auth/],
+    ['the app role on the auth pool', facts(), 'auth', /drefyn_auth.*drefyn_app/],
+    ['the reader on the auth pool', reader(), 'auth', /drefyn_auth.*drefyn_public_reader/],
+    ['an auth role with BYPASSRLS', auth({ bypassRls: true }), 'auth', /bypassrls/i],
+    ['an auth role that is a superuser', auth({ superuser: true }), 'auth', /superuser/i],
+    [
+      'an auth role that is a member of drefyn_app',
+      auth({ memberOf: ['drefyn_app'] }),
+      'auth',
+      /member.*drefyn_app/i,
+    ],
+    [
+      'an auth role with a role setting',
+      auth({ settings: [{ database: null, settings: ['search_path=public'] }] }),
+      'auth',
+      /role setting.*search_path/,
     ],
     ['drefyn_owner on the app pool', facts({ currentUser: 'drefyn_owner' }), 'app', /drefyn_owner/],
     [
