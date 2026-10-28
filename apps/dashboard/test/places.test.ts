@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandFilter, type Command } from '../src/shell/commands.ts';
+import { commandFilter } from '../src/shell/commands.ts';
 import { places } from '../src/shell/places.ts';
 
 const entries = places('acme');
@@ -36,6 +36,6 @@ describe('command bar search', () => {
   });
 
   it('keeps every place inside the organization', () => {
-    for (const entry of entries as readonly Command[]) expect(entry.href).toMatch(/^\/acme(\/|$)/);
+    for (const entry of entries) expect(entry.href).toMatch(/^\/acme(\/|$)/);
   });
 });

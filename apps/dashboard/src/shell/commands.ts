@@ -60,8 +60,17 @@ export function searchText(entry: Command): string {
   return [entry.name, entry.kind, ...(entry.keywords ?? [])].join(' ').toLowerCase();
 }
 
-// TODO(#59): filter through searchText.
-export const commandFilter =
-  (_entries: readonly Command[]) =>
-  (_text: string, _input: string, _node: { key: unknown }): boolean =>
-    false;
+// The filter the command bar's autocomplete runs: the query against each entry's search text,
+// so keywords count as well as the row's words. A node it does not know falls back to the row
+// text. Case is ignored and an empty query keeps everything.
+export function commandFilter(
+  entries: readonly Command[],
+): (text: string, input: string, node: { key: unknown }) => boolean {
+  const index = new Map(entries.map((entry) => [entry.id, searchText(entry)]));
+  return (text, input, node) => {
+    const query = input.trim().toLowerCase();
+    if (query === '') return true;
+    const haystack = index.get(String(node.key)) ?? text.toLowerCase();
+    return haystack.includes(query);
+  };
+}
