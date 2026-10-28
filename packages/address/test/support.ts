@@ -32,7 +32,7 @@ const asciiLabel = fc
   .filter((label) => !label.includes('--'));
 // Letters that IDNA maps or encodes, so the Unicode path is exercised, not just ASCII.
 const unicodeLabel = fc
-  .array(fc.constantFrom('a', 'b', 'z', 'ü', 'é', 'ß', 'ж', '中', 'K'), {
+  .array(fc.constantFrom('a', 'b', 'z', '\u00fc', '\u00e9', '\u00df', '\u0436', '\u4e2d', 'K'), {
     minLength: 1,
     maxLength: 8,
   })
@@ -52,7 +52,7 @@ export const asciiAddress: fc.Arbitrary<string> = fc
   .map(([local, domain]) => `${local}@${domain}`);
 
 const padding = fc
-  .array(fc.constantFrom(' ', '\t', ' ', ' ', '﻿'), { maxLength: 3 })
+  .array(fc.constantFrom(' ', '\t', '\u00a0', '\u2028', '\ufeff'), { maxLength: 3 })
   .map((units) => units.join(''));
 
 // Mostly near misses of real addresses: padded, mixed case, Unicode domains, and stray
@@ -72,7 +72,7 @@ export const addressLike: fc.Arbitrary<string> = fc.oneof(
     .array(
       fc.oneof(
         anyUnit,
-        fc.constantFrom('@', '.', '"', '(', ')', ' ', '/', '%', '#', '?', 'a', 'Z', 'ü'),
+        fc.constantFrom('@', '.', '"', '(', ')', ' ', '/', '%', '#', '?', 'a', 'Z', '\u00fc'),
       ),
       { maxLength: 30 },
     )

@@ -7,11 +7,6 @@ import {
 
 type Reason = AddressError['reason'];
 
-function reasonOf(input: string): Reason | 'accepted' {
-  const result = normalizeEmailAddress(input);
-  return result.ok ? 'accepted' : result.error.reason;
-}
-
 function valueOf(input: string): string {
   const result = normalizeEmailAddress(input);
   if (!result.ok) throw new Error(`refused with ${result.error.reason}`);
@@ -19,7 +14,7 @@ function valueOf(input: string): string {
 }
 
 // Each Unicode label is 7 units and 14 once encoded, so the ASCII form outgrows the input.
-const growing = `${'a'.repeat(64)}@${'bücher.'.repeat(17)}com`;
+const growing = `${'a'.repeat(64)}@${'b\u00fccher.'.repeat(17)}com`;
 const at254 = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`;
 
 const refusals: readonly (readonly [string, string, Reason])[] = [
@@ -36,7 +31,7 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
   ['a tab inside the domain', 'jane@ex\tample.com', 'control'],
   ['DEL', 'ja\u007fne@example.com', 'control'],
   ['a C1 control', 'jane@exa\u0085mple.com', 'control'],
-  ['a line separator inside', 'ja ne@example.com', 'control'],
+  ['a line separator inside', 'ja\u2028ne@example.com', 'control'],
 
   ['no @', 'jane.example.com', 'shape'],
   ['a second @', 'jane@evil.test@example.com', 'shape'],
@@ -47,8 +42,8 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
 
   ['an empty local part', '@example.com', 'local_part'],
   ['a local part over 64', `${'a'.repeat(65)}@example.com`, 'local_part'],
-  ['a non ASCII local part', 'jäne@example.com', 'local_part'],
-  ['a homoglyph local part', 'jаne@example.com', 'local_part'],
+  ['a non ASCII local part', 'j\u00e4ne@example.com', 'local_part'],
+  ['a homoglyph local part', 'j\u0430ne@example.com', 'local_part'],
   ['a quoted local part', '"jane"@example.com', 'local_part'],
   ['a quoted local part with a space', '"jane doe"@example.com', 'local_part'],
   ['a trailing comment', 'jane(comment)@example.com', 'local_part'],
@@ -79,7 +74,7 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
   ['a trailing dot', 'jane@example.com.', 'domain'],
   ['an underscore', 'jane@exa_mple.com', 'domain'],
   ['a label over 63', `jane@${'b'.repeat(64)}.com`, 'domain'],
-  ['an ASCII domain over 253', `j@${'bücher.'.repeat(18)}com`, 'domain'],
+  ['an ASCII domain over 253', `j@${'b\u00fccher.'.repeat(18)}com`, 'domain'],
   ['a port', 'jane@example.com:25', 'domain'],
   // The URL host parser would cut these off or decode them and keep the rest, turning a
   // string that is not an address into someone's real address.
@@ -88,9 +83,9 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
   ['a fragment', 'jane@example.com#evil', 'domain'],
   ['a backslash in the domain', 'jane@example.com\\evil', 'domain'],
   ['a percent escape', 'jane@ex%41mple.com', 'domain'],
-  ['a character IDNA forbids', 'jane@exa／mple.com', 'domain'],
+  ['a character IDNA forbids', 'jane@exa\uff0fmple.com', 'domain'],
   ['a lone surrogate', 'jane@exa\ud800mple.com', 'domain'],
-  ['only ignorable characters in a label', 'jane@​.com', 'domain'],
+  ['only ignorable characters in a label', 'jane@\u200b.com', 'domain'],
 ];
 
 describe('normalizeEmailAddress refusals', () => {
@@ -124,7 +119,7 @@ describe('normalizeEmailAddress accepted forms', () => {
 
   it('trims surrounding whitespace', () => {
     expect(valueOf('  Jane.Doe+Docs@Example.COM ')).toBe('jane.doe+docs@example.com');
-    expect(valueOf('\tjane@example.com ')).toBe('jane@example.com');
+    expect(valueOf('\tjane@example.com\u00a0')).toBe('jane@example.com');
   });
 
   it('accepts exactly 254 characters', () => {
@@ -136,14 +131,14 @@ describe('normalizeEmailAddress accepted forms', () => {
   });
 
   it('returns a Unicode domain in its ASCII form', () => {
-    expect(valueOf('max@Bücher.example')).toBe('max@xn--bcher-kva.example');
+    expect(valueOf('max@B\u00fccher.example')).toBe('max@xn--bcher-kva.example');
     expect(valueOf('max@xn--bcher-kva.example')).toBe('max@xn--bcher-kva.example');
-    expect(valueOf('max@faß.de')).toBe('max@xn--fa-hia.de');
+    expect(valueOf('max@fa\u00df.de')).toBe('max@xn--fa-hia.de');
   });
 
   it('applies the IDNA mapping to full width forms', () => {
-    expect(valueOf('jane@ｅxample.com')).toBe('jane@example.com');
-    expect(valueOf('jane@example。com')).toBe('jane@example.com');
+    expect(valueOf('jane@\uff45xample.com')).toBe('jane@example.com');
+    expect(valueOf('jane@example\u3002com')).toBe('jane@example.com');
   });
 
   it('accepts digits and hyphens inside labels', () => {
@@ -160,9 +155,9 @@ describe('isNormalizedEmailAddress', () => {
       'A@example.com',
       ' a@example.com',
       'a@example.com ',
-      'max@Bücher.example',
-      'max@bücher.example',
-      'jane@ｅxample.com',
+      'max@B\u00fccher.example',
+      'max@b\u00fccher.example',
+      'jane@\uff45xample.com',
       'jane@example.com/evil',
       'jane@localhost',
       '',

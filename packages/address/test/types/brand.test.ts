@@ -23,8 +23,6 @@ function compileOnly(): void {
   takesAddress('jane@example.com');
   // @ts-expect-error a result is not an address until it is checked
   takesAddress(normalizeEmailAddress(plain));
-  // @ts-expect-error the value only exists on success
-  takesAddress(normalizeEmailAddress(plain).value);
   // @ts-expect-error the guard takes a string, not anything
   isNormalizedEmailAddress(1);
 

@@ -7,7 +7,7 @@ Nothing here touches a database, the network or the file system.
 
 ## Entry points
 
-- `@drefyn/auth`: server only. Uses `node:crypto` and `node:url`.
+- `@drefyn/auth`: server only. Uses `node:crypto`.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).
@@ -89,11 +89,9 @@ have no id kind, so the challenge id comes back as a canonical UUID string.
   does not start with exactly one `/`, contains `\` or a control character, or stops
   being a same origin path after parsing (for example `/.//evil.test`). The fallback is
   `/`.
-- `normalizeAddress(value)` returns the trimmed, lower case address with an ASCII domain,
-  or `null`. The local part must be a dot atom: no quoted strings, comments, spaces,
-  escapes or second `@`. CR and LF are refused anywhere. The domain needs two or more
-  hostname labels and a non numeric top label. The limits are 254 characters in total
-  and 64 in the local part. Dots and plus tags are left alone.
+- `normalizeAddress(value)` returns the address normalised by `normalizeEmailAddress`
+  from `@drefyn/address`, or `null` when that refuses it or the value is not a string. The
+  rule lives there so email checks recipients with the same one; see its README.
 - `checkCommonPassword(password, context?)` lists the built in rules that refuse a
   password, in `PASSWORD_RULES` order, after NFKC and lower casing:
   - `repeated_character`: one character repeated.
