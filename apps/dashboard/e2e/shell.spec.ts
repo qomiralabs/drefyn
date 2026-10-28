@@ -363,10 +363,25 @@ test.describe('command bar content', () => {
     await expect(bar.getByRole('combobox')).toHaveValue('');
   });
 
-  test('no results says so and offers the next step', async ({ page }) => {
+  test('no results says so in plain text, with nothing to tab to in the list', async ({ page }) => {
     const bar = await open(page);
     await page.keyboard.type('zzzz');
     await expect(bar.getByText('Nothing matches “zzzz”.')).toBeVisible();
-    await expect(bar.getByRole('link', { name: /zzzz/ })).toHaveCount(2);
+    await expect(bar.getByRole('link')).toHaveCount(0);
+  });
+
+  test('a status line announces no results and is empty otherwise', async ({ page }) => {
+    const bar = await open(page);
+    const status = bar.locator('[role="status"]');
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveText('');
+    await page.keyboard.type('pay');
+    await expect(bar.getByRole('option').first()).toBeVisible();
+    await expect(status).toHaveText('');
+    await page.keyboard.type('zzzz');
+    await expect(status).toHaveText('No results for “payzzzz”');
+    await expect(status.locator('xpath=ancestor::*[@role="listbox"]')).toHaveCount(0);
+    await bar.getByRole('button', { name: 'Clear search' }).click();
+    await expect(status).toHaveText('');
   });
 });

@@ -1,6 +1,6 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { MOBILE, ROUTES, THEMES, useTheme } from './fixtures.ts';
+import { MOBILE, ROUTES, TABLET, THEMES, useTheme } from './fixtures.ts';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 const WIDTHS = ['wide', '390'] as const;
@@ -46,4 +46,31 @@ for (const theme of THEMES) {
     const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
     expect(violations.map((v) => v.id)).toEqual([]);
   });
+}
+
+// React Aria wraps the listbox's empty state in a role option, so nothing focusable may sit in
+// it. Checked where people meet it: no results, in both themes and at every width.
+for (const theme of THEMES) {
+  for (const [width, viewport] of [
+    ['1280', { width: 1280, height: 800 }],
+    ['834', TABLET],
+    ['390', MOBILE],
+  ] as const) {
+    test(`the command bar with no results has no axe violations in ${theme} at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await page.goto(ROUTES.overview);
+      await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+      await page.keyboard.press('ControlOrMeta+k');
+      const bar = page.getByRole('dialog', { name: 'Search or run a command' });
+      await expect(bar).toBeVisible();
+      await page.keyboard.type('zzzz');
+      await expect(bar.getByText('Nothing matches “zzzz”.')).toBeVisible();
+      await expect(bar.locator('[role="listbox"] a, [role="listbox"] button')).toHaveCount(0);
+      const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+      expect(violations.map((v) => v.id)).toEqual([]);
+    });
+  }
 }
