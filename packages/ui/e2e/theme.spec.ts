@@ -6,6 +6,7 @@ import {
   FOUNDATIONS,
   openPage,
   openStory,
+  sweepTimeout,
   test,
   THEMES,
 } from './fixtures.ts';
@@ -46,6 +47,8 @@ for (const theme of THEMES) {
   test(`docs pages take the token ground, ink and Inter in ${theme}`, async ({ page }) => {
     const ids = docsIds();
     expect(ids.length).toBeGreaterThan(0);
+    // Each docs page now waits for every story to mount, so the sweep gets a budget per page.
+    test.setTimeout(sweepTimeout(ids.length));
     for (const id of ids) {
       await openPage(page, docsEntry(id), theme);
       const look = await page.evaluate(() => {
