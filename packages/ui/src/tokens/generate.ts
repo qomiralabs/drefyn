@@ -364,6 +364,13 @@ export function renderTailwindCss(t: Tokens = source): string {
     // move things for the reduced fade time. Under reduced motion only colour and opacity
     // fade. Declared as the same utilities, so Tailwind sorts these into the utilities layer
     // with every variant applied, and motion-reduce:transition-none still comes after them.
+    // Tailwind's text-* utilities take no family from the theme, so a step set in another
+    // family than the page's sans gets it here. Tailwind merges this into the same rule.
+    ...Object.entries(t.type)
+      .filter(([, s]) => s.family !== 'sans')
+      .map(([step, s]) =>
+        block(`@utility text-${kebab(step)}`, [`font-family: var(--dr-font-${s.family})`]),
+      ),
     ...['transition', 'transition-all', 'transition-transform'].map(
       (name) =>
         `@utility ${name} {\n  @media (prefers-reduced-motion: reduce) {\n` +

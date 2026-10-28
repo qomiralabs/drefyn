@@ -44,6 +44,13 @@ function ruleBody(css: string, cls: string): string | undefined {
   return new RegExp(pattern).exec(css)?.[2];
 }
 
+// Every declaration Tailwind wrote for a class, across rules: a static utility and a theme
+// utility of the same name come out as two rules for one class.
+function allRules(css: string, cls: string): string {
+  const pattern = `${escapeRegExp(selector(cls))}(:[a-z-]+)*\\s*\\{([^}]*)\\}`;
+  return [...css.matchAll(new RegExp(pattern, 'g'))].map((m) => m[2] ?? '').join('');
+}
+
 const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
 describe('Tailwind theme', () => {
@@ -107,7 +114,7 @@ describe('Tailwind theme', () => {
     const classes = Object.keys(tokens.type).map((step) => `text-${kebab(step)}`);
     const css = await build(classes);
     for (const cls of classes) {
-      const body = ruleBody(css, cls);
+      const body = allRules(css, cls);
       expect(body, cls).toMatch(/font-size:/);
       expect(body, cls).not.toMatch(/(^|[^-])color:/);
     }
@@ -119,11 +126,12 @@ describe('Tailwind theme', () => {
     const classes = Object.keys(tokens.type).map((step) => `text-${kebab(step)}`);
     const css = await build(classes);
     for (const [step, s] of Object.entries(tokens.type)) {
-      const body = ruleBody(css, `text-${kebab(step)}`);
+      const body = allRules(css, `text-${kebab(step)}`);
       if (s.family === 'sans') expect(body, step).not.toMatch(/font-family:/);
       else expect(body, step).toMatch(new RegExp(`font-family: var\\(--dr-font-${s.family}\\)`));
     }
-    expect(ruleBody(css, 'text-label')).toMatch(/font-family: var\(--dr-font-mono\)/);
+    expect(allRules(css, 'text-label')).toMatch(/font-family: var\(--dr-font-mono\)/);
+    expect(allRules(css, 'text-label')).toMatch(/font-size: 0\.75rem/);
   });
 
   it('gives every colour role a text-* utility that sets the colour and nothing else', async () => {

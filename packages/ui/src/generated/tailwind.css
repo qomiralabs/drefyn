@@ -169,6 +169,12 @@
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-inset);
 }
+@utility text-code {
+  font-family: var(--dr-font-mono);
+}
+@utility text-label {
+  font-family: var(--dr-font-mono);
+}
 @utility transition {
   @media (prefers-reduced-motion: reduce) {
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow;
