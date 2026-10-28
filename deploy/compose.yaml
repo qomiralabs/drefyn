@@ -37,10 +37,14 @@ services:
       - drefyn_owner_password
       - drefyn_app_password
       - drefyn_public_reader_password
+      - drefyn_auth_password
     volumes:
       - pgdata:/var/lib/postgresql
       - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
       - ./postgres/bootstrap.sql:/etc/drefyn/bootstrap.sql:ro
+      # Both the bootstrap and the upgrade scripts include it, relative to their own path.
+      - ./postgres/quiet-log.sql:/etc/drefyn/quiet-log.sql:ro
+      - ./postgres/upgrade:/etc/drefyn/upgrade:ro
       - ./postgres/healthcheck.sh:/etc/drefyn/healthcheck.sh:ro
       - ./postgres/pg_hba.conf:/etc/drefyn/pg_hba.conf:ro
     ports:
@@ -67,6 +71,8 @@ secrets:
     environment: DREFYN_APP_PASSWORD
   drefyn_public_reader_password:
     environment: DREFYN_PUBLIC_READER_PASSWORD
+  drefyn_auth_password:
+    environment: DREFYN_AUTH_PASSWORD
 
 volumes:
   pgdata:

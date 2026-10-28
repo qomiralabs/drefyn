@@ -12,7 +12,7 @@ import {
 import { MIGRATION_NAME, type MigrationFile } from './migration-file.ts';
 import { MigrateError } from './outcome.ts';
 import type { ConnectedRole, InvalidIndex, MigrateSession, RunRequest } from './run.ts';
-import type { VectorExtension } from './prerequisites.ts';
+import { UPGRADE_ROLES, type RoleAccess, type VectorExtension } from './prerequisites.ts';
 
 const CONNECT_TIMEOUT_MS = 10_000;
 // Checks and bookkeeping are small. The migrations themselves run with no statement timeout,
@@ -182,6 +182,20 @@ class PgSession implements MigrateSession {
         where e.extname = 'vector'`,
     );
     return row;
+  }
+
+  // By oid, because has_database_privilege raises on a role name that does not exist.
+  async requiredRoles(): Promise<RoleAccess[]> {
+    const rows = await this.rows<{ role: string; exists: boolean; can_connect: boolean }>(
+      `select u.role, p.oid is not null as exists,
+              coalesce(has_database_privilege(p.oid, current_database(), 'CONNECT'), false)
+                as can_connect
+         from unnest($1::text[]) as u(role)
+         left join pg_roles p on p.rolname = u.role
+        order by u.role`,
+      [UPGRADE_ROLES.map((r) => r.role)],
+    );
+    return rows.map((r) => ({ role: r.role, exists: r.exists, canConnect: r.can_connect }));
   }
 
   async invalidIndexes(): Promise<InvalidIndex[]> {

@@ -98,3 +98,26 @@ jobs:
       - name: Tear down
         if: always()
         run: bash scripts/selfhost.sh reset --yes
+
+  upgrade:
+    name: e2e (database upgrade)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # Full history, so the test can rebuild the stack from the commit before drefyn_auth.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Docker and Compose versions
+        run: |
+          docker version --format 'engine {{.Server.Version}}'
+          docker compose version
+      # Builds a volume with the previous bootstrap, upgrades it twice, refuses a role with
+      # other attributes, and greps the server log and pg_stat_statements for the password.
+      - name: Upgrade a volume made by the previous bootstrap
+        env:
+          DREFYN_UPGRADE_TEST_PROJECT: drefyn-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash scripts/selfhost-upgrade-test.sh
