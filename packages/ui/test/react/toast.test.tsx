@@ -1,5 +1,4 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button, toast, ToastRegion } from '../../src/react/index.ts';
 import { tokens } from '../../src/index.ts';
@@ -45,7 +44,10 @@ function setHidden(hidden: boolean) {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: false });
+  // Only the clocks: faking microtasks too would stall every await in user-event.
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+  });
 });
 
 afterEach(() => {
@@ -57,7 +59,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const user = () => userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+// user-event stalls under fake timers, so these tests send the events it would.
+// A pointer move first, as a real mouse makes, so React Aria knows the pointer is in use.
+const hover = (el: HTMLElement) => {
+  fireEvent.pointerMove(el, { pointerType: 'mouse' });
+  fireEvent.pointerOver(el, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(el, { pointerType: 'mouse' });
+};
+const unhover = (el: HTMLElement) => {
+  fireEvent.pointerOut(el, { pointerType: 'mouse' });
+  fireEvent.pointerLeave(el, { pointerType: 'mouse' });
+};
 
 describe('toast()', () => {
   it('shows nothing and fails nowhere when no region is mounted', () => {
@@ -124,12 +136,12 @@ describe('toast()', () => {
     expect(queryCard('Archived Pricing')).toBeNull();
   });
 
-  it('keeps an error until it is dismissed', async () => {
+  it('keeps an error until it is dismissed', () => {
     render(<ToastRegion />);
     show({ title: 'Could not save the page', tone: 'error' });
     wait(LONG * 10);
     const el = card('Could not save the page');
-    await user().click(within(el).getByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(within(el).getByRole('button', { name: 'Dismiss' }));
     expect(queryCard('Could not save the page')).toBeNull();
   });
 
@@ -179,12 +191,12 @@ describe('Undo', () => {
     expect(within(card('Link copied')).queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
-  it('runs once and closes the toast', async () => {
+  it('runs once and closes the toast', () => {
     const undo = vi.fn();
     render(<ToastRegion />);
     show({ title: 'Archived Pricing', undo });
     const button = within(card('Archived Pricing')).getByRole('button', { name: 'Undo' });
-    await user().click(button);
+    fireEvent.click(button);
     expect(undo).toHaveBeenCalledTimes(1);
     expect(queryCard('Archived Pricing')).toBeNull();
   });
@@ -306,21 +318,20 @@ describe('Undo', () => {
     expect(document.activeElement).toBe(button);
     // It stays, as errors do, until dismissed.
     wait(LONG * 10);
-    await user().click(within(card('Could not undo')).getByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(within(card('Could not undo')).getByRole('button', { name: 'Dismiss' }));
     expect(queryCard('Could not undo')).toBeNull();
   });
 });
 
 describe('the toast timer', () => {
-  it('waits while the pointer is over the region, and resumes where it stopped', async () => {
+  it('waits while the pointer is over the region, and resumes where it stopped', () => {
     render(<ToastRegion />);
     show({ title: 'Link copied' });
     wait(SHORT / 2);
-    const u = user();
-    await u.hover(card('Link copied'));
+    hover(card('Link copied'));
     wait(SHORT * 2);
     expect(queryCard('Link copied')).not.toBeNull();
-    await u.unhover(card('Link copied'));
+    unhover(card('Link copied'));
     wait(SHORT / 2 - 50);
     expect(queryCard('Link copied')).not.toBeNull();
     wait(100);

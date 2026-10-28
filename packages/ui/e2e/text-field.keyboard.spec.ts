@@ -63,8 +63,8 @@ for (const theme of THEMES) {
       'Only the current owner can hand the site over.',
     );
     await expect.poll(async () => (await look(input)).ring).toBe(ring);
+    // No Backspace: WebKit treats it as Back in a field that takes no input.
     await page.keyboard.type('x');
-    await page.keyboard.press('Backspace');
     await expect(input).toHaveValue('Ada Lovelace');
   });
 

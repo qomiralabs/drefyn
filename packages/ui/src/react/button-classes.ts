@@ -1,8 +1,10 @@
 export type ButtonVariant = 'primary' | 'secondary' | 'quiet';
+// Quiet with an accent ink label, for the one action inside a toast. Not a public variant.
+export type ButtonLookVariant = ButtonVariant | 'accent';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonLook {
-  variant: ButtonVariant;
+  variant: ButtonLookVariant;
   size: ButtonSize;
   disabled: boolean;
   // Busy keeps the variant's paint, so the label stays readable, with no hover or pressed
@@ -31,25 +33,28 @@ const ICON_ONLY: Record<ButtonSize, string> = {
 
 // The paint at rest. The quiet variant has no fill or edge, so its border is transparent
 // and the label lines up with the others.
-const REST: Record<ButtonVariant, string> = {
+const REST: Record<ButtonLookVariant, string> = {
   primary: 'border-transparent bg-accent-ink text-accent-on',
   secondary: 'border-rule-strong bg-ground text-body',
   quiet: 'border-transparent text-secondary',
+  accent: 'border-transparent text-accent-ink',
 };
 
 // Text colours stay put on hover and press: each is measured on both fills.
-const LIVE: Record<ButtonVariant, string> = {
+const LIVE: Record<ButtonLookVariant, string> = {
   primary: 'cursor-pointer hover:bg-accent-press active:bg-accent-press',
   secondary: 'cursor-pointer hover:bg-hover active:bg-pressed',
   quiet: 'cursor-pointer hover:bg-hover active:bg-pressed',
+  accent: 'cursor-pointer hover:bg-hover active:bg-pressed',
 };
 
 // Disabled paints with the disabled family, never with opacity, and takes no hover or
 // pressed fill. A quiet button stays without fill or edge.
-const DISABLED: Record<ButtonVariant, string> = {
+const DISABLED: Record<ButtonLookVariant, string> = {
   primary: 'border-disabled-edge bg-disabled-fill text-disabled-text cursor-not-allowed',
   secondary: 'border-disabled-edge bg-disabled-fill text-disabled-text cursor-not-allowed',
   quiet: 'border-transparent text-disabled-text cursor-not-allowed',
+  accent: 'border-transparent text-disabled-text cursor-not-allowed',
 };
 
 // One class function for Button, ButtonLink and the React Aria triggers of overlays, so every

@@ -50,6 +50,10 @@ for (const theme of THEMES) {
   }) => {
     await openStory(page, 'components-tooltip--toolbar', theme);
     const button = page.getByRole('button', { name: 'View history' });
+    // A real pointer has moved before it reaches a button; that is how React Aria tells a
+    // hover from focus moving under a still pointer.
+    await page.mouse.move(1, 1);
+    await page.mouse.move(2, 2);
     await button.hover();
     const tip = page.getByRole('tooltip');
     await expect(tip).toHaveText('View history');

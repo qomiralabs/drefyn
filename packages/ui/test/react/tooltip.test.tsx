@@ -1,5 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
-import { userEvent } from '@testing-library/user-event';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button, ButtonLink, IconMore, Tooltip } from '../../src/react/index.ts';
 import { tokens } from '../../src/index.ts';
@@ -8,15 +7,36 @@ import { classesOf } from './classes.ts';
 const DELAY = tokens.timer.tooltip.ms;
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: false });
+  // Only the clocks: faking microtasks too would stall every await in user-event.
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+  });
 });
 
+// React Aria keeps tooltips warm across triggers for a moment after one closes, so the
+// cool down runs out before the next test, or its hover would open at once.
 afterEach(() => {
   cleanup();
+  act(() => {
+    vi.advanceTimersByTime(DELAY * 10);
+  });
   vi.useRealTimers();
 });
 
-const user = () => userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+// user-event stalls under fake timers, so these tests send the events it would. A key press
+// before focus is how React Aria learns that focus came from the keyboard.
+const keyboardFocus = (el: HTMLElement) => {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab' });
+  act(() => {
+    el.focus();
+  });
+};
+// A pointer move first, as a real mouse makes, so React Aria knows the pointer is in use.
+const hover = (el: HTMLElement) => {
+  fireEvent.pointerMove(el, { pointerType: 'mouse' });
+  fireEvent.pointerOver(el, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(el, { pointerType: 'mouse' });
+};
 const wait = (ms: number) => {
   act(() => {
     vi.advanceTimersByTime(ms);
@@ -45,38 +65,34 @@ describe('Tooltip', () => {
     expect(trigger().getAttribute('aria-label')).toBe('Copy ID');
   });
 
-  it('opens on keyboard focus at once and describes the trigger', async () => {
+  it('opens on keyboard focus at once and describes the trigger', () => {
     render(<CopyId />);
-    const u = user();
-    await u.tab();
-    await u.tab();
+    keyboardFocus(trigger());
     expect(document.activeElement).toBe(trigger());
     const tip = screen.getByRole('tooltip');
     expect(tip.textContent).toBe('Copy ID');
     expect(trigger().getAttribute('aria-describedby')?.split(' ')).toContain(tip.id);
   });
 
-  it('closes on Escape and leaves focus on the trigger', async () => {
+  it('closes on Escape and leaves focus on the trigger', () => {
     render(<CopyId />);
-    const u = user();
-    await u.tab();
-    await u.tab();
+    keyboardFocus(trigger());
     expect(screen.getByRole('tooltip')).toBeDefined();
-    await u.keyboard('{Escape}');
+    fireEvent.keyDown(trigger(), { key: 'Escape' });
     expect(screen.queryByRole('tooltip')).toBeNull();
     expect(document.activeElement).toBe(trigger());
   });
 
-  it(`opens on hover after the tooltip timer, ${DELAY} ms`, async () => {
+  it(`opens on hover after the tooltip timer, ${DELAY} ms`, () => {
     render(<CopyId />);
-    await user().hover(trigger());
+    hover(trigger());
     wait(DELAY - 1);
     expect(screen.queryByRole('tooltip')).toBeNull();
     wait(1);
     expect(screen.getByRole('tooltip').textContent).toBe('Copy ID');
   });
 
-  it('says why a disabled button cannot act, on focus, because it stays focusable', async () => {
+  it('says why a disabled button cannot act, on focus, because it stays focusable', () => {
     const onClick = vi.fn();
     render(
       <Tooltip content="Only owners can publish">
@@ -85,23 +101,23 @@ describe('Tooltip', () => {
         </Button>
       </Tooltip>,
     );
-    const u = user();
-    await u.tab();
     const button = screen.getByRole('button', { name: 'Publish update' });
+    keyboardFocus(button);
     expect(document.activeElement).toBe(button);
     expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByRole('tooltip').textContent).toBe('Only owners can publish');
-    await u.keyboard('{Enter}');
+    fireEvent.keyDown(button, { key: 'Enter' });
+    fireEvent.click(button);
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('works on a ButtonLink too', async () => {
+  it('works on a ButtonLink too', () => {
     render(
       <Tooltip content="Opens the public page">
         <ButtonLink href="/status">View page</ButtonLink>
       </Tooltip>,
     );
-    await user().tab();
+    keyboardFocus(screen.getByRole('link', { name: 'View page' }));
     expect(screen.getByRole('tooltip').textContent).toBe('Opens the public page');
   });
 
@@ -153,11 +169,11 @@ describe('Tooltip', () => {
     }
   });
 
-  it('wires a plain Button without React Aria warnings', async () => {
+  it('wires a plain Button without React Aria warnings', () => {
     const warn = vi.spyOn(console, 'warn');
     const error = vi.spyOn(console, 'error');
     render(<CopyId />);
-    await user().tab();
+    keyboardFocus(trigger());
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
   });

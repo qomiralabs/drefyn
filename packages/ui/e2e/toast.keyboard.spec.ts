@@ -41,13 +41,11 @@ for (const theme of THEMES) {
   }) => {
     await openStory(page, 'components-toast--undo', theme);
     await expect(region(page)).toMatchAriaSnapshot(`
-      - region:
+      - region "Notifications":
         - list:
           - listitem:
             - alertdialog "Archived Pricing":
-              - status:
-                - text: Archived Pricing
-                - text: Readers no longer see this page.
+              - status: Archived Pricing Readers no longer see this page.
               - button "Undo"
               - button "Dismiss"
     `);
@@ -66,7 +64,10 @@ for (const theme of THEMES) {
     await expect(error.getByRole('alert')).toBeVisible();
     await page.clock.runFor(LONG * 3);
     await expect(error).toBeVisible();
+    // F6 lands on the notifications landmark; Tab moves through it.
     await page.keyboard.press('F6');
+    await expect(region(page)).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
     await expect(error).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
     await expect(error.getByRole('button', { name: 'Dismiss' })).toBeFocused();
@@ -82,7 +83,9 @@ for (const theme of THEMES) {
     const back = page.getByRole('button', { name: 'Edit page' });
     await back.focus();
     await page.keyboard.press('F6');
+    await expect(region(page)).toBeFocused();
     const toast = card(page, 'Archived Pricing');
+    await page.keyboard.press(tabKey(browserName));
     await expect(toast).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
     await expect(toast.getByRole('button', { name: 'Undo' })).toBeFocused();

@@ -28,7 +28,8 @@ export function ButtonLink({
   // The type refuses style; a caller without types still never ships an inline one.
   const rest: typeof props & { style?: undefined } = { ...props };
   delete rest.style;
-  const newTab = target === '_blank';
+  // Browsers match target names without regard to case, so _BLANK opens a new tab too.
+  const newTab = target?.toLowerCase() === '_blank';
   // A new tab gets no window.opener and no referrer, whatever rel the caller passed.
   const relation = newTab
     ? [

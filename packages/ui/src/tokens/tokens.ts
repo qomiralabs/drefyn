@@ -277,6 +277,9 @@ const layout = {
   // The dashboard frame: top bar height and side nav widths. Pixels at the default root
   // size, shipped in rem so the frame keeps up with zoomed text.
   shell: { bar: 48, nav: 240, navCollapsed: 48 },
+  // The device's own inset at the bottom edge, such as a phone's home indicator, so toasts and
+  // the bottom sheet clear it. It is the device's value, not a design one, and 0 elsewhere.
+  safeArea: { bottom: 'safe-area-inset-bottom' },
 } as const;
 
 export const tokens = {

@@ -23,20 +23,35 @@ type Input = Parameters<typeof toast>[0];
 type Run = (what: string) => void;
 
 // Story view shows the toasts at once, for the screenshots and the axe run. The docs page
-// shows them only when a button is pressed, so it does not open under a pile of toasts, and
-// only the first story mounts a region there, so each toast shows once.
+// shows them only when a button is pressed, so it does not open under a pile of toasts.
 const inStoryView = (context?: { viewMode?: string }) => context?.viewMode !== 'docs';
+
+// The docs page renders a story more than once, and an app mounts one region, so the docs
+// page gets exactly one: the first story to mount claims it.
+let claimed = false;
+function OneRegion() {
+  const [mine] = useState(() => {
+    if (claimed) return false;
+    claimed = true;
+    return true;
+  });
+  useEffect(
+    () => () => {
+      if (mine) claimed = false;
+    },
+    [mine],
+  );
+  return mine ? <ToastRegion /> : null;
+}
 
 // Every press and every Undo is written to a live output, so tests and readers see what ran.
 function Frame({
   toasts,
   now,
-  region,
   children,
 }: {
   toasts: (run: Run) => Input[];
   now: boolean;
-  region: boolean;
   children: (show: () => void) => ReactNode;
 }) {
   const [last, setLast] = useState('none');
@@ -58,7 +73,7 @@ function Frame({
       <output aria-live="polite" className="text-body-s text-secondary">
         Last action: {last}
       </output>
-      {region ? <ToastRegion /> : null}
+      {now ? <ToastRegion /> : <OneRegion />}
     </div>
   );
 }
@@ -81,7 +96,7 @@ const failed: Input = {
 
 export const Undo: Story = {
   render: (_args, context) => (
-    <Frame toasts={(run) => [archived(run)]} now={inStoryView(context)} region>
+    <Frame toasts={(run) => [archived(run)]} now={inStoryView(context)}>
       {(show) => (
         <>
           <Button onClick={show}>Archive page</Button>
@@ -94,7 +109,7 @@ export const Undo: Story = {
 
 export const Message: Story = {
   render: (_args, context) => (
-    <Frame toasts={() => [copied]} now={inStoryView(context)} region={inStoryView(context)}>
+    <Frame toasts={() => [copied]} now={inStoryView(context)}>
       {(show) => <Button onClick={show}>Copy ID</Button>}
     </Frame>
   ),
@@ -103,7 +118,7 @@ export const Message: Story = {
 export const ErrorToast: Story = {
   name: 'Error',
   render: (_args, context) => (
-    <Frame toasts={() => [failed]} now={inStoryView(context)} region={inStoryView(context)}>
+    <Frame toasts={() => [failed]} now={inStoryView(context)}>
       {(show) => <Button onClick={show}>Save page</Button>}
     </Frame>
   ),
@@ -123,7 +138,6 @@ export const Stack: Story = {
         },
       ]}
       now={inStoryView(context)}
-      region={inStoryView(context)}
     >
       {(show) => <Button onClick={show}>Show three</Button>}
     </Frame>

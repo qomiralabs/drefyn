@@ -104,7 +104,8 @@ for (const theme of THEMES) {
   }) => {
     await openStory(page, 'components-dialog--open', theme);
     await expect(dialog(page)).toBeVisible();
-    await expect(page.locator('#storybook-root')).toHaveAttribute('aria-hidden', 'true');
+    // React Aria makes everything outside the dialog inert, which also hides it from readers.
+    await expect(page.locator('#storybook-root')).toHaveAttribute('inert', '');
     await expect(dialog(page)).toHaveCSS(
       'background-color',
       rgb(tokens.color.surface.overlay[theme]),

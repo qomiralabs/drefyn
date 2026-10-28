@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -88,6 +88,24 @@ describe('Dialog', () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it('wraps Option+Tab at both ends, which React Aria lets through and Safari uses for buttons', async () => {
+    const user = userEvent.setup();
+    render(<Invite />);
+    await user.click(trigger());
+    const close = within(dialog()).getByRole('button', { name: 'Close' });
+    const email = screen.getByRole('textbox', { name: 'Email addresses' });
+    close.focus();
+    fireEvent.keyDown(close, { key: 'Tab', altKey: true });
+    expect(document.activeElement).toBe(email);
+    fireEvent.keyDown(email, { key: 'Tab', altKey: true, shiftKey: true });
+    expect(document.activeElement).toBe(close);
+    // In the middle the browser moves focus, so nothing is cancelled there.
+    const cancel = within(dialog()).getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    expect(fireEvent.keyDown(cancel, { key: 'Tab', altKey: true })).toBe(true);
+    expect(document.activeElement).toBe(cancel);
+  });
+
   it('gives the footer a close callback', async () => {
     const user = userEvent.setup();
     render(<Invite />);
@@ -141,7 +159,8 @@ describe('Dialog', () => {
     }
     render(<Sending />);
     await user.click(trigger());
-    await user.click(screen.getByRole('button', { name: 'Send invites' }));
+    // happy-dom applies no stylesheet, so the hidden busy label still counts in the name here.
+    await user.click(screen.getByRole('button', { name: /^Send invites/ }));
     expect(dialog().getAttribute('aria-busy')).toBe('true');
     await user.keyboard('{Escape}');
     expect(dialog()).toBeDefined();
