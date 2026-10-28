@@ -95,6 +95,18 @@ else
   fail "the old volume has three roles and the old deploy/.env no auth password" "roles [$roles]"
 fi
 
+# A hand edited deploy/.env often ends without a newline. Whatever is appended must start on a
+# line of its own, or it joins the last value and compose prints both in its error.
+printf 'DREFYN_POSTGRES_MEMORY_LIMIT=1g' >>"$root/deploy/.env"
+if [ -n "$(tail -c1 "$root/deploy/.env")" ]; then
+  pass "the old deploy/.env now ends without a newline"
+else
+  fail "the old deploy/.env now ends without a newline"
+fi
+
+# Every output the scripts print from here on, searched for the generated password at the end.
+outputs=""
+
 # The current files, in the same place, as a pull would leave them. Copied over the old ones
 # rather than after removing them: Docker Desktop cannot remount a bind mounted file whose
 # folder was deleted under it.
@@ -104,7 +116,9 @@ cp "$src/deploy/compose.yaml" "$src/deploy/.env.example" "$src/deploy/README.md"
 make_loud
 
 # up alone cannot help: the role is missing, so it fails and names the one command.
-if out="$(DREFYN_SELFHOST_WAIT_SECONDS=20 bash "$root/scripts/selfhost.sh" up 2>&1)"; then
+out="$(DREFYN_SELFHOST_WAIT_SECONDS=20 bash "$root/scripts/selfhost.sh" up 2>&1)" && up_code=0 || up_code=$?
+outputs+="$out"$'\n'
+if [ "$up_code" = 0 ]; then
   fail "up on the old volume fails until the upgrade runs" "it succeeded: $out"
 elif [[ "$out" == *"drefyn_auth"* ]] && [[ "$out" == *"scripts/selfhost.sh upgrade"* ]]; then
   pass "up on the old volume fails, naming drefyn_auth and the upgrade command"
@@ -123,6 +137,16 @@ if [ -n "$(find "$root/deploy/.env" -prune -perm 600)" ]; then
 else
   fail "deploy/.env is still mode 600" "$(ls -l "$root/deploy/.env")"
 fi
+# Values are hex or plain words, so a second = on a line means two keys were joined.
+bad_lines="$(grep -vE '^(#.*)?$' "$root/deploy/.env" | grep -vE '^[A-Z_]+=[^=]*$' | sed 's/=.*/=.../' || true)"
+if [ -z "$bad_lines" ] && [ "$(env_value DREFYN_POSTGRES_MEMORY_LIMIT)" = 1g ] &&
+  [ "$(grep -c '^DREFYN_AUTH_PASSWORD=' "$root/deploy/.env")" = 1 ]; then
+  pass "every key in deploy/.env still parses after the append, the last value included"
+else
+  fail "every key in deploy/.env still parses after the append, the last value included" \
+    "lines that do not parse: [$bad_lines], memory limit [$(env_value DREFYN_POSTGRES_MEMORY_LIMIT)]"
+fi
+env_before="$(cksum <"$root/deploy/.env")"
 
 auth_oid() { superuser_sql <<<"select coalesce((select oid::text from pg_roles where rolname = 'drefyn_auth'), 'none');"; }
 
@@ -132,6 +156,8 @@ for run in 1 2; do
   else
     fail "upgrade run $run succeeds and the stack is healthy" "$out"
   fi
+  outputs+="$out"$'\n'
+
   if [ "$run" = 1 ]; then
     first_oid="$(auth_oid)"
     expected="created drefyn_auth"
@@ -144,6 +170,21 @@ for run in 1 2; do
     fail "upgrade run $run says: $expected" "$out"
   fi
 done
+if [ "$(cksum <"$root/deploy/.env")" = "$env_before" ]; then
+  pass "both upgrade runs left deploy/.env as up wrote it"
+else
+  fail "both upgrade runs left deploy/.env as up wrote it"
+fi
+# Found even when it was glued onto another line, so a bad append cannot hide it.
+generated="$(grep -oE 'DREFYN_AUTH_PASSWORD=[0-9a-f]{48}' "$root/deploy/.env" | head -n 1 | cut -d= -f2)"
+if [ -z "$generated" ]; then
+  fail "no script output shows the generated password" "no generated password in deploy/.env"
+elif grep -qF -- "$generated" <<<"$outputs"; then
+  fail "no script output shows the generated password" \
+    "$(grep -cF -- "$generated" <<<"$outputs") line(s) hold it"
+else
+  pass "no script output shows the generated password"
+fi
 if [ "$(auth_oid)" = "$first_oid" ] && [ "$first_oid" != none ]; then
   pass "the second run left the role the first one made"
 else
@@ -250,30 +291,44 @@ fi
 expect_no_leak "after a create with every log setting on" "$auth_password" \
   'create role drefyn_auth login|password[[:space:]]+(:|E?'"'"')'
 
-# A role that exists with other attributes is refused, not skipped, and nothing is changed.
+# A role that exists with other attributes is refused with exit 3, not skipped, and nothing is
+# changed. Each case starts from a role made by hand; noinherit is spelled out because create
+# role defaults to inherit.
 superuser_sql <<'SQL' >/dev/null
 set log_statement = 'none';
 set log_min_duration_statement = -1;
 set pg_stat_statements.track_utility = off;
 revoke connect on database drefyn from drefyn_auth;
 drop role drefyn_auth;
-create role drefyn_auth login bypassrls;
 SQL
-if out="$("${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh 2>&1)"; then
-  fail "the upgrade refuses drefyn_auth with bypassrls" "it exited 0: $out"
-elif [[ "$out" == *"drefyn_auth already exists with other attributes"* ]] &&
-  [[ "$out" == *"bypassrls"* ]]; then
-  pass "the upgrade refuses drefyn_auth with bypassrls and names the attribute"
-else
-  fail "the upgrade refuses drefyn_auth with bypassrls and names the attribute" "$out"
-fi
-left="$(superuser_sql <<<"select rolbypassrls, has_database_privilege('drefyn_auth', 'drefyn', 'CONNECT') from pg_roles where rolname = 'drefyn_auth';")"
-if [ "$left" = "t|f" ]; then
-  pass "the refused upgrade changed nothing: still bypassrls, still no CONNECT"
-else
-  fail "the refused upgrade changed nothing: still bypassrls, still no CONNECT" "$left"
-fi
-superuser_sql <<<'drop role drefyn_auth;' >/dev/null
+refusals=(
+  "bypassrls|create role drefyn_auth login noinherit bypassrls;"
+  "nologin|create role drefyn_auth nologin noinherit;"
+  "inherit|create role drefyn_auth login inherit;"
+  "membership in another role|create role drefyn_auth login noinherit; grant pg_read_all_data to drefyn_auth;"
+  "role settings|create role drefyn_auth login noinherit; alter role drefyn_auth set search_path = public;"
+  "per database settings|create role drefyn_auth login noinherit; alter role drefyn_auth in database drefyn set work_mem = '64MB';"
+)
+for refusal in "${refusals[@]}"; do
+  difference="${refusal%%|*}"
+  superuser_sql <<<"set log_statement = 'none'; set log_min_duration_statement = -1;
+set pg_stat_statements.track_utility = off; ${refusal#*|}" >/dev/null
+  out="$("${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh 2>&1)" && code=0 || code=$?
+  name="the upgrade refuses drefyn_auth with $difference, exits 3 and names it"
+  if [ "$code" = 3 ] && [[ "$out" == *"drefyn_auth already exists with other attributes ($difference)"* ]]; then
+    pass "$name"
+  else
+    fail "$name" "exit $code: $out"
+  fi
+  left="$(superuser_sql <<<"select has_database_privilege('drefyn_auth', 'drefyn', 'CONNECT');")"
+  if [ "$left" = f ]; then
+    pass "the refused upgrade ($difference) granted no CONNECT"
+  else
+    fail "the refused upgrade ($difference) granted no CONNECT" "$left"
+  fi
+  # Dropping the role takes its settings and memberships with it.
+  superuser_sql <<<'drop role drefyn_auth;' >/dev/null
+done
 
 # Run by hand, as on managed Postgres, the file names a missing or short password and stops
 # before create role.

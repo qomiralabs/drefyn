@@ -107,6 +107,9 @@ describe('the upgrade scripts', () => {
       /as attributes_ok\s+from pg_catalog\.pg_roles r where rolname = 'drefyn_auth' \\gset/,
     );
     expect(upgrade).toMatch(/\\if :attributes_ok/);
+    // One rule: the verdict is derived from the list it prints, so the two cannot drift.
+    expect(upgrade).toMatch(/differences = '' as attributes_ok/);
+    expect(upgrade.match(/\bnot rolinherit\b/g) ?? []).toEqual([]);
   });
 });
 
@@ -180,5 +183,35 @@ describe('the role lists', () => {
     const compose = read(repoRoot, 'deploy', 'compose.yaml');
     expect(compose).toContain('./postgres/quiet-log.sql:/etc/drefyn/quiet-log.sql:ro');
     expect(compose).toContain('./postgres/upgrade:/etc/drefyn/upgrade:ro');
+  });
+});
+
+// The upgrade notes are how a self hoster finds the one command, so a fence that swallows the
+// rest of the page breaks them.
+describe('the self host README', () => {
+  const readme = read(repoRoot, 'deploy', 'README.md');
+  const lines = readme.split('\n');
+
+  it('opens and closes every code fence with three backticks on a line of its own', () => {
+    const fences = lines.filter((line) => line.includes('```'));
+    for (const line of fences) expect(line).toMatch(/^```[a-z]*$/);
+    expect(fences.length % 2).toBe(0);
+  });
+
+  it('shows the managed upgrade command in its own block', () => {
+    const at = lines.indexOf(
+      'psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0001-auth-role.sql',
+    );
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at - 1]).toBe('```sh');
+    expect(lines[at + 1]).toBe('```');
+  });
+
+  it('keeps the postgres and template1 note with the bootstrap, before the upgrade', () => {
+    const note = readme.indexOf('On `postgres` and');
+    const bootstrap = readme.indexOf('--file deploy/postgres/bootstrap.sql');
+    const upgradeCommand = readme.indexOf('--file deploy/postgres/upgrade/0001-auth-role.sql');
+    expect(note).toBeGreaterThan(bootstrap);
+    expect(note).toBeLessThan(upgradeCommand);
   });
 });
