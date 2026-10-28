@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
 import { checkAppTheme } from './app-theme.ts';
+import { checkPureEntries } from './pure-entries.ts';
 import {
   DEPENDENCY_FIELDS,
   exportEntries,
@@ -508,6 +509,7 @@ export function checkWorkspace(root: string): CheckResult {
     if (LAYOUT_ROOTS.some((prefix) => pkg.rel.startsWith(prefix))) {
       packages += 1;
       checkLayout(pkg, add);
+      checkPureEntries(pkg, add);
     }
     checkDependencies(pkg, workspace, add);
   }
