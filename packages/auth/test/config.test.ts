@@ -378,7 +378,9 @@ describe('parseAuthConfig refuses, naming the key', () => {
 describe('parseAuthConfig never echoes a secret', () => {
   // Values of at least 16 base64url symbols cannot occur in fixed message text by chance.
   const value = fc.string({
-    unit: fc.constantFrom(...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'),
+    unit: fc.constantFrom(
+      ...Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'),
+    ),
     minLength: 16,
     maxLength: 80,
   });

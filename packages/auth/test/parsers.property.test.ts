@@ -36,8 +36,28 @@ interface Format<T> {
   readonly length: number;
 }
 
-const formats = [
-  {
+// One shape for every format: the canonical text of what the parser accepted, or null.
+interface Case {
+  readonly name: string;
+  readonly valid: fc.Arbitrary<string>;
+  readonly length: number;
+  readonly canonical: (value: unknown) => string | null;
+}
+
+function erase<T>(f: Format<T>): Case {
+  return {
+    name: f.name,
+    valid: f.valid,
+    length: f.length,
+    canonical: (value) => {
+      const parsed = f.parse(value);
+      return parsed === null ? null : f.format(parsed);
+    },
+  };
+}
+
+const formats: readonly Case[] = [
+  erase<NonNullable<ReturnType<typeof parseSessionToken>>>({
     name: 'session token',
     valid: fc
       .tuple(anyUuid, anyUuid, secretBytes)
@@ -45,8 +65,8 @@ const formats = [
     parse: parseSessionToken,
     format: formatSessionToken,
     length: 109,
-  } satisfies Format<NonNullable<ReturnType<typeof parseSessionToken>>>,
-  {
+  }),
+  erase<NonNullable<ReturnType<typeof parseApiKey>>>({
     name: 'API key',
     valid: fc
       .tuple(anyUuid, anyUuid, secretBytes)
@@ -56,8 +76,8 @@ const formats = [
     parse: parseApiKey,
     format: formatApiKey,
     length: 113,
-  } satisfies Format<NonNullable<ReturnType<typeof parseApiKey>>>,
-  {
+  }),
+  erase<NonNullable<ReturnType<typeof parseInvitationToken>>>({
     name: 'invitation token',
     valid: fc
       .tuple(anyUuid, anyUuid, secretBytes)
@@ -67,15 +87,15 @@ const formats = [
     parse: parseInvitationToken,
     format: formatInvitationToken,
     length: 106,
-  } satisfies Format<NonNullable<ReturnType<typeof parseInvitationToken>>>,
-  {
+  }),
+  erase<string>({
     name: 'email code',
     valid: fc.stringMatching(/^[0-9]{8}$/),
     parse: parseCode,
     format: (code: string) => code,
     length: 8,
-  } satisfies Format<string>,
-  {
+  }),
+  erase<NonNullable<ReturnType<typeof parseVerifyFragment>>>({
     name: 'verify link fragment',
     valid: fc
       .tuple(anyUuid, fc.stringMatching(/^[0-9]{8}$/))
@@ -83,24 +103,22 @@ const formats = [
     parse: parseVerifyFragment,
     format: formatVerifyFragment,
     length: 35,
-  } satisfies Format<NonNullable<ReturnType<typeof parseVerifyFragment>>>,
-  {
+  }),
+  erase<Buffer>({
     name: 'pre sign in and OAuth state cookie',
     valid: secretBytes.map(encodeSecret),
     parse: decodeSecret,
     format: encodeSecret,
     length: 52,
-  } satisfies Format<Buffer>,
-] as const;
+  }),
+];
 
-describe.each(formats)('$name', (f: Format<unknown>) => {
+describe.each(formats)('$name', (f) => {
   it('round trips and has the documented length', () => {
     fc.assert(
       fc.property(f.valid, (valid) => {
         expect(valid).toHaveLength(f.length);
-        const parsed = f.parse(valid);
-        expect(parsed).not.toBeNull();
-        expect(f.format(parsed)).toBe(valid);
+        expect(f.canonical(valid)).toBe(valid);
       }),
       runs,
     );
@@ -114,13 +132,13 @@ describe.each(formats)('$name', (f: Format<unknown>) => {
       fc.property(
         f.valid.chain((valid) => fc.tuple(fc.constant(valid), mutationsOf(valid))),
         ([valid, mutation]) => {
-          const parsed = f.parse(mutation.value);
+          const canonical = f.canonical(mutation.value);
           if (mutation.kind !== 'replace') {
-            expect(parsed).toBeNull();
+            expect(canonical).toBeNull();
             return;
           }
-          if (parsed !== null) {
-            expect(f.format(parsed)).toBe(mutation.value);
+          if (canonical !== null) {
+            expect(canonical).toBe(mutation.value);
             expect(mutation.value).not.toBe(valid);
           }
         },
@@ -137,7 +155,7 @@ describe.each(formats)('$name', (f: Format<unknown>) => {
     fc.assert(
       fc.property(f.valid, fc.nat(), outside, (valid, at, c) => {
         const i = at % valid.length;
-        expect(f.parse(valid.slice(0, i) + c + valid.slice(i + 1))).toBeNull();
+        expect(f.canonical(valid.slice(0, i) + c + valid.slice(i + 1))).toBeNull();
       }),
       runs,
     );
@@ -148,7 +166,7 @@ describe.each(formats)('$name', (f: Format<unknown>) => {
       fc.property(
         f.valid.chain((valid) => lengthChangesOf(valid)),
         (changed) => {
-          expect(f.parse(changed)).toBeNull();
+          expect(f.canonical(changed)).toBeNull();
         },
       ),
       runs,
@@ -158,14 +176,14 @@ describe.each(formats)('$name', (f: Format<unknown>) => {
   it('refuses upper case, surrounding space and anything that is not a string', () => {
     fc.assert(
       fc.property(f.valid, (valid) => {
-        if (/[a-z]/.test(valid)) expect(f.parse(valid.toUpperCase())).toBeNull();
-        expect(f.parse(` ${valid}`)).toBeNull();
-        expect(f.parse(`${valid}\n`)).toBeNull();
+        if (/[a-z]/.test(valid)) expect(f.canonical(valid.toUpperCase())).toBeNull();
+        expect(f.canonical(` ${valid}`)).toBeNull();
+        expect(f.canonical(`${valid}\n`)).toBeNull();
       }),
       runs,
     );
     for (const value of [undefined, null, 12345678, {}, [], Symbol('x'), 'x'.repeat(100_000)]) {
-      expect(f.parse(value)).toBeNull();
+      expect(f.canonical(value)).toBeNull();
     }
   });
 });
@@ -177,7 +195,7 @@ describe('id bodies inside tokens', () => {
         anyUuid,
         anyUuid,
         secretBytes,
-        fc.constantFrom(...CROCKFORD.slice(8)),
+        fc.constantFrom(...Array.from(CROCKFORD.slice(8))),
         (u, s, b, c) => {
           const token = formatSessionToken({ userId: idOf('usr', u), sessionId: s, secret: b });
           expect(parseSessionToken(`v1.${c}${token.slice(4)}`)).toBeNull();

@@ -28,7 +28,7 @@ const compact = (s: string) => fold(s).replace(/[^\p{L}\p{N}]/gu, '');
 
 const oracle: Record<PasswordRule, (password: string, context: PasswordContext) => boolean> = {
   repeated_character: (p) => {
-    const s = [...fold(p)];
+    const s = Array.from(fold(p));
     return s.length > 0 && s.every((c) => c === s[0]);
   },
   sequence: (p) => {
@@ -54,14 +54,16 @@ const oracle: Record<PasswordRule, (password: string, context: PasswordContext) 
     const s = fold(p);
     for (let i = 0; i + 6 <= s.length; i += 1) {
       const run = s.slice(i, i + 6);
-      if (ROWS.some((row) => row.includes(run) || [...row].reverse().join('').includes(run))) {
+      if (
+        ROWS.some((row) => row.includes(run) || Array.from(row).reverse().join('').includes(run))
+      ) {
         return true;
       }
     }
     return false;
   },
   repeated_unit: (p) => {
-    const s = [...fold(p)];
+    const s = Array.from(fold(p));
     for (let unit = 1; unit <= 4; unit += 1) {
       if (s.length < unit * 2) continue;
       if (s.every((c, i) => i < unit || c === s[i - unit])) return true;
@@ -88,11 +90,16 @@ const expected = (password: string, context: PasswordContext = {}) =>
   PASSWORD_RULES.filter((rule) => oracle[rule](password, context));
 
 const randomCase = (s: string) =>
-  fc
-    .array(fc.boolean(), { minLength: s.length, maxLength: s.length })
-    .map((flags) => [...s].map((c, i) => (flags[i] === true ? c.toUpperCase() : c)).join(''));
+  fc.array(fc.boolean(), { minLength: s.length, maxLength: s.length }).map((flags) =>
+    Array.from(s)
+      .map((c, i) => (flags[i] === true ? c.toUpperCase() : c))
+      .join(''),
+  );
 
-const pad = fc.string({ unit: fc.constantFrom(...'!#%&*+=?^~ 2468ACEGIKMOQSUW'), maxLength: 12 });
+const pad = fc.string({
+  unit: fc.constantFrom(...Array.from('!#%&*+=?^~ 2468ACEGIKMOQSUW')),
+  maxLength: 12,
+});
 const embed = (core: fc.Arbitrary<string>) =>
   fc.tuple(pad, core.chain(randomCase), pad).map(([a, b, c]) => a + b + c);
 
@@ -115,7 +122,7 @@ const families: Record<
         fc.nat(),
       )
       .map(([alphabet, down, n, at]) => {
-        const run = down ? [...alphabet].reverse().join('') : alphabet;
+        const run = down ? Array.from(alphabet).reverse().join('') : alphabet;
         const start = at % (run.length - n + 1);
         return run.slice(start, start + n);
       }),
@@ -130,7 +137,7 @@ const families: Record<
       )
       .filter(([row, , n]) => n <= row.length)
       .map(([row, back, n, at]) => {
-        const r = back ? [...row].reverse().join('') : row;
+        const r = back ? Array.from(row).reverse().join('') : row;
         const start = at % (r.length - n + 1);
         return r.slice(start, start + n);
       }),
@@ -206,7 +213,7 @@ describe('checkCommonPassword', () => {
       fc.string({
         minLength: 15,
         maxLength: 40,
-        unit: fc.constantFrom(...'abcdefqwertyasdfgzxcvb123456'),
+        unit: fc.constantFrom(...Array.from('abcdefqwertyasdfgzxcvb123456')),
       }),
       ...PASSWORD_RULES.map((rule) => families[rule].map(({ password }) => password)),
     );
@@ -244,7 +251,9 @@ describe('checkCommonPassword', () => {
   });
 
   it('folds width and case before matching, so full width and upper case runs still count', () => {
-    expect(checkCommonPassword('ａｂｃｄｅｆ is my password')).toContain('sequence');
+    expect(checkCommonPassword('\uff41\uff42\uff43\uff44\uff45\uff46 is my password')).toContain(
+      'sequence',
+    );
     expect(checkCommonPassword('Mon mot AZERTY: azertyu plus')).toContain('keyboard_walk');
     expect(checkCommonPassword('QWERTZUIOP and more letters')).toContain('keyboard_walk');
     expect(checkCommonPassword('the WXCVBN row is a walk too')).toContain('keyboard_walk');

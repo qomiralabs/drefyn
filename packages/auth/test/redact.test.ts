@@ -26,7 +26,7 @@ const invitationToken = fc
     formatInvitationToken({ organizationId: organizationId(o), invitationId: i, secret: b }),
   );
 const freeText = fc.string({
-  unit: fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789 -'),
+  unit: fc.constantFrom(...Array.from('abcdefghijklmnopqrstuvwxyz0123456789 -')),
   minLength: 12,
   maxLength: 30,
 });
@@ -175,7 +175,11 @@ describe('redact', () => {
       deep,
     });
     const text = JSON.stringify(out, (_, v: unknown) =>
-      v instanceof Map ? Object.fromEntries(v) : v instanceof Set ? [...v] : v,
+      v instanceof Map
+        ? (Object.fromEntries(v) as unknown)
+        : v instanceof Set
+          ? (Array.from(v) as unknown)
+          : v,
     );
     expect(text).not.toContain(token);
     expect(text).not.toContain('hunter2');

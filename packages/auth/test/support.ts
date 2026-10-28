@@ -40,14 +40,17 @@ export function mutationsOf(valid: string): fc.Arbitrary<Mutation> {
   const index = fc.nat({ max: valid.length - 1 });
   return fc.oneof(
     fc
-      .tuple(index, fc.oneof(anyUnit, fc.constantFrom(...CROCKFORD)))
+      .tuple(index, fc.oneof(anyUnit, fc.constantFrom(...Array.from(CROCKFORD))))
       .filter(([i, c]) => valid.charAt(i) !== c)
       .map(([i, c]) => ({
         kind: 'replace' as const,
         value: valid.slice(0, i) + c + valid.slice(i + 1),
       })),
     fc
-      .tuple(fc.nat({ max: valid.length }), fc.oneof(anyUnit, fc.constantFrom(...CROCKFORD)))
+      .tuple(
+        fc.nat({ max: valid.length }),
+        fc.oneof(anyUnit, fc.constantFrom(...Array.from(CROCKFORD))),
+      )
       .map(([i, c]) => ({
         kind: 'insert' as const,
         value: valid.slice(0, i) + c + valid.slice(i),

@@ -4,7 +4,7 @@ import { normalizeAddress } from '../src/index.ts';
 import { anyUnit, runs } from './support.ts';
 
 const ATOM = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~";
-const atom = fc.string({ unit: fc.constantFrom(...ATOM), minLength: 1, maxLength: 12 });
+const atom = fc.string({ unit: fc.constantFrom(...Array.from(ATOM)), minLength: 1, maxLength: 12 });
 const local = fc.array(atom, { minLength: 1, maxLength: 4 }).map((a) => a.join('.'));
 const label = fc
   .stringMatching(/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,10}[a-zA-Z0-9])?$/)
@@ -19,7 +19,7 @@ const anything: fc.Arbitrary<string> = fc.oneof(
   address,
   fc.string({ maxLength: 60 }),
   fc
-    .array(fc.oneof(anyUnit, fc.constantFrom('@', '.', '"', '(', ')', ' ', 'a', 'Z', 'ü')), {
+    .array(fc.oneof(anyUnit, fc.constantFrom('@', '.', '"', '(', ')', ' ', 'a', 'Z', '\u00fc')), {
       maxLength: 30,
     })
     .map((p) => p.join('')),
@@ -47,7 +47,7 @@ describe('normalizeAddress', () => {
   });
 
   it('converts a Unicode domain to its ASCII form', () => {
-    expect(normalizeAddress('max@Bücher.example')).toBe('max@xn--bcher-kva.example');
+    expect(normalizeAddress('max@B\u00fccher.example')).toBe('max@xn--bcher-kva.example');
     expect(normalizeAddress('max@xn--bcher-kva.example')).toBe('max@xn--bcher-kva.example');
   });
 
@@ -76,7 +76,7 @@ describe('normalizeAddress', () => {
       '.jane@example.com',
       'jane.@example.com',
       'ja..ne@example.com',
-      'jäne@example.com',
+      'j\u00e4ne@example.com',
       'jane\u0000@example.com',
       'jane@[192.0.2.1]',
       'jane@192.0.2.1',
