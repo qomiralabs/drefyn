@@ -10,6 +10,7 @@ import {
   THEMES,
   useTheme,
 } from './fixtures.ts';
+import { expectBodyLeaksNothing, expectTitleLeaksNothing, UNKNOWN_ORG_PATHS } from './leaks.ts';
 
 test.describe('flag on', () => {
   test('/ sends a first visit to the organization overview', async ({ page }) => {
@@ -25,6 +26,16 @@ test.describe('flag on', () => {
   ] as const) {
     test(`${path} is ${status}`, async ({ request }) => {
       expect((await request.get(path, { maxRedirects: 0 })).status()).toBe(status);
+    });
+  }
+
+  for (const path of UNKNOWN_ORG_PATHS) {
+    test(`${path} is a 404 that sends no page content and no page title`, async ({
+      request,
+      page,
+    }) => {
+      await expectBodyLeaksNothing(request, path);
+      await expectTitleLeaksNothing(page, path);
     });
   }
 

@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { ROUTES } from './fixtures.ts';
+import {
+  expectBodyLeaksNothing,
+  expectTitleLeaksNothing,
+  LEAK_PATHS,
+  UNKNOWN_ORG_PATHS,
+} from './leaks.ts';
 
 // This project runs against the server started with dashboard.shell off.
 const paths = ['/', ...Object.values(ROUTES), '/acme/docs', '/acme/status', '/bundle-baseline'];
@@ -17,3 +23,14 @@ test('the 404 page carries no shell, so nothing about the dashboard leaks', asyn
   await expect(page.getByText('Acme')).toHaveCount(0);
   await expect(page.getByText('Maya Okafor')).toHaveCount(0);
 });
+
+// Pages render next to their layout, so a check in the layout alone still streams the page.
+for (const path of [...LEAK_PATHS, ...UNKNOWN_ORG_PATHS]) {
+  test(`${path} with the flag off sends no page content and no page title`, async ({
+    request,
+    page,
+  }) => {
+    await expectBodyLeaksNothing(request, path);
+    await expectTitleLeaksNothing(page, path);
+  });
+}
