@@ -59,3 +59,9 @@ export function allowed(
 export function searchText(entry: Command): string {
   return [entry.name, entry.kind, ...(entry.keywords ?? [])].join(' ').toLowerCase();
 }
+
+// TODO(#59): filter through searchText.
+export const commandFilter =
+  (_entries: readonly Command[]) =>
+  (_text: string, _input: string, _node: { key: unknown }): boolean =>
+    false;
