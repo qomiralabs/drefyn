@@ -26,9 +26,9 @@ function oracleUuid(body: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-// Each run checks every position against every replacement, about 4,000 parses, most of them
-// throwing. That takes about half a second here and several times that on a loaded runner
-// with coverage on, so the default 5 s is too tight for this one test.
+// The exhaustive properties make thousands of parses, most of them throwing. Alone they take
+// well under a second, but a loaded runner with coverage on has pushed one past the default
+// 5 s, so these get their own limit.
 const EXHAUSTIVE_PROPERTY_TIMEOUT_MS = 30_000;
 
 type Outcome = 'ID_MALFORMED' | 'ID_WRONG_TYPE' | { readonly uuid: string };
@@ -120,25 +120,38 @@ describe('public ID codec for session and invitation ids (property)', () => {
     },
   );
 
-  it('refuses every single character deletion and insertion with ID_MALFORMED', () => {
-    fc.assert(
-      fc.property(
-        newKind,
-        anyUuid,
-        fc.constantFrom(...Array.from(CROCKFORD), '_'),
-        (kind, uuid, extra) => {
-          const original = toPublicId(kind, idOf(kind, uuid));
-          for (let index = 0; index <= original.length; index += 1) {
-            const inserted = `${original.slice(0, index)}${extra}${original.slice(index)}`;
-            expect(codeOf(() => parsePublicId(kind, inserted))).toBe('ID_MALFORMED');
-            if (index < original.length) {
-              const deleted = `${original.slice(0, index)}${original.slice(index + 1)}`;
-              expect(codeOf(() => parsePublicId(kind, deleted))).toBe('ID_MALFORMED');
+  it(
+    'refuses every single character deletion and insertion with ID_MALFORMED',
+    { timeout: EXHAUSTIVE_PROPERTY_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(
+          newKind,
+          anyUuid,
+          fc.constantFrom(...Array.from(CROCKFORD), '_'),
+          (kind, uuid, extra) => {
+            const original = toPublicId(kind, idOf(kind, uuid));
+            // About 60 parses per id: assert once, like the substitution property above.
+            const mismatches: string[] = [];
+            for (let index = 0; index <= original.length; index += 1) {
+              const inserted = `${original.slice(0, index)}${extra}${original.slice(index)}`;
+              const insertedCode = codeOf(() => parsePublicId(kind, inserted));
+              if (insertedCode !== 'ID_MALFORMED') {
+                mismatches.push(`insert ${String(index)}: ${insertedCode}`);
+              }
+              if (index < original.length) {
+                const deleted = `${original.slice(0, index)}${original.slice(index + 1)}`;
+                const deletedCode = codeOf(() => parsePublicId(kind, deleted));
+                if (deletedCode !== 'ID_MALFORMED') {
+                  mismatches.push(`delete ${String(index)}: ${deletedCode}`);
+                }
+              }
             }
-          }
-        },
-      ),
-      runs,
-    );
-  });
+            expect(mismatches).toEqual([]);
+          },
+        ),
+        runs,
+      );
+    },
+  );
 });
