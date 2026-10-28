@@ -1,13 +1,20 @@
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
-import { parseDatabaseConfig, parsePublishedReaderConfig } from '../src/config.ts';
+import {
+  parseAuthDatabaseConfig,
+  parseDatabaseConfig,
+  parsePublishedReaderConfig,
+} from '../src/config.ts';
 import {
   closeDatabase,
+  createAuthDatabase,
   createDatabase,
   createPublishedDatabase,
   poolConfig,
+  withAuth,
   withPublishedReader,
   withTenant,
+  type AuthDatabase,
   type Database,
   type PublishedDatabase,
 } from '../src/database.ts';
@@ -40,6 +47,24 @@ describe('createDatabase before connecting', () => {
     };
     expect(await code(createPublishedDatabase(config))).toBe('DB_CONFIG_INVALID');
   });
+
+  it('refuses an auth statement timeout above 10 s', async () => {
+    const config = {
+      ...parseAuthDatabaseConfig({ DREFYN_AUTH_DATABASE_URL: URL }),
+      statementTimeoutMs: 10_001,
+    };
+    expect(await code(createAuthDatabase(config))).toBe('DB_CONFIG_INVALID');
+  });
+
+  it('fails an unreachable auth database with DB_UNAVAILABLE naming its key', async () => {
+    const config = parseAuthDatabaseConfig({
+      DREFYN_AUTH_DATABASE_URL: URL,
+      DREFYN_DATABASE_POOL_WAIT_MS: '200',
+    });
+    const error = await rejected(createAuthDatabase(config));
+    expect((error as DbError).code).toBe('DB_UNAVAILABLE');
+    expect((error as DbError).message).toContain('DREFYN_AUTH_DATABASE_URL');
+  });
 });
 
 describe('handles that did not come from the constructors', () => {
@@ -65,6 +90,11 @@ describe('handles that did not come from the constructors', () => {
     expect(await code(withPublishedReader(fake, tenant, () => Promise.resolve(1)))).toBe(
       'DB_CONFIG_INVALID',
     );
+  });
+
+  it('refuse an auth handle that was never opened', async () => {
+    const fake = Object.freeze({}) as AuthDatabase;
+    expect(await code(withAuth(fake, () => Promise.resolve(1)))).toBe('DB_CONFIG_INVALID');
   });
 
   it('close as a no op', async () => {
@@ -101,6 +131,12 @@ describe('poolConfig', () => {
       host: '::1',
       port: 55432,
       application_name: 'drefyn-public-reader',
+    });
+  });
+
+  it('names the auth pool', () => {
+    expect(poolConfig(config('postgres://drefyn_auth:x@127.0.0.1/drefyn'), 'auth')).toMatchObject({
+      application_name: 'drefyn-auth',
     });
   });
 });
