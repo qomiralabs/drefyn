@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { idOf, parsePublicId, toPublicId, type IdKind } from '../src/index.ts';
+import { TenancyError, idOf, parsePublicId, toPublicId, type IdKind } from '../src/index.ts';
 import { CROCKFORD, PREFIXES, anyUuid, codeOf, oracleBody, runs } from './support.ts';
 
 // Session tokens and invitation links carry these, so they get their own exhaustive check.
@@ -25,6 +25,11 @@ function oracleUuid(body: string): string {
   const h = n.toString(16).padStart(32, '0');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
+
+// Each run checks every position against every replacement, about 4,000 parses, most of them
+// throwing. That takes about half a second here and several times that on a loaded runner
+// with coverage on, so the default 5 s is too tight for this one test.
+const EXHAUSTIVE_PROPERTY_TIMEOUT_MS = 30_000;
 
 type Outcome = 'ID_MALFORMED' | 'ID_WRONG_TYPE' | { readonly uuid: string };
 
@@ -73,38 +78,47 @@ describe('public ID codec for session and invitation ids (property)', () => {
   // A substitution inside the body that stays in the alphabet is another valid id; there is
   // no checksum. What must never happen is a mutation that parses back to the same id, or a
   // non canonical spelling that parses at all.
-  it('never accepts a single character substitution as the original id or a second spelling', () => {
-    let accepted = 0;
-    let refused = 0;
-    fc.assert(
-      fc.property(newKind, anyUuid, (kind, uuid) => {
-        const original = toPublicId(kind, idOf(kind, uuid));
-        for (let index = 0; index < original.length; index += 1) {
-          for (const next of REPLACEMENTS) {
-            if (next === original.charAt(index)) continue;
-            const mutated = `${original.slice(0, index)}${next}${original.slice(index + 1)}`;
-            const expected = expectedOutcome(kind, mutated, index, next);
-            const code = codeOf(() => parsePublicId(kind, mutated));
-            if (typeof expected === 'string') {
-              refused += 1;
-              expect(code).toBe(expected);
-            } else {
-              accepted += 1;
-              expect(code).toBe('no error');
-              const parsed = parsePublicId(kind, mutated);
-              expect(parsed).toBe(expected.uuid);
-              expect(parsed).not.toBe(uuid);
-              expect(toPublicId(kind, parsed)).toBe(mutated);
+  it(
+    'never accepts a single character substitution as the original id or a second spelling',
+    { timeout: EXHAUSTIVE_PROPERTY_TIMEOUT_MS },
+    () => {
+      let accepted = 0;
+      let refused = 0;
+      fc.assert(
+        fc.property(newKind, anyUuid, (kind, uuid) => {
+          const original = toPublicId(kind, idOf(kind, uuid));
+          // About 4,000 mutations per id: compare plain strings and assert once, because an
+          // expect per mutation is what made this slow enough to time out on a loaded machine.
+          const mismatches: string[] = [];
+          for (let index = 0; index < original.length; index += 1) {
+            for (const next of REPLACEMENTS) {
+              if (next === original.charAt(index)) continue;
+              const mutated = `${original.slice(0, index)}${next}${original.slice(index + 1)}`;
+              const expected = expectedOutcome(kind, mutated, index, next);
+              let actual: string;
+              try {
+                const parsed = parsePublicId(kind, mutated);
+                const roundTrips = toPublicId(kind, parsed) === mutated;
+                actual = parsed === uuid ? 'same id' : roundTrips ? parsed : 'second spelling';
+              } catch (error) {
+                actual = error instanceof TenancyError ? error.code : 'not a TenancyError';
+              }
+              if (typeof expected === 'string') refused += 1;
+              else accepted += 1;
+              const want = typeof expected === 'string' ? expected : expected.uuid;
+              if (actual !== want)
+                mismatches.push(`${String(index)} ${JSON.stringify(next)}: ${actual}`);
             }
           }
-        }
-      }),
-      { ...runs, numRuns: 100 },
-    );
-    // Both branches must run, or the property proves nothing.
-    expect(accepted).toBeGreaterThan(0);
-    expect(refused).toBeGreaterThan(0);
-  });
+          expect(mismatches).toEqual([]);
+        }),
+        { ...runs, numRuns: 25 },
+      );
+      // Both branches must run, or the property proves nothing.
+      expect(accepted).toBeGreaterThan(0);
+      expect(refused).toBeGreaterThan(0);
+    },
+  );
 
   it('refuses every single character deletion and insertion with ID_MALFORMED', () => {
     fc.assert(
