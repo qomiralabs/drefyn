@@ -67,6 +67,8 @@ function compileOnly(): void {
   takesOrganizationId(userId(plain));
   // @ts-expect-error organizationId() does not give a UserId
   takesUserId(organizationId(plain));
+  // @ts-expect-error projectId() does not give a UserId
+  takesUserId(projectId(plain));
   // @ts-expect-error a user id cannot be encoded as an organization
   toPublicId('org', usr);
   // @ts-expect-error parsing an organization id does not give a UserId
