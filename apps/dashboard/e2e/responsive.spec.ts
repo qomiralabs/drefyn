@@ -92,3 +92,32 @@ test.describe('desktop, 1440 px', () => {
     expect((await h1.boundingBox())?.width).toBeLessThanOrEqual(45 * 16);
   });
 });
+
+test.describe('phone command bar', () => {
+  test.use({ viewport: MOBILE, hasTouch: true });
+
+  test('Cancel closes it by touch and focus returns to the search button', async ({ page }) => {
+    await openShell(page, ROUTES.overview);
+    const trigger = page
+      .getByRole('banner')
+      .getByRole('button', { name: /Search or run a command/ });
+    await trigger.tap();
+    const bar = page.getByRole('dialog', { name: 'Search or run a command' });
+    await expect(bar).toBeVisible();
+    await bar.getByRole('button', { name: 'Cancel' }).tap();
+    await expect(bar).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+});
+
+test.describe('wide command bar', () => {
+  test.use({ viewport: DESKTOP });
+
+  test('has no Cancel button, since Escape and the scrim close it', async ({ page }) => {
+    await openShell(page, ROUTES.overview);
+    await page.keyboard.press('ControlOrMeta+k');
+    const bar = page.getByRole('dialog', { name: 'Search or run a command' });
+    await expect(bar).toBeVisible();
+    await expect(bar.getByRole('button', { name: 'Cancel' })).toBeHidden();
+  });
+});

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   ANSWERS,
   banner,
+  commandBar,
   NEEDS_YOU,
   main,
   openShell,
@@ -301,5 +302,71 @@ test.describe('JavaScript off', () => {
     await expect(
       page.getByRole('navigation', { name: 'Acme', exact: true }).getByRole('link').first(),
     ).toBeVisible();
+  });
+});
+
+test.describe('command bar content', () => {
+  const open = async (page: import('@playwright/test').Page) => {
+    await openShell(page, ROUTES.overview);
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(commandBar(page)).toBeVisible();
+    return commandBar(page);
+  };
+
+  test('says where it searches and how to drive it, in mono keycaps', async ({ page }) => {
+    const bar = await open(page);
+    await expect(bar.getByText('In Acme', { exact: true })).toBeVisible();
+    const keys = bar.locator('kbd');
+    await expect(keys.filter({ hasText: 'Enter' })).toBeVisible();
+    await expect(keys.filter({ hasText: 'esc' })).toBeVisible();
+    const family = await keys.first().evaluate((el) => getComputedStyle(el).fontFamily);
+    expect(family).toMatch(/JetBrains Mono/);
+  });
+
+  test('rows carry a kind icon, and objects their state word', async ({ page }) => {
+    const bar = await open(page);
+    const options = bar.getByRole('option');
+    for (const option of await options.all()) {
+      await expect(option.locator('svg[data-icon]')).toHaveCount(1);
+    }
+    await expect(options.filter({ hasText: 'Payments API docs, Docs project' })).toContainText(
+      'Out of date',
+    );
+    await expect(options.filter({ hasText: 'Acme status' })).toContainText('Running');
+  });
+
+  test('the active row is filled, and the focus ring stays on the field', async ({ page }) => {
+    const bar = await open(page);
+    await page.keyboard.press('ArrowDown');
+    const active = bar.locator('[role="option"][data-focused]');
+    await expect(active).toHaveCount(1);
+    const { background, outline } = await active.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { background: s.backgroundColor, outline: s.outlineStyle };
+    });
+    expect(background).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
+    expect(outline).toBe('none');
+  });
+
+  test('finds places by their keywords', async ({ page }) => {
+    const bar = await open(page);
+    await page.keyboard.type('billing');
+    await expect(bar.getByRole('option')).toHaveText([/^Plan and usage/]);
+  });
+
+  test('the clear button is the brand close icon and empties the field', async ({ page }) => {
+    const bar = await open(page);
+    await page.keyboard.type('pay');
+    const clear = bar.getByRole('button', { name: 'Clear search' });
+    await expect(clear.locator('svg[data-icon="close"]')).toHaveCount(1);
+    await clear.click();
+    await expect(bar.getByRole('combobox')).toHaveValue('');
+  });
+
+  test('no results says so and offers the next step', async ({ page }) => {
+    const bar = await open(page);
+    await page.keyboard.type('zzzz');
+    await expect(bar.getByText('Nothing matches “zzzz”.')).toBeVisible();
+    await expect(bar.getByRole('link', { name: /zzzz/ })).toHaveCount(2);
   });
 });
