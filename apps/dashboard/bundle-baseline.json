@@ -1,0 +1,6 @@
+{
+  "route": "/bundle-baseline",
+  "gzipBytes": 131800,
+  "recorded": "2026-10-26",
+  "note": "Framework only: an empty App Router route on Next 16.4.2 and React 19.3.1."
+}

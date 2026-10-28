@@ -31,3 +31,9 @@ Tarball integrity as the registry publishes it, to check a download before unpac
 
 - `@fontsource/inter@5.3.0`: `sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==`
 - `@fontsource/jetbrains-mono@5.3.0`: `sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==`
+
+## Icons
+
+| File                              | Source                                                                                  | Licence                  |
+| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------ |
+| `apps/dashboard/src/app/icon.svg` | Our own drawing of the Drefyn mark on its 100 unit grid, ink in light and paper in dark | Apache-2.0 with the repo |

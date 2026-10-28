@@ -186,6 +186,7 @@ function sharedEntries(t: Tokens): Entry[] {
   for (const [k, v] of Object.entries(t.timer))
     entries.push([`--dr-timer-${kebab(k)}`, `${v.ms}ms`]);
   entries.push(['--dr-page-max', px(t.layout.pageMax)]);
+  entries.push(['--dr-landing', rem(t.layout.landing)]);
   for (const [k, v] of Object.entries(t.layout.docs)) entries.push([`--dr-docs-${k}`, px(v)]);
   for (const [k, v] of Object.entries(t.layout.shell)) {
     entries.push([`--dr-shell-${kebab(k)}`, rem(v)]);
@@ -276,6 +277,8 @@ const SHELL_AXIS: Record<keyof Tokens['layout']['shell'], 'height' | 'width'> = 
   bar: 'height',
   nav: 'width',
   navCollapsed: 'width',
+  drawer: 'width',
+  inspector: 'width',
 };
 
 export function renderTailwindCss(t: Tokens = source): string {
@@ -327,9 +330,12 @@ export function renderTailwindCss(t: Tokens = source): string {
     lines.push(`--transition-duration-${kebab(k)}: var(--dr-duration-${kebab(k)})`);
   }
   lines.push(
+    // Literal, because a media query cannot read a custom property.
     `--breakpoint-sm: ${rem(t.layout.compactBelow)}`,
+    ...Object.entries(t.layout.breakpoints).map(([k, v]) => `--breakpoint-${k}: ${rem(v)}`),
     '--container-page: var(--dr-page-max)',
     '--container-measure: var(--dr-measure)',
+    '--container-landing: var(--dr-landing)',
     '--default-font-family: var(--dr-font-sans)',
     '--default-mono-font-family: var(--dr-font-mono)',
     '--default-border-width: var(--dr-stroke-hairline)',
@@ -358,6 +364,13 @@ export function renderTailwindCss(t: Tokens = source): string {
     // move things for the reduced fade time. Under reduced motion only colour and opacity
     // fade. Declared as the same utilities, so Tailwind sorts these into the utilities layer
     // with every variant applied, and motion-reduce:transition-none still comes after them.
+    // Tailwind's text-* utilities take no family from the theme, so a step set in another
+    // family than the page's sans gets it here. Tailwind merges this into the same rule.
+    ...Object.entries(t.type)
+      .filter(([, s]) => s.family !== 'sans')
+      .map(([step, s]) =>
+        block(`@utility text-${kebab(step)}`, [`font-family: var(--dr-font-${s.family})`]),
+      ),
     ...['transition', 'transition-all', 'transition-transform'].map(
       (name) =>
         `@utility ${name} {\n  @media (prefers-reduced-motion: reduce) {\n` +
@@ -452,6 +465,13 @@ export function renderDtcg(t: Tokens = source): string {
     distance: map(t.motion.distance, (v) => dimension(v, 'px')),
     layout: {
       'page-max': dimension(t.layout.pageMax, 'px'),
+      landing: dimension(t.layout.landing / 16, 'rem'),
+      ...Object.fromEntries(
+        Object.entries(t.layout.breakpoints).map(([k, v]) => [
+          `breakpoint-${k}`,
+          dimension(v / 16, 'rem'),
+        ]),
+      ),
       gutter: dimension(t.layout.gutter.wide / 16, 'rem'),
       'gutter-compact': dimension(t.layout.gutter.compact / 16, 'rem'),
       // DTCG dimensions are px or rem only, and the measure follows the text size.

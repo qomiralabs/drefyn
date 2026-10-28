@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    // Next resolves its own subpaths (next/link, next/navigation) the way a bundler does.
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src", "test", "e2e", "next.config.ts", "vitest.config.ts", "playwright.config.ts"]
+}

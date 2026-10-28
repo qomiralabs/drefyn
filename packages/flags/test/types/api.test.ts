@@ -33,7 +33,9 @@ const base = {
 
 describe('flag names', () => {
   it('are the registry union and nothing else', () => {
-    expectTypeOf<FlagName>().toEqualTypeOf<'product.docs' | 'product.studio' | 'product.status'>();
+    expectTypeOf<FlagName>().toEqualTypeOf<
+      'product.docs' | 'product.studio' | 'product.status' | 'dashboard.shell'
+    >();
   });
 
   it('an unregistered name fails typecheck on every method', () => {

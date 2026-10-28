@@ -55,7 +55,8 @@ pnpm licenses list --json > "$scratch/licenses.json"
 # covers platform binaries this machine never installed.
 pnpm licenses list --prod --json > "$scratch/licenses-prod.json"
 node scripts/license-policy/src/cli.ts --input "$scratch/licenses.json" \
-  --prod-input "$scratch/licenses-prod.json" --lockfile pnpm-lock.yaml
+  --prod-input "$scratch/licenses-prod.json" --lockfile pnpm-lock.yaml \
+  --notices THIRD_PARTY_NOTICES.md
 
 step "hygiene"
 # Commit messages are checked against development when it is known locally; CI checks

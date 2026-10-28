@@ -16,3 +16,8 @@ ignoredBuiltDependencies: [esbuild, protobufjs]
 # the patch adds a closed guard. Drop it once a provider release stops on close.
 patchedDependencies:
   '@openfeature/flagd-provider@0.17.0': scripts/patches/@openfeature__flagd-provider@0.17.0.patch
+
+# Next lists sharp as an optional dependency for image optimisation. Its prebuilt libvips
+# binaries are LGPL, so it is never installed; the dashboard serves images unoptimized.
+overrides:
+  sharp: '-'

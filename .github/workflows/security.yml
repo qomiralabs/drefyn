@@ -39,7 +39,8 @@ jobs:
           pnpm licenses list --json > "$RUNNER_TEMP/licenses.json"
           pnpm licenses list --prod --json > "$RUNNER_TEMP/licenses-prod.json"
           node scripts/license-policy/src/cli.ts --input "$RUNNER_TEMP/licenses.json" \
-            --prod-input "$RUNNER_TEMP/licenses-prod.json" --lockfile pnpm-lock.yaml
+            --prod-input "$RUNNER_TEMP/licenses-prod.json" --lockfile pnpm-lock.yaml \
+            --notices THIRD_PARTY_NOTICES.md
 
   gitleaks:
     name: gitleaks

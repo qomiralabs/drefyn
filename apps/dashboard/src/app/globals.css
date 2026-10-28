@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+@import '@drefyn/ui/tokens.css';
+@import '@drefyn/ui/tailwind.css';
+@import '@drefyn/ui/react.css';
+@source '../';
+
+/* Shell measures read from the existing shell tokens, so the sidebar can sit under the bar. */
+@theme inline {
+  --spacing-shell-bar: var(--dr-shell-bar);
+  --height-shell-view: calc(100dvh - var(--dr-shell-bar));
+}
+
+@layer base {
+  /* The root keeps the browser's text size, so rem tokens mean what they say. */
+  html {
+    background-color: var(--dr-surface-ground);
+    color: var(--dr-text-body);
+    -webkit-font-smoothing: antialiased;
+    scroll-padding-top: calc(var(--dr-shell-bar) + var(--dr-space-16));
+  }
+
+  /* Working text in the dashboard is the small body step. */
+  body {
+    background-color: var(--dr-surface-ground);
+    font: var(--dr-type-body-s);
+  }
+
+  ::selection {
+    background-color: var(--dr-accent-wash);
+  }
+}
+
+/* The drawer scrim fades in; the drawer itself appears at once, so its text is never caught
+   half transparent. Under reduced motion the duration token drops to 120 ms. */
+@keyframes dr-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@utility animate-fade-in {
+  animation: dr-fade-in var(--dr-duration-base) var(--dr-ease-enter);
+}
+
+/* The command bar draws its own clear button, so the browser's is hidden. */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
