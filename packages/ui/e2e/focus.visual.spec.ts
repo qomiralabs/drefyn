@@ -35,8 +35,8 @@ const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-text-field--disabled', keys: ['Tab'], focused: 'input' },
   { id: 'components-dialog--default', keys: ['Tab', 'Enter'], focused: 'input' },
   { id: 'components-dialog--open', keys: ['Tab', 'Tab', 'Tab', 'Tab'], focused: 'button' },
-  // F6 reaches the toast, Tab reaches Undo. Focus inside holds the timer.
-  { id: 'components-toast--undo', keys: ['F6', 'Tab'], focused: 'button' },
+  // F6 reaches the notifications, Tab the toast, Tab again Undo. Focus inside holds the timer.
+  { id: 'components-toast--undo', keys: ['F6', 'Tab', 'Tab'], focused: 'button' },
 ];
 
 test.beforeAll(() => {
