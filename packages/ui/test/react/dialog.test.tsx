@@ -330,8 +330,8 @@ describe('Dialog', () => {
     const a = <Dialog open title="Search" children="Body" />;
     // @ts-expect-error open without onOpenChange, with a trigger.
     const b = <Dialog trigger="Search" open title="Search" children="Body" />;
-    // @ts-expect-error open together with defaultOpen, with a trigger.
     const c = (
+      // @ts-expect-error open together with defaultOpen, with a trigger.
       <Dialog
         trigger="Search"
         open

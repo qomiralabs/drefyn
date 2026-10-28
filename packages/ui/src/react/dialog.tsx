@@ -29,29 +29,36 @@ interface DialogBase {
   busy?: boolean;
   // Why the last submit failed, shown at the top of the body. Focus moves to it.
   error?: string;
-  onOpenChange?: (open: boolean) => void;
 }
 
-// Either a trigger the dialog draws, or open state the caller holds, or both.
-export type DialogProps = DialogBase &
-  (
-    | {
-        trigger: ReactNode;
-        triggerLabel?: string;
-        variant?: ButtonVariant;
-        size?: ButtonSize;
-        open?: boolean;
-        defaultOpen?: boolean;
-      }
-    | {
-        trigger?: never;
-        triggerLabel?: never;
-        variant?: never;
-        size?: never;
-        open: boolean;
-        defaultOpen?: never;
-      }
-  );
+// The dialog keeps its own open state, or the caller holds it. A caller that holds open must
+// hear when it closes: without onOpenChange, Escape and Close would do nothing and the
+// keyboard would be trapped inside.
+interface OwnState {
+  open?: never;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+interface HeldState {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  defaultOpen?: never;
+}
+interface Drawn {
+  trigger: ReactNode;
+  triggerLabel?: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}
+interface Undrawn {
+  trigger?: never;
+  triggerLabel?: never;
+  variant?: never;
+  size?: never;
+}
+
+// A drawn trigger with either state, or no trigger and state the caller holds.
+export type DialogProps = DialogBase & ((Drawn & (OwnState | HeldState)) | (Undrawn & HeldState));
 
 const FIELD = 'input:not([type="hidden"]), textarea, select';
 

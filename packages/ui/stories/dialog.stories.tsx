@@ -50,7 +50,9 @@ function Invite({ run, defaultOpen = false, busy = false, error }: InviteProps) 
       {...(error === undefined ? {} : { error })}
       footer={(close) => (
         <>
-          <Button onClick={close}>Cancel</Button>
+          <Button onClick={close} disabled={busy}>
+            Cancel
+          </Button>
           <Button
             variant="primary"
             type="submit"

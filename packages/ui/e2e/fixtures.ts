@@ -110,6 +110,7 @@ export const DOCS_READY_CEILING_MS = 20_000;
 export interface DocsReadiness {
   ready: boolean;
   anchors: number;
+  innerRoots: number;
   emptyRoots: number;
   heights: [number, number];
 }
@@ -135,19 +136,22 @@ export async function docsReadiness(
       for (;;) {
         const anchors = document.querySelectorAll('#storybook-docs [id^="anchor--"]').length;
         // Each block's .sb-story always holds a wrapper; the story itself mounts into the
-        // story--<id>-inner element, which stays empty until it renders.
-        const emptyRoots = [
+        // story--<id>-inner element, which stays empty until it renders. Counting the roots
+        // too means a renamed id fails the wait instead of matching nothing.
+        const roots = [
           ...document.querySelectorAll('#storybook-docs [id^="story--"][id$="-inner"]'),
-        ].filter((el) => el.childElementCount === 0).length;
+        ];
+        const innerRoots = roots.length;
+        const emptyRoots = roots.filter((el) => el.childElementCount === 0).length;
         const before = document.documentElement.scrollHeight;
         await frame();
         const after = document.documentElement.scrollHeight;
         const heights: [number, number] = [before, after];
-        if (anchors >= wanted && emptyRoots === 0 && before === after) {
-          return { ready: true, anchors, emptyRoots, heights };
+        if (anchors >= wanted && innerRoots >= wanted && emptyRoots === 0 && before === after) {
+          return { ready: true, anchors, innerRoots, emptyRoots, heights };
         }
         if (performance.now() - started > limit) {
-          return { ready: false, anchors, emptyRoots, heights };
+          return { ready: false, anchors, innerRoots, emptyRoots, heights };
         }
         await frame();
       }
@@ -171,7 +175,7 @@ export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Pro
     const state = await docsReadiness(page, stories);
     if (!state.ready) {
       throw new Error(
-        `${entry.id} was not ready after ${DOCS_READY_CEILING_MS} ms: ${state.anchors} of ${stories} story anchors, ${state.emptyRoots} empty story roots, last heights ${state.heights.join(' and ')}`,
+        `${entry.id} was not ready after ${DOCS_READY_CEILING_MS} ms: ${state.anchors} of ${stories} story anchors, ${state.innerRoots} of ${stories} story roots, ${state.emptyRoots} empty story roots, last heights ${state.heights.join(' and ')}`,
       );
     }
     return;

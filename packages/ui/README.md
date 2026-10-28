@@ -164,7 +164,9 @@ In an app that uses Tailwind:
   function that gets `close`. Set `busy` while a submit is in flight and `error` when it
   failed. A click outside never closes it.
 - `TextField` needs an `id`, which wires its label, description and error without a hook, so
-  it renders on the server and posts with JS off.
+  it renders on the server and posts with JS off. A disabled field still posts its value,
+  because it is `aria-disabled` plus `readOnly`, so servers must ignore fields a person could
+  not change.
 
 ### Writing a component
 
