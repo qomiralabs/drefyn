@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { findProject } from '../../../../../fixtures/projects.ts';
+import { guardOrganization } from '../../../../../server/guard.ts';
 import { parseShellPath } from '../../../../../shell/route.ts';
 import { sectionOf } from '../../../../../shell/sections.ts';
 import { Working } from '../../../../../views/working.tsx';
@@ -11,6 +12,7 @@ interface Params {
 
 async function load(params: Params['params']) {
   const { org, product, project, section } = await params;
+  await guardOrganization(org);
   const location = parseShellPath(`/${org}/${product}/${project}/${section}`);
   const found =
     location?.product === undefined || location.project === undefined

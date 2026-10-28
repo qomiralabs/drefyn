@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { guardOrganization } from '../../../../server/guard.ts';
 import { Working } from '../../../../views/working.tsx';
 
 const PAGES = {
@@ -14,6 +15,12 @@ interface Params {
   params: Promise<{ org: string; page: string }>;
 }
 
+async function load(params: Params['params']) {
+  const { org, page } = await params;
+  await guardOrganization(org);
+  return pageFrom(page);
+}
+
 function pageFrom(slug: string) {
   const entry = Object.entries(PAGES).find(([key]) => key === slug)?.[1];
   if (entry === undefined) notFound();
@@ -21,11 +28,11 @@ function pageFrom(slug: string) {
 }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  return { title: pageFrom((await params).page).title };
+  return { title: (await load(params)).title };
 }
 
 export default async function SettingsPage({ params }: Params) {
-  const page = pageFrom((await params).page);
+  const page = await load(params);
   return (
     <Working title={page.title} caption={page.caption}>
       <p className="max-w-measure text-body-s text-secondary">

@@ -1,10 +1,7 @@
-import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
 import { PLACEHOLDER_SHELL } from '../../fixtures/shell.ts';
-import { requireDashboard } from '../../server/gate.ts';
+import { guardOrganization } from '../../server/guard.ts';
 import { ShellFrame } from '../../shell/frame.tsx';
-import { parseShellPath } from '../../shell/route.ts';
 import { Sidebar } from '../../shell/sidebar.tsx';
 import { TopBar } from '../../shell/top-bar.tsx';
 
@@ -18,8 +15,7 @@ export default async function OrgLayout({
   params: Promise<{ org: string }>;
 }) {
   const { org } = await params;
-  if (parseShellPath(`/${org}`) === null || org !== PLACEHOLDER.organization.slug) notFound();
-  await requireDashboard(PLACEHOLDER.organization.id);
+  await guardOrganization(org);
   return (
     <ShellFrame org={org}>
       <a

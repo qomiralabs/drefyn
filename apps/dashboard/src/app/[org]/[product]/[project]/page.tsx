@@ -3,8 +3,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { findProject, type PlaceholderProject } from '../../../../fixtures/projects.ts';
-import { PLACEHOLDER } from '../../../../fixtures/placeholder.ts';
-import { requireDashboard } from '../../../../server/gate.ts';
+import { guardOrganization } from '../../../../server/guard.ts';
 import { parseShellPath, shellHref } from '../../../../shell/route.ts';
 import { MainBusy } from '../../../../views/main-busy.tsx';
 import { ProjectLoading } from '../../../../views/project-loading.tsx';
@@ -17,6 +16,7 @@ interface Params {
 
 async function projectFrom(params: Params['params']): Promise<PlaceholderProject> {
   const { org, product, project } = await params;
+  await guardOrganization(org);
   const location = parseShellPath(`/${org}/${product}/${project}`);
   const found =
     location?.project === undefined ? undefined : findProject(product, location.project);
@@ -56,12 +56,8 @@ async function ProjectBody({ org, project }: { org: string; project: Placeholder
       ...(section === undefined ? {} : { section }),
     });
 
-  // The page renders alongside the layout, so it checks the flag itself before it waits;
-  // with the flag off the response ends as a 404 instead of hanging.
-  if (project.slug === 'pending') {
-    await requireDashboard(PLACEHOLDER.organization.id);
-    await never();
-  }
+  // The guard above has already refused a disabled dashboard, so only a real request waits.
+  if (project.slug === 'pending') await never();
 
   if (project.slug === 'unreachable') {
     return (

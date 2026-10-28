@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
+import { guardOrganization } from '../../server/guard.ts';
 import { NEEDS_YOU, needsYouSentence } from '../../fixtures/shell.ts';
 import { IconLock } from '../../shell/icons.tsx';
 import { Answer, Calm, Eyebrow, Head, Ranked, TextLink } from '../../views/calm.tsx';
@@ -10,7 +11,14 @@ import { Answer, Calm, Eyebrow, Head, Ranked, TextLink } from '../../views/calm.
 const { organization } = PLACEHOLDER;
 const org = organization.slug;
 
-export const metadata: Metadata = { title: `${organization.name} overview` };
+interface Params {
+  params: Promise<{ org: string }>;
+}
+
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const { name } = await guardOrganization((await params).org);
+  return { title: `${name} overview` };
+}
 
 interface ProductRow {
   readonly product: string;
@@ -69,7 +77,8 @@ const DETAILS: Readonly<Record<string, string>> = {
 
 // The organization overview answers "does anything need me?" in one sentence, then one row
 // per product, the ranked list and the plan line.
-export default function Overview() {
+export default async function Overview({ params }: Params) {
+  await guardOrganization((await params).org);
   return (
     <Calm>
       <Head>
