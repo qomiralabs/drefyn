@@ -1,3 +1,4 @@
+import { normalizeEmailAddress } from '@drefyn/address';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { normalizeAddress } from '../src/index.ts';
@@ -120,5 +121,16 @@ describe('normalizeAddress', () => {
     for (const value of [undefined, null, 1, {}, ['a@b.co']]) {
       expect(normalizeAddress(value)).toBeNull();
     }
+  });
+
+  // One rule for auth and email: a second copy here would drift.
+  it('agrees with @drefyn/address on every string', () => {
+    fc.assert(
+      fc.property(anything, (input) => {
+        const shared = normalizeEmailAddress(input);
+        expect(normalizeAddress(input)).toBe(shared.ok ? shared.value : null);
+      }),
+      { ...runs, numRuns: 2000 },
+    );
   });
 });
