@@ -17,6 +17,7 @@ From the repository root:
 bash scripts/selfhost.sh up            # first run writes deploy/.env with random passwords
 bash scripts/selfhost-smoke.sh         # checks health, roles, grants, pgvector and port bindings
 bash scripts/selfhost.sh restart       # recreates the container from deploy/.env
+bash scripts/selfhost.sh upgrade       # adds what an older volume lacks; see Upgrading a volume
 bash scripts/selfhost.sh down          # keeps the data volume
 bash scripts/selfhost.sh reset --yes   # deletes the data volume
 ```
@@ -66,27 +67,50 @@ superuser and creates:
 | `drefyn_owner`         | Owns schema `app`; migrations run as this role | no superuser, no `BYPASSRLS`              |
 | `drefyn_app`           | The application's connection                   | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
 | `drefyn_public_reader` | Public read paths only                         | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
+| `drefyn_auth`          | Sign in lookups, before anyone is known        | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
 
 It also:
 
 - creates schema `extensions` and installs pgvector there, both owned by the superuser.
   pgvector is not a trusted extension, so only a superuser can create it; migrations never
-  need to. All three roles get `USAGE` on the schema; none can create, drop or change
-  anything in it.
+  need to. `drefyn_owner`, `drefyn_app` and `drefyn_public_reader` get `USAGE` on the schema;
+  none can create, drop or change anything in it. `drefyn_auth` never needs pgvector and gets
+  nothing there.
 - sets the `drefyn` database's `search_path` to `app, extensions`, so `vector` works
   unqualified. The roles carry no settings of their own.
 - revokes every right on schema `public` from `PUBLIC`.
 - revokes `CONNECT` and `TEMP` on the `drefyn` database from `PUBLIC` and grants `CONNECT`
-  to the three roles only. A role created later cannot connect until it is granted, and no
+  to the four roles only. A role created later cannot connect until it is granted, and no
   role can create temporary tables in `drefyn`.
 - revokes every right on the `postgres` and `template1` databases from `PUBLIC`, so the
-  three roles and any role created later cannot connect to them.
+  four roles and any role created later cannot connect to them.
 
 Grants on `app` and row level security policies come from migrations.
 
 The image runs the newest patched PostgreSQL 18 minor (18.6) with pgvector 0.8.7. Managed
 Postgres ships pgvector 0.8.2 today; the two have the same SQL surface, and the schema uses
 nothing newer than what managed Postgres offers.
+
+### Upgrading a volume
+
+A volume first started before `drefyn_auth` existed has only the first three roles. The
+bootstrap never runs twice and `drefyn_owner` cannot create roles, so after pulling a version
+that adds the role, `up` fails with `role drefyn_auth is missing` and migrations exit 4 naming
+it. The fix is one command, which is safe to run again:
+
+```sh
+bash scripts/selfhost.sh upgrade
+```
+
+It adds a generated `DREFYN_AUTH_PASSWORD` to `deploy/.env` if the file has none, recreates
+the container so the new secret is mounted, runs every script in `postgres/upgrade/` as the
+superuser over the socket, and waits until the stack is healthy. Your data is not touched.
+
+Each script reads its quiet log settings from `postgres/quiet-log.sql`, the same file the
+bootstrap uses, so the password never reaches the server log or `pg_stat_statements`. If
+`drefyn_auth` already exists with other attributes, for example `BYPASSRLS` or a membership in
+another role, the script names what differs and changes nothing; fix the role as the
+superuser and run it again. The scripts need psql 10 or later, which the image has.
 
 ### Upgrading pgvector
 
@@ -133,8 +157,8 @@ the superuser has no TCP login, so changing it in `deploy/.env` later has no eff
 ## Managed Postgres
 
 On a managed database, run the same file once as the master user, with
-`DREFYN_OWNER_PASSWORD`, `DREFYN_APP_PASSWORD` and `DREFYN_PUBLIC_READER_PASSWORD` set in the
-environment:
+`DREFYN_OWNER_PASSWORD`, `DREFYN_APP_PASSWORD`, `DREFYN_PUBLIC_READER_PASSWORD` and
+`DREFYN_AUTH_PASSWORD` set in the environment:
 
 ```sh
 psql --no-psqlrc --dbname drefyn --file deploy/postgres/bootstrap.sql
@@ -144,7 +168,14 @@ It stops before changing anything if the roles or schemas already exist. On `pos
 `template1` it only revokes `PUBLIC` rights where the master user owns the database, and
 prints a notice for any it skips.
 
-The file turns off statement logging for its own session before it reads a password. A
+A managed database bootstrapped before `drefyn_auth` gets it from the upgrade script instead,
+run the same way as the master user with `DREFYN_AUTH_PASSWORD` set:
+
+```sh
+psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0001-auth-role.sql
+```
+
+Both files turn off statement logging for their own session before they read a password. A
 master user that is not a real superuser may not be allowed to, and then the file stops
 before it reads any password unless the server already logs nothing. These record a
 `create role ... password` in plain text, even when it succeeds:

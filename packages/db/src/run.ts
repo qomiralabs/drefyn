@@ -7,7 +7,12 @@ import { DbError } from './errors.ts';
 import { loadMigrationFiles, type MigrationFile } from './migration-file.ts';
 import { MigrateError, exitCodeFor, outcomeOf } from './outcome.ts';
 import { connectPg } from './pg-session.ts';
-import { evaluatePrerequisites, type VectorExtension } from './prerequisites.ts';
+import {
+  evaluatePrerequisites,
+  evaluateRoles,
+  type RoleAccess,
+  type VectorExtension,
+} from './prerequisites.ts';
 
 export interface Output {
   write(text: string): void;
@@ -42,6 +47,8 @@ export interface RunRequest {
 export interface MigrateSession {
   role(): Promise<ConnectedRole>;
   vectorExtension(): Promise<VectorExtension | undefined>;
+  // Each role in UPGRADE_ROLES, whether it exists and may connect to this database.
+  requiredRoles(): Promise<RoleAccess[]>;
   invalidIndexes(): Promise<InvalidIndex[]>;
   // pg_try_advisory_lock on the shared key; false when another session holds it.
   tryLock(): Promise<boolean>;
@@ -117,6 +124,8 @@ async function checkRoleAndPrerequisites(session: MigrateSession): Promise<void>
   // Before the lock, so a missing extension never holds up a concurrent run.
   const prerequisites = evaluatePrerequisites(await session.vectorExtension());
   if (!prerequisites.ok) throw new MigrateError('prerequisite_missing', prerequisites.message);
+  const roles = evaluateRoles(await session.requiredRoles());
+  if (!roles.ok) throw new MigrateError('prerequisite_missing', roles.message);
   // A marked file rerun after a failed build would skip it through if not exists and be
   // recorded on top of an index that does not work, so nothing runs until it is repaired.
   const invalid = await session.invalidIndexes();

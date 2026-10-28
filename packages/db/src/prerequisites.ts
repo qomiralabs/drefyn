@@ -6,7 +6,27 @@ export interface VectorExtension {
   readonly version: string;
 }
 
-export type PrerequisiteProblem = 'vector_missing' | 'vector_wrong_schema' | 'vector_too_old';
+export type PrerequisiteProblem =
+  | 'vector_missing'
+  | 'vector_wrong_schema'
+  | 'vector_too_old'
+  | 'role_missing'
+  | 'role_cannot_connect';
+
+// What the session read for one role in UPGRADE_ROLES.
+export interface RoleAccess {
+  readonly role: string;
+  readonly exists: boolean;
+  // CONNECT on the database migrate is connected to.
+  readonly canConnect: boolean;
+}
+
+// Roles that came after the first bootstrap shipped. A database set up before then has none
+// of them, bootstrap.sql never runs twice, and drefyn_owner cannot create roles, so each has
+// an upgrade script run by whoever can.
+export const UPGRADE_ROLES: readonly { readonly role: string; readonly script: string }[] = [
+  { role: 'drefyn_auth', script: 'deploy/postgres/upgrade/0001-auth-role.sql' },
+];
 
 export type PrerequisiteResult =
   | { readonly ok: true }
@@ -58,6 +78,44 @@ export function evaluatePrerequisites(vector: VectorExtension | undefined): Prer
   }
   if (!meetsVersionFloor(vector.version)) {
     return { ok: false, problem: 'vector_too_old', message: tooOld(vector.version) };
+  }
+  return { ok: true };
+}
+
+function upgradeSteps(script: string): string[] {
+  return [
+    `Run ${script} as the superuser on compose or as the master user on managed Postgres, never as drefyn_owner. It is safe to run again.`,
+    'On compose: bash scripts/selfhost.sh upgrade',
+    `On managed Postgres, as the master user with DREFYN_AUTH_PASSWORD set: psql --no-psqlrc --dbname drefyn --file ${script}`,
+  ];
+}
+
+// Checked before any migration runs, so a migration that grants to one of these roles never
+// fails halfway on a database that predates it. A role the session did not report at all
+// counts as missing.
+export function evaluateRoles(roles: readonly RoleAccess[]): PrerequisiteResult {
+  for (const { role, script } of UPGRADE_ROLES) {
+    const access = roles.find((r) => r.role === role);
+    if (access?.exists !== true) {
+      return {
+        ok: false,
+        problem: 'role_missing',
+        message: [
+          `Role ${role} does not exist; this database was set up before it was added.`,
+          ...upgradeSteps(script),
+        ].join('\n'),
+      };
+    }
+    if (!access.canConnect) {
+      return {
+        ok: false,
+        problem: 'role_cannot_connect',
+        message: [
+          `Role ${role} exists but has no CONNECT on this database. The upgrade grants it.`,
+          ...upgradeSteps(script),
+        ].join('\n'),
+      };
+    }
   }
   return { ok: true };
 }

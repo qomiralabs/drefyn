@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RecordedMigration } from '../src/checksum.ts';
-import type { VectorExtension } from '../src/prerequisites.ts';
+import type { RoleAccess, VectorExtension } from '../src/prerequisites.ts';
 import {
   runMigrate,
   type ConnectedRole,
@@ -25,6 +25,7 @@ interface FakeState {
   invalid?: InvalidIndex[];
   role?: ConnectedRole;
   vector?: VectorExtension | undefined;
+  roles?: RoleAccess[];
   lockFree?: boolean;
   trackingProblem?: string;
   history?: RecordedMigration[];
@@ -48,6 +49,12 @@ function fakeSession(state: FakeState = {}) {
       calls.push('prerequisites');
       return Promise.resolve(
         'vector' in state ? state.vector : { schema: 'extensions', version: '0.8.7' },
+      );
+    },
+    requiredRoles: () => {
+      calls.push('roles');
+      return Promise.resolve(
+        state.roles ?? [{ role: 'drefyn_auth', exists: true, canConnect: true }],
       );
     },
     invalidIndexes: () => {
@@ -125,6 +132,7 @@ describe('runMigrate order', () => {
     expect(r.calls).toEqual([
       'role',
       'prerequisites',
+      'roles',
       'indexes',
       'lock',
       'lock_timeout',
@@ -175,12 +183,35 @@ describe('runMigrate order', () => {
     },
   );
 
+  it.each([['up'], ['down'], ['status']])(
+    'exits 4 on %s before the lock when drefyn_auth is missing, naming the upgrade',
+    async (command) => {
+      const r = await migrate(['migrate', command], {
+        roles: [{ role: 'drefyn_auth', exists: false, canConnect: false }],
+      });
+      expect(r.code).toBe(4);
+      expect(r.stderr).toContain('drefyn_auth');
+      expect(r.stderr).toContain('bash scripts/selfhost.sh upgrade');
+      expect(r.stderr).toContain('deploy/postgres/upgrade/0001-auth-role.sql');
+      expect(r.calls).toEqual(['role', 'prerequisites', 'roles', 'close']);
+    },
+  );
+
+  it('exits 4 when drefyn_auth may not connect to this database', async () => {
+    const r = await migrate(['migrate', 'up'], {
+      roles: [{ role: 'drefyn_auth', exists: true, canConnect: false }],
+    });
+    expect(r.code).toBe(4);
+    expect(r.stderr).toContain('CONNECT');
+    expect(r.calls).not.toContain('lock');
+  });
+
   it('exits 2 and touches nothing when the lock is held', async () => {
     const r = await migrate(['migrate', 'up'], { lockFree: false });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/another run holds the migration lock/);
     // Never held, so never released.
-    expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'lock', 'close']);
+    expect(r.calls).toEqual(['role', 'prerequisites', 'roles', 'indexes', 'lock', 'close']);
   });
 
   it('exits 1 on a tracking table of the wrong shape and creates nothing', async () => {
@@ -259,7 +290,7 @@ describe('runMigrate with an invalid index in app', () => {
         'app.gadgets_name_idx_ccnew on app.gadgets (a build is still in progress)',
       );
       expect(r.stderr).toContain('drop index concurrently if exists app.<index>');
-      expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'close']);
+      expect(r.calls).toEqual(['role', 'prerequisites', 'roles', 'indexes', 'close']);
     },
   );
 
@@ -281,7 +312,15 @@ describe('runMigrate status', () => {
     );
     expect(r.code).toBe(0);
     expect(r.stdout).toBe(`applied  ${A}\npending  ${B}\n`);
-    expect(r.calls).toEqual(['role', 'prerequisites', 'indexes', 'shape', 'history', 'close']);
+    expect(r.calls).toEqual([
+      'role',
+      'prerequisites',
+      'roles',
+      'indexes',
+      'shape',
+      'history',
+      'close',
+    ]);
   });
 
   it('marks each problem file in the report and exits 3', async () => {

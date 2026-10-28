@@ -21,6 +21,9 @@ import { hidePgEnvironment, sslOption } from './pg-session.ts';
 import type { OrganizationSchema } from './organization.ts';
 import type { PublishedSchema } from './published.ts';
 import { assertRoleSafe, readRoleFacts, type PoolKind } from './role-check.ts';
+
+// TODO(#127): open the auth pool; until then only these two have a URL and a handle.
+type OpenPool = Exclude<PoolKind, 'auth'>;
 import type { Schema } from './schema.generated.ts';
 import {
   APP_TIMEOUT_MAX_MS,
@@ -60,7 +63,7 @@ export interface DatabaseDeps {
 }
 
 interface PoolState {
-  readonly kind: PoolKind;
+  readonly kind: OpenPool;
   readonly pool: pg.Pool;
   readonly statementTimeoutMs: number;
   readonly logger: DbLogger | undefined;
@@ -72,12 +75,12 @@ interface PoolState {
 const appPools = new WeakMap<object, PoolState>();
 const readerPools = new WeakMap<object, PoolState>();
 
-const URL_KEYS: Readonly<Record<PoolKind, string>> = {
+const URL_KEYS: Readonly<Record<OpenPool, string>> = {
   app: 'DREFYN_DATABASE_URL',
   reader: 'DREFYN_PUBLIC_READER_DATABASE_URL',
 };
 
-const TIMEOUT_MAX: Readonly<Record<PoolKind, number>> = {
+const TIMEOUT_MAX: Readonly<Record<OpenPool, number>> = {
   app: APP_TIMEOUT_MAX_MS,
   reader: READER_TIMEOUT_MAX_MS,
 };
@@ -138,7 +141,7 @@ class IsolatedClient extends pg.Client {
   }
 }
 
-export function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfig {
+export function poolConfig(config: DatabaseConfig, kind: OpenPool): pg.PoolConfig {
   const url = new URL(config.url);
   const password = decodeURIComponent(url.password);
   return {
@@ -163,7 +166,7 @@ export function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfi
 
 // For failures to get a connection at all. Anything the mapping does not know, such as a TLS
 // handshake the server refused, still means no connection.
-function unavailable(error: unknown, kind: PoolKind): unknown {
+function unavailable(error: unknown, kind: OpenPool): unknown {
   const mapped = toDbError(error, URL_KEYS[kind]);
   if (mapped instanceof DbError) return mapped;
   return new DbError('DB_UNAVAILABLE', `could not reach the database from ${URL_KEYS[kind]}`);
@@ -173,7 +176,7 @@ function unavailable(error: unknown, kind: PoolKind): unknown {
 // exists so tests can drive the transaction rules with a scripted client.
 export function databaseOverPool(
   pool: pg.Pool,
-  kind: PoolKind,
+  kind: OpenPool,
   options: { readonly statementTimeoutMs: number; readonly logger?: DbLogger },
 ): Database | PublishedDatabase {
   const handle = Object.freeze({});
@@ -189,7 +192,7 @@ export function databaseOverPool(
   return handle as Database | PublishedDatabase;
 }
 
-async function open(config: DatabaseConfig, kind: PoolKind, deps: DatabaseDeps): Promise<object> {
+async function open(config: DatabaseConfig, kind: OpenPool, deps: DatabaseDeps): Promise<object> {
   if (config.statementTimeoutMs > TIMEOUT_MAX[kind]) {
     throw new DbError(
       'DB_CONFIG_INVALID',
