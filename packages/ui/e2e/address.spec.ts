@@ -140,6 +140,16 @@ const JOINER_LABELS = [
   '\u0915\u094d\u200d\u0937\u200c.in',
   // a Latin letter and ZWJ after a valid one
   '\u0915\u094d\u200d\u0937\u0061\u200d.in',
+  // an Arabic letter, a CJK character and a ZWNJ
+  '\u0628\u4e00\u200c\u0628.com',
+  // U+1715 and ZWJ after a Latin letter
+  '\u0061\u1715\u200d\u0937.com',
+  // U+1715 and ZWNJ after a Latin letter
+  '\u0061\u1715\u200c\u0937.com',
+  // U+1715 and ZWJ after a Devanagari letter
+  '\u0915\u1715\u200d\u0937.in',
+  // U+1715 and ZWNJ after a Devanagari letter
+  '\u0915\u1715\u200c\u0937.in',
 ];
 const JOINERS = JOINER_LABELS.map((domain) => `jane@${domain}`);
 

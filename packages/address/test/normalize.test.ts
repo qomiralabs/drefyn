@@ -152,6 +152,12 @@ const refusals: readonly (readonly [string, string, Reason])[] = [
     'jane@\u0915\u094d\u200d\u0937\u0061\u200d.in',
     'domain',
   ],
+  // Joiner contexts where Node and the browsers disagree in one direction or the other.
+  ['an Arabic letter, a CJK character and a ZWNJ', 'jane@\u0628\u4e00\u200c\u0628.com', 'domain'],
+  ['U+1715 and ZWJ after a Latin letter', 'jane@\u0061\u1715\u200d\u0937.com', 'domain'],
+  ['U+1715 and ZWNJ after a Latin letter', 'jane@\u0061\u1715\u200c\u0937.com', 'domain'],
+  ['U+1715 and ZWJ after a Devanagari letter', 'jane@\u0915\u1715\u200d\u0937.in', 'domain'],
+  ['U+1715 and ZWNJ after a Devanagari letter', 'jane@\u0915\u1715\u200c\u0937.in', 'domain'],
 ];
 
 describe('normalizeEmailAddress refusals', () => {
