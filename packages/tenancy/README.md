@@ -17,13 +17,16 @@ IDs:
 
 - `OrganizationId`, `ProjectId`: branded UUID strings. A plain string does not typecheck as
   either, and one does not typecheck as the other.
-- `organizationId(value)`, `projectId(value)`, `idOf(kind, value)`: the only ways to brand a
-  string, alongside `parsePublicId`. The input must be a canonical lowercase UUID
+- `UserId`: a branded UUID string for a person. It does not typecheck as an `OrganizationId`
+  or a `ProjectId`, and neither of those typechecks as a `UserId`.
+- `organizationId(value)`, `projectId(value)`, `userId(value)`, `idOf(kind, value)`: the only
+  ways to brand a string, alongside `parsePublicId`. The input must be a canonical lowercase UUID
   (`8-4-4-4-12` hex, any 128 bit value); anything else throws `ID_MALFORMED`. Uppercase is
   rejected, not lowercased, so one tenant has one spelling.
 - `IdKind`, `ID_KINDS`, `IdOf<K>`: the kinds `idOf` accepts and the branded type for each. The
   kind is the public prefix: `org`, `prj`, `usr`, `mem`, `key`, `nod`, `ver`, `ast`, `cmp`, `inc`,
-  `sub`, `whk`, `evt`, `crd`. `ID_KINDS` is frozen. Renaming a prefix breaks the public API.
+  `sub`, `whk`, `evt`, `crd`, `ses` (session), `inv` (invitation). `ID_KINDS` is frozen.
+  Renaming a prefix breaks the public API.
 
 Refs:
 
@@ -31,6 +34,8 @@ Refs:
   the credit ledger.
 - `TenantRef`: `{ organizationId, projectId }`, for project scoped stores. A `TenantRef` is an
   `OrganizationRef`; an `OrganizationRef` is not a `TenantRef`.
+- `UserRef`: `{ userId }`, for the user's own rows before an organization is chosen. It is
+  not an `OrganizationRef`, and no tenant ref is a `UserRef`.
 
 Cache keys:
 
