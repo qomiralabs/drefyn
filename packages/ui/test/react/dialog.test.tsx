@@ -321,4 +321,31 @@ describe('Dialog', () => {
     const d = <Dialog open defaultOpen title="Search" children="Body" />;
     expect([a, b, c, d]).toHaveLength(4);
   });
+
+  // Held open with no way to say it closed, Escape and Close would do nothing and trap the
+  // keyboard inside, so the types refuse it, with or without a trigger.
+  it('needs onOpenChange whenever the caller holds open, and never takes open with defaultOpen', () => {
+    const change = (next: boolean): boolean => next;
+    // @ts-expect-error open without onOpenChange, no trigger.
+    const a = <Dialog open title="Search" children="Body" />;
+    // @ts-expect-error open without onOpenChange, with a trigger.
+    const b = <Dialog trigger="Search" open title="Search" children="Body" />;
+    // @ts-expect-error open together with defaultOpen, with a trigger.
+    const c = (
+      <Dialog
+        trigger="Search"
+        open
+        defaultOpen
+        onOpenChange={change}
+        title="Search"
+        children="Body"
+      />
+    );
+    const held = <Dialog open onOpenChange={change} title="Search" children="Body" />;
+    const drawnHeld = (
+      <Dialog trigger="Search" open onOpenChange={change} title="Search" children="Body" />
+    );
+    const own = <Dialog trigger="Search" defaultOpen title="Search" children="Body" />;
+    expect([a, b, c, held, drawnHeld, own]).toHaveLength(6);
+  });
 });
