@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import { PLACEHOLDER } from '../../../fixtures/placeholder.ts';
 import { projectsOf } from '../../../fixtures/projects.ts';
 import { guardOrganization } from '../../../server/guard.ts';
+import { IconLock } from '../../../shell/icons.tsx';
 import { PRODUCTS } from '../../../shell/products.ts';
 import { parseShellPath, shellHref } from '../../../shell/route.ts';
 import { Answer, Calm, Eyebrow, Head, Ranked } from '../../../views/calm.tsx';
@@ -67,10 +68,14 @@ export default async function ProductHome({ params }: Params) {
         label="Projects"
         items={projects.map((p) => ({
           id: p.slug,
-          mark: null,
+          mark: p.readOnly ? (
+            <span role="img" aria-label="Read only" className="inline-flex text-secondary">
+              <IconLock />
+            </span>
+          ) : null,
           title: p.name,
           href: shellHref({ org, product: product.id, project: p.slug }),
-          detail: `${product.label} project`,
+          detail: p.answer,
           when: null,
         }))}
       />

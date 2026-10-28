@@ -6,13 +6,35 @@ export const PLACEHOLDER = {
   inbox: { needsYou: 2 },
   projects: {
     // Success: the calm home with an answer.
-    'payments-api': { id: 'prj_payments', product: 'docs', name: 'Payments API docs' },
+    'payments-api': {
+      id: 'prj_payments',
+      product: 'docs',
+      name: 'Payments API docs',
+      answer: '3 pages are out of date.',
+    },
     // Empty: no pages yet.
-    'new-docs': { id: 'prj_new', product: 'docs', name: 'New docs' },
+    'new-docs': { id: 'prj_new', product: 'docs', name: 'New docs', answer: 'No pages yet.' },
     // Error: the project fails to load.
-    unreachable: { id: 'prj_unreachable', product: 'docs', name: 'Partner API docs' },
+    // Also over the Starter limit, so it is read only.
+    unreachable: {
+      id: 'prj_unreachable',
+      product: 'docs',
+      name: 'Partner API docs',
+      answer: 'Read only. Nothing was deleted.',
+      readOnly: true,
+    },
     // Loading: the data never arrives, so the skeleton stays.
-    pending: { id: 'prj_pending', product: 'docs', name: 'Pending docs' },
-    'acme-status': { id: 'prj_status', product: 'status', name: 'Acme status' },
+    pending: {
+      id: 'prj_pending',
+      product: 'docs',
+      name: 'Pending docs',
+      answer: 'Waiting for its first check.',
+    },
+    'acme-status': {
+      id: 'prj_status',
+      product: 'status',
+      name: 'Acme status',
+      answer: 'Everything is running.',
+    },
   },
 } as const;

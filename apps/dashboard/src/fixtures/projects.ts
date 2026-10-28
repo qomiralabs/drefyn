@@ -8,19 +8,33 @@ export interface PlaceholderProject {
   readonly id: string;
   readonly product: ProductId;
   readonly name: string;
+  // The project's answer to its product's question, in one sentence.
+  readonly answer: string;
+  readonly readOnly: boolean;
 }
+
+const shape = (
+  slug: string,
+  p: (typeof PLACEHOLDER.projects)[ProjectSlug],
+): PlaceholderProject => ({
+  slug,
+  id: p.id,
+  product: p.product,
+  name: p.name,
+  answer: p.answer,
+  readOnly: 'readOnly' in p,
+});
 
 // The placeholder project at a product and slug, or undefined, which the route turns into a
 // 404. A project only exists under its own product.
 export function findProject(product: string, slug: string): PlaceholderProject | undefined {
   const entry = Object.entries(PLACEHOLDER.projects).find(([key]) => key === slug);
   if (entry?.[1].product !== product) return undefined;
-  const [, project] = entry;
-  return { slug, id: project.id, product: project.product, name: project.name };
+  return shape(slug, entry[1]);
 }
 
 export function projectsOf(product: ProductId): PlaceholderProject[] {
   return Object.entries(PLACEHOLDER.projects)
     .filter(([, p]) => p.product === product)
-    .map(([slug, p]) => ({ slug, id: p.id, product: p.product, name: p.name }));
+    .map(([slug, p]) => shape(slug, p));
 }

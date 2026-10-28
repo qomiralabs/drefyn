@@ -17,7 +17,6 @@ import {
   IconPulse,
   IconSchema,
   IconSettings,
-  IconUpDown,
   IconUsers,
 } from './icons.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
@@ -190,20 +189,19 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
             <ProductsNav org={org} label="Products, in menu" opens={data.opens} variant="drawer" />
           </div>
 
+          {/* A plain link to the product's project list until the switcher popover exists. */}
           {project === undefined || product === undefined ? null : (
             <Link
               href={`/${org}/${product}`}
-              className="flex items-center gap-8 rounded-sm border border-rule px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:border-transparent sm:max-md:px-0"
+              className="flex items-center gap-8 rounded-sm px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:px-0"
             >
               <span className="inline-flex text-secondary">{PRODUCT_ICON[product]({})}</span>
               <span className={`flex min-w-0 flex-1 flex-col ${RAIL_HIDDEN}`}>
                 <span className="truncate font-medium text-ink">{project.name}</span>
                 <span className="text-caption text-secondary">
-                  {productLabel} project<span className="sr-only">, switch project</span>
+                  {productLabel} project
+                  <span className="sr-only">, all {productLabel} projects</span>
                 </span>
-              </span>
-              <span className={`inline-flex text-secondary ${RAIL_HIDDEN}`}>
-                <IconUpDown />
               </span>
             </Link>
           )}

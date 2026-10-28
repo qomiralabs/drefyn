@@ -60,7 +60,7 @@ test('the sidebar names the project with a plain link, not a menu it does not ha
   const project = side.getByRole('link', { name: /^Payments API docs/ });
   await expect(project).toHaveAttribute('href', '/acme/docs');
   await expect(project).not.toHaveAttribute('aria-haspopup', /.*/);
-  await expect(side.locator('[data-icon="up-down"]')).toHaveCount(0);
+  await expect(project.locator('[data-icon="up-down"]')).toHaveCount(0);
 });
 
 test('the product home gives each project its own answer and says which is read only', async ({

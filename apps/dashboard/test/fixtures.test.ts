@@ -28,7 +28,10 @@ describe('placeholder projects', () => {
       id: 'prj_payments',
       product: 'docs',
       name: 'Payments API docs',
+      answer: '3 pages are out of date.',
+      readOnly: false,
     });
+    expect(findProject('docs', 'unreachable')?.readOnly).toBe(true);
     expect(findProject('status', 'payments-api')).toBeUndefined();
     expect(findProject('docs', 'missing')).toBeUndefined();
   });
