@@ -192,7 +192,9 @@ const AUTH_POOL_MAX = 4;
 // Hosts where the connection never leaves the machine or the compose network.
 function isLocalHost(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === 'postgres' || hostname === '[::1]') return true;
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+  // Postgres URLs keep the host opaque, so 127.300.0.1 stays a name that pg would resolve
+  // through DNS; only a real dotted address counts.
+  return /^127(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(hostname);
 }
 
 // require skips the certificate check and disable has no TLS at all, so off the machine

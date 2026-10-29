@@ -316,7 +316,7 @@ const HAS_ORGANIZATION = `exists (select from pg_attribute o where o.attrelid = 
 const RELATION_GRANTS = `
 select n.nspname || '.' || c.relname as object, c.relkind::text as kind,
        null::text as column_name, ${GRANTEE} as grantee, a.privilege_type as privilege,
-       ${HAS_ORGANIZATION} as tenant
+       a.is_grantable as grantable, ${HAS_ORGANIZATION} as tenant
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   cross join lateral aclexplode(c.relacl) a
@@ -324,7 +324,7 @@ select n.nspname || '.' || c.relname as object, c.relkind::text as kind,
    and a.grantee <> c.relowner
 union all
 select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text, ${GRANTEE}, a.privilege_type,
-       ${HAS_ORGANIZATION}
+       a.is_grantable, ${HAS_ORGANIZATION}
   from pg_attribute att
   join pg_class c on c.oid = att.attrelid
   join pg_namespace n on n.oid = c.relnamespace
@@ -717,27 +717,58 @@ async function definitionProblems(
   return out;
 }
 
-// The sign in role reaches only listed tables, and never one that holds tenant rows.
-function authGrantProblem(
+// Plain DML, as for drefyn_app: TRUNCATE ignores RLS, and REFERENCES, TRIGGER and MAINTAIN
+// are owner business.
+const AUTH_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE', 'DELETE']);
+
+// The sign in role reaches only listed tables, never one that holds tenant rows, and even
+// there only with plain DML it cannot pass on.
+function authGrantProblems(
   target: string,
   object: string,
   privilege: string,
+  grantable: boolean,
   tenant: boolean,
   authTables: ReadonlySet<string>,
-): CatalogProblem | undefined {
+): CatalogProblem[] {
   if (tenant) {
-    return problem(
-      'auth_grant',
-      object,
-      `${target} grants ${privilege} to ${AUTH_ROLE}; the sign in role may never reach a table with organization_id`,
+    return [
+      problem(
+        'auth_grant',
+        object,
+        `${target} grants ${privilege} to ${AUTH_ROLE}; the sign in role may never reach a table with organization_id`,
+      ),
+    ];
+  }
+  if (!authTables.has(object)) {
+    return [
+      problem(
+        'auth_grant',
+        object,
+        `${target} grants ${privilege} to ${AUTH_ROLE} and ${object} is not on the auth table allow list`,
+      ),
+    ];
+  }
+  const out: CatalogProblem[] = [];
+  if (!AUTH_PRIVILEGES.has(privilege)) {
+    out.push(
+      problem(
+        'auth_grant',
+        object,
+        `${target} grants ${privilege} to ${AUTH_ROLE}, beyond SELECT, INSERT, UPDATE and DELETE`,
+      ),
     );
   }
-  if (authTables.has(object)) return undefined;
-  return problem(
-    'auth_grant',
-    object,
-    `${target} grants ${privilege} to ${AUTH_ROLE} and ${object} is not on the auth table allow list`,
-  );
+  if (grantable) {
+    out.push(
+      problem(
+        'auth_grant',
+        object,
+        `${target} grants ${privilege} to ${AUTH_ROLE} with grant option`,
+      ),
+    );
+  }
+  return out;
 }
 
 const PER_COLUMN = new Set(['SELECT', 'UPDATE']);
@@ -793,8 +824,16 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
       continue;
     }
     if (grantee === AUTH_ROLE) {
-      const found = authGrantProblem(target, object, privilege, flag(row, 'tenant'), authTables);
-      if (found !== undefined) out.push(found);
+      out.push(
+        ...authGrantProblems(
+          target,
+          object,
+          privilege,
+          flag(row, 'grantable'),
+          flag(row, 'tenant'),
+          authTables,
+        ),
+      );
     }
     if (columnTables.has(object)) {
       const found = columnGrantProblem(object, column, grantee, privilege, columnGrants);

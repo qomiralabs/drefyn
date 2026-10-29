@@ -81,7 +81,7 @@ secrets.
 | `DB_ROLE_UNSAFE`            | the startup role check failed                                                                  |
 | `DB_TENANT_CONTEXT_MISSING` | no valid organization, no valid project where one is required, or no user                      |
 | `DB_TENANT_CONTEXT_INVALID` | a key that belongs to another entry point, a malformed user id, or a context that is not plain |
-| `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant                                           |
+| `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant or user                                   |
 | `DB_RLS_VIOLATION`          | a row level security policy refused a write                                                    |
 | `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                                            |
 | `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                                             |
@@ -135,8 +135,9 @@ beyond the bootstrap's.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
 `organization_id`, even one on the auth table list, or on a table off that list; `EXECUTE` on
-any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; default
-privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and
+any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; anything
+beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or any grant option;
+default privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and
 `published_read` unless it matches its `userPolicies` entry exactly (command, roles, `USING`
 and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alike; any policy
 to `PUBLIC`, restrictive ones included; a unique key without `organization_id` on a tenant table
