@@ -48,21 +48,25 @@ In order, with the refusal reason for each step:
 7. The local part must be a dot atom of at most 64 characters: printable ASCII from
    ``A-Z a-z 0-9 ! # $ % & ' * + - / = ? ^ _ ` { | } ~``, dots only between atoms. Quoted
    strings, comments, spaces, escapes and non ASCII are refused: `local_part`.
-8. The domain may not hold a default ignorable code point (soft hyphen, zero width space,
-   word joiner, variation selectors and the like), since IDNA would drop it silently. ZWNJ
-   (U+200C) and ZWJ (U+200D) are refused too, at a cost: real Persian and Indic domains
-   that need a joiner (after a virama, or between Persian letters) cannot be used, and only
-   their joiner free spelling, a different domain, is accepted. The reason is that the
-   runtimes disagree on the joiner context rule. Node 24 checks only the first joiner in a
-   label and stores labels with later invalid joiners, while every browser refuses them,
-   and the split also runs the other way (U+1715 before a joiner). The browser spec test
-   "Node and this engine still disagree on raw joiner host conversion" fails once they
-   agree; that is the moment to revisit. In ASCII the domain may hold only
-   letters, digits, dots and hyphens, checked both as typed and in its NFKC form; other non
-   ASCII is left to IDNA. It is lower cased and converted to ASCII with the WHATWG URL host
-   rules (the same conversion as `node:url` `domainToASCII`). The result needs two or more
-   labels, each 1 to 63 letters, digits or inner hyphens, at most 253 characters in all, and
-   a top label that is not all digits, which rules out IP addresses: `domain`.
+8. The domain as typed may not hold a default ignorable code point (soft hyphen, zero
+   width space, word joiner, variation selectors and the like), since IDNA would drop it
+   silently. ZWNJ (U+200C) and ZWJ (U+200D) are refused too, because the runtimes
+   disagree on the joiner context rules: Node 24 stores labels with joiners that every
+   browser refuses, and browsers accept some that Node refuses (U+1715 before a joiner).
+   The browser spec test "Node and this engine still disagree on raw joiner host
+   conversion" fails once they agree; that is the moment to revisit. In ASCII the domain
+   may hold only letters, digits, dots and hyphens, checked both as typed and in its NFKC
+   form; other non ASCII is left to IDNA. It is lower cased and converted to ASCII with the
+   WHATWG URL host rules (the same conversion as `node:url` `domainToASCII`). The result
+   needs two or more labels, each 1 to 63 letters, digits or inner hyphens, at most 253
+   characters in all, and a top label that is not all digits, which rules out IP
+   addresses: `domain`.
+
+   These checks see the domain as typed. A domain typed in `xn--` form goes to IDNA
+   unchecked for now (#168), so a joiner domain typed as punycode is accepted, and Node
+   can store IDNA invalid ACE labels that Firefox refuses. The server's answer stands. An
+   ACE label is stored as itself, so this cannot make two different domains store as one.
+
 9. The local part is lower cased. If the joined address is now over 254 characters,
    because IDNA made the domain longer: `length`.
 
