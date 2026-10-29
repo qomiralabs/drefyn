@@ -172,6 +172,8 @@ describe('the shipped rules file', () => {
     'packages/auth/src/session.ts',
     'packages/auth/test/session.test.ts',
     'packages/auth/README.md',
+    'packages/address/src/normalize.ts',
+    'packages/address/README.md',
     'apps/cloud/src/tenancy/rls.sql',
     'packages/tenancy/src/ids.ts',
     'packages/billing/src/invoice.ts',

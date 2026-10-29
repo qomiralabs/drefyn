@@ -59,7 +59,9 @@ describe('package manifest', () => {
 
   it('pins every dev dependency exactly', () => {
     for (const [name, version] of Object.entries(pkg.devDependencies)) {
-      expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
+      // Our own packages come from this repo at its current commit, never from npm.
+      if (name.startsWith('@drefyn/')) expect(version, name).toBe('workspace:*');
+      else expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
     }
     // It came in only as a peer of the axe runner; pinning it holds the browser protocol.
     expect(pkg.devDependencies['playwright-core']).toBe(pkg.devDependencies['@playwright/test']);
