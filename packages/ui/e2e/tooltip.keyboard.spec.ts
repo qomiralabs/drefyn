@@ -87,3 +87,60 @@ for (const theme of THEMES) {
     await expect(tip).toHaveCSS('opacity', '1');
   });
 }
+
+// On a page long enough to scroll, the Tab that reaches a trigger also scrolls it into view.
+// The tooltip and its description must survive that scroll, or a keyboard or screen reader
+// user never hears why a disabled control cannot act.
+const SCROLL_CASES = [
+  {
+    story: 'components-tooltip--toolbar',
+    // Edit component comes first, then the first icon button, whose tooltip sits on top.
+    tabs: 2,
+    name: 'Mark as verified',
+    text: 'Mark as verified',
+  },
+  {
+    story: 'components-tooltip--disabled-reason',
+    // Placed below its disabled button.
+    tabs: 1,
+    name: 'Publish update',
+    text: 'Only owners can publish this page.',
+  },
+] as const;
+
+for (const theme of THEMES) {
+  for (const { story, tabs, name, text } of SCROLL_CASES) {
+    test(`${name} keeps its tooltip and description when Tab scrolls it into view in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, story, theme);
+      // A story that opens with its tooltip shown starts closed here.
+      await page.keyboard.press('Escape');
+      await page.evaluate(() => {
+        const spacer = document.createElement('div');
+        spacer.setAttribute('data-spacer', '');
+        spacer.style.height = '2000px';
+        document.querySelector('#storybook-root')?.prepend(spacer);
+        window.scrollTo(0, 0);
+      });
+      for (let i = 0; i < tabs; i += 1) await page.keyboard.press(tabKey(browserName));
+      const button = page.getByRole('button', { name });
+      await expect(button).toBeFocused();
+      // The Tab really scrolled: the page is no longer at the top.
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      const tip = page.getByRole('tooltip');
+      await expect(tip).toHaveText(text);
+      await expect(button).toHaveAccessibleDescription(text);
+      // Still there once scrolling has settled, not only for a frame.
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          }),
+      );
+      await expect(tip).toBeVisible();
+      await expect(button).toHaveAccessibleDescription(text);
+    });
+  }
+}

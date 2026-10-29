@@ -63,6 +63,26 @@ describe('TextField', () => {
     expect(icon?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it("keeps a caller's own aria-describedby ahead of its description and error", () => {
+    render(
+      <>
+        <p id="site-help">Names appear in every page title.</p>
+        <TextField
+          id="site-name"
+          label="Site name"
+          aria-describedby="site-help"
+          description="Shown in the browser tab."
+          error="Enter a name."
+        />
+      </>,
+    );
+    expect(describedBy(field())).toEqual([
+      'Names appear in every page title.',
+      'Shown in the browser tab.',
+      'Enter a name.',
+    ]);
+  });
+
   it('is not a live region: the form decides when to announce errors', () => {
     render(<TextField id="site-name" label="Site name" error="Enter a name." />);
     expect(screen.queryByRole('alert')).toBeNull();

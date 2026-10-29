@@ -239,6 +239,90 @@ describe('Undo', () => {
     expect(undo).toHaveBeenCalledTimes(1);
   });
 
+  // Without the guard both presses in one frame reach the handler, because the card has not
+  // gone yet: this is the test that fails when the guard is removed.
+  it('runs once when two presses land in the same frame', () => {
+    const undo = vi.fn();
+    render(<ToastRegion />);
+    show({ title: 'Archived Pricing', undo });
+    const button = within(card('Archived Pricing')).getByRole('button', { name: 'Undo' });
+    act(() => {
+      button.click();
+      button.click();
+    });
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs once when a press and the shortcut land in the same frame', () => {
+    const undo = vi.fn();
+    render(<ToastRegion />);
+    show({ title: 'Archived Pricing', undo });
+    const button = within(card('Archived Pricing')).getByRole('button', { name: 'Undo' });
+    act(() => {
+      button.click();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }));
+    });
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a held key, so auto repeat never undoes a run of toasts', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    render(<ToastRegion />);
+    show({ title: 'Archived Pricing', undo: first });
+    show({ title: 'Archived Changelog', undo: second });
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true, repeat: true });
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it('leaves the shortcut alone when something else already handled it', () => {
+    const undo = vi.fn();
+    render(<ToastRegion />);
+    show({ title: 'Archived Pricing', undo });
+    const claim = (event: KeyboardEvent) => {
+      event.preventDefault();
+    };
+    document.body.addEventListener('keydown', claim);
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+    document.body.removeEventListener('keydown', claim);
+    expect(undo).not.toHaveBeenCalled();
+    expect(queryCard('Archived Pricing')).not.toBeNull();
+  });
+
+  it('says so when an undo throws before it returns', () => {
+    render(<ToastRegion />);
+    show({
+      title: 'Archived Pricing',
+      undo: () => {
+        throw new Error('offline');
+      },
+    });
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+    const failed = card('Could not undo');
+    expect(within(failed).getByText('Archived Pricing')).toBeDefined();
+    fireEvent.click(within(failed).getByRole('button', { name: 'Dismiss' }));
+  });
+
+  it('says so when an undo returns a thenable that is not a native promise and rejects', async () => {
+    render(<ToastRegion />);
+    const thenable = {
+      then(_resolve: () => void, reject: (reason: unknown) => void) {
+        reject(new Error('offline'));
+      },
+    };
+    show({ title: 'Archived Pricing', undo: () => thenable as unknown as Promise<void> });
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const failed = card('Could not undo');
+    expect(within(failed).getByText('Archived Pricing')).toBeDefined();
+    fireEvent.click(within(failed).getByRole('button', { name: 'Dismiss' }));
+  });
+
   it('leaves Cmd+Z to a text field, a text area and editable content', () => {
     const undo = vi.fn();
     render(
