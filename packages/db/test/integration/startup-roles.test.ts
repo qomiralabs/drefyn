@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { createDatabase, createPublishedDatabase } from '../../src/database.ts';
+import { createAuthDatabase, createDatabase, createPublishedDatabase } from '../../src/database.ts';
 import { DbError } from '../../src/errors.ts';
 import { closeDatabase } from '../../src/index.ts';
 import { errorText, rejected } from '../support.ts';
@@ -8,7 +8,14 @@ import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
 import { until } from './support/process.ts';
 import { stack, superuser } from './support/stack.ts';
-import { appConfig, backendsOf, fixtureTemplate, readerConfig } from './support/tenancy.ts';
+import {
+  appConfig,
+  authConfig,
+  authUrl,
+  backendsOf,
+  fixtureTemplate,
+  readerConfig,
+} from './support/tenancy.ts';
 
 const dbs = databases();
 const fixture = fixtureTemplate(dbs);
@@ -122,6 +129,37 @@ describeWithStack('startup role check', () => {
 
   it('refuses the reader pool on the owner', async () => {
     await unsafe(createPublishedDatabase(readerConfig(db.owner)));
+  });
+
+  it('starts the auth pool as drefyn_auth and closes it cleanly', async () => {
+    await closeDatabase(await createAuthDatabase(authConfig(authUrl(db))));
+    await noBackendsLeft('drefyn_auth');
+  });
+
+  // The sign in path must never run on a role that holds tenant grants, or the other way.
+  it.each<[string, () => string, string]>([
+    ['the app role', () => db.app, 'drefyn_app'],
+    ['the reader role', () => db.reader, 'drefyn_public_reader'],
+    ['the owner', () => db.owner, 'drefyn_owner'],
+  ])('refuses the auth pool on %s', async (_label, url, role) => {
+    const error = await unsafe(createAuthDatabase(authConfig(url())));
+    expect(error.message).toContain('drefyn_auth');
+    expect(error.message).toContain(role);
+    await noBackendsLeft(role);
+  });
+
+  it('refuses a superuser on the auth pool', async () => {
+    const error = await unsafe(createAuthDatabase(authConfig(urlAs(SUPERUSER))));
+    expect(error.message).toMatch(/superuser/i);
+  });
+
+  it.each<[string, (url: string) => Promise<unknown>]>([
+    ['app', (url) => createDatabase(appConfig(url))],
+    ['reader', (url) => createPublishedDatabase(readerConfig(url))],
+  ])('refuses the %s pool on drefyn_auth', async (_label, open) => {
+    const error = await unsafe(open(authUrl(db)));
+    expect(error.message).toContain('drefyn_auth');
+    await noBackendsLeft('drefyn_auth');
   });
 
   it('fails a wrong password as bad config, without the password', async () => {

@@ -29,6 +29,87 @@ const orgTable = (name: string, columns: readonly string[] = ['body text']) =>
 const projectTable = (name: string, columns: readonly string[] = ['body text']) =>
   tenantTableSql({ name, scope: 'project', columns, projectsTable: 'fixture_projects' });
 
+// A table with no organization_id, for the identity table rules. RLS is on, as the real ones
+// will have it.
+const globalTable = (name: string, columns: readonly string[] = ['body text']) =>
+  `create table app.${name} (id uuid primary key default uuidv7(), ${columns.join(', ')});
+alter table app.${name} enable row level security;
+alter table app.${name} force row level security;`;
+
+const reviewed = (name: string) => ({ name, reason: 'test only' });
+
+// The fixture lists with the given global tables, and anything else the case needs.
+function lists(globals: readonly string[], more: Partial<AllowLists> = {}): AllowLists {
+  return {
+    ...FIXTURE_ALLOW_LISTS,
+    globalTables: [
+      ...FIXTURE_ALLOW_LISTS.globalTables,
+      ...globals.map((g) => reviewed(`app.${g}`)),
+    ],
+    ...more,
+  };
+}
+
+// A users table built the reviewed way: no table level select or update for anyone, column
+// grants only, and one policy per role.
+const USERS_UP = `${globalTable('users', ['email text not null', 'display_name text', 'created_at timestamptz not null default now()'])}
+revoke all on app.users from drefyn_app;
+grant select (id, email, display_name, created_at) on app.users to drefyn_app;
+grant update (display_name) on app.users to drefyn_app;
+grant insert on app.users to drefyn_auth;
+grant select (id, email) on app.users to drefyn_auth;
+create policy self_read on app.users for select to drefyn_app using (id = app.current_user_id());
+create policy self_update on app.users for update to drefyn_app
+  using (id = app.current_user_id()) with check (id = app.current_user_id());
+create policy auth_access on app.users to drefyn_auth using (true) with check (true);`;
+
+const SELF = '(id = app.current_user_id())';
+
+const USERS_LISTS = lists(['users'], {
+  authTables: [reviewed('app.users')],
+  userPolicies: [
+    {
+      name: 'app.users.self_read',
+      command: 'select',
+      roles: ['drefyn_app'],
+      using: SELF,
+      withCheck: null,
+      reason: 'test only',
+    },
+    {
+      name: 'app.users.self_update',
+      command: 'update',
+      roles: ['drefyn_app'],
+      using: SELF,
+      withCheck: SELF,
+      reason: 'test only',
+    },
+    {
+      name: 'app.users.auth_access',
+      command: 'all',
+      roles: ['drefyn_auth'],
+      using: 'true',
+      withCheck: 'true',
+      reason: 'test only',
+    },
+  ],
+  columnGrants: [
+    ...['id', 'email', 'display_name', 'created_at'].map((column) => ({
+      name: `app.users.${column}`,
+      grantee: 'drefyn_app',
+      privilege: 'SELECT',
+      reason: 'test only',
+    })),
+    { name: 'app.users.display_name', grantee: 'drefyn_app', privilege: 'UPDATE', reason: 'r' },
+    ...['id', 'email'].map((column) => ({
+      name: `app.users.${column}`,
+      grantee: 'drefyn_auth',
+      privilege: 'SELECT',
+      reason: 'test only',
+    })),
+  ],
+});
+
 interface BadCase {
   readonly rule: CatalogRule;
   readonly object: string;
@@ -401,6 +482,280 @@ grant execute on function app.bad_public_fn() to public;`,
     up: () =>
       'alter default privileges for role drefyn_owner grant execute on functions to public;',
   },
+  // The sign in role must never reach tenant data, whatever the auth table list says.
+  'an auth grant on an organization table': {
+    rule: 'auth_grant',
+    object: 'app.fixture_members',
+    mentions: ['drefyn_auth', 'organization_id'],
+    up: () => 'grant select on app.fixture_members to drefyn_auth;',
+  },
+  'an auth grant on an organization table on the auth list': {
+    rule: 'auth_grant',
+    object: 'app.fixture_members',
+    mentions: ['organization_id'],
+    up: () => 'grant select on app.fixture_members to drefyn_auth;',
+    allow: lists([], { authTables: [reviewed('app.fixture_members')] }),
+  },
+  'an auth grant on a project table': {
+    rule: 'auth_grant',
+    object: 'app.fixture_published',
+    up: () => 'grant select on app.fixture_published to drefyn_auth;',
+  },
+  'an auth grant on a global table off the auth list': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_global',
+    mentions: ['drefyn_auth', 'auth table allow list'],
+    up: () => `${globalTable('bad_auth_global')}
+grant select on app.bad_auth_global to drefyn_auth;`,
+    allow: lists(['bad_auth_global']),
+  },
+  'a column grant to drefyn_auth on a tenant table': {
+    rule: 'auth_grant',
+    object: 'app.fixture_members',
+    mentions: ['email'],
+    up: () => 'grant select (email) on app.fixture_members to drefyn_auth;',
+  },
+  'execute on a context reader for drefyn_auth': {
+    rule: 'auth_grant',
+    object: 'app.current_org()',
+    up: () => 'grant execute on function app.current_org() to drefyn_auth;',
+  },
+  'create on schema app for drefyn_auth': {
+    rule: 'auth_grant',
+    object: 'app',
+    mentions: ['CREATE'],
+    up: () => 'grant create on schema app to drefyn_auth;',
+  },
+  'default privileges for drefyn_auth': {
+    rule: 'default_privileges',
+    object: 'drefyn_auth',
+    up: () =>
+      'alter default privileges for role drefyn_owner in schema app grant select on tables to drefyn_auth;',
+  },
+  // A global table had no policy rule at all: a user keyed policy must be reviewed.
+  'a user policy off the allow list': {
+    rule: 'policy',
+    object: 'app.bad_user_policy',
+    mentions: ['self_read'],
+    up: () => `${globalTable('bad_user_policy')}
+create policy self_read on app.bad_user_policy for select to drefyn_app
+  using (id = app.current_user_id());`,
+    allow: lists(['bad_user_policy']),
+  },
+  'a user policy that differs from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_text',
+    mentions: ['self_read', 'USING'],
+    up: () => `${globalTable('bad_policy_text')}
+create policy self_read on app.bad_policy_text for select to drefyn_app using (true);`,
+    allow: lists(['bad_policy_text'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_text.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  'a user policy for another command than its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_cmd_user',
+    mentions: ['self_read'],
+    up: () => `${globalTable('bad_policy_cmd_user')}
+create policy self_read on app.bad_policy_cmd_user to drefyn_app
+  using (id = app.current_user_id()) with check (id = app.current_user_id());`,
+    allow: lists(['bad_policy_cmd_user'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_cmd_user.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  // Each of the next three differs from its entry in one field only, so every comparison is
+  // needed to catch it.
+  'a user policy whose command alone differs from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_cmd',
+    mentions: ['self_read', 'is for delete, not select'],
+    up: () => `${globalTable('bad_policy_only_cmd')}
+create policy self_read on app.bad_policy_only_cmd for delete to drefyn_app
+  using (id = app.current_user_id());`,
+    allow: lists(['bad_policy_only_cmd'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_cmd.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  'a user policy whose roles alone differ from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_roles',
+    mentions: ['self_read', 'is to drefyn_app, drefyn_auth, not drefyn_app'],
+    up: () => `${globalTable('bad_policy_only_roles')}
+create policy self_read on app.bad_policy_only_roles for select to drefyn_app, drefyn_auth
+  using (id = app.current_user_id());`,
+    allow: lists(['bad_policy_only_roles'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_roles.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  'a user policy whose WITH CHECK alone differs from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_check',
+    mentions: ['self_update', 'WITH CHECK'],
+    up: () => `${globalTable('bad_policy_only_check')}
+create policy self_update on app.bad_policy_only_check for update to drefyn_app
+  using (id = app.current_user_id()) with check (true);`,
+    allow: lists(['bad_policy_only_check'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_check.self_update',
+          command: 'update',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: SELF,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  // drefyn_auth is held to plain DML on a listed table: TRUNCATE ignores RLS, and the rest is
+  // owner business.
+  'a truncate grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_truncate',
+    mentions: ['TRUNCATE', 'drefyn_auth'],
+    up: () => `${globalTable('bad_auth_truncate')}
+revoke all on app.bad_auth_truncate from drefyn_app;
+grant truncate on app.bad_auth_truncate to drefyn_auth;`,
+    allow: lists(['bad_auth_truncate'], { authTables: [reviewed('app.bad_auth_truncate')] }),
+  },
+  'a trigger grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_trigger',
+    mentions: ['TRIGGER'],
+    up: () => `${globalTable('bad_auth_trigger')}
+revoke all on app.bad_auth_trigger from drefyn_app;
+grant trigger on app.bad_auth_trigger to drefyn_auth;`,
+    allow: lists(['bad_auth_trigger'], { authTables: [reviewed('app.bad_auth_trigger')] }),
+  },
+  'a references grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_references',
+    mentions: ['REFERENCES'],
+    up: () => `${globalTable('bad_auth_references')}
+revoke all on app.bad_auth_references from drefyn_app;
+grant references on app.bad_auth_references to drefyn_auth;`,
+    allow: lists(['bad_auth_references'], { authTables: [reviewed('app.bad_auth_references')] }),
+  },
+  'a grant option for drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_option',
+    mentions: ['SELECT', 'grant option'],
+    up: () => `${globalTable('bad_auth_option')}
+revoke all on app.bad_auth_option from drefyn_app;
+grant select on app.bad_auth_option to drefyn_auth with grant option;`,
+    allow: lists(['bad_auth_option'], { authTables: [reviewed('app.bad_auth_option')] }),
+  },
+  'a column grant option for drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_column_option',
+    mentions: ['app.bad_auth_column_option.body', 'grant option'],
+    up: () => `${globalTable('bad_auth_column_option')}
+revoke all on app.bad_auth_column_option from drefyn_app;
+grant select (body) on app.bad_auth_column_option to drefyn_auth with grant option;`,
+    allow: lists(['bad_auth_column_option'], {
+      authTables: [reviewed('app.bad_auth_column_option')],
+    }),
+  },
+  // Default privileges give drefyn_app every column of a new table, the next one included.
+  'the default grants left on a users table': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['SELECT', 'drefyn_app'],
+    up: () => globalTable('users', ['email text']),
+    allow: lists(['users']),
+  },
+  'a table level update on users': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['UPDATE', 'drefyn_app'],
+    up: () => `${globalTable('users', ['email text'])}
+revoke all on app.users from drefyn_app;
+grant update on app.users to drefyn_app;`,
+    allow: lists(['users']),
+  },
+  'a column grant off the list on users': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['app.users.email', 'UPDATE', 'drefyn_app'],
+    up: () => `${globalTable('users', ['email text'])}
+revoke all on app.users from drefyn_app;
+grant update (email) on app.users to drefyn_app;`,
+    allow: lists(['users']),
+  },
+  'a column grant off the list on password_credentials': {
+    rule: 'column_grant',
+    object: 'app.password_credentials',
+    mentions: ['app.password_credentials.phc', 'drefyn_auth'],
+    up: () => `${globalTable('password_credentials', ['phc text'])}
+revoke all on app.password_credentials from drefyn_app;
+grant select (phc) on app.password_credentials to drefyn_auth;`,
+    allow: lists(['password_credentials'], { authTables: [reviewed('app.password_credentials')] }),
+  },
+  'a table level update on password_credentials for drefyn_auth': {
+    rule: 'column_grant',
+    object: 'app.password_credentials',
+    mentions: ['UPDATE', 'drefyn_auth'],
+    up: () => `${globalTable('password_credentials', ['phc text'])}
+revoke all on app.password_credentials from drefyn_app;
+grant update on app.password_credentials to drefyn_auth;`,
+    allow: lists(['password_credentials'], { authTables: [reviewed('app.password_credentials')] }),
+  },
+  // A policy with no TO clause applies to every role, the pools included.
+  'a restrictive policy to public': {
+    rule: 'public_policy',
+    object: 'app.fixture_notes',
+    mentions: ['narrow'],
+    up: () => `create policy narrow on app.fixture_notes as restrictive using (body <> '');`,
+  },
+  'a policy to public on a global table': {
+    rule: 'public_policy',
+    object: 'app.bad_public_global',
+    up: () => `${globalTable('bad_public_global')}
+create policy deny on app.bad_public_global using (false);`,
+    allow: lists(['bad_public_global']),
+  },
+  'a policy to public and a role': {
+    rule: 'public_policy',
+    object: 'app.fixture_members',
+    up: () =>
+      `create policy wide on app.fixture_members as restrictive to drefyn_app, public using (true);`,
+  },
 };
 
 // Applies the bad file through the real migrate command, as a reviewer would see it fail.
@@ -484,6 +839,69 @@ alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organiza
     };
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with a users table built the reviewed way', async () => {
+    const db = await fixture();
+    await withBadMigration(db, USERS_UP);
+    const problems = await catalogProblems(db.owner, USERS_LISTS);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with plain DML for drefyn_auth on a listed auth table', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `${globalTable('ok_auth_dml')}
+revoke all on app.ok_auth_dml from drefyn_app;
+grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
+    );
+    const allow = lists(['ok_auth_dml'], { authTables: [reviewed('app.ok_auth_dml')] });
+    const problems = await catalogProblems(db.owner, allow);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with a reviewed user policy on an organization table', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `create policy has_email on app.fixture_members for select to drefyn_app using (email <> '');`,
+    );
+    const allow = lists([], {
+      userPolicies: [
+        {
+          name: 'app.fixture_members.has_email',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: "(email <> ''::text)",
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    });
+    const problems = await catalogProblems(db.owner, allow);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with a reviewed global unique key', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `${orgTable('ok_slugs', ['slug text not null'])}
+create unique index ok_slugs_slug_key on app.ok_slugs (slug);`,
+    );
+    const allow = lists([], {
+      globalUniqueConstraints: [reviewed('app.ok_slugs.ok_slugs_slug_key')],
+    });
+    const problems = await catalogProblems(db.owner, allow);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with usage on schema app for drefyn_auth from the shipped migrations', async () => {
+    const db = await dbs.fresh('migrated');
+    expect(
+      await query(db.owner, `select has_schema_privilege('drefyn_auth', 'app', 'USAGE') as usage`),
+    ).toEqual([{ usage: true }]);
   });
 
   it('through check:catalog with exit 0 on the migrated template', async () => {
@@ -605,6 +1023,9 @@ describe('catalog case list', () => {
       'default_privileges',
       'app_privilege',
       'tenant_foreign_key',
+      'auth_grant',
+      'column_grant',
+      'public_policy',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }

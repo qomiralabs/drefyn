@@ -21,10 +21,11 @@ const withGetter = (key: string, value: string, base: object = {}) =>
   Object.defineProperty({ ...base }, key, { get: () => value, enumerable: true });
 
 describe('projectSettings', () => {
-  it('takes a TenantRef as both settings', () => {
+  it('takes a TenantRef as both settings, with an empty user', () => {
     expect(projectSettings({ organizationId: ORG, projectId: PROJECT })).toEqual({
       organizationId: ORG,
       projectId: PROJECT,
+      userId: '',
     });
   });
 
@@ -33,7 +34,7 @@ describe('projectSettings', () => {
       organizationId: ORG,
       projectId: PROJECT,
     });
-    expect(projectSettings(ctx)).toEqual({ organizationId: ORG, projectId: PROJECT });
+    expect(projectSettings(ctx)).toEqual({ organizationId: ORG, projectId: PROJECT, userId: '' });
   });
 
   // A project transaction must never quietly become an organization one.
@@ -83,10 +84,11 @@ describe('projectSettings', () => {
 
 describe('organizationSettings', () => {
   // The project is always set, to empty here, so nothing left on the session can stand in.
-  it('takes an OrganizationRef with an empty project', () => {
+  it('takes an OrganizationRef with an empty project and user', () => {
     expect(organizationSettings({ organizationId: ORG })).toEqual({
       organizationId: ORG,
       projectId: '',
+      userId: '',
     });
   });
 

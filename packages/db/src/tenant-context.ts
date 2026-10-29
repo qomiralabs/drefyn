@@ -1,10 +1,12 @@
-import { organizationId, projectId } from '@drefyn/tenancy';
+import { organizationId, projectId, userId } from '@drefyn/tenancy';
 import { DbError } from './errors.ts';
 
+// Every transaction sets all three, empty where unused, so nothing left on the session can
+// stand in for a value the entry point did not set.
 export interface TenantSettings {
   readonly organizationId: string;
-  // Empty for an organization scoped transaction, so the project always gets set too.
   readonly projectId: string;
+  readonly userId: string;
 }
 
 function missing(reason: string): DbError {
@@ -32,8 +34,7 @@ function ownFields(ctx: unknown, allowed: readonly string[]): Map<string, Proper
   if (proto !== Object.prototype && proto !== null) throw invalid('is not a plain object');
   const fields = new Map(Object.entries(Object.getOwnPropertyDescriptors(ctx)));
   for (const key of fields.keys()) {
-    if (!allowed.includes(key))
-      throw invalid('has a field other than organizationId and projectId');
+    if (!allowed.includes(key)) throw invalid(`has a field other than ${allowed.join(' and ')}`);
   }
   return fields;
 }
@@ -57,7 +58,7 @@ export function projectSettings(ctx: unknown): TenantSettings {
   const organization = organizationOf(fields);
   const project = canonical(dataValue(fields.get('projectId')), projectId);
   if (project === undefined) throw missing('has no valid projectId');
-  return { organizationId: organization, projectId: project };
+  return { organizationId: organization, projectId: project, userId: '' };
 }
 
 // For withOrganization. Any own projectId, even undefined, means the caller holds a project
@@ -65,12 +66,40 @@ export function projectSettings(ctx: unknown): TenantSettings {
 export function organizationSettings(ctx: unknown): TenantSettings {
   const fields = ownFields(ctx, FIELDS);
   if (fields.has('projectId')) throw invalid('has a projectId; use withTenant for a project');
-  return { organizationId: organizationOf(fields), projectId: '' };
+  return { organizationId: organizationOf(fields), projectId: '', userId: '' };
 }
+
+// For withUser. A user belongs to many organizations, so an organization or project key here
+// means the caller mixed two contexts, and their permissive policies would combine.
+export function userSettings(ctx: unknown): TenantSettings {
+  if (typeof ctx === 'object' && ctx !== null) {
+    for (const key of ['organizationId', 'projectId']) {
+      if (Object.hasOwn(ctx, key)) {
+        throw invalid(`has ${key}; a user context holds the user only`);
+      }
+    }
+  }
+  const fields = ownFields(ctx, ['userId']);
+  const descriptor = fields.get('userId');
+  if (descriptor === undefined || ('value' in descriptor && descriptor.value === undefined)) {
+    throw missing('has no userId');
+  }
+  const user = canonical(dataValue(descriptor), userId);
+  if (user === undefined) throw invalid('has a userId that is not a valid user id');
+  return { organizationId: '', projectId: '', userId: user };
+}
+
+// For withAuth: no tenant and no user, all three set empty.
+export const AUTH_SETTINGS: TenantSettings = Object.freeze({
+  organizationId: '',
+  projectId: '',
+  userId: '',
+});
 
 // Ceilings per pool: an unbounded value would quietly turn the timeout off.
 export const APP_TIMEOUT_MAX_MS = 60_000;
 export const READER_TIMEOUT_MAX_MS = 10_000;
+export const AUTH_TIMEOUT_MAX_MS = 10_000;
 
 // The statement timeout for one transaction. Throws DbError DB_CONFIG_INVALID.
 export function transactionTimeout(timeoutMs: unknown, fallbackMs: number, maxMs: number): number {

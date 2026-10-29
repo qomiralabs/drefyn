@@ -49,23 +49,27 @@ describe('package shape', () => {
     }
   });
 
-  // Every way in needs a tenant or the published reader: nothing here hands out a pool, a
+  // Every way in needs a tenant, a user, the published reader or the auth pool: nothing here hands out a pool, a
   // client, a Kysely instance or a transaction without context.
   it('exports only context bound access, the config parsers and the helpers', () => {
     expect(Object.keys(db).sort()).toEqual(
       [
         'DbError',
         'closeDatabase',
+        'createAuthDatabase',
         'createDatabase',
         'createPublishedDatabase',
         'newId',
+        'parseAuthDatabaseConfig',
         'parseDatabaseConfig',
         'parseMigrationConfig',
         'parsePublishedReaderConfig',
         'toSafeInteger',
+        'withAuth',
         'withOrganization',
         'withPublishedReader',
         'withTenant',
+        'withUser',
       ].sort(),
     );
   });

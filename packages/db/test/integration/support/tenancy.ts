@@ -5,10 +5,13 @@ import { ALLOW_LISTS, type AllowLists } from '../../../src/allow-lists.ts';
 import { checkCatalog, type CatalogProblem } from '../../../src/catalog-check.ts';
 import {
   closeDatabase,
+  createAuthDatabase,
   createDatabase,
   createPublishedDatabase,
+  parseAuthDatabaseConfig,
   parseDatabaseConfig,
   parsePublishedReaderConfig,
+  type AuthDatabase,
   type Database,
   type PublishedDatabase,
 } from '../../../src/index.ts';
@@ -146,9 +149,23 @@ export function readerConfig(url: string, overrides: Readonly<Record<string, str
   });
 }
 
+export function authConfig(url: string, overrides: Readonly<Record<string, string>> = {}) {
+  return parseAuthDatabaseConfig({
+    DREFYN_AUTH_DATABASE_URL: url,
+    DREFYN_DATABASE_SSL: 'disable',
+    ...overrides,
+  });
+}
+
+// The drefyn_auth URL for a test database. Not on TestDatabase, so its password is only read
+// by files that use it.
+export function authUrl(db: TestDatabase): string {
+  return urlFor('auth', db.name);
+}
+
 // Pools opened by a file, closed after it even when a test fails halfway.
 export function pools() {
-  const open: (Database | PublishedDatabase)[] = [];
+  const open: (Database | PublishedDatabase | AuthDatabase)[] = [];
   afterAll(async () => {
     for (const db of open.splice(0)) await closeDatabase(db).catch(() => undefined);
   });
@@ -163,6 +180,14 @@ export function pools() {
       overrides: Readonly<Record<string, string>> = {},
     ): Promise<PublishedDatabase> {
       const db = await createPublishedDatabase(readerConfig(url, overrides));
+      open.push(db);
+      return db;
+    },
+    async auth(
+      url: string,
+      overrides: Readonly<Record<string, string>> = {},
+    ): Promise<AuthDatabase> {
+      const db = await createAuthDatabase(authConfig(url, overrides));
       open.push(db);
       return db;
     },
@@ -182,6 +207,20 @@ export async function one<R, DB>(tx: Transaction<DB>, query: RawBuilder<R>): Pro
 export const context = sql<{ org: string | null; project: string | null; pid: number }>`
   select app.current_org()::text as org, app.current_project()::text as project,
          pg_backend_pid() as pid`;
+
+// Raw settings rather than the readers, so it also works as drefyn_auth, which may not
+// execute app functions.
+export const settings = sql<{
+  org: string | null;
+  project: string | null;
+  user_id: string | null;
+  who: string;
+  pid: number;
+}>`
+  select current_setting('drefyn.organization_id', true) as org,
+         current_setting('drefyn.project_id', true) as project,
+         current_setting('drefyn.user_id', true) as user_id,
+         current_user::text as who, pg_backend_pid() as pid`;
 
 // Writes as drefyn_app on a plain connection with transaction local settings, so seeding
 // does not depend on the code under test.

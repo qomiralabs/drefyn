@@ -52,12 +52,21 @@ export function stack(): Stack {
   return cached;
 }
 
-export type Role = 'owner' | 'app' | 'reader';
+export type Role = 'owner' | 'app' | 'reader' | 'auth';
 const ROLE_NAMES: Record<Role, string> = {
   owner: 'drefyn_owner',
   app: 'drefyn_app',
   reader: 'drefyn_public_reader',
+  auth: 'drefyn_auth',
 };
+
+// Read on demand, so files that never open the auth pool still run against a deploy/.env
+// from before the role.
+export function authPassword(): string {
+  const value = envFile()['DREFYN_AUTH_PASSWORD'] ?? '';
+  if (value === '') throw new Error('deploy/.env has no DREFYN_AUTH_PASSWORD');
+  return value;
+}
 
 export function roleName(role: Role): string {
   return ROLE_NAMES[role];
@@ -65,7 +74,9 @@ export function roleName(role: Role): string {
 
 export function urlFor(role: Role, database: string, password?: string): string {
   const s = stack();
-  const secret = encodeURIComponent(password ?? s.passwords[role]);
+  const secret = encodeURIComponent(
+    password ?? (role === 'auth' ? authPassword() : s.passwords[role]),
+  );
   return `postgres://${ROLE_NAMES[role]}:${secret}@127.0.0.1:${s.port}/${database}`;
 }
 
