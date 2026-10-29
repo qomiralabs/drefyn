@@ -58,20 +58,27 @@ describe('parseAuthDatabaseConfig', () => {
     expect(error.message).toContain(key);
   });
 
-  it.each(['db.example.com', '10.0.0.5', 'postgres.internal', 'postgresx', 'mylocalhost'])(
-    'refuses require for %s, which skips the certificate check off the machine',
-    (host) => {
-      const error = configError(() =>
-        parseAuthDatabaseConfig({
-          DREFYN_AUTH_DATABASE_URL: urlAt(host),
-          DREFYN_DATABASE_SSL: 'require',
-        }),
-      );
-      expect(error.message).toContain('DREFYN_DATABASE_SSL');
-      expect(error.message).toContain('verify-full');
-      expect(error.message).not.toContain(host);
-    },
-  );
+  // Not addresses: the URL parser keeps them as names, so pg would look them up in DNS.
+  it.each([
+    'db.example.com',
+    '10.0.0.5',
+    'postgres.internal',
+    'postgresx',
+    'mylocalhost',
+    '127.300.0.1',
+    '127.999.999.999',
+    '127.0.0.256',
+  ])('refuses require for %s, which skips the certificate check off the machine', (host) => {
+    const error = configError(() =>
+      parseAuthDatabaseConfig({
+        DREFYN_AUTH_DATABASE_URL: urlAt(host),
+        DREFYN_DATABASE_SSL: 'require',
+      }),
+    );
+    expect(error.message).toContain('DREFYN_DATABASE_SSL');
+    expect(error.message).toContain('verify-full');
+    expect(error.message).not.toContain(host);
+  });
 
   it('reports a broken URL once, not as a TLS problem as well', () => {
     const error = configError(() =>
@@ -119,14 +126,32 @@ describe('parseAuthDatabaseConfig', () => {
 });
 
 const LOCAL = new Set(['localhost', 'postgres', '[::1]']);
-const isLoopbackV4 = (host: string) => /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+// Four decimal octets of 0 to 255 without leading zeros, the first one 127.
+const isLoopbackV4 = (host: string) => {
+  const parts = host.split('.');
+  return (
+    parts.length === 4 &&
+    parts[0] === '127' &&
+    parts.every((p) => /^(0|[1-9]\d{0,2})$/.test(p) && Number(p) <= 255)
+  );
+};
 
 describe('auth pool TLS for any host', () => {
   const label = fc.stringMatching(/^[a-z0-9]([a-z0-9-]{0,10}[a-z0-9])?$/);
   const host = fc.oneof(
     fc.array(label, { minLength: 1, maxLength: 4 }).map((parts) => parts.join('.')),
     fc.ipV4(),
-    fc.constantFrom('postgres', 'localhost', 'postgres-1', 'localhost.example.com', '128.0.0.1'),
+    fc.constantFrom(
+      'postgres',
+      'localhost',
+      'postgres-1',
+      'localhost.example.com',
+      '128.0.0.1',
+      '127.300.0.1',
+    ),
+    fc
+      .tuple(fc.integer({ min: 0, max: 999 }), fc.integer({ min: 0, max: 999 }))
+      .map(([a, b]) => `127.${String(a)}.${String(b)}.1`),
   );
 
   it('accepts require only for loopback or the compose service name', () => {

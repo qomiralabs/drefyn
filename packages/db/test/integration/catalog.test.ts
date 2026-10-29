@@ -581,6 +581,117 @@ create policy self_read on app.bad_policy_cmd_user to drefyn_app
       ],
     }),
   },
+  // Each of the next three differs from its entry in one field only, so every comparison is
+  // needed to catch it.
+  'a user policy whose command alone differs from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_cmd',
+    mentions: ['self_read', 'is for delete, not select'],
+    up: () => `${globalTable('bad_policy_only_cmd')}
+create policy self_read on app.bad_policy_only_cmd for delete to drefyn_app
+  using (id = app.current_user_id());`,
+    allow: lists(['bad_policy_only_cmd'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_cmd.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  'a user policy whose roles alone differ from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_roles',
+    mentions: ['self_read', 'is to drefyn_app, drefyn_auth, not drefyn_app'],
+    up: () => `${globalTable('bad_policy_only_roles')}
+create policy self_read on app.bad_policy_only_roles for select to drefyn_app, drefyn_auth
+  using (id = app.current_user_id());`,
+    allow: lists(['bad_policy_only_roles'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_roles.self_read',
+          command: 'select',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: null,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  'a user policy whose WITH CHECK alone differs from its entry': {
+    rule: 'policy',
+    object: 'app.bad_policy_only_check',
+    mentions: ['self_update', 'WITH CHECK'],
+    up: () => `${globalTable('bad_policy_only_check')}
+create policy self_update on app.bad_policy_only_check for update to drefyn_app
+  using (id = app.current_user_id()) with check (true);`,
+    allow: lists(['bad_policy_only_check'], {
+      userPolicies: [
+        {
+          name: 'app.bad_policy_only_check.self_update',
+          command: 'update',
+          roles: ['drefyn_app'],
+          using: SELF,
+          withCheck: SELF,
+          reason: 'test only',
+        },
+      ],
+    }),
+  },
+  // drefyn_auth is held to plain DML on a listed table: TRUNCATE ignores RLS, and the rest is
+  // owner business.
+  'a truncate grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_truncate',
+    mentions: ['TRUNCATE', 'drefyn_auth'],
+    up: () => `${globalTable('bad_auth_truncate')}
+revoke all on app.bad_auth_truncate from drefyn_app;
+grant truncate on app.bad_auth_truncate to drefyn_auth;`,
+    allow: lists(['bad_auth_truncate'], { authTables: [reviewed('app.bad_auth_truncate')] }),
+  },
+  'a trigger grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_trigger',
+    mentions: ['TRIGGER'],
+    up: () => `${globalTable('bad_auth_trigger')}
+revoke all on app.bad_auth_trigger from drefyn_app;
+grant trigger on app.bad_auth_trigger to drefyn_auth;`,
+    allow: lists(['bad_auth_trigger'], { authTables: [reviewed('app.bad_auth_trigger')] }),
+  },
+  'a references grant to drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_references',
+    mentions: ['REFERENCES'],
+    up: () => `${globalTable('bad_auth_references')}
+revoke all on app.bad_auth_references from drefyn_app;
+grant references on app.bad_auth_references to drefyn_auth;`,
+    allow: lists(['bad_auth_references'], { authTables: [reviewed('app.bad_auth_references')] }),
+  },
+  'a grant option for drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_option',
+    mentions: ['SELECT', 'grant option'],
+    up: () => `${globalTable('bad_auth_option')}
+revoke all on app.bad_auth_option from drefyn_app;
+grant select on app.bad_auth_option to drefyn_auth with grant option;`,
+    allow: lists(['bad_auth_option'], { authTables: [reviewed('app.bad_auth_option')] }),
+  },
+  'a column grant option for drefyn_auth on a listed auth table': {
+    rule: 'auth_grant',
+    object: 'app.bad_auth_column_option',
+    mentions: ['app.bad_auth_column_option.body', 'grant option'],
+    up: () => `${globalTable('bad_auth_column_option')}
+revoke all on app.bad_auth_column_option from drefyn_app;
+grant select (body) on app.bad_auth_column_option to drefyn_auth with grant option;`,
+    allow: lists(['bad_auth_column_option'], {
+      authTables: [reviewed('app.bad_auth_column_option')],
+    }),
+  },
   // Default privileges give drefyn_app every column of a new table, the next one included.
   'the default grants left on a users table': {
     rule: 'column_grant',
@@ -734,6 +845,19 @@ alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organiza
     const db = await fixture();
     await withBadMigration(db, USERS_UP);
     const problems = await catalogProblems(db.owner, USERS_LISTS);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with plain DML for drefyn_auth on a listed auth table', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `${globalTable('ok_auth_dml')}
+revoke all on app.ok_auth_dml from drefyn_app;
+grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
+    );
+    const allow = lists(['ok_auth_dml'], { authTables: [reviewed('app.ok_auth_dml')] });
+    const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
