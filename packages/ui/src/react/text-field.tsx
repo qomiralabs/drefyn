@@ -58,8 +58,13 @@ export function TextField({
   const invalid = error !== undefined && error.trim() !== '';
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
-  const describedBy = [description === undefined ? null : descriptionId, invalid ? errorId : null]
-    .filter((part) => part !== null)
+  // A caller's own description comes first, then the field's description and error.
+  const describedBy = [
+    rest['aria-describedby'] ?? null,
+    description === undefined ? null : descriptionId,
+    invalid ? errorId : null,
+  ]
+    .filter((part) => part !== null && part !== '')
     .join(' ');
   // Disabled is read only too, so it keeps focus and its value but never changes.
   const handle =

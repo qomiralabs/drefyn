@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test as base, expect, type Page, type Request } from '@playwright/test';
+import { storiesOnPage } from './docs-entries.ts';
 
 const STATIC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'storybook-static');
 
@@ -102,7 +103,7 @@ export const sameSize = (
 
 // Stories on a docs page with the same title, which is how many story blocks it must show.
 export function storiesOnDocsPage(title: string): number {
-  return indexEntries().filter((entry) => entry.type === 'story' && entry.title === title).length;
+  return storiesOnPage(indexEntries(), title);
 }
 
 export const DOCS_READY_CEILING_MS = 20_000;
@@ -132,7 +133,16 @@ export async function docsReadiness(
           });
         });
       const started = performance.now();
-      await document.fonts.ready;
+      // Fonts count against the same ceiling, so a font that never loads fails the wait
+      // instead of hanging it.
+      const fonts = await Promise.race([
+        document.fonts.ready.then(() => true),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(false);
+          }, limit);
+        }),
+      ]);
       for (;;) {
         const anchors = document.querySelectorAll('#storybook-docs [id^="anchor--"]').length;
         // Each block's .sb-story always holds a wrapper; the story itself mounts into the
@@ -147,7 +157,13 @@ export async function docsReadiness(
         await frame();
         const after = document.documentElement.scrollHeight;
         const heights: [number, number] = [before, after];
-        if (anchors >= wanted && innerRoots >= wanted && emptyRoots === 0 && before === after) {
+        if (
+          fonts &&
+          anchors >= wanted &&
+          innerRoots >= wanted &&
+          emptyRoots === 0 &&
+          before === after
+        ) {
           return { ready: true, anchors, innerRoots, emptyRoots, heights };
         }
         if (performance.now() - started > limit) {
@@ -158,6 +174,21 @@ export async function docsReadiness(
     },
     { stories, ceiling },
   );
+}
+
+// Waits for a docs page to be ready, or fails naming every count it waited on.
+export async function waitForDocs(
+  page: Page,
+  id: string,
+  stories: number,
+  ceiling = DOCS_READY_CEILING_MS,
+): Promise<void> {
+  const state = await docsReadiness(page, stories, ceiling);
+  if (!state.ready) {
+    throw new Error(
+      `${id} was not ready after ${ceiling} ms: ${state.anchors} of ${stories} story anchors, ${state.innerRoots} of ${stories} story roots, ${state.emptyRoots} empty story roots, last heights ${state.heights.join(' and ')}`,
+    );
+  }
 }
 
 export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Promise<void> {
@@ -171,13 +202,7 @@ export async function openPage(page: Page, entry: IndexEntry, theme: Theme): Pro
   );
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   if (entry.type === 'docs') {
-    const stories = storiesOnDocsPage(entry.title);
-    const state = await docsReadiness(page, stories);
-    if (!state.ready) {
-      throw new Error(
-        `${entry.id} was not ready after ${DOCS_READY_CEILING_MS} ms: ${state.anchors} of ${stories} story anchors, ${state.innerRoots} of ${stories} story roots, ${state.emptyRoots} empty story roots, last heights ${state.heights.join(' and ')}`,
-      );
-    }
+    await waitForDocs(page, entry.id, storiesOnDocsPage(entry.title));
     return;
   }
   await page.evaluate(async () => {

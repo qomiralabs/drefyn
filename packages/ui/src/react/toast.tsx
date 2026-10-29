@@ -61,12 +61,11 @@ export function toast(input: ToastInput): ToastHandle {
           queue.close(key);
           // A failed undo says so in an error toast, which never takes focus either.
           try {
-            const result = original();
-            if (result instanceof Promise) {
-              result.catch(() => {
-                failedUndo(input.title);
-              });
-            }
+            // Promise.resolve adopts any thenable, so a rejection from a promise library or
+            // another realm still reaches the catch.
+            Promise.resolve(original()).catch(() => {
+              failedUndo(input.title);
+            });
           } catch {
             failedUndo(input.title);
           }
@@ -206,6 +205,9 @@ export function ToastRegion(): ReactNode {
   useEffect(() => {
     let pausedForHidden = false;
     const onKeyDown = (event: KeyboardEvent) => {
+      // A held key repeats; something that already handled the key keeps it; a text field
+      // keeps its own undo.
+      if (event.repeat || event.defaultPrevented) return;
       if (!isUndo(event) || takesText(document.activeElement)) return;
       const newest = queue.visibleToasts.find((item) => item.content.undo !== undefined);
       if (newest === undefined) return;

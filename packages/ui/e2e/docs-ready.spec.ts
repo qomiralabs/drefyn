@@ -49,9 +49,10 @@ test('a page with an empty story root is not ready', async ({ page }) => {
 });
 
 test('a page whose height is still changing is not ready', async ({ page }) => {
-  // A block that grows every frame, as a story that is still laying out does.
+  // A block taller than the viewport that grows every frame, as a story that is still laying
+  // out does. Shorter, the page height would stay at the viewport's.
   const grow =
-    "const g=document.createElement('div');document.body.append(g);let h=1;(function f(){h+=1;g.style.height=h+'px';requestAnimationFrame(f);})();";
+    "const g=document.createElement('div');document.body.append(g);let h=2000;(function f(){h+=1;g.style.height=h+'px';requestAnimationFrame(f);})();";
   await serve(page, docsPage(FULL, grow));
   const state = await docsReadiness(page, 2, SHORT_MS);
   expect(state.ready).toBe(false);
