@@ -20,6 +20,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@drefyn/address": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "zod": "4.6.7"
