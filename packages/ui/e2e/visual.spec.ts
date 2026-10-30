@@ -1,5 +1,13 @@
 import { currentPlace, insidePinnedImage } from '../scripts/in-container.ts';
-import { expect, indexEntries, MOBILE, openPage, test, type Theme } from './fixtures.ts';
+import {
+  expect,
+  holdToasts,
+  indexEntries,
+  MOBILE,
+  openPage,
+  test,
+  type Theme,
+} from './fixtures.ts';
 
 const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
   { name: 'light', theme: 'light', mobile: false },
@@ -22,6 +30,9 @@ for (const entry of indexEntries()) {
     test(`${entry.type} ${entry.id} looks the same in ${variant.name}`, async ({ page }) => {
       if (variant.mobile) await page.setViewportSize(MOBILE);
       await openPage(page, entry, variant.theme);
+      if (entry.type === 'story' && entry.id.startsWith('components-toast--')) {
+        await holdToasts(page);
+      }
       await expect(page).toHaveScreenshot(`${entry.id}-${variant.name}.png`, { fullPage: true });
     });
   }

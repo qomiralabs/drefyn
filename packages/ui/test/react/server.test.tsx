@@ -10,6 +10,7 @@ import {
   Skeleton,
   StatusDot,
   StatusPip,
+  TextField,
 } from '../../src/react/index.ts';
 
 // Server safe components render once on the server and ship no JS, so their markup alone
@@ -108,5 +109,32 @@ describe('server rendered markup', () => {
     expect(html.length).toBeGreaterThan(7);
     expect(html).not.toMatch(/\sstyle="/);
     expect(html).not.toMatch(/\son[a-z]+="/i);
+  });
+
+  it('wires a TextField label, description and error with no script', () => {
+    const html = renderToStaticMarkup(
+      <TextField
+        id="site-name"
+        name="name"
+        label="Site name"
+        description="Shown in the browser tab."
+        error="Enter a name."
+      />,
+    );
+    expect(html).toContain('<label for="site-name"');
+    expect(html).toMatch(/<input[^>]* id="site-name"/);
+    expect(html).toMatch(/<input[^>]* aria-invalid="true"/);
+    const ids = /aria-describedby="([^"]+)"/.exec(html)?.[1]?.split(' ') ?? [];
+    expect(ids).toHaveLength(2);
+    for (const id of ids) expect(html).toContain(`id="${id}"`);
+  });
+
+  it('keeps a disabled TextField focusable and unchangeable with no script', () => {
+    const html = renderToStaticMarkup(
+      <TextField id="site-name" label="Site name" defaultValue="Acme docs" disabled />,
+    );
+    expect(html).toMatch(/<input[^>]* aria-disabled="true"/);
+    expect(html).toMatch(/<input[^>]* readonly=""/i);
+    expect(html).not.toMatch(/<input[^>]*\sdisabled(=|\s|>)/);
   });
 });

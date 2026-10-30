@@ -53,6 +53,7 @@
   --spacing-64: var(--dr-space-64);
   --spacing-96: var(--dr-space-96);
   --spacing-128: var(--dr-space-128);
+  --spacing-safe-bottom: var(--dr-safe-bottom);
   --height-control-sm: var(--dr-size-control-sm);
   --size-control-sm: var(--dr-size-control-sm);
   --height-control-md: var(--dr-size-control-md);
