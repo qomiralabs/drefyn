@@ -11,7 +11,7 @@ const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
 // case presses keys until the named control has focus, then compares the page. The ring
 // is drawn the same way in every engine, so Chromium in the pinned image stands for all.
 // What the focused element is: its role attribute, or its tag when the role is native.
-type Focused = 'button' | 'a' | 'switch' | 'menuitem' | 'input';
+type Focused = 'button' | 'a' | 'switch' | 'menuitem' | 'input' | 'option' | 'tab';
 
 const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-button--primary', keys: ['Tab'], focused: 'button' },
@@ -35,6 +35,22 @@ const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-text-field--disabled', keys: ['Tab'], focused: 'input' },
   { id: 'components-dialog--default', keys: ['Tab', 'Enter'], focused: 'input' },
   { id: 'components-dialog--open', keys: ['Tab', 'Tab', 'Tab', 'Tab'], focused: 'button' },
+  { id: 'components-checkbox--default', keys: ['Tab'], focused: 'input' },
+  { id: 'components-checkbox--disabled', keys: ['Tab'], focused: 'input' },
+  { id: 'components-radio-group--default', keys: ['Tab'], focused: 'input' },
+  { id: 'components-radio-group--disabled', keys: ['Tab', 'ArrowUp'], focused: 'input' },
+  { id: 'components-select--default', keys: ['Tab'], focused: 'button' },
+  { id: 'components-select--disabled', keys: ['Tab'], focused: 'button' },
+  { id: 'components-select--default', keys: ['Tab', 'Enter', 'ArrowDown'], focused: 'option' },
+  {
+    id: 'components-select--default',
+    keys: ['Tab', 'Enter', 'ArrowDown', 'ArrowDown'],
+    focused: 'option',
+  },
+  { id: 'components-popover--default', keys: ['Tab'], focused: 'button' },
+  { id: 'components-popover--default', keys: ['Tab', 'Enter', 'Tab'], focused: 'switch' },
+  { id: 'components-tabs--default', keys: ['Tab'], focused: 'tab' },
+  { id: 'components-tabs--disabled', keys: ['Tab', 'ArrowRight'], focused: 'tab' },
   // F6 reaches the notifications, Tab the toast, Tab again Undo. Focus inside holds the timer.
   { id: 'components-toast--undo', keys: ['F6', 'Tab', 'Tab'], focused: 'button' },
 ];

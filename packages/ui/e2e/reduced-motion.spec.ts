@@ -124,3 +124,64 @@ for (const theme of THEMES) {
     expect(transitions.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
   });
 }
+
+// Overlays and tabs fade in. Under reduced motion each one must fade only, within the cap,
+// read on the first frame it exists, while it is still entering, as well as once settled.
+const OPENED: {
+  id: string;
+  role: 'dialog' | 'listbox' | 'tabpanel';
+  open: (page: Page) => Promise<void>;
+}[] = [
+  {
+    id: 'components-popover--default',
+    role: 'dialog',
+    open: (page) => page.getByRole('button', { name: 'Filters' }).click(),
+  },
+  {
+    id: 'components-select--default',
+    role: 'listbox',
+    open: (page) => page.getByRole('button', { name: /^Region/ }).click(),
+  },
+  {
+    id: 'components-tabs--default',
+    role: 'tabpanel',
+    open: (page) => page.getByRole('tab', { name: 'History' }).click(),
+  },
+];
+
+for (const theme of THEMES) {
+  for (const { id, role, open } of OPENED) {
+    test(`${id} fades in without travelling, within the cap, in ${theme}`, async ({ page }) => {
+      await openStory(page, id, theme);
+      const first = page.evaluate(
+        (wanted) =>
+          new Promise<{ transform: string; translate: string }>((resolve) => {
+            const read = () => {
+              // A tab panel is there before the click; wait for the one being shown.
+              const el = [...document.querySelectorAll(`[role="${wanted}"]`)].find(
+                (node) => wanted !== 'tabpanel' || node.hasAttribute('data-entering'),
+              );
+              if (el === undefined) {
+                requestAnimationFrame(read);
+                return;
+              }
+              const style = getComputedStyle(el.closest('[data-popover]') ?? el);
+              resolve({ transform: style.transform, translate: style.translate });
+            };
+            read();
+          }),
+        role,
+      );
+      await open(page);
+      expect(await first, 'while entering').toEqual({ transform: 'none', translate: 'none' });
+      await expect(page.getByRole(role)).toBeVisible();
+      const transitions = await transitionsIn(page);
+      expect(transitions.filter((t) => MOVING.test(t.property))).toEqual([]);
+      expect(transitions.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
+      expect(
+        transitions.some((t) => t.property === 'opacity'),
+        'an opacity fade',
+      ).toBe(true);
+    });
+  }
+}
