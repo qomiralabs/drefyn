@@ -5,9 +5,11 @@ import {
   commandBar,
   NEEDS_YOU,
   main,
+  MOBILE,
   openShell,
   products,
   ROUTES,
+  TABLET,
   THEMES,
   useTheme,
 } from './fixtures.ts';
@@ -385,4 +387,49 @@ test.describe('command bar content', () => {
     await bar.getByRole('button', { name: 'Clear search' }).click();
     await expect(status).toHaveText('');
   });
+});
+
+// Two initials need clear space inside their circle, and the circle lines up with the other
+// controls in the bar. MW and WM are about the widest pairs Inter sets.
+test.describe('account initials', () => {
+  const SIZES = { desktop: { width: 1280, height: 800 }, tablet: TABLET, phone: MOBILE };
+  for (const [size, viewport] of Object.entries(SIZES)) {
+    for (const initials of ['MO', 'MW', 'WM']) {
+      test(`${initials} has room inside a circle as tall as the inbox at ${size} width`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await openShell(page, ROUTES.overview);
+        const account = banner(page).getByRole('button', { name: /account for/ });
+        // The innermost element holding the placeholder person's initials is the circle.
+        // Held as a handle, since the text it is found by changes next.
+        const circle = await account.getByText('MO', { exact: true }).elementHandle();
+        if (circle === null) throw new Error('no initials circle in the account button');
+        await circle.evaluate((el, text) => {
+          el.textContent = text;
+        }, initials);
+        const inbox = banner(page).getByRole('button', { name: /^Inbox/ });
+        const sizes = await circle.evaluate((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const text = range.getBoundingClientRect();
+          const box = el.getBoundingClientRect();
+          return {
+            width: box.width,
+            height: box.height,
+            text: text.width,
+            textHeight: text.height,
+          };
+        });
+        const inboxBox = await inbox.boundingBox();
+        expect(inboxBox).not.toBeNull();
+        if (inboxBox === null) return;
+        expect(sizes.height).toBe(inboxBox.height);
+        expect(sizes.width).toBe(sizes.height);
+        // At least the 4 px space step clear on each side, inside the 1 px edge.
+        expect((sizes.width - sizes.text) / 2 - 1).toBeGreaterThanOrEqual(4);
+        expect((sizes.height - sizes.textHeight) / 2 - 1).toBeGreaterThanOrEqual(4);
+      });
+    }
+  }
 });
