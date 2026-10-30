@@ -79,8 +79,6 @@ function Invite({ run, defaultOpen = false, busy = false, error }: InviteProps) 
           type="email"
           label="Email addresses"
           description="Separate addresses with commas."
-          placeholder="ada@example.com"
-          {...(error === undefined ? {} : { error: 'Enter at least one address.' })}
         />
         <TextField id="invite-note" name="note" label="Note" description="Optional." />
       </form>

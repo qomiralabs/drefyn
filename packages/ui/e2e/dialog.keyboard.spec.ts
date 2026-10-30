@@ -84,7 +84,8 @@ for (const theme of THEMES) {
       .toBe(true);
     await page.keyboard.press(tabKey(browserName));
     await expect(field(page, 'Email addresses')).toBeFocused();
-    await expect(field(page, 'Email addresses')).toHaveAttribute('aria-invalid', 'true');
+    // Only the send failed; the address itself is not marked wrong.
+    await expect(field(page, 'Email addresses')).not.toHaveAttribute('aria-invalid');
   });
 
   test(`with no field, focus lands on the dialog, which reads its title, in ${theme}`, async ({

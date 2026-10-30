@@ -170,23 +170,31 @@ function Card({
           </Text>
         )}
       </ToastContent>
-      {undo === undefined ? null : (
-        <button
-          type="button"
-          aria-keyshortcuts="Meta+Z Control+Z"
-          onClick={undo}
-          className={buttonClasses({ variant: 'accent', size: 'sm', disabled: false })}
+      {/* Same row box as the error icon, so the actions centre on a one line message. */}
+      <span className="flex h-row-compact shrink-0 items-center gap-4">
+        {undo === undefined ? null : (
+          <button
+            type="button"
+            aria-keyshortcuts="Meta+Z Control+Z"
+            onClick={undo}
+            className={buttonClasses({ variant: 'accent', size: 'sm', disabled: false })}
+          >
+            <span className={LABEL_CELL}>Undo</span>
+          </button>
+        )}
+        <AriaButton
+          slot="close"
+          aria-label="Dismiss"
+          className={buttonClasses({
+            variant: 'quiet',
+            size: 'sm',
+            disabled: false,
+            iconOnly: true,
+          })}
         >
-          <span className={LABEL_CELL}>Undo</span>
-        </button>
-      )}
-      <AriaButton
-        slot="close"
-        aria-label="Dismiss"
-        className={buttonClasses({ variant: 'quiet', size: 'sm', disabled: false, iconOnly: true })}
-      >
-        <IconCross />
-      </AriaButton>
+          <IconCross />
+        </AriaButton>
+      </span>
     </AriaToast>
   );
 }
