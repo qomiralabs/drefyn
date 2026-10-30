@@ -13,6 +13,7 @@ export const SERVER_SAFE = [
   'Button',
   'ButtonLink',
   'TextField',
+  'Mark',
   'Icon*',
 ] as const;
 

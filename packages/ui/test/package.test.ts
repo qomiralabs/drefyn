@@ -67,8 +67,20 @@ describe('package manifest', () => {
     expect(pkg.devDependencies['playwright-core']).toBe(pkg.devDependencies['@playwright/test']);
   });
 
-  it('builds every interactive component on React Aria Components alone, exactly pinned', () => {
-    expect(pkg.dependencies ?? {}).toEqual({ 'react-aria-components': '1.22.1' });
+  it('builds every interactive component on React Aria Components, exactly pinned', () => {
+    // react-aria is the hooks layer Components is built on, taken at the version Components
+    // pins, so one copy and one landmark manager serve the page.
+    expect(pkg.dependencies ?? {}).toEqual({
+      'react-aria': '3.53.1',
+      'react-aria-components': '1.22.1',
+    });
+    const components = JSON.parse(
+      readFileSync(
+        fileURLToPath(import.meta.resolve('react-aria-components/package.json')),
+        'utf8',
+      ),
+    ) as { dependencies: Record<string, string> };
+    expect(components.dependencies['react-aria']).toBe(pkg.dependencies?.['react-aria']);
   });
 
   it('lists no other primitives, command, toast, sheet, motion or icon library', () => {
