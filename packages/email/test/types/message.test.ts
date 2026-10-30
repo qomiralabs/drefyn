@@ -14,50 +14,41 @@ declare const link: URL;
 declare const mailer: Mailer;
 
 function compileOnly(): void {
-  // @ts-expect-error a link_identity code must say which identity is being linked
-  const missing: MailMessage = {
-    template: 'sign_in_code',
-    purpose: 'link_identity',
-    code: '12345678',
-    link,
-    expiresInMinutes: 10,
-  };
-  // @ts-expect-error linking belongs only to link_identity
-  const extra: MailMessage = {
-    template: 'sign_in_code',
+  const base = { template: 'sign_in_code', code: '12345678', link, expiresInMinutes: 10 } as const;
+  const noLinking = { ...base, purpose: 'link_identity' } as const;
+  const signInWithLinking = {
+    ...base,
     purpose: 'sign_in',
-    code: '12345678',
-    link,
-    expiresInMinutes: 10,
     linking: { provider: 'github', account: 'ada' },
-  };
-  // @ts-expect-error the provider list is closed
-  const provider: MailMessage = {
-    template: 'sign_in_code',
+  } as const;
+  const otherProvider = {
+    ...base,
     purpose: 'link_identity',
-    code: '12345678',
-    link,
-    expiresInMinutes: 10,
     linking: { provider: 'gitlab', account: 'ada' },
-  };
-  // @ts-expect-error every send needs an idempotency key
-  void mailer.send('a@b.test', missing, {});
-  // @ts-expect-error a link is a URL, not a string
-  const text: MailMessage = {
+  } as const;
+  const textLink = {
     template: 'invitation',
     organizationName: 'A',
     inviterName: 'B',
-    link: 'https://x',
+    link: 'https://app.drefyn.test/invite',
     expiresAt: new Date(),
-  };
+  } as const;
+
+  // @ts-expect-error a link_identity code must say which identity is being linked
+  const missing: MailMessage = noLinking;
+  // @ts-expect-error linking belongs only to link_identity
+  const extra: MailMessage = signInWithLinking;
+  // @ts-expect-error the provider list is closed
+  const provider: MailMessage = otherProvider;
+  // @ts-expect-error a link is a URL, not a string
+  const text: MailMessage = textLink;
+  // @ts-expect-error every send needs an idempotency key
+  void mailer.send('a@b.test', missing, {});
 
   // What must keep compiling.
   const linked: MailMessage = {
-    template: 'sign_in_code',
+    ...base,
     purpose: 'link_identity',
-    code: '12345678',
-    link,
-    expiresInMinutes: 10,
     linking: { provider: 'google', account: 'ada@example.com' },
   };
   void mailer.send('a@b.test', linked, { idempotencyKey: 'code:1' });

@@ -141,7 +141,8 @@ describe('Message-ID', () => {
     let bits = '';
     for (const byte of digest) bits += byte.toString(2).padStart(8, '0');
     let out = '';
-    for (let i = 0; i < bits.length; i += 5) out += alphabet[parseInt(bits.slice(i, i + 5), 2)];
+    for (let i = 0; i < bits.length; i += 5)
+      out += alphabet.charAt(parseInt(bits.slice(i, i + 5), 2));
     return `<${out}@drefyn.test>`;
   }
 
@@ -330,7 +331,7 @@ describe('send never throws', () => {
 
   it('resolves for arguments a typed caller could never pass', async () => {
     const { mailer } = setup();
-    const odd = mailer.send as unknown as (...args: unknown[]) => Promise<SendResult>;
+    const odd = mailer.send.bind(mailer) as unknown as (...args: unknown[]) => Promise<SendResult>;
     expect(failed(await odd()).code).toBe('email.input_invalid');
     expect(failed(await odd(TO, signIn(), null)).field).toBe('idempotencyKey');
     expect(failed(await odd(TO, signIn(), { idempotencyKey: 7 })).field).toBe('idempotencyKey');

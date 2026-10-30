@@ -88,7 +88,7 @@ describe('link guard', () => {
 
   it('refuses a link that is not a URL object', async () => {
     await refused(
-      { ...signIn(), link: 'https://app.drefyn.test/verify' as unknown as URL },
+      { ...signIn(), link: 'https://app.drefyn.test/verify' } as unknown as MailMessage,
       'link',
     );
   });

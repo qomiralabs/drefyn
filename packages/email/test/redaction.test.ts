@@ -86,6 +86,8 @@ const messages: readonly MailMessage[] = [
   },
 ];
 
+const [firstMessage, secondMessage] = messages as [MailMessage, MailMessage, ...MailMessage[]];
+
 const failures: readonly [TransportError['code'], TransportError['phase']][] = [
   ['email.rejected', 'envelope'],
   ['email.deferred', 'envelope'],
@@ -111,17 +113,24 @@ describe('logs and metrics', () => {
     for (const [code, phase] of failures) {
       transport.failNext(code, phase);
       transport.failNext(code, phase);
-      const pending = mailer.send(ADDRESS, messages[0] as MailMessage, { idempotencyKey: KEY });
+      const pending = mailer.send(ADDRESS, firstMessage, { idempotencyKey: KEY });
       await vi.advanceTimersByTimeAsync(0);
       for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
       await vi.advanceTimersByTimeAsync(1500);
       await pending;
+      // Sends that are not retried leave their second planned failure behind.
+      transport.clear();
     }
-    await mailer.send(`bad ${ADDRESS}`, messages[0] as MailMessage, { idempotencyKey: KEY });
+    // A caller that puts something other than an id in the tenant gets it dropped.
+    await mailer.send(ADDRESS, firstMessage, {
+      idempotencyKey: KEY,
+      tenant: { organizationId: ADDRESS, projectId: ORG } as never,
+    });
+    await mailer.send(`bad ${ADDRESS}`, firstMessage, { idempotencyKey: KEY });
     transport.hangNext();
-    const hung = mailer.send(ADDRESS, messages[1] as MailMessage, { idempotencyKey: KEY });
+    const hung = mailer.send(ADDRESS, secondMessage, { idempotencyKey: KEY });
     for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r));
-    await mailer.drain(0).then(() => vi.advanceTimersByTimeAsync(15_000));
+    await Promise.all([mailer.drain(0), vi.advanceTimersByTimeAsync(15_000)]);
     await hung;
 
     const sends = lines.filter((l) => l.event === 'email.send');

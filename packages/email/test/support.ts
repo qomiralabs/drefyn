@@ -122,7 +122,8 @@ export const hostileName: fc.Arbitrary<string> = fc
 const at = fc
   .date({ min: new Date('2000-01-01T00:00:00Z'), max: new Date('2100-01-01T00:00:00Z') })
   .filter((d) => !Number.isNaN(d.getTime()));
-const path = fc.webPath().map((p) => new URL(p === '' ? '/' : p, ORIGIN));
+// Prefixed, so a path such as //host cannot read as another origin.
+const path = fc.webPath().map((p) => new URL(`/p${p}`, ORIGIN));
 const code = fc.stringMatching(/^[0-9]{8}$/);
 const provider = fc.constantFrom(...LINK_PROVIDERS);
 
