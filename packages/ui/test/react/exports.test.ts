@@ -8,12 +8,13 @@ import { barrelExports } from './split.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-// The first batch of v1 components. Adding or removing an export is a public API change,
+// The v1 components so far. Adding or removing an export is a public API change,
 // so it changes this list in the same PR.
 const EXPORTS = [
   'Badge',
   'Button',
   'ButtonLink',
+  'Dialog',
   'EmptyState',
   'IconAlert',
   'IconCheck',
@@ -30,6 +31,10 @@ const EXPORTS = [
   'StatusDot',
   'StatusPip',
   'Switch',
+  'TextField',
+  'ToastRegion',
+  'Tooltip',
+  'toast',
 ];
 
 describe('@drefyn/ui/react', () => {

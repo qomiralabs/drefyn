@@ -43,7 +43,7 @@ export const NoResults: Story = {
   render: () => (
     <Frame>
       <EmptyState
-        title="No pages match 'stale'"
+        title="No pages match ‘stale’"
         headingLevel={3}
         action={<Button>Clear filter</Button>}
       >

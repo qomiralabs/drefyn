@@ -28,11 +28,11 @@ describe('EmptyState', () => {
 
   it('sets the heading level the page needs', () => {
     render(
-      <EmptyState title="No pages match 'stale'" headingLevel={3}>
+      <EmptyState title="No pages match ‘stale’" headingLevel={3}>
         Clear the filter to see every page.
       </EmptyState>,
     );
-    expect(screen.getByRole('heading', { level: 3, name: "No pages match 'stale'" })).toBeDefined();
+    expect(screen.getByRole('heading', { level: 3, name: 'No pages match ‘stale’' })).toBeDefined();
   });
 
   it('lets a caller move focus to the heading after an error replaces content', () => {

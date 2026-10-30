@@ -12,6 +12,7 @@ export const SERVER_SAFE = [
   'EmptyState',
   'Button',
   'ButtonLink',
+  'TextField',
   'Icon*',
 ] as const;
 

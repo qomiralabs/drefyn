@@ -171,6 +171,7 @@
   --dr-shell-drawer: 18rem;
   --dr-shell-inspector: 20rem;
   --dr-gutter: 1.5rem;
+  --dr-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 :where(time, data, output, td, th, [data-numeric]) {
   font-variant-numeric: tabular-nums;

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -276,5 +276,31 @@ describe('Tab in an open Menu', () => {
     await user.tab({ shift: true });
     expect(screen.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit component' }));
+  });
+
+  it('leaves Tab alone while the menu is closed, so focus never jumps to the trigger', async () => {
+    const user = userEvent.setup();
+    render(<Row />);
+    screen.getByRole('button', { name: 'Share page' }).focus();
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(trigger());
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit component' }));
+    await user.tab();
+    expect(document.activeElement).toBe(trigger());
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Share page' }));
+  });
+
+  it('ignores Ctrl+Tab and Cmd+Tab, which belong to the browser and the system', async () => {
+    const user = userEvent.setup();
+    render(<Row />);
+    await user.click(trigger());
+    const item = screen.getByRole('menuitem', { name: 'Open monitor' });
+    item.focus();
+    fireEvent.keyDown(item, { key: 'Tab', ctrlKey: true });
+    fireEvent.keyDown(item, { key: 'Tab', metaKey: true });
+    expect(screen.getByRole('menu')).toBeDefined();
+    expect(document.activeElement).toBe(item);
   });
 });

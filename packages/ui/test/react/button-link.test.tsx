@@ -49,6 +49,20 @@ describe('ButtonLink', () => {
     expect(rel).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
   });
 
+  it('treats the target name without regard to case, as browsers do', () => {
+    for (const target of ['_BLANK', '_Blank']) {
+      render(
+        <ButtonLink href="https://drefyn.com/docs" target={target}>
+          Read the docs
+        </ButtonLink>,
+      );
+      const link = screen.getByRole('link', { name: /^Read the docs.*opens in a new tab/ });
+      const rel = (link.getAttribute('rel') ?? '').split(' ');
+      expect(rel, target).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+      cleanup();
+    }
+  });
+
   it('adds nothing to a link that stays in the tab', () => {
     render(<ButtonLink href="/history">View history</ButtonLink>);
     const link = screen.getByRole('link', { name: 'View history' });

@@ -179,6 +179,10 @@ describe('tokens.css', () => {
     }
   });
 
+  it('reads the bottom safe area from the device, falling back to nothing', () => {
+    expect(root.declarations.get('--dr-safe-bottom')).toBe('env(safe-area-inset-bottom, 0px)');
+  });
+
   it('keeps 40 out of the space scale; it lives in the size family only', () => {
     expect(Object.keys(tokens.space)).not.toContain('40');
     expect(root.declarations.has('--dr-space-40')).toBe(false);
@@ -293,6 +297,8 @@ describe('tokens.dtcg.json', () => {
     expect(byPath.get('duration.move-base')?.['$value']).toEqual({ value: 180, unit: 'ms' });
     expect(byPath.get('layout.docs-content')?.['$value']).toEqual({ value: 640, unit: 'px' });
     expect(byPath.get('layer.overlay')?.['$type']).toBe('number');
+    // The safe area is the device's, not a design value, so design tools get nothing to set.
+    expect([...byPath.keys()].filter((path) => path.includes('safe'))).toEqual([]);
   });
 
   it('carries the component tokens with their types', () => {

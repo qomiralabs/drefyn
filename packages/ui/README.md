@@ -77,6 +77,10 @@ The tests fail if they drift.
   media query cannot read a custom property. Tailwind's own `xl` and `2xl` do not exist.
 - Meters: `bg-meter-track` and `bg-meter-fill`, aliases of the rule and secondary ink. A plan
   limit never takes a state colour.
+- Safe area: `mb-safe-bottom` and `pb-safe-bottom` clear the device's bottom inset, such as a
+  phone's home indicator, from `env(safe-area-inset-bottom)`. Only things pinned to the
+  bottom edge use them: toasts and the dialog's bottom sheet. Design tools get no value for
+  it, because the device sets it.
 - Skeletons: `bg-skeleton-fill`, never under text, with no shimmer or pulse.
 - Timers: `tokens.timer` and `--dr-timer-*` hold the waits (tooltip 500 ms, skeleton reveal
   200 ms, toast 6 s, toast with Undo 10 s). They are not Tailwind utilities and reduced motion
@@ -148,6 +152,21 @@ In an app that uses Tailwind:
 @import '@drefyn/ui/tailwind.css';
 @import '@drefyn/ui/react.css';
 ```
+
+### Toasts, tooltips, dialogs and fields
+
+- Mount `<ToastRegion />` once per app, then call `toast({ title, description, undo, tone })`
+  from anywhere. It returns a handle with `close()`. Undo runs once and Cmd or Ctrl+Z runs the
+  newest one when focus is not in a text field. `tone: 'error'` stays until dismissed.
+- `Tooltip` wraps one Button or ButtonLink. Its text describes the control and is never its
+  only name. A disabled Button keeps hover and focus, so a tooltip can say why.
+- `Dialog` takes a `trigger`, or `open` and `onOpenChange` from the caller. `footer` may be a
+  function that gets `close`. Set `busy` while a submit is in flight and `error` when it
+  failed. A click outside never closes it.
+- `TextField` needs an `id`, which wires its label, description and error without a hook, so
+  it renders on the server and posts with JS off. A disabled field still posts its value,
+  because it is `aria-disabled` plus `readOnly`, so servers must ignore fields a person could
+  not change.
 
 ### Writing a component
 
