@@ -1,5 +1,12 @@
 'use client';
-import type { ComponentProps, ReactElement, ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { Focusable, Tooltip as AriaTooltip, TooltipTrigger } from 'react-aria-components';
 import { tokens } from '../tokens/tokens.ts';
 
@@ -21,6 +28,16 @@ type FocusableChild = ComponentProps<typeof Focusable>['children'];
 // describes the trigger with it. Focusable lends those handlers to a plain element, so our
 // native Button and ButtonLink work as triggers. A disabled Button keeps its hover and focus
 // handlers for exactly this.
+// True when the element has focus and the browser would draw a keyboard ring on it.
+function keyboardFocused(el: HTMLElement | null): boolean {
+  if (el === null || el !== document.activeElement) return false;
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
 export function Tooltip({
   content,
   children,
@@ -28,9 +45,42 @@ export function Tooltip({
   defaultOpen = false,
 }: TooltipProps): ReactNode {
   if (content.trim() === '') throw new Error('Tooltip needs text to show.');
+  const [open, setOpen] = useState(defaultOpen);
+  const trigger = useRef<HTMLElement>(null);
+  const scrolling = useRef(false);
+
+  // React Aria closes a tooltip on any scroll around its trigger, and the scroll the browser
+  // makes to bring a newly focused trigger into view counts. The tooltip and its description
+  // would then vanish for a keyboard or screen reader user, disabled reasons included. A
+  // close that comes from a scroll while the trigger keeps keyboard focus reopens it on the
+  // next frame, which also places it again where the trigger now is.
+  useEffect(() => {
+    let reset = 0;
+    const onScroll = () => {
+      scrolling.current = true;
+      window.clearTimeout(reset);
+      reset = window.setTimeout(() => {
+        scrolling.current = false;
+      }, 0);
+    };
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.clearTimeout(reset);
+    };
+  }, []);
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next || !scrolling.current || !keyboardFocused(trigger.current)) return;
+    requestAnimationFrame(() => {
+      if (keyboardFocused(trigger.current)) setOpen(true);
+    });
+  };
+
   return (
-    <TooltipTrigger delay={tokens.timer.tooltip.ms} defaultOpen={defaultOpen}>
-      <Focusable>{children as FocusableChild}</Focusable>
+    <TooltipTrigger delay={tokens.timer.tooltip.ms} isOpen={open} onOpenChange={onOpenChange}>
+      <Focusable ref={trigger}>{children as FocusableChild}</Focusable>
       <AriaTooltip
         placement={placement}
         offset={tokens.space[4]}
