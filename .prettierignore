@@ -4,8 +4,6 @@ dist/
 .turbo/
 # Written by the token generator; a test checks them against the source byte for byte.
 packages/ui/src/generated/
-# Captured renderer output; a test compares it byte for byte.
-packages/email/test/fixtures/html/
 storybook-static/
 test-results/
 playwright-report/

@@ -10,7 +10,8 @@ import { ORIGIN } from './support.ts';
 const STREAM_MARKERS = ['<!--$-->', '<!--/$-->', '<!--html-->', '<!--head-->', '<!--body-->'];
 
 const dir = new URL('./fixtures/html/', import.meta.url);
-const fixture = (name: string) => readFileSync(new URL(`${name}.html`, dir), 'utf8');
+// Stored as .txt: packages may not carry .html, and nothing should reformat these bytes.
+const fixture = (name: string) => readFileSync(new URL(`${name}.html.txt`, dir), 'utf8');
 
 function withoutMarkers(html: string): string {
   let out = html;
@@ -24,8 +25,9 @@ function withoutMarkers(html: string): string {
 
 describe('html matches the previous renderer', () => {
   it('has one fixture per message kind and no strays', () => {
-    const files = readdirSync(dir).filter((f) => f.endsWith('.html'));
-    expect(files.sort()).toEqual(FIXTURE_MESSAGES.map(([name]) => `${name}.html`).sort());
+    expect(readdirSync(dir).sort()).toEqual(
+      FIXTURE_MESSAGES.map(([name]) => `${name}.html.txt`).sort(),
+    );
     expect(FIXTURE_MESSAGES).toHaveLength(18);
   });
 
