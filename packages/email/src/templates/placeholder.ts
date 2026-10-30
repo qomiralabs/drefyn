@@ -100,7 +100,10 @@ function codeContent(message: Extract<MailMessage, { template: 'sign_in_code' }>
       { type: 'heading', text: words.heading },
       { type: 'paragraph', text: lead },
       { type: 'code', code: message.code },
-      { type: 'paragraph', text: `The code expires in ${message.expiresInMinutes} minutes.` },
+      {
+        type: 'paragraph',
+        text: `The code expires in ${message.expiresInMinutes} ${message.expiresInMinutes === 1 ? 'minute' : 'minutes'}.`,
+      },
       { type: 'action', label: 'Open Drefyn', href: message.link },
       { type: 'rule' },
       { type: 'fineprint', text: FINEPRINT_CODE },

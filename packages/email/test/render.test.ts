@@ -368,8 +368,9 @@ describe('renderMail never throws', () => {
 
 describe('links are copied before they are checked', () => {
   class LyingUrl extends URL {
-    override get origin(): string {
-      return ORIGIN.origin;
+    constructor(href: string) {
+      super(href);
+      Object.defineProperty(this, 'origin', { value: ORIGIN.origin });
     }
   }
 

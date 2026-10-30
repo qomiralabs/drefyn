@@ -10,9 +10,9 @@ import {
   type Result,
 } from './types.ts';
 
-// Bidi embeddings, overrides and isolates can make a name read as something else in
-// the rendered mail, which is all a phishing name needs.
-const BIDI = /[\u202a-\u202e\u2066-\u2069]/u;
+// Bidi marks, embeddings, overrides and isolates can make a name read as something
+// else in the rendered mail, which is all a phishing name needs.
+const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 const ELLIPSIS = '\u2026';
 const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
@@ -44,7 +44,10 @@ const name = (limit: number) =>
     return cutName(trimmed, limit);
   });
 
-const url = z.instanceof(URL);
+// A copy is checked and rendered, never the caller's object: rendering awaits, so the
+// caller could edit the original after the check, and a subclass could lie about its
+// origin. The copy is a plain URL built from the serialised form.
+const url = z.instanceof(URL).transform((value) => new URL(value.href));
 const date = z.instanceof(Date).refine((d) => !Number.isNaN(d.getTime()));
 const provider = z.enum(LINK_PROVIDERS);
 

@@ -3,7 +3,6 @@ import {
   createMailer,
   type EmailConfig,
   type EmailDeps,
-  type MailMessage,
   type MailTransport,
   type Mailer,
   type SendResult,
@@ -18,8 +17,9 @@ const TO = 'person@example.com';
 const boom = (): never => {
   throw new Error('boom');
 };
-const trap = <T extends object>(): T =>
-  new Proxy({} as T, { get: boom, has: boom, ownKeys: boom, getOwnPropertyDescriptor: boom });
+// Typed as never so it can stand in for any argument.
+const trap = (): never =>
+  new Proxy({}, { get: boom, has: boom, ownKeys: boom, getOwnPropertyDescriptor: boom }) as never;
 
 type Kind = 'smtp' | 'none';
 
@@ -82,9 +82,7 @@ describe.each<[Kind, string]>([
 
   it('when the message throws when read', async () => {
     const mailer = mailerOf(kind);
-    const result = await settle(() =>
-      mailer.send(TO, trap<MailMessage>(), { idempotencyKey: 'code:1' }),
-    );
+    const result = await settle(() => mailer.send(TO, trap(), { idempotencyKey: 'code:1' }));
     expect(codeOf(result)).toBe(kind === 'smtp' ? 'email.render_failed' : healthy);
   });
 

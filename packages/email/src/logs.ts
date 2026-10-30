@@ -18,40 +18,49 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 // Logging and metrics must never be the reason a send fails, so a port that throws is
 // ignored.
+function quietly(work: () => void): void {
+  try {
+    work();
+  } catch {
+    // Nothing to do: the send result is what matters.
+  }
+}
+
 export function safeLogger(logger: EmailLogger): EmailLogger {
   return {
-    log(level, event, fields) {
-      try {
-        logger.log(level, event, fields);
-      } catch {
-        // Nothing to do: the send result is what matters.
-      }
+    info: (event, fields) => {
+      quietly(() => {
+        logger.info(event, fields);
+      });
+    },
+    warn: (event, fields) => {
+      quietly(() => {
+        logger.warn(event, fields);
+      });
+    },
+    error: (event, fields) => {
+      quietly(() => {
+        logger.error(event, fields);
+      });
     },
   };
 }
 
 export function safeMetrics(metrics: EmailMetrics): EmailMetrics {
-  const guard = (work: () => void) => {
-    try {
-      work();
-    } catch {
-      // As for the logger.
-    }
-  };
   return {
-    count: (name, labels, value) => {
-      guard(() => {
-        metrics.count(name, labels, value);
+    counter: (name, value, labels) => {
+      quietly(() => {
+        metrics.counter(name, value, labels);
       });
     },
-    observe: (name, labels, value) => {
-      guard(() => {
-        metrics.observe(name, labels, value);
+    histogram: (name, value, labels) => {
+      quietly(() => {
+        metrics.histogram(name, value, labels);
       });
     },
-    gauge: (name, value) => {
-      guard(() => {
-        metrics.gauge(name, value);
+    gauge: (name, value, labels) => {
+      quietly(() => {
+        metrics.gauge(name, value, labels);
       });
     },
   };
@@ -63,7 +72,8 @@ export interface SendFacts {
   readonly result: SendResult;
   readonly attempts: number;
   readonly durationMs: number;
-  readonly transport: string;
+  // Read lazily: a hosted transport's kind getter is outside our control.
+  readonly transport: () => unknown;
 }
 
 // Reads only fields whose values come from closed lists, never free text, and survives
@@ -103,37 +113,50 @@ function outcomeOf(result: SendResult): string {
   }
 }
 
+function read(work: () => unknown): unknown {
+  try {
+    return work();
+  } catch {
+    return undefined;
+  }
+}
+
+// Never throws: every read of caller supplied data is guarded, and so is each port.
 export function sendLog(logger: EmailLogger, metrics: EmailMetrics, facts: SendFacts): void {
-  const message = facts.message as Loose;
-  const tenant = (facts.options as Loose)?.['tenant'] as Loose;
-  const template = pick(() => message?.['template'], TEMPLATES);
-  const purpose = template === 'sign_in_code' ? pick(() => message?.['purpose'], PURPOSES) : null;
-  const noticeKind =
-    template === 'security_notice'
-      ? pick(() => (message?.['notice'] as Loose)?.['kind'], NOTICE_KINDS)
-      : null;
-  const outcome = outcomeOf(facts.result);
-  const error = facts.result.ok ? null : facts.result.error;
-  logger.log(facts.result.ok ? 'info' : 'warn', 'email.send', {
-    template,
-    purpose,
-    noticeKind,
-    outcome,
-    errorCode: error?.code ?? null,
-    smtpReplyClass: error?.smtpReplyClass ?? null,
-    attempts: facts.attempts,
-    durationMs: facts.durationMs,
-    transport: facts.transport,
-    organizationId: tenantId(() => tenant?.['organizationId']),
-    projectId: tenantId(() => tenant?.['projectId']),
+  quietly(() => {
+    const message = facts.message as Loose;
+    const tenant = read(() => (facts.options as Loose)?.['tenant']) as Loose;
+    const template = pick(() => message?.['template'], TEMPLATES);
+    const purpose = template === 'sign_in_code' ? pick(() => message?.['purpose'], PURPOSES) : null;
+    const noticeKind =
+      template === 'security_notice'
+        ? pick(() => (message?.['notice'] as Loose)?.['kind'], NOTICE_KINDS)
+        : null;
+    const kind = read(facts.transport);
+    const outcome = outcomeOf(facts.result);
+    const error = facts.result.ok ? null : facts.result.error;
+    const fields = {
+      template,
+      purpose,
+      noticeKind,
+      outcome,
+      errorCode: error?.code ?? null,
+      smtpReplyClass: error?.smtpReplyClass ?? null,
+      attempts: facts.attempts,
+      durationMs: facts.durationMs,
+      transport: typeof kind === 'string' ? kind : null,
+      organizationId: tenantId(() => tenant?.['organizationId']),
+      projectId: tenantId(() => tenant?.['projectId']),
+    };
+    if (facts.result.ok) logger.info('email.send', fields);
+    else logger.warn('email.send', fields);
+    const labels = { template: template ?? 'unknown', purpose: purpose ?? noticeKind ?? 'none' };
+    metrics.counter('email_sends_total', 1, { ...labels, outcome });
+    metrics.histogram('email_send_duration_ms', facts.durationMs, {
+      template: labels.template,
+      outcome,
+    });
   });
-  const labels = { template: template ?? 'unknown', purpose: purpose ?? noticeKind ?? 'none' };
-  metrics.count('email_sends_total', { ...labels, outcome });
-  metrics.observe(
-    'email_send_duration_ms',
-    { template: labels.template, outcome },
-    facts.durationMs,
-  );
 }
 
 // Startup lines: what kind of transport runs, never where it points or who it signs in as.
@@ -143,18 +166,18 @@ export function logEmailConfig(
 ): void {
   const log = safeLogger(logger);
   if (!result.ok) {
-    log.log('error', 'email.config_invalid', { key: result.error.key });
+    log.error('email.config_invalid', { key: result.error.key });
     return;
   }
   const config = result.value;
   if (config.kind === 'none') {
-    log.log('warn', 'email.no_transport', {});
+    log.warn('email.no_transport', {});
     return;
   }
-  log.log('info', 'email.transport_configured', {
+  log.info('email.transport_configured', {
     kind: config.kind,
     tls: config.smtp.tls,
     port: config.smtp.port,
   });
-  if (config.smtp.tls === 'none') log.log('warn', 'email.plaintext_smtp', {});
+  if (config.smtp.tls === 'none') log.warn('email.plaintext_smtp', {});
 }

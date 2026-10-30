@@ -46,11 +46,13 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   the code.
 - Header values refuse C0 and C1 controls, U+2028 and U+2029, and anything over 998 bytes
   on the line once encoded.
-- Names (organization, inviter, device, account, key, owner and member) refuse control and
-  bidi override characters, naming the field, and are cut at a grapheme boundary with an
+- Names (organization, inviter, device, account, key, owner and member) refuse control
+  characters and bidi marks, embeddings, overrides and isolates, naming the field, and are cut at a grapheme boundary with an
   ellipsis: 100 code points, 120 for a device and 254 for an account.
 - Links must be https on the link origin, or http only when that origin is loopback, with
-  no user or password.
+  no user or password. Each link is copied before the check and only the copy is
+  rendered, so editing the URL after `send` or a URL subclass cannot change where it
+  points.
 - A code is exactly 8 ASCII digits.
 - Recipient, sender and reply to addresses must pass `isNormalizedEmailAddress`.
 
@@ -70,6 +72,10 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
 - A transport that throws or answers in an unexpected shape counts as a lost reply.
 
 ## Logs and metrics
+
+The ports match the flags and db packages: `logger.info`, `warn` and `error(event,
+fields)`, and `metrics.counter`, `histogram` and `gauge(name, value, labels?)`. A port
+that throws is ignored, and `send` settles whatever a caller, a port or the clock does.
 
 `email.send` carries only `template`, `purpose`, `noticeKind`, `outcome`, `errorCode`,
 `smtpReplyClass`, `attempts`, `durationMs`, `transport`, `organizationId` and `projectId`.

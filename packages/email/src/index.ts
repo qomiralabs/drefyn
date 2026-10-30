@@ -27,7 +27,6 @@ export {
   type InvitationMail,
   type LinkProvider,
   type Linking,
-  type LogLevel,
   type MailMessage,
   type MailTransport,
   type Mailer,

@@ -131,6 +131,29 @@ interface Delivery {
   readonly attempts: number;
 }
 
+// The clock is injected for tests. One that throws or returns nonsense falls back to
+// wall time rather than leaving a send unsettled.
+function safeClock(clock: (() => number) | undefined): () => number {
+  if (clock === undefined) return Date.now;
+  return () => {
+    try {
+      const value = clock();
+      return Number.isFinite(value) ? value : Date.now();
+    } catch {
+      return Date.now();
+    }
+  };
+}
+
+// A getter that throws is a bad key, like any other bad key.
+function readKey(options: unknown): unknown {
+  try {
+    return (options as Partial<SendOptions> | null | undefined)?.idempotencyKey;
+  } catch {
+    return undefined;
+  }
+}
+
 function notConfigured(deps: EmailDeps): Mailer {
   const logger = safeLogger(deps.logger);
   const metrics = safeMetrics(deps.metrics);
@@ -144,7 +167,7 @@ function notConfigured(deps: EmailDeps): Mailer {
         result,
         attempts: 0,
         durationMs: 0,
-        transport: 'none',
+        transport: () => 'none',
       });
       return Promise.resolve(result);
     },
@@ -155,13 +178,14 @@ function notConfigured(deps: EmailDeps): Mailer {
 export function createMailer(config: EmailConfig, deps: EmailDeps): Mailer {
   if (config.kind === 'none') return notConfigured(deps);
   if (deps.transport === undefined) {
+    // TODO(#153): build the SMTP transport from config here instead of refusing.
     throw new Error('email transport is required with DREFYN_EMAIL_TRANSPORT=smtp');
   }
   return smtpMailer(config, deps, deps.transport);
 }
 
 function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTransport): Mailer {
-  const clock = deps.clock ?? Date.now;
+  const clock = safeClock(deps.clock);
   const logger = safeLogger(deps.logger);
   const metrics = safeMetrics(deps.metrics);
   const { maxConcurrent, queueMax } = config.limits;
@@ -264,7 +288,7 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
     message: unknown,
     options: unknown,
   ): Promise<Outcome | null> {
-    const key = (options as Partial<SendOptions> | null | undefined)?.idempotencyKey;
+    const key = readKey(options);
     if (closed) return early(fail('email.unavailable'));
     if (typeof key !== 'string' || !KEY.test(key)) {
       return early(failure(invalidInput('idempotencyKey')));
@@ -281,11 +305,9 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
     const renderStart = clock();
     const rendered = await renderMail(message as MailMessage, { linkOrigin: deps.linkOrigin });
     if (rendered.ok) {
-      metrics.observe(
-        'email_render_duration_ms',
-        { template: rendered.value.template },
-        clock() - renderStart,
-      );
+      metrics.histogram('email_render_duration_ms', clock() - renderStart, {
+        template: rendered.value.template,
+      });
     }
     if (entry.done) return null;
     if (!rendered.ok) return early(failure(rendered.error));
@@ -307,8 +329,8 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
     active.delete(tracked);
     release();
     if (breaker.record(healthOf(error), gate === 'trial', clock())) {
-      logger.log('warn', 'email.breaker_open', {});
-      metrics.count('email_breaker_open_total', {});
+      logger.warn('email.breaker_open', {});
+      metrics.counter('email_breaker_open_total', 1);
     }
     if (error === null) {
       return { result: { ok: true, value: { messageId: envelope.messageId, attempts } }, attempts };
@@ -326,17 +348,20 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
           finish(result, attempts) {
             if (entry.done) return;
             entry.done = true;
-            admitted.delete(entry);
-            const facts: SendFacts = {
-              message,
-              options,
-              result,
-              attempts,
-              durationMs: clock() - started,
-              transport: transport.kind,
-            };
-            sendLog(logger, metrics, facts);
-            resolve(result);
+            try {
+              admitted.delete(entry);
+              const facts: SendFacts = {
+                message,
+                options,
+                result,
+                attempts,
+                durationMs: clock() - started,
+                transport: () => transport.kind,
+              };
+              sendLog(logger, metrics, facts);
+            } finally {
+              resolve(result);
+            }
           },
         };
         pipeline(entry, to, message, options).then(
@@ -361,8 +386,8 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
       waiting.length = 0;
       depth();
       if (dropped.length > 0) {
-        logger.log('warn', 'email.dropped_on_shutdown', { dropped: dropped.length });
-        metrics.count('email_dropped_on_shutdown_total', {}, dropped.length);
+        logger.warn('email.dropped_on_shutdown', { dropped: dropped.length });
+        metrics.counter('email_dropped_on_shutdown_total', dropped.length);
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([

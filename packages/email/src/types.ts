@@ -236,7 +236,6 @@ export type EmailConfig =
       readonly idempotencyHeader?: string;
     };
 
-export type LogLevel = 'info' | 'warn' | 'error';
 export type EmailLogEvent =
   | 'email.send'
   | 'email.transport_configured'
@@ -247,8 +246,11 @@ export type EmailLogEvent =
   | 'email.dropped_on_shutdown';
 export type EmailLogFields = Readonly<Record<string, string | number | null>>;
 
+// The same shape as the flags and db ports, so one app adapter serves every package.
 export interface EmailLogger {
-  log(level: LogLevel, event: EmailLogEvent, fields: EmailLogFields): void;
+  info(event: EmailLogEvent, fields?: EmailLogFields): void;
+  warn(event: EmailLogEvent, fields?: EmailLogFields): void;
+  error(event: EmailLogEvent, fields?: EmailLogFields): void;
 }
 
 export type EmailCounter =
@@ -257,9 +259,9 @@ export type EmailHistogram = 'email_send_duration_ms' | 'email_render_duration_m
 export type MetricLabels = Readonly<Record<string, string>>;
 
 export interface EmailMetrics {
-  count(name: EmailCounter, labels: MetricLabels, value?: number): void;
-  observe(name: EmailHistogram, labels: MetricLabels, value: number): void;
-  gauge(name: 'email_queue_depth', value: number): void;
+  counter(name: EmailCounter, value: number, labels?: MetricLabels): void;
+  histogram(name: EmailHistogram, value: number, labels?: MetricLabels): void;
+  gauge(name: 'email_queue_depth', value: number, labels?: MetricLabels): void;
 }
 
 export interface EmailDeps {
