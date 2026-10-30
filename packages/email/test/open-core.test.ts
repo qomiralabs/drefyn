@@ -89,6 +89,51 @@ describe('open core', () => {
   });
 });
 
+describe('renderer use', () => {
+  // The renderer only runs its HTML to text conversion, and the merge code under it,
+  // when given options. One call site with one argument keeps that path unreachable.
+  it('imports @react-email/render only in src/render.ts and calls render with one argument', () => {
+    const importers = files.filter((file) =>
+      specifiers(file).some((spec) => spec.startsWith('@react-email/')),
+    );
+    expect(importers.map((file) => relative(root, file))).toEqual([join('src', 'render.ts')]);
+
+    const file = join(src, 'render.ts');
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const local = new Set<string>();
+    const calls: number[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        if (node.moduleSpecifier.text === '@react-email/render') {
+          const bindings = node.importClause?.namedBindings;
+          expect(bindings !== undefined && ts.isNamedImports(bindings)).toBe(true);
+          if (bindings !== undefined && ts.isNamedImports(bindings)) {
+            for (const element of bindings.elements) {
+              expect((element.propertyName ?? element.name).text).toBe('render');
+              local.add(element.name.text);
+            }
+          }
+        }
+      }
+      if (ts.isIdentifier(node) && local.has(node.text)) {
+        const parent = node.parent;
+        const isImport = ts.isImportSpecifier(parent);
+        const isCallee = ts.isCallExpression(parent) && parent.expression === node;
+        expect(isImport || isCallee, 'render is only ever called directly').toBe(true);
+        if (isCallee) calls.push(parent.arguments.length);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(calls).toEqual([1]);
+  });
+});
+
 describe('package entries', () => {
   it('has a server entry and a testing entry', () => {
     expect(manifest.exports).toEqual({

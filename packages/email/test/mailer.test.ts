@@ -343,24 +343,13 @@ describe('send never throws', () => {
 
   it('survives a logger and metrics port that throw', async () => {
     const spy = spyOn();
+    const down = () => {
+      throw new Error('port down');
+    };
     const mailer = createMailer(smtpConfig(), {
       linkOrigin: ORIGIN,
-      logger: {
-        log: () => {
-          throw new Error('log down');
-        },
-      },
-      metrics: {
-        count: () => {
-          throw new Error('metrics down');
-        },
-        observe: () => {
-          throw new Error('metrics down');
-        },
-        gauge: () => {
-          throw new Error('metrics down');
-        },
-      },
+      logger: { info: down, warn: down, error: down },
+      metrics: { counter: down, histogram: down, gauge: down },
       transport: spy.transport,
       clock: () => Date.now(),
     });

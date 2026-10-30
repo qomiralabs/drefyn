@@ -89,15 +89,19 @@ export function recorder(): {
 } {
   const lines: LogLine[] = [];
   const calls: MetricCall[] = [];
+  const at =
+    (level: string) =>
+    (event: string, fields: Readonly<Record<string, unknown>> = {}) =>
+      lines.push({ level, event, fields });
+  const metric =
+    (kind: string) =>
+    (name: string, value: number, labels: Readonly<Record<string, string>> = {}) =>
+      calls.push({ kind, name, labels, value });
   return {
     lines,
     calls,
-    logger: { log: (level, event, fields) => lines.push({ level, event, fields }) },
-    metrics: {
-      count: (name, labels, value = 1) => calls.push({ kind: 'count', name, labels, value }),
-      observe: (name, labels, value) => calls.push({ kind: 'observe', name, labels, value }),
-      gauge: (name, value) => calls.push({ kind: 'gauge', name, labels: {}, value }),
-    },
+    logger: { info: at('info'), warn: at('warn'), error: at('error') },
+    metrics: { counter: metric('counter'), histogram: metric('histogram'), gauge: metric('gauge') },
   };
 }
 

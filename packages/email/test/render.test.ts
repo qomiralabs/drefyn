@@ -365,3 +365,72 @@ describe('renderMail never throws', () => {
     );
   });
 });
+
+describe('links are copied before they are checked', () => {
+  class LyingUrl extends URL {
+    override get origin(): string {
+      return ORIGIN.origin;
+    }
+  }
+
+  it('refuses a URL subclass that lies about its origin', async () => {
+    await refused(signIn({ link: new LyingUrl('https://evil.test/verify') }), 'link');
+    await refused(invitation({ link: new LyingUrl('https://evil.test/i') }), 'link');
+    await refused(
+      notice({
+        kind: 'password_changed',
+        at: AT,
+        sessionsLink: new LyingUrl('https://evil.test/s'),
+      }),
+      'notice.sessionsLink',
+    );
+  });
+
+  it('renders the checked link even if the caller edits its URL afterwards', async () => {
+    const original = link('/verify');
+    const sessions = link('/settings/sessions');
+    const pending = [
+      renderMail(signIn({ link: original }), ctx),
+      renderMail(notice({ kind: 'password_changed', at: AT, sessionsLink: sessions }), ctx),
+    ];
+    original.href = 'https://evil.test/verify';
+    sessions.href = 'https://evil.test/sessions';
+    for (const result of await Promise.all(pending)) {
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value.html).not.toContain('evil.test');
+      expect(result.value.text).not.toContain('evil.test');
+      expect(result.value.text).toContain('https://app.drefyn.test/');
+    }
+  });
+
+  it('delivers the checked link when the URL changes after send', async () => {
+    const transport = createTestTransport();
+    const { logger, metrics } = recorder();
+    const mailer = createMailer(smtpConfig(), { linkOrigin: ORIGIN, logger, metrics, transport });
+    const target = link('/verify');
+    const sending = mailer.send('person@example.com', signIn({ link: target }), {
+      idempotencyKey: 'code:copy',
+    });
+    target.href = 'https://evil.test/verify';
+    expect((await sending).ok).toBe(true);
+    const captured = transport.sent[0];
+    expect(captured?.links.map(String)).toEqual(['https://app.drefyn.test/verify']);
+    expect(captured?.html).not.toContain('evil.test');
+  });
+});
+
+describe('small wording rules', () => {
+  it('refuses direction marks as well as overrides', async () => {
+    for (const mark of ['\u200e', '\u200f', '\u061c']) {
+      await refused(invitation({ organizationName: `Acme${mark}evil` }), 'organizationName');
+    }
+  });
+
+  it('says 1 minute, not 1 minutes', async () => {
+    const one = await rendered({ ...signIn(), expiresInMinutes: 1 } as MailMessage);
+    expect(one.text).toContain('The code expires in 1 minute.');
+    const two = await rendered({ ...signIn(), expiresInMinutes: 2 } as MailMessage);
+    expect(two.text).toContain('The code expires in 2 minutes.');
+  });
+});
