@@ -18,6 +18,9 @@ describe('rateKeyForIp', () => {
     expect(rateKeyForIp('2001:db8:1:3::1')).toBe('ip6:2001:0db8:0001:0003::/64');
     expect(rateKeyForIp('::1')).toBe('ip6:0000:0000:0000:0000::/64');
     expect(rateKeyForIp('2001:db8::')).toBe('ip6:2001:0db8:0000:0000::/64');
+    expect(rateKeyForIp('::')).toBe('ip6:0000:0000:0000:0000::/64');
+    expect(rateKeyForIp('1:2:3:4:5:6:7::')).toBe('ip6:0001:0002:0003:0004::/64');
+    expect(rateKeyForIp('1:2:3:4:5:6:1.2.3.4')).toBe('ip6:0001:0002:0003:0004::/64');
   });
 
   it('reads an IPv4 mapped IPv6 address as the IPv4 address it carries', () => {
@@ -42,6 +45,17 @@ describe('rateKeyForIp', () => {
     ' 203.0.113.7',
     '203.0.113.7\n',
     `2001:db8::${'1'.repeat(5)}`,
+    '1::2::3',
+    ':1:2:3:4:5:6:7',
+    '1:2:3:4:5:6:7:',
+    '1:2:3:4:5:6:7:8::',
+    '::1:2:3:4:5:6:7:8',
+    '::ffff:01.2.3.4',
+    '010.1.2.3',
+    '1:2:3:4:5:6:1.2.3.4:5',
+    'a:1.2.3.4',
+    '2001:db8::g',
+    ':::',
   ])('refuses %j', (ip) => {
     expectAuthError(() => rateKeyForIp(ip), 'AUTH_INPUT_INVALID');
   });

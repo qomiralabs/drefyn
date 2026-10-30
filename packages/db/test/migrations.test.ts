@@ -44,7 +44,8 @@ describe('shipped migrations', () => {
       const sql = sqlOf(readFileSync(join(defaultMigrationsDir, name), 'utf8'));
       expect(sql, name).not.toMatch(/\bsecurity\s+definer\b/);
       expect(sql, name).not.toMatch(/\b(create|alter|drop)\s+role\b/);
-      expect(sql, name).not.toMatch(/\bpassword\b/);
+      // A role password would be a keyword; 'password' as a sign in method is data.
+      expect(sql.replace(/'(?:[^']|'')*'/g, "''"), name).not.toMatch(/\bpassword\b/);
       expect(sql, name).not.toMatch(/\bbypassrls\b/);
     }
   });

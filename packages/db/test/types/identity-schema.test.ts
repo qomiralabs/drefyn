@@ -1,6 +1,7 @@
 // Checked by `pnpm typecheck`: each @ts-expect-error fails the build if the line below it
 // starts to compile. The function body never runs; vitest only confirms the file loads.
 import type { UserRef } from '@drefyn/tenancy';
+import type { Insertable, Updateable } from 'kysely';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   withApiKeyLimiter,
@@ -28,8 +29,6 @@ async function compileOnly(): Promise<void> {
     await tx.updateTable('users').set({ display_name: 'x', updated_at: new Date() }).execute();
     // @ts-expect-error drefyn_app may not write the address
     await tx.updateTable('users').set({ email: 'x@example.com' }).execute();
-    // @ts-expect-error nor insert a user at all
-    await tx.insertInto('users').values({ id: 'x' }).execute();
     await tx
       .insertInto('password_credentials')
       .values({ user_id: 'x', phc: '$argon2id$' })
@@ -54,8 +53,6 @@ async function compileOnly(): Promise<void> {
     // @ts-expect-error drefyn_auth may not rename anyone
     await tx.updateTable('users').set({ display_name: 'x' }).execute();
     await tx.selectFrom('password_credentials').select(['user_id', 'phc']).execute();
-    // @ts-expect-error drefyn_auth only rehashes; it never creates a credential
-    await tx.insertInto('password_credentials').values({ user_id: 'x', phc: 'x' }).execute();
     // @ts-expect-error sessions are written after sign in, never by the sign in role
     await tx.selectFrom('sessions').selectAll().execute();
     // @ts-expect-error the API limiter belongs to the API service
@@ -65,13 +62,17 @@ async function compileOnly(): Promise<void> {
   await withApiKeyLimiter(db, async (tx) => {
     await tx.selectFrom('api_key_failures').select(['key_hmac', 'count']).execute();
     // @ts-expect-error the limiter context names one table
-    await tx.selectFrom('users').select('id').execute();
+    await tx.selectFrom('users').selectAll().execute();
   });
-  // @ts-expect-error the limiter runs on the app pool, never the auth pool
-  await withApiKeyLimiter(authDb, () => Promise.resolve(1));
 }
 
 describe('identity schema types', () => {
+  it('run the limiter on the app pool only', () => {
+    expectTypeOf(withApiKeyLimiter<number>)
+      .parameter(0)
+      .toEqualTypeOf<Database>();
+  });
+
   it('give each context exactly its tables', () => {
     expectTypeOf<keyof ApiKeyLimiterSchema>().toEqualTypeOf<'api_key_failures'>();
     expectTypeOf<keyof AuthSchema>().toEqualTypeOf<
@@ -87,6 +88,17 @@ describe('identity schema types', () => {
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'
+    >();
+  });
+
+  it('leave no insertable column where the role holds no insert', () => {
+    expectTypeOf<keyof Insertable<UserSchema['users']>>().toEqualTypeOf<never>();
+    expectTypeOf<keyof Insertable<AuthSchema['password_credentials']>>().toEqualTypeOf<never>();
+    expectTypeOf<keyof Insertable<AuthSchema['users']>>().toEqualTypeOf<
+      'id' | 'email' | 'email_normalized' | 'display_name' | 'email_verified_at'
+    >();
+    expectTypeOf<keyof Updateable<AuthSchema['users']>>().toEqualTypeOf<
+      'email' | 'email_normalized' | 'email_verified_at' | 'updated_at'
     >();
   });
 

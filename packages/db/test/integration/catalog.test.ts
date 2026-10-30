@@ -844,7 +844,9 @@ alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organiza
 revoke all on app.ok_auth_dml from drefyn_app;
 grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
     );
-    const allow = lists(['ok_auth_dml'], { authTables: [reviewed('app.ok_auth_dml')] });
+    const allow = lists(['ok_auth_dml'], {
+      authTables: [...ALLOW_LISTS.authTables, reviewed('app.ok_auth_dml')],
+    });
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
@@ -857,6 +859,7 @@ grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
     );
     const allow = lists([], {
       userPolicies: [
+        ...ALLOW_LISTS.userPolicies,
         {
           name: 'app.fixture_members.has_email',
           command: 'select',

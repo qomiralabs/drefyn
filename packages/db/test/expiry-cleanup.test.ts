@@ -167,7 +167,7 @@ describe('createExpiryCleanup', () => {
     expect(await counting.maybeRun()).toEqual(ok);
   });
 
-  it('takes rules registered after the shipped ones', async () => {
+  it('takes rules registered after the shipped ones', () => {
     const cleanup = createExpiryCleanup({
       rules: [...RULES, { table: 'second', column: 'started_at', afterSeconds: 400 * 86_400 }],
       transact: () => Promise.resolve(ok),

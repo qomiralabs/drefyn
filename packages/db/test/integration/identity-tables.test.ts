@@ -1,4 +1,4 @@
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
@@ -334,7 +334,6 @@ describeWithStack('identity tables', () => {
   describe('password_credentials', () => {
     it('lets the person write their own hash and the auth role read and rehash it', async () => {
       const app = await as('app');
-      const auth = await as('auth');
       await app.query('begin');
       await app.query("select set_config('drefyn.user_id', $1, true)", [USER_B]);
       await app.query('insert into app.password_credentials (user_id, phc) values ($1, $2)', [

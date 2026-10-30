@@ -113,12 +113,18 @@ importers:
       '@drefyn/address':
         specifier: workspace:*
         version: link:../address
+      '@drefyn/db':
+        specifier: workspace:*
+        version: link:../db
       '@drefyn/entitlements':
         specifier: workspace:*
         version: link:../entitlements
       '@drefyn/tenancy':
         specifier: workspace:*
         version: link:../tenancy
+      kysely:
+        specifier: 0.29.7
+        version: 0.29.7
       zod:
         specifier: 4.6.7
         version: 4.6.7

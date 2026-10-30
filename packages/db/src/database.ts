@@ -15,7 +15,7 @@ import {
 } from 'kysely';
 import pg from 'pg';
 import type { DatabaseConfig } from './config.ts';
-import type { AuthSchema, UserSchema } from './contexts.ts';
+import type { ApiKeyLimiterSchema, AuthSchema, UserSchema } from './contexts.ts';
 import { DbError } from './errors.ts';
 import { toDbError } from './pg-errors.ts';
 import { hidePgEnvironment, sslOption } from './pg-session.ts';
@@ -389,10 +389,10 @@ end $$; commit`;
 
 // A user or auth transaction has no tenant to log. The user id is left out: logs carry no
 // personal data by default, and the caller's own request log can join on it.
-function transactionInvalid(state: PoolState, settings: TenantSettings): DbError {
+function transactionInvalid(state: PoolState, settings: TenantSettings, scope: string): DbError {
   const fields: Record<string, string> = { pool: state.kind };
   if (settings.organizationId !== '') fields['organization_id'] = settings.organizationId;
-  else fields['scope'] = settings.userId === '' ? 'auth' : 'user';
+  else fields['scope'] = scope;
   if (settings.projectId !== '') fields['project_id'] = settings.projectId;
   try {
     state.logger?.warn('db_transaction_invalid', fields);
@@ -405,11 +405,15 @@ function transactionInvalid(state: PoolState, settings: TenantSettings): DbError
   );
 }
 
+// What a transaction without an organization is for, named in the log when it goes wrong.
+type Scope = 'tenant' | 'user' | 'auth' | 'api_key_limiter';
+
 async function runTransaction<DB, T>(
   state: PoolState,
   settings: TenantSettings,
   timeoutMs: number,
   work: (tx: Transaction<DB>) => Promise<T>,
+  scope: Scope = 'tenant',
 ): Promise<T> {
   let client: pg.PoolClient;
   try {
@@ -459,7 +463,7 @@ async function runTransaction<DB, T>(
       await rollback();
       if (events.ended) {
         doubtful = true;
-        throw transactionInvalid(state, settings);
+        throw transactionInvalid(state, settings, scope);
       }
       throw error;
     }
@@ -474,7 +478,7 @@ async function runTransaction<DB, T>(
       }
       if (code === CONTEXT_CHANGED) {
         doubtful = true;
-        throw transactionInvalid(state, settings);
+        throw transactionInvalid(state, settings, scope);
       }
       throw error;
     }
@@ -583,7 +587,7 @@ export async function withUser<T>(
     state.statementTimeoutMs,
     APP_TIMEOUT_MAX_MS,
   );
-  return runTransaction(state, settings, timeoutMs, work);
+  return runTransaction(state, settings, timeoutMs, work, 'user');
 }
 
 // The sign in path, before any user or organization is known. Runs as drefyn_auth, whose
@@ -599,5 +603,22 @@ export async function withAuth<T>(
     state.statementTimeoutMs,
     AUTH_TIMEOUT_MAX_MS,
   );
-  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work);
+  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'auth');
+}
+
+// Counting failed API key checks, before any key or organization is proved. Runs as
+// drefyn_app with every setting empty; the transaction type names api_key_failures alone, so
+// the request's attacker supplied organization can never steer it anywhere else.
+export async function withApiKeyLimiter<T>(
+  db: Database,
+  work: (tx: Transaction<ApiKeyLimiterSchema>) => Promise<T>,
+  options?: TransactionOptions,
+): Promise<T> {
+  const state = stateOf('app', db, 'withApiKeyLimiter');
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    APP_TIMEOUT_MAX_MS,
+  );
+  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'api_key_limiter');
 }

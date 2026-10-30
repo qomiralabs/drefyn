@@ -84,11 +84,22 @@ describeWithStack('expiry cleanup', () => {
     const first = await withAuth(auth, (tx) =>
       deleteExpired(tx, AUTH_EXPIRY_RULES, { batchSize: 3 }),
     );
-    expect(first.oauth_states).toBe(3);
+    expect(first['oauth_states']).toBe(3);
     const second = await withAuth(auth, (tx) =>
       deleteExpired(tx, AUTH_EXPIRY_RULES, { batchSize: 3 }),
     );
-    expect(second.oauth_states).toBe(2);
+    expect(second['oauth_states']).toBe(2);
+  });
+
+  it('adds up two rules on one table under that table', async () => {
+    const counts = await withAuth(auth, (tx) =>
+      deleteExpired(tx, [
+        { table: 'email_challenges', column: 'expires_at', afterSeconds: 86_400 },
+        { table: 'email_challenges', column: 'created_at', afterSeconds: 0 },
+      ]),
+    );
+    // The row 23 hours past expiry was created before now, so the second rule takes it.
+    expect(counts).toEqual({ email_challenges: 1 });
   });
 
   it('runs through the throttled runner against the real pool', async () => {

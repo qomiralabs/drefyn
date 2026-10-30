@@ -46,12 +46,18 @@ describe('package layout', () => {
     expect(text).not.toMatch(/^import (?!type )/m);
   });
 
-  it('has no database, network or file access anywhere in src', () => {
+  // The database is reached only through @drefyn/db's context bound functions, and only by
+  // the limiter.
+  it('reaches the database only from the limiter, and no network or file anywhere', () => {
+    const allowed: Readonly<Record<string, RegExp>> = {
+      'rate-limiter.ts': /^(@drefyn\/db|kysely)$/,
+    };
     const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
     for (const file of files) {
       for (const spec of specifiers(join(src, file))) {
+        if (allowed[file]?.test(spec) === true) continue;
         expect(spec, `${file} imports ${spec}`).not.toMatch(
-          /^(@drefyn\/db|pg|node:(fs|net|http|https|dns|child_process|tls))/,
+          /^(@drefyn\/db|pg|kysely$|node:(fs|net|http|https|dns|child_process|tls))/,
         );
       }
     }
