@@ -327,7 +327,8 @@ test.describe('command bar content', () => {
     const bar = await open(page);
     const options = bar.getByRole('option');
     for (const option of await options.all()) {
-      await expect(option.locator(':scope > svg[data-icon]')).toHaveCount(1);
+      // The kind icon leads the row, in a span that gives it the secondary ink.
+      await expect(option.locator(':scope > span:first-child > svg[data-icon]')).toHaveCount(1);
     }
     await expect(options.filter({ hasText: 'Payments API docs, Docs project' })).toContainText(
       'Out of date',
@@ -354,11 +355,11 @@ test.describe('command bar content', () => {
     await expect(bar.getByRole('option')).toHaveText([/^Plan and usage/]);
   });
 
-  test('the clear button is the brand close icon and empties the field', async ({ page }) => {
+  test('the clear button is the package cross icon and empties the field', async ({ page }) => {
     const bar = await open(page);
     await page.keyboard.type('pay');
     const clear = bar.getByRole('button', { name: 'Clear search' });
-    await expect(clear.locator('svg[data-icon="close"]')).toHaveCount(1);
+    await expect(clear.locator('svg[data-icon="cross"]')).toHaveCount(1);
     await clear.click();
     await expect(bar.getByRole('combobox')).toHaveValue('');
   });

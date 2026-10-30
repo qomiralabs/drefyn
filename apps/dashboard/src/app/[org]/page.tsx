@@ -1,11 +1,10 @@
-import { Badge, StatusPip } from '@drefyn/ui/react';
+import { Badge, IconLock, StatusPip } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
 import { guardOrganization } from '../../server/guard.ts';
 import { NEEDS_YOU, needsYouSentence } from '../../fixtures/shell.ts';
-import { IconLock } from '../../shell/icons.tsx';
 import { Answer, Calm, Eyebrow, Head, Ranked, TextLink } from '../../views/calm.tsx';
 
 const { organization } = PLACEHOLDER;

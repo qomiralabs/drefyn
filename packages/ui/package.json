@@ -54,6 +54,7 @@
     "vite": "8.3.3"
   },
   "dependencies": {
+    "react-aria": "3.53.1",
     "react-aria-components": "1.22.1"
   }
 }

@@ -1,5 +1,5 @@
 'use client';
-import { Badge } from '@drefyn/ui/react';
+import { Badge, IconCross, IconSearch } from '@drefyn/ui/react';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
@@ -14,8 +14,8 @@ import {
   SearchField,
 } from 'react-aria-components';
 import { allowed, commandFilter } from './commands.ts';
-import { ICON_BY_NAME, IconClose, IconSearch } from './icons.tsx';
 import { places } from './places.ts';
+import { ICON_BY_NAME } from './section-icons.ts';
 
 export interface CommandBarProps {
   org: string;
@@ -84,7 +84,7 @@ export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps
                   aria-label="Clear search"
                   className={`${QUIET} size-control-sm group-data-empty:hidden`}
                 >
-                  <IconClose />
+                  <IconCross />
                 </Button>
               </SearchField>
               <span className="shrink-0 rounded-xs border border-rule-strong px-4 text-caption text-secondary">
@@ -125,7 +125,9 @@ export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps
                     // where keyboard focus really is.
                     className="flex min-h-row-compact cursor-default items-center gap-8 rounded-sm px-8 text-body-s text-body outline-none data-focused:bg-hover data-pressed:bg-pressed"
                   >
-                    <Icon tone="secondary" />
+                    <span className="inline-flex shrink-0 text-secondary">
+                      <Icon />
+                    </span>
                     <span className="min-w-0 flex-1 truncate">
                       <span className="text-ink">{entry.name}</span>
                       <span className="text-secondary">, {entry.kind}</span>

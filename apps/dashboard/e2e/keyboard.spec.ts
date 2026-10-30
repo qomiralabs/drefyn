@@ -161,7 +161,7 @@ test('F6 goes into the notifications after main and out again, both ways', async
   await expect(notifications(page)).toBeVisible();
 });
 
-test('the toast is the shared one: bottom left, Dismiss closes it, focus stays put', async ({
+test('the toast is the shared one: bottom left, Shift+F6 from the bar reaches it, Dismiss closes it', async ({
   page,
   browserName,
 }) => {
@@ -174,7 +174,8 @@ test('the toast is the shared one: bottom left, Dismiss closes it, focus stays p
   if (box === null) return;
   expect(box.x).toBeLessThan(DESKTOP.width / 4);
   expect(DESKTOP.height - (box.y + box.height)).toBeLessThanOrEqual(24 + 1);
-  await page.keyboard.press('F6');
+  // Focus is back on the account menu in the bar; the notifications are last in the cycle.
+  await page.keyboard.press('Shift+F6');
   await expect(region).toBeFocused();
   await page.keyboard.press(tabKey(browserName));
   await page.keyboard.press(tabKey(browserName));
