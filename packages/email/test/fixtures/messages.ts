@@ -59,7 +59,7 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
 
 // One entry per message kind: every sign in code purpose, the invitation and every
 // security notice. The name is the fixture file stem.
-export const FIXTURE_MESSAGES: ReadonlyArray<readonly [string, MailMessage]> = [
+export const FIXTURE_MESSAGES: readonly (readonly [string, MailMessage])[] = [
   ...SIGN_IN_CODE_PURPOSES.map((p) => [`sign_in_code.${p}`, codeMail(p)] as const),
   [
     'invitation',
