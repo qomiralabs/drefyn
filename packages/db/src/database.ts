@@ -1,4 +1,4 @@
-import type { OrganizationRef, TenantRef } from '@drefyn/tenancy';
+import type { OrganizationRef, TenantRef, UserRef } from '@drefyn/tenancy';
 import {
   DefaultQueryExecutor,
   DummyDriver,
@@ -15,28 +15,30 @@ import {
 } from 'kysely';
 import pg from 'pg';
 import type { DatabaseConfig } from './config.ts';
+import type { AuthSchema, UserSchema } from './contexts.ts';
 import { DbError } from './errors.ts';
 import { toDbError } from './pg-errors.ts';
 import { hidePgEnvironment, sslOption } from './pg-session.ts';
 import type { OrganizationSchema } from './organization.ts';
 import type { PublishedSchema } from './published.ts';
 import { assertRoleSafe, readRoleFacts, type PoolKind } from './role-check.ts';
-
-// TODO(#127): open the auth pool; until then only these two have a URL and a handle.
-type OpenPool = Exclude<PoolKind, 'auth'>;
 import type { Schema } from './schema.generated.ts';
 import {
   APP_TIMEOUT_MAX_MS,
+  AUTH_SETTINGS,
+  AUTH_TIMEOUT_MAX_MS,
   READER_TIMEOUT_MAX_MS,
   organizationSettings,
   projectSettings,
   transactionTimeout,
+  userSettings,
   type TenantSettings,
 } from './tenant-context.ts';
 import { toSafeInteger } from './integers.ts';
 
 declare const appBrand: unique symbol;
 declare const readerBrand: unique symbol;
+declare const authBrand: unique symbol;
 
 // Opaque: holds the pool and never hands it out.
 export interface Database {
@@ -45,6 +47,10 @@ export interface Database {
 
 export interface PublishedDatabase {
   readonly [readerBrand]: true;
+}
+
+export interface AuthDatabase {
+  readonly [authBrand]: true;
 }
 
 export interface TransactionOptions {
@@ -63,7 +69,7 @@ export interface DatabaseDeps {
 }
 
 interface PoolState {
-  readonly kind: OpenPool;
+  readonly kind: PoolKind;
   readonly pool: pg.Pool;
   readonly statementTimeoutMs: number;
   readonly logger: DbLogger | undefined;
@@ -72,17 +78,29 @@ interface PoolState {
 }
 
 // The handles are empty frozen objects; everything lives here, out of reach of callers.
-const appPools = new WeakMap<object, PoolState>();
-const readerPools = new WeakMap<object, PoolState>();
-
-const URL_KEYS: Readonly<Record<OpenPool, string>> = {
-  app: 'DREFYN_DATABASE_URL',
-  reader: 'DREFYN_PUBLIC_READER_DATABASE_URL',
+// One map per pool kind, so a handle only ever opens its own kind of transaction.
+const POOLS: Readonly<Record<PoolKind, WeakMap<object, PoolState>>> = {
+  app: new WeakMap(),
+  reader: new WeakMap(),
+  auth: new WeakMap(),
 };
 
-const TIMEOUT_MAX: Readonly<Record<OpenPool, number>> = {
+const URL_KEYS: Readonly<Record<PoolKind, string>> = {
+  app: 'DREFYN_DATABASE_URL',
+  reader: 'DREFYN_PUBLIC_READER_DATABASE_URL',
+  auth: 'DREFYN_AUTH_DATABASE_URL',
+};
+
+const TIMEOUT_MAX: Readonly<Record<PoolKind, number>> = {
   app: APP_TIMEOUT_MAX_MS,
   reader: READER_TIMEOUT_MAX_MS,
+  auth: AUTH_TIMEOUT_MAX_MS,
+};
+
+const APPLICATION_NAMES: Readonly<Record<PoolKind, string>> = {
+  app: 'drefyn-app',
+  reader: 'drefyn-public-reader',
+  auth: 'drefyn-auth',
 };
 
 // Bounds the startup role check, which runs outside any tenant transaction.
@@ -141,7 +159,7 @@ class IsolatedClient extends pg.Client {
   }
 }
 
-export function poolConfig(config: DatabaseConfig, kind: OpenPool): pg.PoolConfig {
+export function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfig {
   const url = new URL(config.url);
   const password = decodeURIComponent(url.password);
   return {
@@ -153,7 +171,7 @@ export function poolConfig(config: DatabaseConfig, kind: OpenPool): pg.PoolConfi
     password: () => Promise.resolve(password),
     database: decodeURIComponent(url.pathname.slice(1)),
     ssl: sslOption(config.ssl),
-    application_name: kind === 'app' ? 'drefyn-app' : 'drefyn-public-reader',
+    application_name: APPLICATION_NAMES[kind],
     max: config.poolMax,
     connectionTimeoutMillis: config.poolWaitMs,
     idleTimeoutMillis: 30_000,
@@ -166,7 +184,7 @@ export function poolConfig(config: DatabaseConfig, kind: OpenPool): pg.PoolConfi
 
 // For failures to get a connection at all. Anything the mapping does not know, such as a TLS
 // handshake the server refused, still means no connection.
-function unavailable(error: unknown, kind: OpenPool): unknown {
+function unavailable(error: unknown, kind: PoolKind): unknown {
   const mapped = toDbError(error, URL_KEYS[kind]);
   if (mapped instanceof DbError) return mapped;
   return new DbError('DB_UNAVAILABLE', `could not reach the database from ${URL_KEYS[kind]}`);
@@ -176,9 +194,9 @@ function unavailable(error: unknown, kind: OpenPool): unknown {
 // exists so tests can drive the transaction rules with a scripted client.
 export function databaseOverPool(
   pool: pg.Pool,
-  kind: OpenPool,
+  kind: PoolKind,
   options: { readonly statementTimeoutMs: number; readonly logger?: DbLogger },
-): Database | PublishedDatabase {
+): Database | PublishedDatabase | AuthDatabase {
   const handle = Object.freeze({});
   const state: PoolState = {
     kind,
@@ -188,11 +206,11 @@ export function databaseOverPool(
     closed: false,
     closing: undefined,
   };
-  (kind === 'app' ? appPools : readerPools).set(handle, state);
-  return handle as Database | PublishedDatabase;
+  POOLS[kind].set(handle, state);
+  return handle as Database | PublishedDatabase | AuthDatabase;
 }
 
-async function open(config: DatabaseConfig, kind: OpenPool, deps: DatabaseDeps): Promise<object> {
+async function open(config: DatabaseConfig, kind: PoolKind, deps: DatabaseDeps): Promise<object> {
   if (config.statementTimeoutMs > TIMEOUT_MAX[kind]) {
     throw new DbError(
       'DB_CONFIG_INVALID',
@@ -242,8 +260,19 @@ export async function createPublishedDatabase(
   return (await open(config, 'reader', deps)) as PublishedDatabase;
 }
 
-export async function closeDatabase(db: Database | PublishedDatabase): Promise<void> {
-  const state = appPools.get(db) ?? readerPools.get(db);
+// The same checks for drefyn_auth, for the sign in path only. Every other role is refused,
+// so a misconfigured URL can never give sign in a role with tenant grants.
+export async function createAuthDatabase(
+  config: DatabaseConfig,
+  deps: DatabaseDeps = {},
+): Promise<AuthDatabase> {
+  return (await open(config, 'auth', deps)) as AuthDatabase;
+}
+
+export async function closeDatabase(
+  db: Database | PublishedDatabase | AuthDatabase,
+): Promise<void> {
+  const state = POOLS.app.get(db) ?? POOLS.reader.get(db) ?? POOLS.auth.get(db);
   if (state === undefined) return;
   state.closed = true;
   state.closing ??= state.pool.end();
@@ -346,22 +375,24 @@ const sqlState = (value: unknown): unknown => Reflect.get(Object(value), 'code')
 
 // Runs in the same string as COMMIT, so it costs no round trip. The ids are validated
 // canonical UUIDs or empty, so they can be part of the text. If the work switched the
-// tenant, or ended the transaction and kept going, the settings no longer match and the
-// commit never runs.
+// tenant or the user, or ended the transaction and kept going, the settings no longer match
+// and the commit never runs.
 function contextCheck(settings: TenantSettings): string {
   return `do $$ begin
   if current_setting('drefyn.organization_id', true) is distinct from '${settings.organizationId}'
-     or current_setting('drefyn.project_id', true) is distinct from '${settings.projectId}' then
+     or current_setting('drefyn.project_id', true) is distinct from '${settings.projectId}'
+     or current_setting('drefyn.user_id', true) is distinct from '${settings.userId}' then
     raise exception 'the tenant context changed inside the transaction' using errcode = '${CONTEXT_CHANGED}';
   end if;
 end $$; commit`;
 }
 
+// A user or auth transaction has no tenant to log. The user id is left out: logs carry no
+// personal data by default, and the caller's own request log can join on it.
 function transactionInvalid(state: PoolState, settings: TenantSettings): DbError {
-  const fields: Record<string, string> = {
-    pool: state.kind,
-    organization_id: settings.organizationId,
-  };
+  const fields: Record<string, string> = { pool: state.kind };
+  if (settings.organizationId !== '') fields['organization_id'] = settings.organizationId;
+  else fields['scope'] = settings.userId === '' ? 'auth' : 'user';
   if (settings.projectId !== '') fields['project_id'] = settings.projectId;
   try {
     state.logger?.warn('db_transaction_invalid', fields);
@@ -416,9 +447,10 @@ async function runTransaction<DB, T>(
     await client.query("select set_config('drefyn.organization_id', $1, true)", [
       settings.organizationId,
     ]);
-    // Always set, empty for an organization transaction, so nothing left on the session can
+    // Always set, empty where the entry point has none, so nothing left on the session can
     // stand in.
     await client.query("select set_config('drefyn.project_id', $1, true)", [settings.projectId]);
+    await client.query("select set_config('drefyn.user_id', $1, true)", [settings.userId]);
     let result: T;
     try {
       result = await work(transactionOn<DB>(connection));
@@ -468,8 +500,8 @@ async function runTransaction<DB, T>(
   }
 }
 
-function stateOf(pools: WeakMap<object, PoolState>, db: unknown, what: string): PoolState {
-  const state = typeof db === 'object' && db !== null ? pools.get(db) : undefined;
+function stateOf(kind: PoolKind, db: unknown, what: string): PoolState {
+  const state = typeof db === 'object' && db !== null ? POOLS[kind].get(db) : undefined;
   if (state === undefined) {
     throw new DbError(
       'DB_CONFIG_INVALID',
@@ -484,11 +516,11 @@ function stateOf(pools: WeakMap<object, PoolState>, db: unknown, what: string): 
 // transaction only. The project is required.
 export async function withTenant<T>(
   db: Database,
-  tenant: TenantRef,
+  tenant: TenantRef & { readonly userId?: never },
   work: (tx: Transaction<Schema>) => Promise<T>,
   options?: TransactionOptions,
 ): Promise<T> {
-  const state = stateOf(appPools, db, 'withTenant');
+  const state = stateOf('app', db, 'withTenant');
   const settings = projectSettings(tenant);
   const timeoutMs = transactionTimeout(
     options?.timeoutMs,
@@ -502,11 +534,11 @@ export async function withTenant<T>(
 // tables read as empty, so the wider scope is said out loud at the call site.
 export async function withOrganization<T>(
   db: Database,
-  org: OrganizationRef & { readonly projectId?: never },
+  org: OrganizationRef & { readonly projectId?: never; readonly userId?: never },
   work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
   options?: TransactionOptions,
 ): Promise<T> {
-  const state = stateOf(appPools, db, 'withOrganization');
+  const state = stateOf('app', db, 'withOrganization');
   const settings = organizationSettings(org);
   const timeoutMs = transactionTimeout(
     options?.timeoutMs,
@@ -520,11 +552,11 @@ export async function withOrganization<T>(
 // the transaction type has only the published tables.
 export async function withPublishedReader<T>(
   db: PublishedDatabase,
-  tenant: TenantRef,
+  tenant: TenantRef & { readonly userId?: never },
   work: (tx: Transaction<PublishedSchema>) => Promise<T>,
   options?: TransactionOptions,
 ): Promise<T> {
-  const state = stateOf(readerPools, db, 'withPublishedReader');
+  const state = stateOf('reader', db, 'withPublishedReader');
   const settings = projectSettings(tenant);
   const timeoutMs = transactionTimeout(
     options?.timeoutMs,
@@ -532,4 +564,40 @@ export async function withPublishedReader<T>(
     READER_TIMEOUT_MAX_MS,
   );
   return runTransaction(state, settings, timeoutMs, work);
+}
+
+// Signed in work that belongs to the person rather than an organization: their own rows, and
+// the organizations they belong to. Runs as drefyn_app with only drefyn.user_id set, so
+// tenant tables read as empty. Before the work runs, only BEGIN and the settings are sent, so
+// a caller that must prove a credential first can make that its first statement.
+export async function withUser<T>(
+  db: Database,
+  user: UserRef & { readonly organizationId?: never; readonly projectId?: never },
+  work: (tx: Transaction<UserSchema>) => Promise<T>,
+  options?: TransactionOptions,
+): Promise<T> {
+  const state = stateOf('app', db, 'withUser');
+  const settings = userSettings(user);
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    APP_TIMEOUT_MAX_MS,
+  );
+  return runTransaction(state, settings, timeoutMs, work);
+}
+
+// The sign in path, before any user or organization is known. Runs as drefyn_auth, whose
+// grants reach only the identity tables, with every setting empty.
+export async function withAuth<T>(
+  db: AuthDatabase,
+  work: (tx: Transaction<AuthSchema>) => Promise<T>,
+  options?: TransactionOptions,
+): Promise<T> {
+  const state = stateOf('auth', db, 'withAuth');
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    AUTH_TIMEOUT_MAX_MS,
+  );
+  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work);
 }

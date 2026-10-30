@@ -106,18 +106,20 @@ describe('the end of every transaction', () => {
     const [client] = clients;
     const sent = client?.sent ?? [];
     expect(sent[0]).toMatch(/^begin; set local statement_timeout = 5000$/);
-    expect(sent.slice(1, 3).every((q) => q.includes('set_config'))).toBe(true);
-    expect(sent[3]).toMatch(/drefyn\.organization_id[\s\S]*drefyn\.project_id[\s\S]*; commit$/);
-    expect(sent[3]).toContain(ORG);
-    expect(sent[3]).toContain(PRJ);
-    expect(sent[4]).toBe('discard all');
+    expect(sent.slice(1, 4).every((q) => q.includes('set_config'))).toBe(true);
+    expect(sent[4]).toMatch(
+      /drefyn\.organization_id[\s\S]*drefyn\.project_id[\s\S]*drefyn\.user_id[\s\S]*; commit$/,
+    );
+    expect(sent[4]).toContain(ORG);
+    expect(sent[4]).toContain(PRJ);
+    expect(sent[5]).toBe('discard all');
     expect(client?.released).toBeUndefined();
   });
 
   it('organization scope checks an empty project', async () => {
     const { db, clients } = scripted();
     await withOrganization(db, { organizationId: ORG }, () => Promise.resolve(1));
-    expect(clients[0]?.sent[3]).toMatch(/drefyn\.project_id', true\) is distinct from ''/);
+    expect(clients[0]?.sent[4]).toMatch(/drefyn\.project_id', true\) is distinct from ''/);
   });
 
   it('destroys the client when the reset fails, after a commit that did land', async () => {

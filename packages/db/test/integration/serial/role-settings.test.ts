@@ -1,13 +1,24 @@
 import { afterEach, beforeAll, expect, it } from 'vitest';
 import { ALLOW_LISTS } from '../../../src/allow-lists.ts';
 import { DbError } from '../../../src/errors.ts';
-import { closeDatabase, createDatabase, createPublishedDatabase } from '../../../src/index.ts';
+import {
+  closeDatabase,
+  createAuthDatabase,
+  createDatabase,
+  createPublishedDatabase,
+} from '../../../src/index.ts';
 import { rejected } from '../../support.ts';
 import { BOOTSTRAPPED, databases, type TestDatabase } from '../support/databases.ts';
 import { describeWithStack } from '../support/presence.ts';
 import { query } from '../support/sql.ts';
 import { superuser } from '../support/stack.ts';
-import { appConfig, catalogProblems, readerConfig } from '../support/tenancy.ts';
+import {
+  appConfig,
+  authConfig,
+  authUrl,
+  catalogProblems,
+  readerConfig,
+} from '../support/tenancy.ts';
 
 // Role settings and attributes are cluster wide, so this file runs on its own, after every
 // other integration file, and puts each change back before the next test.
@@ -19,6 +30,7 @@ const reset = () => `
 alter role drefyn_app in database ${db.name} reset all;
 alter role drefyn_app reset all;
 alter role drefyn_public_reader reset all;
+alter role drefyn_auth reset all;
 alter role drefyn_app in database ${BOOTSTRAPPED} reset all;
 alter role drefyn_public_reader in database ${BOOTSTRAPPED} reset all;
 alter role drefyn_app nosuperuser nobypassrls;
@@ -30,7 +42,7 @@ alter role all reset all;
 async function settingsRows(): Promise<number> {
   const out = await superuser(
     `select count(*) from pg_db_role_setting s join pg_roles r on r.oid = s.setrole
-      where r.rolname in ('drefyn_app', 'drefyn_public_reader');`,
+      where r.rolname in ('drefyn_app', 'drefyn_public_reader', 'drefyn_auth');`,
   );
   return Number(out.trim());
 }
@@ -82,6 +94,14 @@ describeWithStack('persisted role settings', () => {
     expect(message).toMatch(/\brole\b/);
     const error = await unsafe(createPublishedDatabase(readerConfig(db.reader)));
     expect(error.message).toMatch(/\brole\b/);
+  });
+
+  it('fail after drefyn_auth gets a search_path of its own', async () => {
+    await superuser('alter role drefyn_auth set search_path = public;');
+    const message = await roleSettingProblem('drefyn_auth');
+    expect(message).toContain('search_path');
+    const error = await unsafe(createAuthDatabase(authConfig(authUrl(db))));
+    expect(error.message).toContain('search_path');
   });
 
   it('fail after the superuser sets a per database setting for drefyn_app', async () => {
