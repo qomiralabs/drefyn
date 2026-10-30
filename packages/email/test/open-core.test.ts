@@ -85,16 +85,15 @@ describe('open core', () => {
       if (range.startsWith('workspace:')) continue;
       expect(range, name).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/);
     }
-    expect(deps['@react-email/render']).toBe('2.1.1');
   });
 });
 
 describe('renderer use', () => {
-  // The renderer only runs its HTML to text conversion, and the merge code under it,
-  // when given options. One call site with one argument keeps that path unreachable.
-  it('imports @react-email/render only in src/render.ts and calls render with one argument', () => {
+  // One file turns React into HTML, through the one call that never streams, so the
+  // markup cannot pick up stream markers or a second code path.
+  it('imports react-dom/server only in src/render.ts and calls renderToStaticMarkup once', () => {
     const importers = files.filter((file) =>
-      specifiers(file).some((spec) => spec.startsWith('@react-email/')),
+      specifiers(file).some((spec) => spec.startsWith('react-dom')),
     );
     expect(importers.map((file) => relative(root, file))).toEqual([join('src', 'render.ts')]);
 
@@ -106,15 +105,18 @@ describe('renderer use', () => {
       true,
     );
     const local = new Set<string>();
+    const imported: string[] = [];
     const calls: number[] = [];
     const visit = (node: ts.Node) => {
       if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-        if (node.moduleSpecifier.text === '@react-email/render') {
+        if (node.moduleSpecifier.text.startsWith('react-dom')) {
+          imported.push(node.moduleSpecifier.text);
+          expect(node.importClause?.name, 'no default import').toBeUndefined();
           const bindings = node.importClause?.namedBindings;
           expect(bindings !== undefined && ts.isNamedImports(bindings)).toBe(true);
           if (bindings !== undefined && ts.isNamedImports(bindings)) {
             for (const element of bindings.elements) {
-              expect((element.propertyName ?? element.name).text).toBe('render');
+              expect((element.propertyName ?? element.name).text).toBe('renderToStaticMarkup');
               local.add(element.name.text);
             }
           }
@@ -124,13 +126,25 @@ describe('renderer use', () => {
         const parent = node.parent;
         const isImport = ts.isImportSpecifier(parent);
         const isCallee = ts.isCallExpression(parent) && parent.expression === node;
-        expect(isImport || isCallee, 'render is only ever called directly').toBe(true);
+        expect(isImport || isCallee, 'renderToStaticMarkup is only ever called directly').toBe(
+          true,
+        );
         if (isCallee) calls.push(parent.arguments.length);
       }
       ts.forEachChild(node, visit);
     };
     visit(source);
+    expect(imported).toEqual(['react-dom/server']);
     expect(calls).toEqual([1]);
+  });
+
+  it('has no React Email package', () => {
+    expect(dependencyNames.filter((name) => name.startsWith('@react-email/'))).toEqual([]);
+    for (const file of files) {
+      for (const spec of specifiers(file)) {
+        expect(spec, relative(root, file)).not.toMatch(/^@react-email\//);
+      }
+    }
   });
 });
 
