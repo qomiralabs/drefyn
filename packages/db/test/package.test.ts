@@ -54,8 +54,15 @@ describe('package shape', () => {
   it('exports only context bound access, the config parsers and the helpers', () => {
     expect(Object.keys(db).sort()).toEqual(
       [
+        'API_KEY_EXPIRY_RULES',
+        'AUTH_EXPIRY_RULES',
         'DbError',
         'closeDatabase',
+        'createExpiryCleanup',
+        'deleteExpired',
+        'reserveApiKeyFailureWindows',
+        'reserveAuthRateWindows',
+        'withApiKeyLimiter',
         'createAuthDatabase',
         'createDatabase',
         'createPublishedDatabase',

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALLOW_LISTS,
   APP_FUNCTIONS,
+  AUTH_ONLY_TABLES,
   AUTH_TABLES,
   COLUMN_GRANT_TABLES,
   COLUMN_GRANTS,
@@ -89,12 +90,83 @@ describe('allow lists', () => {
     expect(READER_FUNCTIONS.map((f) => f.name)).not.toContain('app.current_user_id()');
   });
 
-  // The identity tables arrive with their own reviewed entries.
-  it('start with no auth table, user policy, global unique key or column grant', () => {
-    expect(AUTH_TABLES).toEqual([]);
-    expect(USER_POLICIES).toEqual([]);
+  it('list every identity and limiter table as global, with a reason', () => {
+    const tables = [
+      'app.api_key_failures',
+      'app.auth_rate_limits',
+      'app.email_challenges',
+      'app.identities',
+      'app.oauth_states',
+      'app.password_credentials',
+      'app.sessions',
+      'app.users',
+    ];
+    for (const name of tables) {
+      expect(
+        GLOBAL_TABLES.map((t) => t.name),
+        name,
+      ).toContain(name);
+    }
+  });
+
+  // The sign in role reaches the tables sign in needs and nothing after it.
+  it('let drefyn_auth reach the six sign in tables, never sessions or the API limiter', () => {
+    expect(AUTH_TABLES.map((t) => t.name).sort()).toEqual([
+      'app.auth_rate_limits',
+      'app.email_challenges',
+      'app.identities',
+      'app.oauth_states',
+      'app.password_credentials',
+      'app.users',
+    ]);
+  });
+
+  it('keep drefyn_app off the three auth only tables', () => {
+    expect(AUTH_ONLY_TABLES.map((t) => t.name).sort()).toEqual([
+      'app.auth_rate_limits',
+      'app.email_challenges',
+      'app.oauth_states',
+    ]);
+  });
+
+  it('name api_access on api_key_failures only', () => {
+    const access = USER_POLICIES.filter((p) => p.name.endsWith('.api_access'));
+    expect(access.map((p) => p.name)).toEqual(['app.api_key_failures.api_access']);
+  });
+
+  it('start with no global unique key', () => {
     expect(GLOBAL_UNIQUE_CONSTRAINTS).toEqual([]);
-    expect(COLUMN_GRANTS).toEqual([]);
+  });
+
+  it('grant drefyn_app only id, email, display_name and created_at on users', () => {
+    const appSelect = COLUMN_GRANTS.filter(
+      (g) =>
+        g.name.startsWith('app.users.') && g.grantee === 'drefyn_app' && g.privilege === 'SELECT',
+    );
+    expect(appSelect.map((g) => g.name).sort()).toEqual([
+      'app.users.created_at',
+      'app.users.display_name',
+      'app.users.email',
+      'app.users.id',
+    ]);
+    const appWrite = COLUMN_GRANTS.filter(
+      (g) =>
+        g.name.startsWith('app.users.') && g.grantee === 'drefyn_app' && g.privilege !== 'SELECT',
+    );
+    expect(appWrite.map((g) => `${g.privilege} ${g.name}`).sort()).toEqual([
+      'UPDATE app.users.display_name',
+      'UPDATE app.users.updated_at',
+    ]);
+    const authUpdate = COLUMN_GRANTS.filter(
+      (g) =>
+        g.name.startsWith('app.users.') && g.grantee === 'drefyn_auth' && g.privilege === 'UPDATE',
+    );
+    expect(authUpdate.map((g) => g.name).sort()).toEqual([
+      'app.users.email',
+      'app.users.email_normalized',
+      'app.users.email_verified_at',
+      'app.users.updated_at',
+    ]);
   });
 
   it('control the grants on users and password_credentials by column', () => {
@@ -210,6 +282,64 @@ describe('allow lists', () => {
           { name: 'app.users.email', grantee: 'public', privilege: 'SELECT', reason: 'r' },
         ],
       }),
+    ],
+    [
+      'a column grant with a lower case privilege',
+      (l) => ({
+        ...l,
+        columnGrants: [
+          { name: 'app.users.email', grantee: 'drefyn_app', privilege: 'select', reason: 'r' },
+        ],
+      }),
+    ],
+    [
+      'a column grant for a privilege that is never per column here',
+      (l) => ({
+        ...l,
+        columnGrants: [
+          { name: 'app.users.email', grantee: 'drefyn_app', privilege: 'REFERENCES', reason: 'r' },
+        ],
+      }),
+    ],
+    [
+      'a column grant to a role that is not a pool role',
+      (l) => ({
+        ...l,
+        columnGrants: [
+          { name: 'app.users.email', grantee: 'drefyn_owner', privilege: 'SELECT', reason: 'r' },
+        ],
+      }),
+    ],
+    [
+      'a column grant to the public reader',
+      (l) => ({
+        ...l,
+        columnGrants: [
+          {
+            name: 'app.users.email',
+            grantee: 'drefyn_public_reader',
+            privilege: 'SELECT',
+            reason: 'r',
+          },
+        ],
+      }),
+    ],
+    [
+      'a column grant on a table that is not column controlled',
+      (l) => ({
+        ...l,
+        columnGrants: [
+          { name: 'app.sessions.user_id', grantee: 'drefyn_app', privilege: 'SELECT', reason: 'r' },
+        ],
+      }),
+    ],
+    [
+      'an auth only table that is not an auth table',
+      (l) => ({ ...l, authOnlyTables: [{ name: 'app.sessions', reason: 'reviewed' }] }),
+    ],
+    [
+      'an auth only table outside schema app',
+      (l) => ({ ...l, authOnlyTables: [{ name: 'public.x', reason: 'reviewed' }] }),
     ],
     [
       'a column controlled table outside schema app',
