@@ -1,0 +1,50 @@
+export {
+  EMAIL_CONFIG_KEYS,
+  parseEmailConfig,
+  type EmailConfigError,
+  type EmailConfigKey,
+} from './config.ts';
+export { isHeaderSafe } from './headers.ts';
+export { logEmailConfig } from './logs.ts';
+export { createMailer } from './mailer.ts';
+export { renderMail } from './render.ts';
+export type { Secret } from './secret.ts';
+export {
+  LINK_PROVIDERS,
+  SECURITY_NOTICE_KINDS,
+  SIGN_IN_CODE_PURPOSES,
+  type EmailConfig,
+  type EmailCounter,
+  type EmailDeps,
+  type EmailError,
+  type EmailErrorCode,
+  type EmailHistogram,
+  type EmailLogEvent,
+  type EmailLogFields,
+  type EmailLogger,
+  type EmailMetrics,
+  type Envelope,
+  type InvitationMail,
+  type LinkProvider,
+  type Linking,
+  type MailMessage,
+  type MailTransport,
+  type Mailer,
+  type MetricLabels,
+  type NoticeFacts,
+  type RenderedMail,
+  type Result,
+  type SecurityNoticeKind,
+  type SecurityNoticeMail,
+  type SendLimits,
+  type SendOptions,
+  type SendResult,
+  type SenderConfig,
+  type SignInCodeMail,
+  type SignInCodePurpose,
+  type SmtpConfig,
+  type TemplateId,
+  type TlsMode,
+  type TransportError,
+  type TransportPhase,
+} from './types.ts';
