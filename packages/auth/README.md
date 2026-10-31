@@ -190,8 +190,20 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
 - `touchSession({ userId, sessionId, organizationId? })` runs after the response when
   `touchDue` is true. One guarded update, at most once an hour per session, never throws; a
   failure logs `auth.session_touch_failed` with public ids only.
-- `signOut`, `signOutEverywhere` (every row of the user), `listSessions` (live rows, current
-  marked, no hashes or IPs) and `revokeSession`.
+- `signOut`, `signOutEverywhere` (every row of the user, nothing reissued), `listSessions`
+  (live rows, current marked, no hashes or IPs) and `revokeSession`.
+- `signOutOtherSessions(session, browser)` is "Sign out everywhere else". In one transaction
+  it deletes every row of the user, this one included, and gives this browser a new row and
+  secret that keep the old `method`, `authenticated_at`, `user_agent` and `expires_at`. A copy
+  of this browser's old cookie stops working with the rest. Returns `{ revoked, setCookies }`:
+  `revoked` counts the other sessions, and the new session cookie's `Max-Age` is the time left
+  on the old row. Needs a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`);
+  `AUTH_SESSION_INVALID` when the current row is already gone; `AUTH_UNAVAILABLE` on a
+  database error. None of them changes a row. Use `signOutEverywhere` where the current
+  browser is not trusted. Both log `auth.sessions_revoked` with `scope` (`all` or `others`),
+  `revoked` and the public user id.
+- A failed `resolve` or `resolveAccess` returns no cookies, so a late request from another
+  tab with the old cookie cannot clear the new one.
 - `requireRecentAuth(session)` answers `AUTH_RECENT_AUTH_REQUIRED` when the last sign in is
   older than 15 minutes by database time. `stepUpWithPassword` counts `password_fail` and
   `password_fail_ip` before the hash and verifies outside any transaction through the
