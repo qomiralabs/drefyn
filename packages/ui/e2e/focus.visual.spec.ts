@@ -21,6 +21,8 @@ const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-switch--off', keys: ['Tab'], focused: 'switch' },
   { id: 'components-switch--disabled', keys: ['Tab'], focused: 'switch' },
   { id: 'components-menu--default', keys: ['Tab'], focused: 'button' },
+  // The ring follows the round trigger's circle.
+  { id: 'components-menu--round-trigger', keys: ['Tab'], focused: 'button' },
   { id: 'components-menu--default', keys: ['Tab', 'Enter', 'ArrowDown'], focused: 'menuitem' },
   {
     id: 'components-menu--default',

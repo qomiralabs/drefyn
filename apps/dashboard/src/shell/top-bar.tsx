@@ -1,24 +1,34 @@
 'use client';
-import { IconCheck, Menu, MenuItem, MenuSection, MenuSeparator } from '@drefyn/ui/react';
+import {
+  IconCheck,
+  IconMenu,
+  IconSearch,
+  IconUpDown,
+  Mark,
+  Menu,
+  MenuItem,
+  MenuSection,
+  MenuSeparator,
+  toast,
+  useLandmark,
+} from '@drefyn/ui/react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
-import { IconMenu, IconSearch, IconUpDown, Mark } from './icons.tsx';
 import { Inbox } from './inbox.tsx';
 import { PRODUCTS } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
 import { parseShellPath } from './route.ts';
 import { applyTheme, currentTheme, type ThemeChoice } from './theme.ts';
-import { toast } from './toast.tsx';
 
 const QUIET_ICON =
   'inline-grid size-control-md shrink-0 cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring';
 
 // Things the placeholder shell lists but cannot do yet say so instead of doing nothing.
 const notYet = (what: string) => () => {
-  toast(`${what} is not available yet.`);
+  toast({ title: `${what} is not available yet.` });
 };
 
 export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
@@ -70,14 +80,15 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
   const mark = (choice: ThemeChoice) =>
     theme === choice ? <IconCheck /> : <span className="size-icon-sm" />;
   return (
+    // The trigger is the circle: as tall as the other bar controls, so two initials have
+    // clear space on every side, with its edge and its hover and open fills on the circle.
     <Menu
-      variant="quiet"
+      variant="secondary"
+      triggerShape="round"
       label="Account"
       triggerLabel={`${data.person.initials}, account for ${data.person.name}`}
       trigger={
-        <span className="inline-grid size-icon-lg place-items-center rounded-full border border-rule-strong bg-raised text-caption font-medium text-secondary">
-          {data.person.initials}
-        </span>
+        <span className="text-caption font-medium text-secondary">{data.person.initials}</span>
       }
     >
       <MenuSection title="Theme">
@@ -147,10 +158,13 @@ export function TopBar({ data }: { data: ShellData }): ReactNode {
   const project = here?.project === undefined ? undefined : data.projects[here.project];
   const product = PRODUCTS.find((p) => p.id === here?.product);
   const where = project?.name ?? product?.label ?? data.organization.name;
+  const ref = useRef<HTMLElement>(null);
+  const landmark = useLandmark(ref, { role: 'banner' });
   return (
     <header
+      ref={ref}
       data-region="bar"
-      tabIndex={-1}
+      {...landmark}
       className="sticky top-0 z-raised flex h-shell-bar items-center gap-4 border-b border-rule bg-ground ps-8 pe-12 outline-none focus-visible:focus-ring-inset"
     >
       <button

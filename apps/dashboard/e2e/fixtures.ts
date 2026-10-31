@@ -55,6 +55,8 @@ export const banner = (page: Page): Locator => page.getByRole('banner');
 export const products = (page: Page): Locator =>
   banner(page).getByRole('navigation', { name: 'Products', exact: true });
 export const main = (page: Page): Locator => page.getByRole('main');
+export const notifications = (page: Page): Locator =>
+  page.getByRole('region', { name: /notification/i });
 export const commandBar = (page: Page): Locator =>
   page.getByRole('dialog', { name: 'Search or run a command' });
 
@@ -79,13 +81,18 @@ export async function focused(page: Page): Promise<string> {
   });
 }
 
-// The landmark that holds focus: banner, the sidebar navigation, main, or none.
+// The landmark that holds focus: banner, the sidebar navigation, main, the notifications,
+// or none.
 export async function focusedRegion(page: Page): Promise<string> {
   return page.evaluate(() => {
     const el = document.activeElement;
     if (el === null) return 'none';
     if (el.closest('header') !== null) return 'banner';
     if (el.closest('main') !== null) return 'main';
+    const region = el.closest('[role="region"]');
+    if (region !== null && /notification/i.test(region.getAttribute('aria-label') ?? '')) {
+      return 'notifications';
+    }
     const nav = el.closest('nav[aria-label]');
     if (nav !== null && nav.closest('header') === null)
       return `nav ${nav.getAttribute('aria-label') ?? ''}`;

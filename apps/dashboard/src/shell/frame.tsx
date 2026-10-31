@@ -1,4 +1,5 @@
 'use client';
+import { toast, ToastRegion } from '@drefyn/ui/react';
 import { useRouter } from 'next/navigation';
 import {
   createContext,
@@ -12,8 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { CommandBarProps } from './command-bar.tsx';
-import { isTyping, nextRegion, sequenceTarget } from './keys.ts';
-import { ShellToasts, toast } from './toast.tsx';
+import { isTyping, sequenceTarget } from './keys.ts';
 
 interface ShellState {
   readonly org: string;
@@ -32,10 +32,6 @@ export function useShell(): ShellState {
 
 // The command bar is not in the first load: it arrives on the first Cmd+K or Ctrl+K.
 const loadCommandBar = () => import('./command-bar.tsx').then((mod) => mod.CommandBar);
-
-// Regions F6 moves between, in order. Hidden ones are skipped, so the cycle follows what a
-// person can see at each width.
-const REGIONS = ['[data-region="bar"]', '[data-region="nav"]', '#main'];
 
 export function ShellFrame({
   org,
@@ -70,7 +66,7 @@ export function ShellFrame({
         setCommandOpen(true);
       })
       .catch(() => {
-        toast('Could not open search. Try again.');
+        toast({ title: 'Could not open search. Try again.', tone: 'error' });
       })
       .finally(() => {
         loading.current = false;
@@ -105,23 +101,6 @@ export function ShellFrame({
         toggleCommandBar();
         return;
       }
-      if (event.key === 'F6' && !event.altKey && !event.metaKey && !event.ctrlKey) {
-        const regions = REGIONS.flatMap((selector) => {
-          const el = document.querySelector<HTMLElement>(selector);
-          return el !== null && el.offsetParent !== null ? [el] : [];
-        });
-        const index = nextRegion(
-          regions.findIndex((el) => el.contains(document.activeElement)),
-          regions.length,
-          event.shiftKey,
-        );
-        const target = regions[index];
-        if (target !== undefined) {
-          event.preventDefault();
-          target.focus();
-        }
-        return;
-      }
       // Single key shortcuts never fire in a field, with a modifier, or over an overlay.
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (isTyping(document.activeElement) || commandOpen || drawerOpen) return;
@@ -150,7 +129,7 @@ export function ShellFrame({
       {CommandBar === null ? null : (
         <CommandBar org={org} orgName={orgName} open={commandOpen} onOpenChange={setCommandOpen} />
       )}
-      <ShellToasts />
+      <ToastRegion />
     </ShellContext>
   );
 }

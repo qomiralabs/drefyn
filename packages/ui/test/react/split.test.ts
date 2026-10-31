@@ -100,6 +100,8 @@ describe('the server and client split', () => {
     expect(isServerSafe('TextField')).toBe(true);
     expect(isServerSafe('Tooltip')).toBe(false);
     expect(isServerSafe('toast')).toBe(false);
+    expect(isServerSafe('Mark')).toBe(true);
+    expect(isServerSafe('useLandmark')).toBe(false);
   });
 });
 
