@@ -19,6 +19,12 @@ create table app.organizations (
 alter table app.organizations enable row level security;
 alter table app.organizations force row level security;
 
+-- Organization work runs as drefyn_app, so RLS alone would let it raise its own plan or lift
+-- its own read only state. Only the listed columns may change; the plan and read only state
+-- are set at creation and afterwards only by billing.
+revoke update on app.organizations from drefyn_app;
+grant update (name, updated_at) on app.organizations to drefyn_app;
+
 create policy tenant_isolation on app.organizations to drefyn_app
   using (organization_id = app.current_org())
   with check (organization_id = app.current_org());
@@ -59,6 +65,11 @@ create index memberships_user_id_idx on app.memberships (user_id);
 alter table app.memberships enable row level security;
 alter table app.memberships force row level security;
 
+-- A role is set when the membership is made. Nothing changes it until role management lands
+-- with its own checks, so a member's own organization work can never promote them.
+revoke update on app.memberships from drefyn_app;
+grant update (default_project_role, updated_at) on app.memberships to drefyn_app;
+
 create policy tenant_isolation on app.memberships to drefyn_app
   using (organization_id = app.current_org())
   with check (organization_id = app.current_org());
@@ -91,6 +102,10 @@ create table app.projects (
 
 alter table app.projects enable row level security;
 alter table app.projects force row level security;
+
+-- Read only state follows the plan, so organization work cannot lift it either.
+revoke update on app.projects from drefyn_app;
+grant update (slug, name, updated_at) on app.projects to drefyn_app;
 
 create policy tenant_isolation on app.projects to drefyn_app
   using (organization_id = app.current_org())
