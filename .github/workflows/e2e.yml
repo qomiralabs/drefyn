@@ -46,6 +46,9 @@ jobs:
       # tenancy files to 95 percent: some of them only run against a real Postgres.
       - name: Unit and integration tests with merged coverage
         run: pnpm --filter @drefyn/db test:merged
+      # Sessions, revocation and step up against the same stack, on databases of their own.
+      - name: Auth integration tests
+        run: pnpm --filter @drefyn/auth test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the

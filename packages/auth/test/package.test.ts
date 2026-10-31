@@ -47,10 +47,14 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter.
-  it('reaches the database only from the limiter, and no network or file anywhere', () => {
+  // the limiter and the session files.
+  it('reaches the database only from the limiter and sessions, and no network or file anywhere', () => {
+    const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
-      'rate-limiter.ts': /^(@drefyn\/db|kysely)$/,
+      'rate-limiter.ts': database,
+      'sessions.ts': database,
+      'session-support.ts': database,
+      'step-up.ts': database,
     };
     const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
     for (const file of files) {
@@ -85,10 +89,12 @@ describe('the main entry', () => {
         'cookieNames',
         'createApiKeyFailureLimiter',
         'createRateLimiter',
+        'createSessions',
         'decodeSecret',
         'deriveAuthKeys',
         'encodeSecret',
         'formatApiKey',
+        'formatChallengeId',
         'formatInvitationToken',
         'formatSessionToken',
         'formatVerifyFragment',
@@ -98,6 +104,7 @@ describe('the main entry', () => {
         'parseApiKey',
         'parseAuthConfig',
         'parseBearer',
+        'parseChallengeId',
         'parseCode',
         'parseInvitationToken',
         'parseSessionToken',
@@ -107,6 +114,8 @@ describe('the main entry', () => {
         'redact',
         'redactText',
         'safeReturnTo',
+        'serializeCookie',
+        'sessionCookieValue',
         'sha256',
       ].sort(),
     );

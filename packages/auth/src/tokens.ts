@@ -196,6 +196,16 @@ export function parseInvitationToken(value: unknown): InvitationToken | null {
   return { organizationId: parts[0], invitationId: parts[1], secret: parts[2] };
 }
 
+// The challenge id as the verify form carries it: the 26 character body, no prefix.
+export function formatChallengeId(uuid: string): string {
+  return challengeBody(uuid);
+}
+
+export function parseChallengeId(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length !== BODY_LENGTH) return null;
+  return decodeBody('usr', value, 0);
+}
+
 const CODE = /^[0-9]{8}$/;
 
 export function parseCode(value: unknown): string | null {
