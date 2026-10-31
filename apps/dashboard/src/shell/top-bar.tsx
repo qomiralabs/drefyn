@@ -80,16 +80,15 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
   const mark = (choice: ThemeChoice) =>
     theme === choice ? <IconCheck /> : <span className="size-icon-sm" />;
   return (
+    // The trigger is the circle: as tall as the other bar controls, so two initials have
+    // clear space on every side, with its edge and its hover and open fills on the circle.
     <Menu
-      variant="quiet"
+      variant="secondary"
+      triggerShape="round"
       label="Account"
       triggerLabel={`${data.person.initials}, account for ${data.person.name}`}
-      // The circle is as tall as the other bar controls, so two initials have clear space
-      // on every side and the row lines up.
       trigger={
-        <span className="inline-grid size-control-md place-items-center rounded-full border border-rule-strong bg-raised text-caption font-medium text-secondary">
-          {data.person.initials}
-        </span>
+        <span className="text-caption font-medium text-secondary">{data.person.initials}</span>
       }
     >
       <MenuSection title="Theme">

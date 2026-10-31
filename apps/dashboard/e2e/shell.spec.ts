@@ -400,19 +400,21 @@ test.describe('account initials', () => {
       }) => {
         await page.setViewportSize(viewport);
         await openShell(page, ROUTES.overview);
+        // The trigger itself is the circle; the initials are the text inside it. Held as a
+        // handle, since the text it is found by changes next.
         const account = banner(page).getByRole('button', { name: /account for/ });
-        // The innermost element holding the placeholder person's initials is the circle.
-        // Held as a handle, since the text it is found by changes next.
-        const circle = await account.getByText('MO', { exact: true }).elementHandle();
-        await circle.evaluate((el, text) => {
+        const label = await account.getByText('MO', { exact: true }).elementHandle();
+        await label.evaluate((el, text) => {
           el.textContent = text;
         }, initials);
         const inbox = banner(page).getByRole('button', { name: /^Inbox/ });
-        const sizes = await circle.evaluate((el) => {
+        const sizes = await label.evaluate((el) => {
           const range = document.createRange();
           range.selectNodeContents(el);
           const text = range.getBoundingClientRect();
-          const box = el.getBoundingClientRect();
+          const circle = el.closest('button');
+          if (circle === null) throw new Error('the initials are not inside the trigger');
+          const box = circle.getBoundingClientRect();
           return {
             width: box.width,
             height: box.height,
@@ -420,6 +422,9 @@ test.describe('account initials', () => {
             textHeight: text.height,
           };
         });
+        // Edge and fills follow the circle: no square behind it.
+        await expect(account).toHaveCSS('border-top-left-radius', '9999px');
+        await expect(account).toHaveCSS('border-bottom-right-radius', '9999px');
         const inboxBox = await inbox.boundingBox();
         expect(inboxBox).not.toBeNull();
         if (inboxBox === null) return;
