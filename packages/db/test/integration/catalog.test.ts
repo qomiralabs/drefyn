@@ -50,65 +50,7 @@ function lists(globals: readonly string[], more: Partial<AllowLists> = {}): Allo
   };
 }
 
-// A users table built the reviewed way: no table level select or update for anyone, column
-// grants only, and one policy per role.
-const USERS_UP = `${globalTable('users', ['email text not null', 'display_name text', 'created_at timestamptz not null default now()'])}
-revoke all on app.users from drefyn_app;
-grant select (id, email, display_name, created_at) on app.users to drefyn_app;
-grant update (display_name) on app.users to drefyn_app;
-grant insert on app.users to drefyn_auth;
-grant select (id, email) on app.users to drefyn_auth;
-create policy self_read on app.users for select to drefyn_app using (id = app.current_user_id());
-create policy self_update on app.users for update to drefyn_app
-  using (id = app.current_user_id()) with check (id = app.current_user_id());
-create policy auth_access on app.users to drefyn_auth using (true) with check (true);`;
-
 const SELF = '(id = app.current_user_id())';
-
-const USERS_LISTS = lists(['users'], {
-  authTables: [reviewed('app.users')],
-  userPolicies: [
-    {
-      name: 'app.users.self_read',
-      command: 'select',
-      roles: ['drefyn_app'],
-      using: SELF,
-      withCheck: null,
-      reason: 'test only',
-    },
-    {
-      name: 'app.users.self_update',
-      command: 'update',
-      roles: ['drefyn_app'],
-      using: SELF,
-      withCheck: SELF,
-      reason: 'test only',
-    },
-    {
-      name: 'app.users.auth_access',
-      command: 'all',
-      roles: ['drefyn_auth'],
-      using: 'true',
-      withCheck: 'true',
-      reason: 'test only',
-    },
-  ],
-  columnGrants: [
-    ...['id', 'email', 'display_name', 'created_at'].map((column) => ({
-      name: `app.users.${column}`,
-      grantee: 'drefyn_app',
-      privilege: 'SELECT',
-      reason: 'test only',
-    })),
-    { name: 'app.users.display_name', grantee: 'drefyn_app', privilege: 'UPDATE', reason: 'r' },
-    ...['id', 'email'].map((column) => ({
-      name: `app.users.${column}`,
-      grantee: 'drefyn_auth',
-      privilege: 'SELECT',
-      reason: 'test only',
-    })),
-  ],
-});
 
 interface BadCase {
   readonly rule: CatalogRule;
@@ -692,49 +634,102 @@ grant select (body) on app.bad_auth_column_option to drefyn_auth with grant opti
       authTables: [reviewed('app.bad_auth_column_option')],
     }),
   },
-  // Default privileges give drefyn_app every column of a new table, the next one included.
-  'the default grants left on a users table': {
+  // The shipped users and password_credentials tables carry column grants only; each case
+  // adds one grant on top of them.
+  'a table level select on users for drefyn_app': {
     rule: 'column_grant',
     object: 'app.users',
     mentions: ['SELECT', 'drefyn_app'],
-    up: () => globalTable('users', ['email text']),
-    allow: lists(['users']),
+    up: () => 'grant select on app.users to drefyn_app;',
   },
   'a table level update on users': {
     rule: 'column_grant',
     object: 'app.users',
-    mentions: ['UPDATE', 'drefyn_app'],
-    up: () => `${globalTable('users', ['email text'])}
-revoke all on app.users from drefyn_app;
-grant update on app.users to drefyn_app;`,
-    allow: lists(['users']),
+    mentions: ['UPDATE'],
+    up: () => 'grant update on app.users to drefyn_app;',
+  },
+  'a table level insert on users': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['INSERT', 'drefyn_auth'],
+    up: () => 'grant insert on app.users to drefyn_auth;',
   },
   'a column grant off the list on users': {
     rule: 'column_grant',
     object: 'app.users',
     mentions: ['app.users.email', 'UPDATE', 'drefyn_app'],
-    up: () => `${globalTable('users', ['email text'])}
-revoke all on app.users from drefyn_app;
-grant update (email) on app.users to drefyn_app;`,
-    allow: lists(['users']),
+    up: () => 'grant update (email) on app.users to drefyn_app;',
+  },
+  'a column insert off the list on users': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['app.users.created_at', 'INSERT', 'drefyn_auth'],
+    up: () => 'grant insert (created_at) on app.users to drefyn_auth;',
   },
   'a column grant off the list on password_credentials': {
     rule: 'column_grant',
     object: 'app.password_credentials',
-    mentions: ['app.password_credentials.phc', 'drefyn_auth'],
-    up: () => `${globalTable('password_credentials', ['phc text'])}
-revoke all on app.password_credentials from drefyn_app;
-grant select (phc) on app.password_credentials to drefyn_auth;`,
-    allow: lists(['password_credentials'], { authTables: [reviewed('app.password_credentials')] }),
+    mentions: ['app.password_credentials.created_at', 'drefyn_auth'],
+    up: () => 'grant select (created_at) on app.password_credentials to drefyn_auth;',
   },
   'a table level update on password_credentials for drefyn_auth': {
     rule: 'column_grant',
     object: 'app.password_credentials',
-    mentions: ['UPDATE', 'drefyn_auth'],
-    up: () => `${globalTable('password_credentials', ['phc text'])}
-revoke all on app.password_credentials from drefyn_app;
-grant update on app.password_credentials to drefyn_auth;`,
-    allow: lists(['password_credentials'], { authTables: [reviewed('app.password_credentials')] }),
+    mentions: ['UPDATE'],
+    up: () => 'grant update on app.password_credentials to drefyn_auth;',
+  },
+  'a table level insert on password_credentials for drefyn_app': {
+    rule: 'column_grant',
+    object: 'app.password_credentials',
+    mentions: ['INSERT', 'drefyn_app'],
+    up: () => 'grant insert on app.password_credentials to drefyn_app;',
+  },
+  // The auth only tables hold addresses of people who never signed up, codes and limiter
+  // keys; drefyn_app runs every request, so it holds nothing there.
+  'a grant to drefyn_app on email_challenges': {
+    rule: 'auth_only',
+    object: 'app.email_challenges',
+    mentions: ['SELECT', 'drefyn_app'],
+    up: () => 'grant select on app.email_challenges to drefyn_app;',
+  },
+  'a grant to drefyn_app on oauth_states': {
+    rule: 'auth_only',
+    object: 'app.oauth_states',
+    mentions: ['DELETE', 'drefyn_app'],
+    up: () => 'grant delete on app.oauth_states to drefyn_app;',
+  },
+  'a grant to drefyn_app on auth_rate_limits': {
+    rule: 'auth_only',
+    object: 'app.auth_rate_limits',
+    mentions: ['INSERT', 'drefyn_app'],
+    up: () => 'grant insert on app.auth_rate_limits to drefyn_app;',
+  },
+  'a column grant to drefyn_app on auth_rate_limits': {
+    rule: 'auth_only',
+    object: 'app.auth_rate_limits',
+    mentions: ['app.auth_rate_limits.bucket', 'drefyn_app'],
+    up: () => 'grant select (bucket) on app.auth_rate_limits to drefyn_app;',
+  },
+  // The API service never holds the auth role, and the sign in role never reaches the API
+  // limiter or sessions.
+  'a grant to drefyn_auth on api_key_failures': {
+    rule: 'auth_grant',
+    object: 'app.api_key_failures',
+    mentions: ['SELECT', 'drefyn_auth'],
+    up: () => 'grant select on app.api_key_failures to drefyn_auth;',
+  },
+  'a grant to drefyn_auth on sessions': {
+    rule: 'auth_grant',
+    object: 'app.sessions',
+    mentions: ['INSERT', 'drefyn_auth'],
+    up: () => 'grant insert on app.sessions to drefyn_auth;',
+  },
+  'an api_access policy on a table other than api_key_failures': {
+    rule: 'policy',
+    object: 'app.auth_rate_limits',
+    mentions: ['api_access'],
+    up: () =>
+      'create policy api_access on app.auth_rate_limits to drefyn_app using (true) with check (true);',
   },
   // A policy with no TO clause applies to every role, the pools included.
   'a restrictive policy to public': {
@@ -841,13 +836,6 @@ alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organiza
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
-  it('with a users table built the reviewed way', async () => {
-    const db = await fixture();
-    await withBadMigration(db, USERS_UP);
-    const problems = await catalogProblems(db.owner, USERS_LISTS);
-    expect(problems, describeProblems(problems)).toEqual([]);
-  });
-
   it('with plain DML for drefyn_auth on a listed auth table', async () => {
     const db = await fixture();
     await withBadMigration(
@@ -856,7 +844,9 @@ alter table app.ok_cross add constraint ok_cross_note_fkey foreign key (organiza
 revoke all on app.ok_auth_dml from drefyn_app;
 grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
     );
-    const allow = lists(['ok_auth_dml'], { authTables: [reviewed('app.ok_auth_dml')] });
+    const allow = lists(['ok_auth_dml'], {
+      authTables: [...ALLOW_LISTS.authTables, reviewed('app.ok_auth_dml')],
+    });
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
@@ -869,6 +859,7 @@ grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
     );
     const allow = lists([], {
       userPolicies: [
+        ...ALLOW_LISTS.userPolicies,
         {
           name: 'app.fixture_members.has_email',
           command: 'select',

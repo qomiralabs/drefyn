@@ -1,9 +1,10 @@
 # `@drefyn/auth`
 
-Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. This
-first slice holds only pure pieces: config parsing, key derivation, credential formats,
-input validators, the built in password rules, log redaction and the permission model.
-Nothing here touches a database, the network or the file system.
+Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. So far it
+holds config parsing, key derivation, credential formats, input validators, the built in
+password rules, log redaction, the permission model, the rate limiters and database
+sessions with step up. Only the limiters and the session files reach the database, and only
+through `@drefyn/db`; nothing here touches the network or the file system.
 
 ## Entry points
 
@@ -60,6 +61,34 @@ const api = parseApiAuthConfig(process.env); // API service
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
+
+## Rate limits
+
+- `rateKeyForIp(ip)` gives the value a per IP bucket is keyed by: `ip4:a.b.c.d`, or the /64 of
+  an IPv6 address in one fixed spelling (`ip6:2001:0db8:0001:0002::/64`). An IPv4 mapped
+  address reads as its IPv4 address. Anything else, zone ids included, is
+  `AUTH_INPUT_INVALID`.
+- `createRateLimiter({ db, keys, limits, metrics, logger })` returns `reserve(bucket, value)`.
+  The stored key is `HMAC(subkey_rate, bucket, ...value)`. Each call counts one attempt
+  against every window of the bucket in a short transaction of its own, committed before it
+  returns. Past any limit it throws `AUTH_RATE_LIMITED` with `retryAfterSeconds`, the longest
+  wait of the windows that refused; a database failure is `AUTH_UNAVAILABLE`. The first
+  refusal in a window of `email_send_address_ceiling` also counts `auth.email_ceiling_hit`
+  and logs the bucket and the first 16 hex digits of the key, never the address; later
+  refusals in that window record nothing, so strangers cannot flood the log.
+- `createApiKeyFailureLimiter({ db, config })` is the API service's: keyed with
+  `DREFYN_API_RATE_LIMIT_KEY` through `parseApiAuthConfig`, committed through
+  `withApiKeyLimiter`.
+
+The contract for every flow: await `reserve` before the work it limits and outside that
+work's transaction. A wrong code or password is thrown from the work and rolls its
+transaction back; a count made inside it would go with it, and its row lock would queue every
+other request on that key behind the work. The same holds for the per challenge attempt
+count: it is incremented and committed before the code is compared. Slow work such as
+password hashing holds no connection.
+
+The buckets and defaults are in `RATE_BUCKETS` and the Config section. `email_send_device`
+(10 a day) is configured for the known device exemption, which the email sign in flow adds.
 
 ## Credential formats
 
@@ -136,3 +165,38 @@ lets admins assign admin and member, and lets members assign nothing. `ORG_ROLES
 
 `AuthError` carries `code` (`AuthErrorCode`), plus `key` for config errors and
 `retryAfterSeconds` for rate limits. Messages are fixed text per code.
+
+## Sessions
+
+```ts
+const sessions = createSessions(config, { db, authDb, logger, mailer, passwords });
+```
+
+- Token `v1.<user>.<session>.<secret>` in `__Host-drefyn_session` (`HttpOnly; Secure;
+SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
+  `drefyn_session` and `Secure` is dropped; with them on, the bare name is never read.
+  `serializeCookie(config, spec)` writes the header; callers choose only name, value and
+  `Max-Age`.
+- `startSession(browser, { userId, method })` runs after a sign in was proved: it deletes the
+  session the browser's cookie proves, whoever it belongs to, inserts a new row with a fresh
+  secret (`secret_hash = sha256(secret)`) and database times (30 days absolute by default),
+  and clears the pre sign in and OAuth cookies.
+- `resolve(cookie)` returns `{ session, touchDue }` or null; `resolveSession(cookie)` returns
+  the session or null. The first statement selects only the session row by id; the hash is
+  compared with `timingSafeEqual` in process (against a dummy on a miss); idle and absolute
+  expiry use database `now()`; any failure rolls back before a second statement. Nothing is
+  written. A database failure throws `AUTH_UNAVAILABLE` rather than signing anyone out.
+- `touchSession({ userId, sessionId, organizationId? })` runs after the response when
+  `touchDue` is true. One guarded update, at most once an hour per session, never throws; a
+  failure logs `auth.session_touch_failed` with public ids only.
+- `signOut`, `signOutEverywhere` (every row of the user), `listSessions` (live rows, current
+  marked, no hashes or IPs) and `revokeSession`.
+- `requireRecentAuth(session)` answers `AUTH_RECENT_AUTH_REQUIRED` when the last sign in is
+  older than 15 minutes by database time. `stepUpWithPassword` counts `password_fail` and
+  `password_fail_ip` before the hash and verifies outside any transaction through the
+  `PasswordVerifier` it is given (`AUTH_PASSWORDS_DISABLED` without one).
+  `startStepUpCode` and `verifyStepUpCode` send an 8 digit code bound to the asking session
+  (10 minutes, 5 attempts, single use). Both refresh `authenticated_at` on the same row and
+  record `step_up_method`.
+- `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
+  stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.

@@ -14,5 +14,106 @@ export interface ColumnType<Select, Insert = Select, Update = Select> {
 // A column an insert may leave out because the database fills it in.
 export type Generated<T> = ColumnType<T, T | undefined, T>;
 
+// app.api_key_failures
+export interface ApiKeyFailuresTable {
+  key_hmac: Buffer;
+  window_start: Date;
+  window_end: Date;
+  count: number;
+}
+
+// app.auth_rate_limits
+export interface AuthRateLimitsTable {
+  bucket: string;
+  key_hmac: Buffer;
+  window_start: Date;
+  window_end: Date;
+  count: number;
+}
+
+// app.email_challenges
+export interface EmailChallengesTable {
+  id: Generated<string>;
+  email_normalized: string;
+  purpose: string;
+  user_id: string | null;
+  code_hmac: Buffer;
+  browser_hash: Buffer;
+  attempts: Generated<number>;
+  pending_provider: string | null;
+  pending_subject: string | null;
+  return_to: string | null;
+  expires_at: Date;
+  consumed_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.identities
+export interface IdentitiesTable {
+  id: Generated<string>;
+  user_id: string;
+  provider: string;
+  provider_subject: string;
+  provider_email_normalized: string;
+  last_used_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.oauth_states
+export interface OauthStatesTable {
+  state_hash: Buffer;
+  provider: string;
+  purpose: string;
+  code_verifier: string;
+  nonce: string | null;
+  browser_hash: Buffer;
+  return_to: string | null;
+  link_user_id: string | null;
+  expires_at: Date;
+  created_at: Generated<Date>;
+}
+
+// app.password_credentials
+export interface PasswordCredentialsTable {
+  user_id: string;
+  phc: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.sessions
+export interface SessionsTable {
+  id: Generated<string>;
+  user_id: string;
+  secret_hash: Buffer;
+  method: string;
+  step_up_method: string | null;
+  authenticated_at: Date;
+  last_seen_at: Generated<Date>;
+  expires_at: Date;
+  user_agent: string | null;
+  created_at: Generated<Date>;
+}
+
+// app.users
+export interface UsersTable {
+  id: Generated<string>;
+  email: string;
+  email_normalized: string;
+  display_name: string | null;
+  email_verified_at: Date;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // Tables in schema app, keyed by name, as the search_path finds them.
-export type Schema = Record<string, never>;
+export interface Schema {
+  api_key_failures: ApiKeyFailuresTable;
+  auth_rate_limits: AuthRateLimitsTable;
+  email_challenges: EmailChallengesTable;
+  identities: IdentitiesTable;
+  oauth_states: OauthStatesTable;
+  password_credentials: PasswordCredentialsTable;
+  sessions: SessionsTable;
+  users: UsersTable;
+}

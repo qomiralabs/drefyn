@@ -52,6 +52,7 @@ describe('parseAuthConfig defaults', () => {
         { count: 10, windowSeconds: 86_400 },
       ],
       email_send_address_ceiling: [{ count: 30, windowSeconds: 86_400 }],
+      email_send_device: [{ count: 10, windowSeconds: 86_400 }],
       email_send_ip: [{ count: 20, windowSeconds: 600 }],
       code_verify: [{ count: 10, windowSeconds: 3600 }],
       oauth_start: [{ count: 30, windowSeconds: 600 }],

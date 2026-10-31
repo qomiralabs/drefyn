@@ -38,6 +38,7 @@ export type CatalogRule =
   | 'tenant_foreign_key'
   | 'auth_grant'
   | 'column_grant'
+  | 'auth_only'
   | 'public_policy';
 
 export interface CatalogProblem {
@@ -91,6 +92,27 @@ interface ListSpec {
   readonly unsafe?: (entry: AllowEntry) => string | undefined;
 }
 
+const COLUMN_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE']);
+const COLUMN_GRANTEES = new Set([APP_ROLE, AUTH_ROLE]);
+
+// A typo here would fail closed against the catalog, but the message would then point at the
+// database rather than at the entry that is wrong.
+function columnGrantUnsafe(
+  entry: ColumnGrantEntry,
+  tables: ReadonlySet<string>,
+): string | undefined {
+  if (entry.grantee === 'public') return 'is to public, which every role inherits';
+  if (!COLUMN_GRANTEES.has(entry.grantee)) {
+    return `is to ${entry.grantee}; only ${APP_ROLE} and ${AUTH_ROLE} get column grants`;
+  }
+  if (!COLUMN_PRIVILEGES.has(entry.privilege)) {
+    return `is for ${entry.privilege}; only SELECT, INSERT and UPDATE, in upper case, go per column`;
+  }
+  const table = entry.name.split('.').slice(0, 2).join('.');
+  if (!tables.has(table)) return `is on ${table}, which is not on the column grant table list`;
+  return undefined;
+}
+
 function policyUnsafe(entry: PolicyEntry): string | undefined {
   if (entry.roles.length === 0) return 'names no role';
   if (entry.roles.includes('public')) return 'is for public, which every role inherits';
@@ -100,6 +122,8 @@ function policyUnsafe(entry: PolicyEntry): string | undefined {
 // Problems with the allow lists themselves: an empty reason, a bad name, a duplicate entry,
 // or an entry that is unsafe whatever the catalog says.
 export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] {
+  const authTables = new Set(allow.authTables.map((e) => e.name));
+  const columnTables = new Set(allow.columnGrantTables.map((e) => e.name));
   const lists: readonly ListSpec[] = [
     { label: 'global table', entries: allow.globalTables, shape: TABLE_NAME },
     {
@@ -116,6 +140,13 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
       shape: CONSTRAINT_NAME,
     },
     { label: 'auth table', entries: allow.authTables, shape: TABLE_NAME },
+    {
+      label: 'auth only table',
+      entries: allow.authOnlyTables,
+      shape: TABLE_NAME,
+      unsafe: (entry) =>
+        authTables.has(entry.name) ? undefined : 'is not on the auth table allow list',
+    },
     {
       label: 'user policy',
       entries: allow.userPolicies,
@@ -136,10 +167,7 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
         const grant = entry as ColumnGrantEntry;
         return grantKey(grant.name, grant.grantee, grant.privilege);
       },
-      unsafe: (entry) =>
-        (entry as ColumnGrantEntry).grantee === 'public'
-          ? 'is to public, which every role inherits'
-          : undefined,
+      unsafe: (entry) => columnGrantUnsafe(entry as ColumnGrantEntry, columnTables),
     },
   ];
   const problems: CatalogProblem[] = [];
@@ -771,9 +799,10 @@ function authGrantProblems(
   return out;
 }
 
-const PER_COLUMN = new Set(['SELECT', 'UPDATE']);
+const PER_COLUMN = new Set(['SELECT', 'INSERT', 'UPDATE']);
 
-// On the column controlled tables, select and update go per column and only as listed.
+// On the column controlled tables, select, insert and update go per column and only as
+// listed: an insert that may set any column could set email_verified_at.
 function columnGrantProblem(
   object: string,
   column: string | null,
@@ -803,6 +832,7 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
   const published = new Set(allow.publishedTables.map((e) => e.name));
   const authTables = new Set(allow.authTables.map((e) => e.name));
   const columnTables = new Set(allow.columnGrantTables.map((e) => e.name));
+  const authOnly = new Set(allow.authOnlyTables.map((e) => e.name));
   const columnGrants = new Set(
     allow.columnGrants.map((e) => grantKey(e.name, e.grantee, e.privilege)),
   );
@@ -838,6 +868,15 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     if (columnTables.has(object)) {
       const found = columnGrantProblem(object, column, grantee, privilege, columnGrants);
       if (found !== undefined) out.push(found);
+    }
+    if (grantee === APP_ROLE && authOnly.has(object)) {
+      out.push(
+        problem(
+          'auth_only',
+          object,
+          `${target} grants ${privilege} to ${APP_ROLE}; ${object} is for the sign in role only`,
+        ),
+      );
     }
     if (grantee !== READER_ROLE && grantee !== 'public') continue;
     const sequence = text(row, 'kind') === 'S';

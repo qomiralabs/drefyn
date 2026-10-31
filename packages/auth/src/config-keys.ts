@@ -1,6 +1,7 @@
 export const RATE_BUCKETS = Object.freeze([
   'email_send',
   'email_send_address_ceiling',
+  'email_send_device',
   'email_send_ip',
   'code_verify',
   'oauth_start',

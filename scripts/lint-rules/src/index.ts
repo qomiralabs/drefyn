@@ -2,6 +2,7 @@ import type { ESLint } from 'eslint';
 import { noArbitraryValues } from './no-arbitrary-values.ts';
 import { noCrossPackageInternals } from './no-cross-package-internals.ts';
 import { noRawEgress } from './no-raw-egress.ts';
+import { noSelectAll } from './no-select-all.ts';
 
 export { egressAllowList } from './egress-allow-list.ts';
 export { classify, noArbitraryValues, type Problem } from './no-arbitrary-values.ts';
@@ -12,6 +13,7 @@ const plugin = {
     'no-arbitrary-values': noArbitraryValues,
     'no-cross-package-internals': noCrossPackageInternals,
     'no-raw-egress': noRawEgress,
+    'no-select-all': noSelectAll,
   },
 } satisfies ESLint.Plugin;
 

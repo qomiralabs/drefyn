@@ -29,6 +29,10 @@ describe('coverage split between the unit and merged runs', () => {
         'src/source-check.ts',
         'src/tenant-context.ts',
         'src/tenant-sql.ts',
+        'src/rate-windows.ts',
+        'src/expiry-cleanup.ts',
+        'src/identity-columns.ts',
+        'src/allow-lists.ts',
       ].sort(),
     );
     for (const file of TENANCY_FILES) expect(existsSync(join(root, file)), file).toBe(true);

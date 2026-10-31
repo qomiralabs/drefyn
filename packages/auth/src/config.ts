@@ -63,6 +63,8 @@ export interface AuthConfig {
 const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
   email_send: '3/10m,10/1d',
   email_send_address_ceiling: '30/1d',
+  // A known device's own allowance, used instead of the shared ceiling.
+  email_send_device: '10/1d',
   email_send_ip: '20/10m',
   code_verify: '10/1h',
   oauth_start: '30/10m',
