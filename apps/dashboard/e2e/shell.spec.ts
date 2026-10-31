@@ -404,7 +404,6 @@ test.describe('account initials', () => {
         // The innermost element holding the placeholder person's initials is the circle.
         // Held as a handle, since the text it is found by changes next.
         const circle = await account.getByText('MO', { exact: true }).elementHandle();
-        if (circle === null) throw new Error('no initials circle in the account button');
         await circle.evaluate((el, text) => {
           el.textContent = text;
         }, initials);
