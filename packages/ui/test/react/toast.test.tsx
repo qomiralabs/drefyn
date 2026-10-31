@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button, toast, ToastRegion } from '../../src/react/index.ts';
 import { tokens } from '../../src/index.ts';
@@ -529,5 +530,74 @@ describe('the toast look', () => {
         String(pattern),
       ).toEqual([]);
     }
+  });
+});
+
+// Any order of the ways a person or a timer can end a toast. Each step happens to the one
+// toast with Undo; a tick moves the clock by up to twice its wait.
+type Step =
+  | { kind: 'undo-click' }
+  | { kind: 'meta-z' }
+  | { kind: 'ctrl-z' }
+  | { kind: 'dismiss' }
+  | { kind: 'close' }
+  | { kind: 'tick'; ms: number };
+
+const step: fc.Arbitrary<Step> = fc.oneof(
+  fc.constant({ kind: 'undo-click' as const }),
+  fc.constant({ kind: 'meta-z' as const }),
+  fc.constant({ kind: 'ctrl-z' as const }),
+  fc.constant({ kind: 'dismiss' as const }),
+  fc.constant({ kind: 'close' as const }),
+  fc.record({ kind: fc.constant('tick' as const), ms: fc.integer({ min: 0, max: LONG * 2 }) }),
+);
+
+describe('toast() under any sequence of steps', () => {
+  it('runs Undo at most once, and never from Cmd or Ctrl+Z once the toast is gone', () => {
+    fc.assert(
+      fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
+        const { unmount } = render(<ToastRegion />);
+        let runs = 0;
+        const handle = show({
+          title: 'Archived Pricing',
+          undo: () => {
+            runs += 1;
+          },
+        });
+        try {
+          for (const s of steps) {
+            const before = runs;
+            const present = queryCard('Archived Pricing') !== null;
+            act(() => {
+              const el = queryCard('Archived Pricing');
+              if (s.kind === 'undo-click' && el !== null) {
+                fireEvent.click(within(el).getByRole('button', { name: 'Undo' }));
+              } else if (s.kind === 'meta-z') {
+                fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+              } else if (s.kind === 'ctrl-z') {
+                fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+              } else if (s.kind === 'dismiss' && el !== null) {
+                fireEvent.click(within(el).getByRole('button', { name: 'Dismiss' }));
+              } else if (s.kind === 'close') {
+                handle.close();
+              } else if (s.kind === 'tick') {
+                vi.advanceTimersByTime(s.ms);
+              }
+            });
+            expect(runs).toBeLessThanOrEqual(1);
+            // A toast that timed out, was dismissed or closed takes no shortcut.
+            if (!present && (s.kind === 'meta-z' || s.kind === 'ctrl-z')) {
+              expect(runs).toBe(before);
+            }
+          }
+        } finally {
+          act(() => {
+            handle.close();
+          });
+          unmount();
+        }
+      }),
+      { numRuns: 200 },
+    );
   });
 });
