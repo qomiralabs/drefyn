@@ -224,8 +224,8 @@ describe('touchSession', () => {
   });
 });
 
-const isInsert = (s: Statement) => /^insert into "sessions"/.test(s.sql);
-const isDelete = (s: Statement) => /^delete from "sessions"/.test(s.sql);
+const isInsert = (s: Statement) => s.sql.startsWith('insert into "sessions"');
+const isDelete = (s: Statement) => s.sql.startsWith('delete from "sessions"');
 
 function startResponder(oldRows: readonly Record<string, unknown>[]) {
   const proof = sessionResponder(oldRows);
@@ -304,6 +304,19 @@ describe('startSession', () => {
       method: 'email',
     });
     expect(scripted.statements().filter(isDelete)).toEqual([]);
+  });
+
+  it('fails with AUTH_UNAVAILABLE when the old row cannot be retired', async () => {
+    const { sessions, scripted } = setup(() => {
+      throw new Error('down');
+    });
+    await expect(
+      sessions.startSession(browser({ [config.cookies.session]: tokenFor() }), {
+        userId: OTHER_USER,
+        method: 'email',
+      }),
+    ).rejects.toMatchObject({ code: 'AUTH_UNAVAILABLE' });
+    expect(scripted.statements().filter(isInsert)).toEqual([]);
   });
 
   it('truncates the user agent to 256 characters', async () => {
@@ -428,6 +441,14 @@ describe('sign out and revocation', () => {
 });
 
 describe('recent sign in', () => {
+  it('maps a database failure to AUTH_UNAVAILABLE', async () => {
+    const { sessions } = setup(() => {
+      throw new Error('down');
+    });
+    const result = await sessions.requireRecentAuth(sessionInfo());
+    expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+
   it('passes inside 15 minutes by the database clock', async () => {
     const { sessions, scripted } = setup(() => [{ recent: true }]);
     await expect(sessions.requireRecentAuth(sessionInfo())).resolves.toEqual({
@@ -452,8 +473,8 @@ describe('recent sign in', () => {
 });
 
 const isStepUpWrite = (s: Statement) =>
-  /^update "sessions" set "authenticated_at" = now\(\)/.test(s.sql);
-const isPhcRead = (s: Statement) => /from "password_credentials"/.test(s.sql);
+  s.sql.startsWith('update "sessions" set "authenticated_at" = now()');
+const isPhcRead = (s: Statement) => s.sql.includes('from "password_credentials"');
 
 function stepUpResponder(phc: string | null = '$argon2id$stored') {
   return (s: Statement) => {
@@ -573,12 +594,12 @@ describe('step up by current password', () => {
   });
 });
 
-const isChallengeInsert = (s: Statement) => /^insert into "email_challenges"/.test(s.sql);
-const isChallengeDelete = (s: Statement) => /^delete from "email_challenges"/.test(s.sql);
+const isChallengeInsert = (s: Statement) => s.sql.startsWith('insert into "email_challenges"');
+const isChallengeDelete = (s: Statement) => s.sql.startsWith('delete from "email_challenges"');
 const isAttempt = (s: Statement) =>
-  /^update "email_challenges" set "attempts" = "attempts" \+ 1/.test(s.sql);
+  s.sql.startsWith('update "email_challenges" set "attempts" = "attempts" + 1');
 const isConsume = (s: Statement) =>
-  /^update "email_challenges" set "consumed_at" = now\(\)/.test(s.sql);
+  s.sql.startsWith('update "email_challenges" set "consumed_at" = now()');
 
 function mailer() {
   const sent: { to: string; code: string; link: URL; purpose: string }[] = [];

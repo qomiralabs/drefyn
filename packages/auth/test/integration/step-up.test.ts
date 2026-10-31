@@ -77,12 +77,12 @@ describeWithStack('step up against Postgres', () => {
     await age(session.sessionId, 30);
     const wrong = await sessions.stepUpWithPassword(browser(), session, { password: 'nope' });
     expect(!wrong.ok && wrong.error.code).toBe('AUTH_CREDENTIALS_INVALID');
-    expect(await stepUpOf(session.sessionId)).toBe('-|f');
+    expect(await stepUpOf(session.sessionId)).toBe('-|false');
     const right = await sessions.stepUpWithPassword(browser(), session, {
       password: 'correct horse battery',
     });
     expect(right.ok && right.value.stepUpMethod).toBe('password');
-    expect(await stepUpOf(session.sessionId)).toBe('password|t');
+    expect(await stepUpOf(session.sessionId)).toBe('password|true');
     await expect(sessions.requireRecentAuth(session)).resolves.toMatchObject({ ok: true });
     await expect(sessions.resolveSession(cookie)).resolves.toMatchObject({
       stepUpMethod: 'password',
@@ -129,7 +129,7 @@ describeWithStack('step up against Postgres', () => {
       code,
     });
     expect(first.ok && first.value.stepUpMethod).toBe('email');
-    expect(await stepUpOf(session.sessionId)).toBe('email|t');
+    expect(await stepUpOf(session.sessionId)).toBe('email|true');
     const replay = await sessions.verifyStepUpCode(browser(), session, {
       challenge: started.value.challenge,
       code,

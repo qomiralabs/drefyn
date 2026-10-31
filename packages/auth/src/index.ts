@@ -18,7 +18,34 @@ export {
   type SignUpMode,
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
-export { cookieNames, type CookieNames } from './cookies.ts';
+export {
+  cookieNames,
+  serializeCookie,
+  sessionCookieValue,
+  type BrowserContext,
+  type CookieNames,
+  type CookieSpec,
+} from './cookies.ts';
+export {
+  createSessions,
+  type ResolvedSession,
+  type SessionId,
+  type SessionInfo,
+  type SessionMethod,
+  type SessionRef,
+  type SessionStore,
+  type SessionSummary,
+  type Sessions,
+  type SessionsDeps,
+  type StartedSession,
+  type StepUpMethod,
+} from './sessions.ts';
+export {
+  type AuthMailer,
+  type PasswordVerifier,
+  type SignInCodePurpose,
+  type StepUps,
+} from './step-up.ts';
 export {
   KEY_PURPOSES,
   constantTimeEqual,
@@ -33,11 +60,13 @@ export {
   decodeSecret,
   encodeSecret,
   formatApiKey,
+  formatChallengeId,
   formatInvitationToken,
   formatSessionToken,
   formatVerifyFragment,
   parseApiKey,
   parseBearer,
+  parseChallengeId,
   parseCode,
   parseInvitationToken,
   parseSessionToken,

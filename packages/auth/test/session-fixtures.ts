@@ -67,8 +67,8 @@ export function sessionRow(shape: RowShape = {}): Record<string, unknown> {
   };
 }
 
-export const isProof = (s: Statement) => /^select\b/i.test(s.sql) && /"sessions"/.test(s.sql);
-export const isEmailRead = (s: Statement) => /^select\b/i.test(s.sql) && /"users"/.test(s.sql);
+export const isProof = (s: Statement) => /^select\b/i.test(s.sql) && s.sql.includes('"sessions"');
+export const isEmailRead = (s: Statement) => /^select\b/i.test(s.sql) && s.sql.includes('"users"');
 
 // Answers the proof with the row whose id matches the first parameter, and the email read
 // with one address.

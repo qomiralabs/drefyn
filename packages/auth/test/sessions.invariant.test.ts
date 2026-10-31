@@ -1,3 +1,4 @@
+import type * as Crypto from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OTHER_SESSION,
@@ -11,7 +12,7 @@ import {
 // The compare is spied where it lives, so a refactor that swaps it for === fails here.
 const compare = vi.hoisted(() => ({ calls: [] as [Uint8Array, Uint8Array][] }));
 vi.mock('node:crypto', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:crypto')>();
+  const actual = await importOriginal<typeof Crypto>();
   return {
     ...actual,
     timingSafeEqual: (a: NodeJS.ArrayBufferView, b: NodeJS.ArrayBufferView) => {
@@ -72,7 +73,8 @@ describe('the credential first invariant', () => {
     const [first] = scripted.statements();
     expect(first?.sql).toMatch(/from "sessions"/);
     expect(first?.sql).not.toMatch(/join|"users"|"memberships"/i);
-    expect(first?.sql).toMatch(/where "id" = \$1/);
+    // The id is the only filter: nothing else picks the row.
+    expect(first?.sql).toMatch(/ where "id" = \$[0-9]+$/);
   });
 
   it('reads the address only after the compare matched', async () => {

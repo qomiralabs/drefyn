@@ -1,5 +1,5 @@
+import type { CompiledQuery } from 'kysely';
 import {
-  CompiledQuery,
   Kysely,
   PostgresAdapter,
   PostgresIntrospector,
@@ -51,8 +51,7 @@ export function scriptedStore(respond: Responder = () => []) {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }
     },
-    // eslint-disable-next-line require-yield
-    async *streamQuery() {
+    streamQuery() {
       throw new Error('streaming is not scripted');
     },
   };
