@@ -177,3 +177,26 @@ for (const theme of THEMES) {
     expect(Math.round(390 - (narrow.x + narrow.width))).toBe(tokens.space[16]);
   });
 }
+
+// The page holds its own landmarks through useLandmark, as the dashboard shell does, so F6
+// leaves the toast region as well as reaching it.
+for (const theme of THEMES) {
+  test(`F6 goes into the notifications after main and out again, both ways, in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, 'components-toast--in-a-page', theme);
+    await expect(card(page, 'Archived Pricing')).toBeVisible();
+    const banner = page.getByRole('banner');
+    const main = page.getByRole('main');
+    await main.getByRole('button', { name: 'Edit page' }).focus();
+    await page.keyboard.press('F6');
+    await expect(region(page)).toBeFocused();
+    await page.keyboard.press('F6');
+    await expect(banner).toBeFocused();
+    await page.keyboard.press('Shift+F6');
+    await expect(region(page)).toBeFocused();
+    await page.keyboard.press('Shift+F6');
+    // Back in main, focus returns to the control it left.
+    await expect(main.getByRole('button', { name: 'Edit page' })).toBeFocused();
+  });
+}

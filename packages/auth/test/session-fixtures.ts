@@ -88,6 +88,9 @@ export function capturingLogger() {
     warn(event, fields) {
       lines.push({ event, fields });
     },
+    info(event, fields) {
+      lines.push({ event, fields });
+    },
   };
   return { logger, lines };
 }
@@ -141,4 +144,29 @@ export function setup(
     ...extra,
   });
   return { sessions, scripted, lines, limiter };
+}
+
+// signOutOtherSessions: the lock read, the copying insert and the delete of every other row.
+export const NEW_SESSION = idOf('ses', '01890a5d-ac96-774b-bcce-b302099a8099');
+// setup() hands the code Buffer.alloc(n, 5) as its randomness.
+export const NEW_SECRET = Buffer.alloc(32, 5);
+
+export const isLock = (s: Statement) => /^select\b/i.test(s.sql) && /\bfor update$/i.test(s.sql);
+export const isInsert = (s: Statement) => /^insert into "sessions"/i.test(s.sql);
+export const isDelete = (s: Statement) => /^delete from "sessions"/i.test(s.sql);
+
+interface LockShape {
+  readonly id?: string;
+  readonly live?: boolean;
+  readonly recent?: boolean;
+  readonly secondsLeft?: number;
+}
+
+export function lockRow(shape: LockShape = {}): Record<string, unknown> {
+  return {
+    id: shape.id ?? SESSION,
+    live: shape.live ?? true,
+    recent: shape.recent ?? true,
+    seconds_left: shape.secondsLeft ?? 1_000_000,
+  };
 }

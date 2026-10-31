@@ -127,6 +127,45 @@ export const IconTrigger: Story = {
   ),
 };
 
+// The account menu: initials on a round trigger. The edge, the hover fill and the open fill
+// all follow the circle. MW is about the widest pair, so it shows the tightest fit.
+function Account({ open }: { open: boolean }) {
+  return (
+    <WithOutput>
+      {(run) => (
+        <div className="flex items-center gap-12">
+          {[
+            ['MO', 'Maya Okafor'],
+            ['MW', 'Mei Wong'],
+          ].map(([initials = '', name = '']) => (
+            <Menu
+              key={initials}
+              trigger={<span className="text-caption font-medium text-secondary">{initials}</span>}
+              triggerLabel={`${initials}, account for ${name}`}
+              triggerShape="round"
+              defaultOpen={open && initials === 'MO'}
+              onAction={run}
+            >
+              <MenuItem id="profile">Profile and security</MenuItem>
+              <MenuItem id="sign-out">Sign out</MenuItem>
+            </Menu>
+          ))}
+        </div>
+      )}
+    </WithOutput>
+  );
+}
+
+export const RoundTrigger: Story = {
+  name: 'Round trigger',
+  render: () => <Account open={false} />,
+};
+
+export const RoundTriggerOpen: Story = {
+  name: 'Round trigger open',
+  render: (_args, context) => <Account open={openInStoryView(context)} />,
+};
+
 // A menu between other controls, so the specs can check where Tab and Shift+Tab land.
 export const InARow: Story = {
   name: 'In a row',

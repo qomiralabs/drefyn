@@ -30,9 +30,9 @@ async function compileOnly(): Promise<void> {
     // @ts-expect-error api_key_failures is the limiter's alone
     await tx.insertInto('api_key_failures').values({}).execute();
     // @ts-expect-error users is not a project table
-    await tx.selectFrom('users').select('id').execute();
+    tx.selectFrom('users');
     // @ts-expect-error nor are the sign in tables
-    await tx.selectFrom('auth_rate_limits').select('bucket').execute();
+    tx.selectFrom('auth_rate_limits');
   });
 
   await withUser(db, user, async (tx) => {
@@ -97,7 +97,13 @@ describe('identity schema types', () => {
       | 'auth_rate_limits'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
-      'users' | 'identities' | 'sessions' | 'password_credentials'
+      | 'users'
+      | 'identities'
+      | 'sessions'
+      | 'password_credentials'
+      | 'memberships'
+      | 'organizations'
+      | 'organization_slugs'
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'

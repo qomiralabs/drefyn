@@ -3,16 +3,19 @@ import { withAuth, withUser, type AuthDatabase, type Database, type UserSchema }
 import { idOf, type OrganizationId, type UserId } from '@drefyn/tenancy';
 import { randomBytes } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
+import { grantAccess, type AccessResult } from './access.ts';
 import type { AuthConfig } from './config.ts';
 import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
+import { isSlugShape } from './organization-rules.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
   asId,
   fail,
   idFields,
   ok,
+  quietInfo,
   quietWarn,
   unavailable,
   type SessionId,
@@ -66,6 +69,12 @@ export interface StartedSession {
   readonly setCookies: readonly CookieSpec[];
 }
 
+export interface RotatedSession {
+  // The other sessions removed; the reissued one is not counted.
+  readonly revoked: number;
+  readonly setCookies: readonly CookieSpec[];
+}
+
 export interface SessionsDeps {
   readonly db: Database;
   readonly authDb: AuthDatabase;
@@ -87,9 +96,18 @@ export interface Sessions extends StepUps {
   ): Promise<StartedSession>;
   resolve(cookie: string | undefined): Promise<ResolvedSession | null>;
   resolveSession(cookie: string | undefined): Promise<SessionInfo | null>;
+  // The guard's one call. Read only: a due touch is reported, never written here.
+  resolveAccess(cookie: string | undefined, slug: string): Promise<AccessResult>;
   touchSession(ref: SessionRef): Promise<void>;
   signOut(s: SessionInfo): Promise<readonly CookieSpec[]>;
   signOutEverywhere(s: SessionInfo): Promise<number>;
+  // Ends every session of the user, this one included, and gives this browser a new row and
+  // secret in the same transaction: a copy of this browser's cookie dies with the rest.
+  // Needs a sign in within 15 minutes, or a stolen cookie could lock the owner out.
+  signOutOtherSessions(
+    s: SessionInfo,
+    b: BrowserContext,
+  ): Promise<Result<RotatedSession, AuthError>>;
   listSessions(s: SessionInfo): Promise<readonly SessionSummary[]>;
   revokeSession(s: SessionInfo, id: SessionId): Promise<Result<void, AuthError>>;
 }
@@ -110,6 +128,9 @@ const DUMMY_HASH = Buffer.alloc(32);
 // error, so the db layer passes it through untouched.
 class Refused extends Error {}
 const REFUSED = new Refused('refused');
+
+const SIGNED_OUT: AccessResult = Object.freeze({ kind: 'signed_out' });
+const NOT_MEMBER: AccessResult = Object.freeze({ kind: 'not_member' });
 
 const method = (value: string): SessionMethod => {
   if (!METHODS.has(value)) throw new Error('stored session method is unknown');
@@ -232,6 +253,15 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     }
   }
 
+  // Ids and a count only: never a cookie, a secret or an address.
+  function logRevoked(user: UserId, scope: 'all' | 'others', revoked: number): void {
+    quietInfo(deps.logger, 'auth.sessions_revoked', {
+      scope,
+      revoked,
+      ...idFields({ userId: ['usr', user] }),
+    });
+  }
+
   const steps = stepUps(config, {
     store,
     limiter,
@@ -301,6 +331,46 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       return (await resolve(cookie))?.session ?? null;
     },
 
+    async resolveAccess(cookie, slug) {
+      const token = parseSessionToken(cookie);
+      if (token === null) return SIGNED_OUT;
+      try {
+        return await store.user(token.userId, async (tx) => {
+          const row = await prove(tx, token, idleDays);
+          if (!row?.live) throw REFUSED;
+          // A slug that cannot exist needs no read; it answers like an unknown one.
+          if (!isSlugShape(slug)) return NOT_MEMBER;
+          // Only after the proof: the slug, the organization and the person's own
+          // membership, each readable here only through that membership.
+          const member = await tx
+            .selectFrom('organization_slugs as s')
+            .innerJoin('organizations as o', 'o.organization_id', 's.organization_id')
+            .innerJoin('memberships as m', (join) =>
+              join
+                .onRef('m.organization_id', '=', 's.organization_id')
+                .on('m.user_id', '=', sql<string>`app.current_user_id()`),
+            )
+            .select(['s.organization_id', 'm.role', 'm.default_project_role', 'o.plan_tier'])
+            .where('s.slug', '=', slug)
+            .executeTakeFirst();
+          if (member === undefined) return NOT_MEMBER;
+          const access = grantAccess({
+            organizationId: idOf('org', member.organization_id),
+            userId: token.userId,
+            sessionId: token.sessionId,
+            role: member.role,
+            defaultProjectRole: member.default_project_role,
+            tier: member.plan_tier,
+            authenticatedAt: row.authenticated_at,
+          });
+          return { kind: 'ok', access, touchDue: row.touch_due } as const;
+        });
+      } catch (error) {
+        if (error === REFUSED) return SIGNED_OUT;
+        throw unavailable(error);
+      }
+    },
+
     async touchSession(ref) {
       try {
         if (asId('usr', ref.userId) === null || asId('ses', ref.sessionId) === null) {
@@ -346,6 +416,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     },
 
     async signOutEverywhere(s) {
+      let revoked: number;
       try {
         const rows = await store.user(s.userId, (tx) =>
           tx
@@ -354,9 +425,104 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .returning('id')
             .execute(),
         );
-        return rows.length;
+        revoked = rows.length;
       } catch (error) {
         throw unavailable(error);
+      }
+      logRevoked(s.userId, 'all', revoked);
+      return revoked;
+    },
+
+    async signOutOtherSessions(s) {
+      const secret = random(SECRET_BYTES);
+      try {
+        const rotated = await store.user(s.userId, async (tx) => {
+          // Every row of the user, locked in id order: two presses in two tabs queue on the
+          // first row, and the second then finds its own row gone instead of deadlocking.
+          const rows = await tx
+            .selectFrom('sessions')
+            .select([
+              'id',
+              sql<boolean>`expires_at > now() and last_seen_at > now() - make_interval(days => ${idleDays})`.as(
+                'live',
+              ),
+              sql<boolean>`authenticated_at > now() - interval '15 minutes'`.as('recent'),
+              sql<number>`floor(extract(epoch from expires_at - now()))::int`.as('seconds_left'),
+            ])
+            .where('user_id', '=', sql<string>`app.current_user_id()`)
+            .orderBy('id')
+            .forUpdate()
+            .execute();
+          const current = rows.find((row) => row.id === s.sessionId);
+          // Under a second left would mean a Max-Age of 0, which clears the cookie instead.
+          if (current?.live !== true || current.seconds_left < 1) {
+            throw new AuthError('AUTH_SESSION_INVALID');
+          }
+          if (!current.recent) throw new AuthError('AUTH_RECENT_AUTH_REQUIRED');
+          // Copied inside the database, so the times keep their microseconds and the
+          // absolute lifetime is never extended.
+          const inserted = await tx
+            .insertInto('sessions')
+            .columns([
+              'user_id',
+              'secret_hash',
+              'method',
+              'step_up_method',
+              'authenticated_at',
+              'last_seen_at',
+              'expires_at',
+              'user_agent',
+            ])
+            .expression((eb) =>
+              eb
+                .selectFrom('sessions')
+                .select([
+                  'user_id',
+                  sql<Buffer>`${sha256(secret)}`.as('secret_hash'),
+                  'method',
+                  'step_up_method',
+                  'authenticated_at',
+                  sql<Date>`now()`.as('last_seen_at'),
+                  'expires_at',
+                  'user_agent',
+                ])
+                .where('id', '=', s.sessionId)
+                .where('user_id', '=', sql<string>`app.current_user_id()`),
+            )
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          const deleted = await tx
+            .deleteFrom('sessions')
+            .where('user_id', '=', sql<string>`app.current_user_id()`)
+            .where('id', '<>', inserted.id)
+            .returning('id')
+            .execute();
+          // TODO(#130): in this transaction, delete the user's known devices, record this
+          // browser's new device hash with its user_agent_family, and add its cookie here.
+          const deviceCookies: readonly CookieSpec[] = [];
+          return {
+            sessionId: idOf('ses', inserted.id),
+            // The old row of this browser is among the deleted and is not counted.
+            revoked: Math.max(0, deleted.length - 1),
+            secondsLeft: current.seconds_left,
+            deviceCookies,
+          };
+        });
+        logRevoked(s.userId, 'others', rotated.revoked);
+        const value = formatSessionToken({
+          userId: s.userId,
+          sessionId: rotated.sessionId,
+          secret,
+        });
+        return ok({
+          revoked: rotated.revoked,
+          setCookies: [
+            { name: config.cookies.session, value, maxAgeSeconds: rotated.secondsLeft },
+            ...rotated.deviceCookies,
+          ],
+        });
+      } catch (error) {
+        return fail(error);
       }
     },
 
