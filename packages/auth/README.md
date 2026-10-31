@@ -190,12 +190,15 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
 - `touchSession({ userId, sessionId, organizationId? })` runs after the response when
   `touchDue` is true. One guarded update, at most once an hour per session, never throws; a
   failure logs `auth.session_touch_failed` with public ids only.
-- `signOut`, `signOutEverywhere` (every row of the user, nothing reissued), `listSessions`
+- `signOut`, `signOutEverywhere` (every row and every known device of the user, nothing
+  reissued), `listSessions`
   (live rows, current marked, no hashes or IPs) and `revokeSession`.
 - `signOutOtherSessions(session, browser)` is "Sign out everywhere else". In one transaction
   it deletes every row of the user, this one included, and gives this browser a new row and
   secret that keep the old `method`, `authenticated_at`, `user_agent` and `expires_at`. A copy
-  of this browser's old cookie stops working with the rest. Returns `{ revoked, setCookies }`:
+  of this browser's old cookie stops working with the rest. Known devices are forgotten and
+  this browser is recorded on a new device cookie, so a copied device cookie loses its
+  exemption too. Returns `{ revoked, setCookies }`:
   `revoked` counts the other sessions, and the new session cookie's `Max-Age` is the time left
   on the old row. Needs a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`);
   `AUTH_SESSION_INVALID` when the current row is already gone; `AUTH_UNAVAILABLE` on a
@@ -216,6 +219,41 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
   then, only after a match, one read of the slug, the organization and the person's own
   membership. An unknown slug and a slug of an organization the person is not in give the
   same `not_member`. `AccessContext` is branded, so only this package can build one.
+
+## Email sign in
+
+```ts
+const signIn = createEmailSignIn(config, { db, authDb, logger, mailer, sessions, invitations });
+const started = await signIn.startEmailSignIn(browser, { email, returnTo });
+// set started.value.setCookies, answer, then in after(): await started.value.send()
+const result = await signIn.verifyEmailCode(browser, { challenge, code }); // challenge optional
+```
+
+- Sign in and sign up are one flow. Every address gets the same response and the same
+  cookies (`__Host-drefyn_pre`, 15 minutes); the mail goes out only when `send` runs, and
+  `send` never throws. In `invite_only` (without a pending invitation) and `closed`, an
+  unknown address gets the same response and no mail.
+- Limits, counted before any work: `email_send` on the address and IP or /64,
+  `email_send_ip`, then `email_send_device` for a browser whose device cookie is known for
+  the address's user, otherwise the shared `email_send_address_ceiling`.
+- The code is 8 digits from `crypto.randomInt`, stored as `HMAC(subkey_code, challenge,
+purpose, code)`, 10 minutes, 5 attempts, single use. A new challenge replaces only older
+  ones from the same browser.
+- Verify checks the binding first: without the asking browser's pre cookie it answers
+  `AUTH_CHALLENGE_BINDING` and spends no attempt. Then `code_verify` on the address and
+  browser, then one guarded update that counts the attempt, then the `timingSafeEqual`
+  compare. `AUTH_SIGNUP_CLOSED` comes only after a right code. Typed spaces, tabs and no
+  break spaces are dropped. Without a challenge id the browser's newest open challenge is used.
+- `verifyLinkCode(browser, session | null, { challenge, code })` is for the link page: a
+  step up code goes to `verifyStepUpCode` of that session and never signs anyone in.
+- A sign in records the browser in `known_devices` (at most 20 per user, the one seen
+  longest ago goes) and sets `__Host-drefyn_device` for 400 days when it had none. The cookie
+  is never an authenticator. `createCodeIssuer` is the shared issuer for every mail purpose
+  (`sign_in`, `link_identity` with the provider and account, `step_up`, `password_reset`,
+  `email_change`). `src/testing.ts` holds the test mailer.
+- Logs: `auth.email_code_refused` with the outcome code and the first 16 hex digits of the
+  `code_verify` key, `auth.sign_in_mail_failed` with the purpose, `auth.device_record_failed`
+  with the public user id. Never an address, code, challenge id or cookie.
 
 ## Organizations
 
