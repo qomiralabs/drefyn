@@ -97,7 +97,13 @@ describe('identity schema types', () => {
       | 'auth_rate_limits'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
-      'users' | 'identities' | 'sessions' | 'password_credentials'
+      | 'users'
+      | 'identities'
+      | 'sessions'
+      | 'password_credentials'
+      | 'memberships'
+      | 'organizations'
+      | 'organization_slugs'
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'
