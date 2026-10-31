@@ -300,6 +300,12 @@ describeWithStack('identity tables', () => {
       }
     });
 
+    // Linking the CLI uses a session method, not an email challenge.
+    it('refuses a cli_link challenge', async () => {
+      const auth = await as('auth');
+      expect(await sqlState(auth.query(challenge('cli_link', null), [HASH]))).toBe('23514');
+    });
+
     it('refuses an unknown challenge purpose', async () => {
       const auth = await as('auth');
       expect(await sqlState(auth.query(challenge('sign_up', null), [HASH]))).toBe('23514');
@@ -337,6 +343,17 @@ describeWithStack('identity tables', () => {
         await asUser(app, USER_A, () => app.query(session(stepUp), [USER_A, HASH]));
       },
     );
+
+    it('accepts a cli_link session', async () => {
+      const app = await as('app');
+      await asUser(app, USER_A, () =>
+        app.query(
+          `insert into app.sessions (user_id, secret_hash, method, authenticated_at, expires_at)
+           values ($1, $2, 'cli_link', now(), now() + interval '30 days')`,
+          [USER_A, HASH],
+        ),
+      );
+    });
 
     it.each(['github', 'sms', ''])('refuses step_up_method %j', async (stepUp) => {
       const app = await as('app');

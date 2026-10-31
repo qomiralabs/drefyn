@@ -25,6 +25,7 @@ describe('no-select-all', () => {
     "tx.selectFrom(['sessions', 'users']).selectAll();",
     "tx.selectFrom('sessions').selectAll('users');",
     "tx.selectFrom('sessions').selectAll(['sessions', 'password_credentials']);",
+    "tx.selectFrom('users AS u').selectAll('u');",
   ])('refuses %s', async (code) => {
     const found = await lint(code);
     expect(found).toHaveLength(1);
@@ -39,8 +40,26 @@ describe('no-select-all', () => {
     'db.selectAll();',
     'selectAll();',
     'tx.selectFrom(table).selectAll();',
+    "tx.selectFrom('users as').selectAll();",
+    "tx.selectFrom('users as u extra').selectAll();",
   ])('allows %s', async (code) => {
     expect(await lint(code)).toEqual([]);
+  });
+
+  // A table name is source text, so it can be hostile; reading it must stay linear.
+  describe('with long runs of spaces in a table name', () => {
+    const spaces = ' '.repeat(100_000);
+
+    it('reads table, as and alias across them and refuses', async () => {
+      const found = await lint(`tx.selectFrom('users${spaces}as u').selectAll('u');`);
+      expect(found).toHaveLength(1);
+    });
+
+    it('allows a two word name and lints it in under 2 s', async () => {
+      const started = performance.now();
+      expect(await lint(`tx.selectFrom('users${spaces}x').selectAll('u');`)).toEqual([]);
+      expect(performance.now() - started).toBeLessThan(2000);
+    });
   });
 
   it('is on in the repository config for users and password_credentials', async () => {
