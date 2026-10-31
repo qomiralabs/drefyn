@@ -1,6 +1,11 @@
-import type { ColumnType, PasswordCredentialsTable, UsersTable } from './schema.generated.ts';
+import type {
+  ColumnType,
+  KnownDevicesTable,
+  PasswordCredentialsTable,
+  UsersTable,
+} from './schema.generated.ts';
 
-// The column grants on users and password_credentials, written once. The catalog allow list
+// The column grants on users, password_credentials and known_devices, written once. The catalog allow list
 // and the transaction types are both built from this, so a type can never offer a column
 // the role cannot touch, and the migration is held to the same list by check:catalog.
 
@@ -47,6 +52,21 @@ export const PASSWORD_CREDENTIAL_COLUMNS = {
   },
 } as const satisfies Record<ColumnGrantee, RoleColumns<PasswordCredentialsTable>>;
 
+// The auth role only checks whether a device is known and deletes stale rows; it never reads
+// the family or writes a row. It also selects ctid, which the type cannot name (see below).
+export const KNOWN_DEVICE_COLUMNS = {
+  drefyn_app: {
+    SELECT: ['id', 'user_id', 'device_hash', 'user_agent_family', 'created_at', 'last_seen_at'],
+    INSERT: ['user_id', 'device_hash', 'user_agent_family'],
+    UPDATE: ['user_agent_family', 'last_seen_at'],
+  },
+  drefyn_auth: {
+    SELECT: ['user_id', 'device_hash', 'last_seen_at'],
+    INSERT: [],
+    UPDATE: [],
+  },
+} as const satisfies Record<ColumnGrantee, RoleColumns<KnownDevicesTable>>;
+
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
 type InsertOf<C> = C extends ColumnType<unknown, infer I, unknown> ? I : C;
 type UpdateOf<C> = C extends ColumnType<unknown, unknown, infer U> ? U : C;
@@ -72,6 +92,15 @@ export type AppPasswordCredentialsTable = GrantedColumns<
 export type AuthPasswordCredentialsTable = GrantedColumns<
   PasswordCredentialsTable,
   (typeof PASSWORD_CREDENTIAL_COLUMNS)['drefyn_auth']
+>;
+
+export type AppKnownDevicesTable = GrantedColumns<
+  KnownDevicesTable,
+  (typeof KNOWN_DEVICE_COLUMNS)['drefyn_app']
+>;
+export type AuthKnownDevicesTable = GrantedColumns<
+  KnownDevicesTable,
+  (typeof KNOWN_DEVICE_COLUMNS)['drefyn_auth']
 >;
 
 export interface ColumnGrant {
@@ -100,4 +129,7 @@ function grantsOn(
 export const IDENTITY_COLUMN_GRANTS: readonly ColumnGrant[] = [
   ...grantsOn('users', USER_COLUMNS),
   ...grantsOn('password_credentials', PASSWORD_CREDENTIAL_COLUMNS),
+  ...grantsOn('known_devices', KNOWN_DEVICE_COLUMNS),
+  // The expiry cleanup deletes in batches by ctid, so the auth role selects that system column.
+  { name: 'app.known_devices.ctid', grantee: 'drefyn_auth', privilege: 'SELECT' },
 ];

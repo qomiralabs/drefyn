@@ -1,7 +1,9 @@
 import type { AuthTableName, UserTableName } from './allow-lists.ts';
 import type {
+  AppKnownDevicesTable,
   AppPasswordCredentialsTable,
   AppUsersTable,
+  AuthKnownDevicesTable,
   AuthPasswordCredentialsTable,
   AuthUsersTable,
 } from './identity-columns.ts';
@@ -12,23 +14,29 @@ import type { Schema } from './schema.generated.ts';
 export type NamedTables<S, T extends string> = { [K in keyof S & T]: S[K] };
 
 // The column controlled tables, swapped for the columns the role was granted.
-type WithColumns<S, Users, Credentials> = Omit<S, 'users' | 'password_credentials'> & {
+type WithColumns<S, Users, Credentials, Devices> = Omit<
+  S,
+  'users' | 'password_credentials' | 'known_devices'
+> & {
   users: Users;
   password_credentials: Credentials;
+  known_devices: Devices;
 };
 
 // The identity tables drefyn_auth may touch, before anyone is signed in.
 export type AuthSchema = WithColumns<
   NamedTables<Schema, AuthTableName>,
   AuthUsersTable,
-  AuthPasswordCredentialsTable
+  AuthPasswordCredentialsTable,
+  AuthKnownDevicesTable
 >;
 
 // The signed in person's own rows.
 export type UserSchema = WithColumns<
   NamedTables<Schema, UserTableName>,
   AppUsersTable,
-  AppPasswordCredentialsTable
+  AppPasswordCredentialsTable,
+  AppKnownDevicesTable
 >;
 
 // The one table the API key failure limiter writes, before any key or organization is proved.

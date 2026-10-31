@@ -59,6 +59,16 @@ export interface IdentitiesTable {
   created_at: Generated<Date>;
 }
 
+// app.known_devices
+export interface KnownDevicesTable {
+  id: Generated<string>;
+  user_id: string;
+  device_hash: Buffer;
+  user_agent_family: string;
+  created_at: Generated<Date>;
+  last_seen_at: Generated<Date>;
+}
+
 // app.oauth_states
 export interface OauthStatesTable {
   state_hash: Buffer;
@@ -112,6 +122,7 @@ export interface Schema {
   auth_rate_limits: AuthRateLimitsTable;
   email_challenges: EmailChallengesTable;
   identities: IdentitiesTable;
+  known_devices: KnownDevicesTable;
   oauth_states: OauthStatesTable;
   password_credentials: PasswordCredentialsTable;
   sessions: SessionsTable;

@@ -95,9 +95,10 @@ describe('identity schema types', () => {
       | 'email_challenges'
       | 'oauth_states'
       | 'auth_rate_limits'
+      | 'known_devices'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
-      'users' | 'identities' | 'sessions' | 'password_credentials'
+      'users' | 'identities' | 'sessions' | 'password_credentials' | 'known_devices'
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'
@@ -112,6 +113,16 @@ describe('identity schema types', () => {
     >();
     expectTypeOf<keyof Updateable<AuthSchema['users']>>().toEqualTypeOf<
       'email' | 'email_normalized' | 'email_verified_at' | 'updated_at'
+    >();
+  });
+
+  it('let the auth role see only whether a device is known and when it was last seen', () => {
+    expectTypeOf<keyof AuthSchema['known_devices']>().toEqualTypeOf<
+      'user_id' | 'device_hash' | 'last_seen_at'
+    >();
+    expectTypeOf<keyof Insertable<AuthSchema['known_devices']>>().toEqualTypeOf<never>();
+    expectTypeOf<keyof Insertable<UserSchema['known_devices']>>().toEqualTypeOf<
+      'user_id' | 'device_hash' | 'user_agent_family'
     >();
   });
 
@@ -131,6 +142,7 @@ describe('identity schema types', () => {
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('email_challenges');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('api_key_failures');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('password_credentials');
+    expectTypeOf<OrganizationSchema>().not.toHaveProperty('known_devices');
     expectTypeOf<OrganizationSchema['users']>().toEqualTypeOf<UserSchema['users']>();
   });
 
