@@ -294,10 +294,10 @@ describeWithStack('sessions against Postgres', () => {
       );
       expect(now).toBe(old);
       expect(now).toContain('Integration/1.0');
-      // The old cookie, a copy of it taken elsewhere, and the other browsers' cookies.
-      const copied = `${a.cookie}`;
+      // The old cookie, the same value copied to another machine and resolved by another
+      // instance, and the other browsers' cookies.
       await expect(a.sessions.resolveSession(a.cookie)).resolves.toBeNull();
-      await expect(h.sessions().resolveSession(copied)).resolves.toBeNull();
+      await expect(h.sessions().resolveSession(a.cookie)).resolves.toBeNull();
       for (const other of a.others) {
         await expect(a.sessions.resolveSession(valueOf(other.setCookies))).resolves.toBeNull();
       }
@@ -356,12 +356,12 @@ describeWithStack('sessions against Postgres', () => {
       const won = results.filter((r) => r.ok);
       const lost = results.filter((r) => !r.ok);
       expect(won).toHaveLength(1);
-      expect(lost.map((r) => !r.ok && r.error.code)).toEqual(['AUTH_SESSION_INVALID']);
+      expect(lost.map((r) => r.error.code)).toEqual(['AUTH_SESSION_INVALID']);
       expect(await h.sql(`select count(*) from app.sessions where user_id = '${a.user}';`)).toBe(
         '1',
       );
-      const winner = won[0];
-      if (winner?.ok !== true) throw new Error('no winner');
+      const [winner] = won;
+      if (winner === undefined) throw new Error('no winner');
       await expect(
         a.sessions.resolveSession(valueOf(winner.value.setCookies)),
       ).resolves.toMatchObject({ userId: a.user });

@@ -35,6 +35,7 @@ export {
   type SessionRef,
   type SessionStore,
   type SessionSummary,
+  type RotatedSession,
   type Sessions,
   type SessionsDeps,
   type StartedSession,

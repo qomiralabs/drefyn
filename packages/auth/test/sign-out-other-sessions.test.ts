@@ -22,7 +22,7 @@ import {
   sha,
   tokenFor,
 } from './session-fixtures.ts';
-import type { Responder } from './scripted-store.ts';
+import type { Responder, Statement } from './scripted-store.ts';
 
 function rotation(
   rows: readonly Record<string, unknown>[],
@@ -38,6 +38,10 @@ function rotation(
     return [];
   };
 }
+
+// The lock read ends in for update, so the store's own write check would count it.
+const changes = (statements: readonly Statement[]) =>
+  statements.filter((s) => isInsert(s) || isDelete(s));
 
 const sessionCookie = (cookies: readonly CookieSpec[], name = config.cookies.session) =>
   cookies.find((c) => c.name === name);
@@ -75,7 +79,7 @@ describe('signOutOtherSessions', () => {
     const insert = scripted.statements().find(isInsert);
     // Copied by insert ... select, so the database keeps its own microseconds.
     expect(insert?.sql).toMatch(
-      /^insert into "sessions" \("user_id", "secret_hash", "method", "step_up_method", "authenticated_at", "last_seen_at", "expires_at", "user_agent"\) select "user_id", \$1, "method", "step_up_method", "authenticated_at", now\(\), "expires_at", "user_agent" from "sessions" where "id" = \$2/,
+      /^insert into "sessions" \("user_id", "secret_hash", "method", "step_up_method", "authenticated_at", "last_seen_at", "expires_at", "user_agent"\) select "user_id", \$1 as "secret_hash", "method", "step_up_method", "authenticated_at", now\(\) as "last_seen_at", "expires_at", "user_agent" from "sessions" where "id" = \$2 and "user_id" = app\.current_user_id\(\) returning "id"$/,
     );
     expect(insert?.parameters[0]).toEqual(sha(NEW_SECRET));
     expect(insert?.parameters[1]).toBe(SESSION);
@@ -130,11 +134,11 @@ describe('signOutOtherSessions', () => {
     const { sessions, scripted } = setup(rotation([lockRow({ recent: false })]));
     const result = await sessions.signOutOtherSessions(sessionInfo(), browser());
     expect(!result.ok && result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
-    expect(scripted.writes()).toEqual([]);
+    expect(changes(scripted.statements())).toEqual([]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     // The database clock decides, not the app's copy of authenticated_at.
     expect(scripted.statements()[0]?.sql).toMatch(
-      /"authenticated_at" > now\(\) - interval '15 minutes'/,
+      /authenticated_at > now\(\) - interval '15 minutes'/,
     );
   });
 
@@ -142,7 +146,7 @@ describe('signOutOtherSessions', () => {
     const { sessions, scripted } = setup(rotation([lockRow({ id: OTHER_SESSION })]));
     const result = await sessions.signOutOtherSessions(sessionInfo(), browser());
     expect(!result.ok && result.error.code).toBe('AUTH_SESSION_INVALID');
-    expect(scripted.writes()).toEqual([]);
+    expect(changes(scripted.statements())).toEqual([]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
   });
 
@@ -150,7 +154,14 @@ describe('signOutOtherSessions', () => {
     const { sessions, scripted } = setup(rotation([lockRow({ live: false, recent: true })]));
     const result = await sessions.signOutOtherSessions(sessionInfo(), browser());
     expect(!result.ok && result.error.code).toBe('AUTH_SESSION_INVALID');
-    expect(scripted.writes()).toEqual([]);
+    expect(changes(scripted.statements())).toEqual([]);
+  });
+
+  it('refuses with AUTH_SESSION_INVALID when under a second is left, since Max-Age=0 would clear', async () => {
+    const { sessions, scripted } = setup(rotation([lockRow({ secondsLeft: 0 })]));
+    const result = await sessions.signOutOtherSessions(sessionInfo(), browser());
+    expect(!result.ok && result.error.code).toBe('AUTH_SESSION_INVALID');
+    expect(changes(scripted.statements())).toEqual([]);
   });
 
   it('rolls the insert back when the delete fails, and sets no cookie', async () => {
@@ -249,7 +260,7 @@ describe('a failed resolve never clears the session cookie', () => {
       const access = await sessions.resolveAccess(cookie, 'acme');
       expect(access).toStrictEqual({ kind: 'signed_out' });
       expect(Object.keys(access)).toEqual(['kind']);
-      expect(scripted.writes()).toEqual([]);
+      expect(changes(scripted.statements())).toEqual([]);
     },
   );
 });

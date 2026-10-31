@@ -15,6 +15,7 @@ import {
   fail,
   idFields,
   ok,
+  quietInfo,
   quietWarn,
   unavailable,
   type SessionId,
@@ -68,6 +69,12 @@ export interface StartedSession {
   readonly setCookies: readonly CookieSpec[];
 }
 
+export interface RotatedSession {
+  // The other sessions removed; the reissued one is not counted.
+  readonly revoked: number;
+  readonly setCookies: readonly CookieSpec[];
+}
+
 export interface SessionsDeps {
   readonly db: Database;
   readonly authDb: AuthDatabase;
@@ -94,6 +101,13 @@ export interface Sessions extends StepUps {
   touchSession(ref: SessionRef): Promise<void>;
   signOut(s: SessionInfo): Promise<readonly CookieSpec[]>;
   signOutEverywhere(s: SessionInfo): Promise<number>;
+  // Ends every session of the user, this one included, and gives this browser a new row and
+  // secret in the same transaction: a copy of this browser's cookie dies with the rest.
+  // Needs a sign in within 15 minutes, or a stolen cookie could lock the owner out.
+  signOutOtherSessions(
+    s: SessionInfo,
+    b: BrowserContext,
+  ): Promise<Result<RotatedSession, AuthError>>;
   listSessions(s: SessionInfo): Promise<readonly SessionSummary[]>;
   revokeSession(s: SessionInfo, id: SessionId): Promise<Result<void, AuthError>>;
 }
@@ -237,6 +251,15 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     } catch (error) {
       if (error !== REFUSED) throw unavailable(error);
     }
+  }
+
+  // Ids and a count only: never a cookie, a secret or an address.
+  function logRevoked(user: UserId, scope: 'all' | 'others', revoked: number): void {
+    quietInfo(deps.logger, 'auth.sessions_revoked', {
+      scope,
+      revoked,
+      ...idFields({ userId: ['usr', user] }),
+    });
   }
 
   const steps = stepUps(config, {
@@ -393,6 +416,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     },
 
     async signOutEverywhere(s) {
+      let revoked: number;
       try {
         const rows = await store.user(s.userId, (tx) =>
           tx
@@ -401,9 +425,104 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .returning('id')
             .execute(),
         );
-        return rows.length;
+        revoked = rows.length;
       } catch (error) {
         throw unavailable(error);
+      }
+      logRevoked(s.userId, 'all', revoked);
+      return revoked;
+    },
+
+    async signOutOtherSessions(s) {
+      const secret = random(SECRET_BYTES);
+      try {
+        const rotated = await store.user(s.userId, async (tx) => {
+          // Every row of the user, locked in id order: two presses in two tabs queue on the
+          // first row, and the second then finds its own row gone instead of deadlocking.
+          const rows = await tx
+            .selectFrom('sessions')
+            .select([
+              'id',
+              sql<boolean>`expires_at > now() and last_seen_at > now() - make_interval(days => ${idleDays})`.as(
+                'live',
+              ),
+              sql<boolean>`authenticated_at > now() - interval '15 minutes'`.as('recent'),
+              sql<number>`floor(extract(epoch from expires_at - now()))::int`.as('seconds_left'),
+            ])
+            .where('user_id', '=', sql<string>`app.current_user_id()`)
+            .orderBy('id')
+            .forUpdate()
+            .execute();
+          const current = rows.find((row) => row.id === s.sessionId);
+          // Under a second left would mean a Max-Age of 0, which clears the cookie instead.
+          if (current?.live !== true || current.seconds_left < 1) {
+            throw new AuthError('AUTH_SESSION_INVALID');
+          }
+          if (!current.recent) throw new AuthError('AUTH_RECENT_AUTH_REQUIRED');
+          // Copied inside the database, so the times keep their microseconds and the
+          // absolute lifetime is never extended.
+          const inserted = await tx
+            .insertInto('sessions')
+            .columns([
+              'user_id',
+              'secret_hash',
+              'method',
+              'step_up_method',
+              'authenticated_at',
+              'last_seen_at',
+              'expires_at',
+              'user_agent',
+            ])
+            .expression((eb) =>
+              eb
+                .selectFrom('sessions')
+                .select([
+                  'user_id',
+                  sql<Buffer>`${sha256(secret)}`.as('secret_hash'),
+                  'method',
+                  'step_up_method',
+                  'authenticated_at',
+                  sql<Date>`now()`.as('last_seen_at'),
+                  'expires_at',
+                  'user_agent',
+                ])
+                .where('id', '=', s.sessionId)
+                .where('user_id', '=', sql<string>`app.current_user_id()`),
+            )
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          const deleted = await tx
+            .deleteFrom('sessions')
+            .where('user_id', '=', sql<string>`app.current_user_id()`)
+            .where('id', '<>', inserted.id)
+            .returning('id')
+            .execute();
+          // TODO(#130): in this transaction, delete the user's known devices, record this
+          // browser's new device hash with its user_agent_family, and add its cookie here.
+          const deviceCookies: readonly CookieSpec[] = [];
+          return {
+            sessionId: idOf('ses', inserted.id),
+            // The old row of this browser is among the deleted and is not counted.
+            revoked: Math.max(0, deleted.length - 1),
+            secondsLeft: current.seconds_left,
+            deviceCookies,
+          };
+        });
+        logRevoked(s.userId, 'others', rotated.revoked);
+        const value = formatSessionToken({
+          userId: s.userId,
+          sessionId: rotated.sessionId,
+          secret,
+        });
+        return ok({
+          revoked: rotated.revoked,
+          setCookies: [
+            { name: config.cookies.session, value, maxAgeSeconds: rotated.secondsLeft },
+            ...rotated.deviceCookies,
+          ],
+        });
+      } catch (error) {
+        return fail(error);
       }
     },
 

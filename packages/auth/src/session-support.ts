@@ -73,7 +73,7 @@ export function quietWarn(
 export function quietInfo(
   logger: AuthLogger,
   event: string,
-  fields: Readonly<Record<string, string>>,
+  fields: Readonly<Record<string, string | number>>,
 ): void {
   try {
     logger.info?.(event, fields);
