@@ -81,6 +81,12 @@ describe('Select', () => {
     expect(option('United States').querySelector('[data-icon="check"]')).toBeNull();
   });
 
+  it('shows only the chosen option label on the trigger, never its description', () => {
+    render(<Region defaultValue="eu" />);
+    expect(trigger().textContent).toContain('Europe');
+    expect(trigger().textContent).not.toContain('Frankfurt and Dublin');
+  });
+
   it('joins an option description to the option', async () => {
     render(<Region />);
     await userEvent.setup().click(trigger());

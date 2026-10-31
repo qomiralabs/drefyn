@@ -141,8 +141,9 @@ export function Select({
           invalid,
         )}`}
       >
+        {/* The option's text alone: its description belongs in the list, not the field. */}
         <SelectValue className="truncate data-placeholder:text-secondary">
-          {({ defaultChildren, isPlaceholder }) => (isPlaceholder ? placeholder : defaultChildren)}
+          {({ selectedText, isPlaceholder }) => (isPlaceholder ? placeholder : selectedText)}
         </SelectValue>
         <span className={`inline-flex ${disabled ? 'text-disabled-text' : 'text-secondary'}`}>
           <Icon name="chevron-down">{chevronDownShape}</Icon>
