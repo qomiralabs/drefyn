@@ -21,6 +21,12 @@ export type ButtonShape = 'square' | 'round';
 
 const SHAPE: Record<ButtonShape, string> = { square: 'rounded-sm', round: 'rounded-full' };
 
+// A round secondary control is a chip, such as initials, so it rests on the raised fill
+// where a square one rests on the ground. Hover and pressed fills are the same for both.
+const ROUND_REST: Partial<Record<ButtonLookVariant, string>> = {
+  secondary: 'border-rule-strong bg-raised text-body',
+};
+
 // Both labels of a button that can be busy sit in one grid cell, so the grid is always
 // there and a button looks the same whether or not it can be busy.
 const BASE =
@@ -75,10 +81,11 @@ export function buttonClasses({
   shape = 'square',
 }: ButtonLook): string {
   const box = iconOnly ? ICON_ONLY[size] : SIZE[size];
+  const rest = (shape === 'round' ? ROUND_REST[variant] : undefined) ?? REST[variant];
   let paint: string;
   if (disabled) paint = DISABLED[variant];
-  else if (busy) paint = `${REST[variant]} data-busy:cursor-progress`;
-  else paint = `${REST[variant]} ${LIVE[variant]}`;
+  else if (busy) paint = `${rest} data-busy:cursor-progress`;
+  else paint = `${rest} ${LIVE[variant]}`;
   return `${BASE} ${SHAPE[shape]} ${box} ${paint}`;
 }
 

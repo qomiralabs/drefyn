@@ -553,8 +553,18 @@ describe('buttonClasses shape', () => {
     const round = buttonClasses({ ...look, shape: 'round' }).split(' ');
     expect(square.filter((c) => c.startsWith('rounded-'))).toEqual(['rounded-sm']);
     expect(round.filter((c) => c.startsWith('rounded-'))).toEqual(['rounded-full']);
-    expect(round.filter((c) => !c.startsWith('rounded-'))).toEqual(
-      square.filter((c) => !c.startsWith('rounded-')),
-    );
+    // A round secondary chip rests on raised; everything else matches the square button.
+    expect(square).toContain('bg-ground');
+    expect(round).toContain('bg-raised');
+    expect(round).not.toContain('bg-ground');
+    const rest = (c: string) => !c.startsWith('rounded-') && c !== 'bg-ground' && c !== 'bg-raised';
+    expect(round.filter(rest)).toEqual(square.filter(rest));
+  });
+
+  it('keeps the quiet variant without a fill when round', () => {
+    const look = { variant: 'quiet', size: 'md', disabled: false, iconOnly: true } as const;
+    const round = buttonClasses({ ...look, shape: 'round' }).split(' ');
+    expect(round).toContain('rounded-full');
+    expect(round.filter((c) => c.startsWith('bg-'))).toEqual([]);
   });
 });

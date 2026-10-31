@@ -191,7 +191,9 @@ describe('Menu', () => {
     expect(round).toContain('rounded-full');
     expect(round).not.toContain('rounded-sm');
     // The secondary edge and the hover and open fills sit on the circle itself.
-    expect(round).toEqual(expect.arrayContaining(['border-rule-strong', 'hover:bg-hover']));
+    expect(round).toEqual(
+      expect.arrayContaining(['border-rule-strong', 'bg-raised', 'hover:bg-hover']),
+    );
     expect(round).toContain('aria-expanded:bg-pressed');
     const square = classesOf(screen.getByRole('button', { name: 'Payments API' }));
     expect(square).toContain('rounded-sm');
