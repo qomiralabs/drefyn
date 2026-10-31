@@ -5,9 +5,12 @@ import type {
   EmailError,
   MailMessage,
   Mailer,
+  RenderedMail,
+  Result,
   SendOptions,
   SendResult,
   TemplateId,
+  renderMail,
 } from '../../src/index.ts';
 
 declare const link: URL;
@@ -65,5 +68,11 @@ describe('message type tests', () => {
     expectTypeOf<SendOptions['idempotencyKey']>().toEqualTypeOf<string>();
     expectTypeOf<Mailer['send']>().returns.toEqualTypeOf<Promise<SendResult>>();
     expectTypeOf<EmailError['code']>().toExtend<string>();
+    expectTypeOf<typeof renderMail>().parameters.toEqualTypeOf<
+      [MailMessage, { readonly linkOrigin: URL }]
+    >();
+    expectTypeOf<typeof renderMail>().returns.toEqualTypeOf<
+      Promise<Result<RenderedMail, EmailError>>
+    >();
   });
 });

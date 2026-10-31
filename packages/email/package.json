@@ -18,7 +18,6 @@
     "@drefyn/address": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "@drefyn/ui": "workspace:*",
-    "@react-email/render": "2.1.1",
     "zod": "4.6.7"
   },
   "peerDependencies": {
