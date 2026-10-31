@@ -158,9 +158,9 @@ describeWithStack('organization tables', () => {
     });
 
     it.each([
-      "update app.organizations set plan_tier = 'enterprise'",
+      "update app.organizations set name = 'Taken over'",
       "update app.organization_slugs set slug = 'taken-over'",
-      "update app.memberships set role = 'owner'",
+      "update app.memberships set default_project_role = 'editor'",
       'delete from app.memberships',
     ])('changes no row with %s', async (text) => {
       const app = await as('app');
