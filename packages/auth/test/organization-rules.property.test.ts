@@ -119,10 +119,15 @@ const fullWidth = (text: string) =>
     /[A-Za-z0-9]/.test(c) ? String.fromCodePoint((c.codePointAt(0) ?? 0) + 0xfee0) : c,
   ).join('');
 
-const domainLike = fc.tuple(word, dot, letters, fc.boolean()).map(([label, d, tld, wide]) => {
-  const text = `${label}${d}${tld}`;
-  return wide ? fullWidth(text) : text;
-});
+// What may sit right before the dot: combining marks, the dotted capital I (which lowercases
+// to i plus a mark), and the punctuation a hostname or a linkifier still accepts.
+const labelEnd = fc.constantFrom('', '\u0301', '\u0300', '\u0334', '_', '-', 'İ', '~', '+');
+const domainLike = fc
+  .tuple(word, labelEnd, dot, letters, fc.boolean())
+  .map(([label, end, d, tld, wide]) => {
+    const text = `${label}${end}${d}${tld}`;
+    return wide ? fullWidth(text) : text;
+  });
 const scheme = fc
   .tuple(fc.constantFrom('http', 'https', 'ftp', 'x'), fc.constantFrom('://', '：//'), word)
   .map(([s, sep, rest]) => `${s}${sep}${rest}`);
@@ -165,6 +170,12 @@ describe('organization names', () => {
     'ａｃｍｅ.ｃｏｍ',
     'evil.co.uk',
     'mail.xn--p1ai',
+    'x\u0301.com',
+    'x_.com',
+    'a-.com',
+    'x\u0300.org',
+    'evilİ.com',
+    'x.c\u0334om',
   ])('refuses %j', (name) => {
     expect(codeOf(parseOrganizationName(name))).toBe('AUTH_INPUT_INVALID');
   });

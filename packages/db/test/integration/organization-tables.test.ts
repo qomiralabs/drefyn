@@ -223,6 +223,36 @@ describeWithStack('organization tables', () => {
       },
     );
 
+    // Organization scoped code runs as drefyn_app too, so RLS alone would let it raise its
+    // own plan, lift its own read only state or promote itself.
+    it.each([
+      ['organizations', "plan_tier = 'enterprise'"],
+      ['organizations', 'read_only_since = null'],
+      ['organizations', 'organization_id = organization_id'],
+      ['memberships', "role = 'owner'"],
+      ['memberships', 'user_id = user_id'],
+      ['projects', 'read_only_since = null'],
+    ])('refuses an update of %s set %s with permission denied', async (table, assignment) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(app.query(`update app.${table} set ${assignment}`)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it.each([
+      ['organizations', "name = 'Renamed', updated_at = now()"],
+      ['memberships', "default_project_role = 'viewer', updated_at = now()"],
+      ['projects', "name = 'Renamed', slug = 'renamed', updated_at = now()"],
+      ['organization_slugs', "slug = 'acme-renamed'"],
+    ])('still lets organization work update %s set %s', async (table, assignment) => {
+      const app = await as('app');
+      const result = await within(app, { org: ORG_A }, () =>
+        app.query(`update app.${table} set ${assignment}`),
+      );
+      expect(result.rowCount).toBe(1);
+    });
+
     it('holds one membership per person and organization', async () => {
       const app = await as('app');
       const code = await within(app, { org: ORG_A }, () =>

@@ -51,6 +51,16 @@ async function compileOnly(): Promise<void> {
       .insertInto('projects')
       .values({ organization_id: 'x', product: 'docs', slug: 'x', name: 'x' })
       .execute();
+    await tx.updateTable('organizations').set({ name: 'x', updated_at: new Date() }).execute();
+    await tx.updateTable('memberships').set({ default_project_role: 'viewer' }).execute();
+    // @ts-expect-error organization work never sets its own plan
+    await tx.updateTable('organizations').set({ plan_tier: 'enterprise' }).execute();
+    // @ts-expect-error nor lifts its own read only state
+    await tx.updateTable('organizations').set({ read_only_since: null }).execute();
+    // @ts-expect-error nor changes a role
+    await tx.updateTable('memberships').set({ role: 'owner' }).execute();
+    // @ts-expect-error nor a project's read only state
+    await tx.updateTable('projects').set({ read_only_since: null }).execute();
   });
 }
 
