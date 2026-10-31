@@ -84,8 +84,10 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
       variant="quiet"
       label="Account"
       triggerLabel={`${data.person.initials}, account for ${data.person.name}`}
+      // The circle is as tall as the other bar controls, so two initials have clear space
+      // on every side and the row lines up.
       trigger={
-        <span className="inline-grid size-icon-lg place-items-center rounded-full border border-rule-strong bg-raised text-caption font-medium text-secondary">
+        <span className="inline-grid size-control-md place-items-center rounded-full border border-rule-strong bg-raised text-caption font-medium text-secondary">
           {data.person.initials}
         </span>
       }

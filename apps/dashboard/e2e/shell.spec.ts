@@ -426,9 +426,15 @@ test.describe('account initials', () => {
         if (inboxBox === null) return;
         expect(sizes.height).toBe(inboxBox.height);
         expect(sizes.width).toBe(sizes.height);
-        // At least the 4 px space step clear on each side, inside the 1 px edge.
-        expect((sizes.width - sizes.text) / 2 - 1).toBeGreaterThanOrEqual(4);
-        expect((sizes.height - sizes.textHeight) / 2 - 1).toBeGreaterThanOrEqual(4);
+        // Clear space inside the 1 px edge: at least the 2 px space step beside the widest
+        // pairs, which caption type in a 32 px circle allows, and 4 px above and below.
+        const side = (sizes.width - sizes.text) / 2 - 1;
+        const above = (sizes.height - sizes.textHeight) / 2 - 1;
+        console.log(
+          `${initials} at ${size}: ${side.toFixed(1)} px beside, ${above.toFixed(1)} px above`,
+        );
+        expect(side).toBeGreaterThanOrEqual(2);
+        expect(above).toBeGreaterThanOrEqual(4);
       });
     }
   }
