@@ -158,6 +158,18 @@ In an app that uses Tailwind:
 - Mount `<ToastRegion />` once per app, then call `toast({ title, description, undo, tone })`
   from anywhere. It returns a handle with `close()`. Undo runs once and Cmd or Ctrl+Z runs the
   newest one when focus is not in a text field. `tone: 'error'` stays until dismissed.
+- F6 reaches the notifications through React Aria's landmark cycle. A page with its own bar,
+  sidebar or main puts each in the same cycle with `useLandmark(ref, { role, label })` and
+  spreads the props it returns on the native element; without that, F6 can enter the
+  notifications but not leave them. Pass `skip` while a landmark is display none, such as a
+  closed phone drawer. Never add a second F6 handler.
+
+### Icons and the mark
+
+- One file per icon in `src/react/icons/`, drawn on the 24 grid, exported as `Icon<Name>` with
+  `size` and `label`. They take the current text colour; wrap one in a `text-secondary` span
+  for secondary ink. Apps draw no svg of their own.
+- `Mark` is the Drefyn mark on its own 100 unit grid, decorative unless given a `label`.
 - `Tooltip` wraps one Button or ButtonLink. Its text describes the control and is never its
   only name. A disabled Button keeps hover and focus, so a tooltip can say why.
 - `Dialog` takes a `trigger`, or `open` and `onOpenChange` from the caller. `footer` may be a
