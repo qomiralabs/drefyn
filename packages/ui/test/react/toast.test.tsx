@@ -534,8 +534,12 @@ describe('the toast look', () => {
 });
 
 // Any order of the ways a person or a timer can end a toast. Each step happens to the one
-// toast with Undo; a tick moves the clock by up to twice its wait.
+// toast with Undo; a tick moves the clock by up to twice its wait. A burst sends two or three
+// presses inside one act, so the later ones land before React renders the toast away, as a
+// double click or a click and a shortcut in one frame would.
+type Press = 'undo-click' | 'meta-z' | 'ctrl-z';
 type Step =
+  | { kind: 'burst'; presses: Press[] }
   | { kind: 'undo-click' }
   | { kind: 'meta-z' }
   | { kind: 'ctrl-z' }
@@ -543,7 +547,13 @@ type Step =
   | { kind: 'close' }
   | { kind: 'tick'; ms: number };
 
+const press: fc.Arbitrary<Press> = fc.constantFrom('undo-click', 'meta-z', 'ctrl-z');
+
 const step: fc.Arbitrary<Step> = fc.oneof(
+  fc.record({
+    kind: fc.constant('burst' as const),
+    presses: fc.array(press, { minLength: 2, maxLength: 3 }),
+  }),
   fc.constant({ kind: 'undo-click' as const }),
   fc.constant({ kind: 'meta-z' as const }),
   fc.constant({ kind: 'ctrl-z' as const }),
@@ -573,7 +583,22 @@ describe('toast() under any sequence of steps', () => {
             const present = queryCard('Archived Pricing') !== null;
             act(() => {
               const el = queryCard('Archived Pricing');
-              if (s.kind === 'undo-click' && el !== null) {
+              if (s.kind === 'burst') {
+                // The Undo button is found once, as a second click in the same frame would
+                // reach the button still on screen.
+                const undoButton =
+                  el === null ? null : within(el).getByRole('button', { name: 'Undo' });
+                for (const p of s.presses) {
+                  if (p === 'undo-click') {
+                    if (undoButton !== null) fireEvent.click(undoButton);
+                  } else {
+                    fireEvent.keyDown(document.body, {
+                      key: 'z',
+                      ...(p === 'meta-z' ? { metaKey: true } : { ctrlKey: true }),
+                    });
+                  }
+                }
+              } else if (s.kind === 'undo-click' && el !== null) {
                 fireEvent.click(within(el).getByRole('button', { name: 'Undo' }));
               } else if (s.kind === 'meta-z') {
                 fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
