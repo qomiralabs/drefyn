@@ -8,6 +8,7 @@ export { isHeaderSafe } from './headers.ts';
 export { logEmailConfig } from './logs.ts';
 export { createMailer } from './mailer.ts';
 export { renderMail } from './render.ts';
+export { createSmtpTransport } from './smtp/nodemailer.ts';
 export type { Secret } from './secret.ts';
 export {
   LINK_PROVIDERS,
@@ -47,4 +48,5 @@ export {
   type TlsMode,
   type TransportError,
   type TransportPhase,
+  type TransportProgress,
 } from './types.ts';

@@ -7,6 +7,8 @@ import type {
   SignInCodePurpose,
   TemplateId,
   TransportError,
+  TransportPhase,
+  TransportProgress,
 } from './types.ts';
 
 export interface CapturedMail {
@@ -26,12 +28,15 @@ export interface CapturedMail {
 export interface TestTransport extends MailTransport {
   readonly sent: readonly CapturedMail[];
   failNext(code: TransportError['code'], phase?: TransportError['phase']): void;
-  // Never answers until the signal aborts, like a relay that stalls.
-  hangNext(): void;
+  // Never answers until the signal aborts, like a relay that stalls. With a phase, it
+  // reports progress up to that phase first, so a test can stall a send after DATA.
+  hangNext(after?: TransportPhase): void;
   clear(): void;
 }
 
-type Plan = { readonly kind: 'fail'; readonly error: TransportError } | { readonly kind: 'hang' };
+type Plan =
+  | { readonly kind: 'fail'; readonly error: TransportError }
+  | { readonly kind: 'hang'; readonly after?: TransportPhase };
 type Delivered = Result<{ readonly messageId: string }, TransportError>;
 
 // Where each failure usually happens, so a test can name only the code.
@@ -68,8 +73,27 @@ function capture(envelope: Envelope, mail: RenderedMail): CapturedMail {
   });
 }
 
-function hang(signal: AbortSignal): Promise<Delivered> {
-  const stalled: Delivered = { ok: false, error: { code: 'email.timeout', phase: 'connect' } };
+// The phases a send through an authenticating relay reports, in order.
+const STEPS: readonly TransportPhase[] = ['connect', 'auth', 'envelope', 'data', 'after_data'];
+const SENT_STEPS: readonly TransportPhase[] = ['connect', 'envelope', 'data', 'after_data'];
+
+function hang(
+  signal: AbortSignal,
+  after: TransportPhase | undefined,
+  progress: TransportProgress | undefined,
+): Promise<Delivered> {
+  let reached: TransportPhase = 'connect';
+  if (after !== undefined) {
+    for (const step of STEPS.slice(0, STEPS.indexOf(after) + 1)) {
+      reached = step;
+      progress?.(step);
+    }
+  }
+  const error: TransportError =
+    reached === 'data' || reached === 'after_data'
+      ? { code: 'email.unknown_outcome', phase: 'after_data' }
+      : { code: 'email.timeout', phase: reached };
+  const stalled: Delivered = { ok: false, error };
   if (signal.aborted) return Promise.resolve(stalled);
   return new Promise((resolve) => {
     signal.addEventListener(
@@ -98,17 +122,18 @@ export function createTestTransport(): TestTransport {
         error: smtpReplyClass === undefined ? { code, phase } : { code, phase, smtpReplyClass },
       });
     },
-    hangNext() {
-      plans.push({ kind: 'hang' });
+    hangNext(after) {
+      plans.push(after === undefined ? { kind: 'hang' } : { kind: 'hang', after });
     },
     clear() {
       sent.length = 0;
       plans.length = 0;
     },
-    deliver(envelope, mail, signal) {
+    deliver(envelope, mail, signal, progress) {
       const plan = plans.shift();
-      if (plan?.kind === 'hang') return hang(signal);
+      if (plan?.kind === 'hang') return hang(signal, plan.after, progress);
       if (plan?.kind === 'fail') return Promise.resolve({ ok: false, error: plan.error });
+      for (const step of SENT_STEPS) progress?.(step);
       sent.push(capture(envelope, mail));
       return Promise.resolve({ ok: true, value: { messageId: envelope.messageId } });
     },
