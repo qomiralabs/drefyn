@@ -11,7 +11,7 @@ const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
 // case presses keys until the named control has focus, then compares the page. The ring
 // is drawn the same way in every engine, so Chromium in the pinned image stands for all.
 // What the focused element is: its role attribute, or its tag when the role is native.
-type Focused = 'button' | 'a' | 'switch' | 'menuitem';
+type Focused = 'button' | 'a' | 'switch' | 'menuitem' | 'input';
 
 const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-button--primary', keys: ['Tab'], focused: 'button' },
@@ -27,6 +27,16 @@ const CASES: { id: string; keys: string[]; focused: Focused }[] = [
     keys: ['Tab', 'Enter', 'ArrowDown', 'ArrowDown'],
     focused: 'menuitem',
   },
+  // The tooltip shows on keyboard focus, so the ring and the tooltip are one screenshot.
+  { id: 'components-tooltip--toolbar', keys: ['Tab', 'Tab'], focused: 'button' },
+  { id: 'components-tooltip--disabled-reason', keys: ['Escape', 'Tab'], focused: 'button' },
+  { id: 'components-text-field--default', keys: ['Tab'], focused: 'input' },
+  { id: 'components-text-field--invalid', keys: ['Tab'], focused: 'input' },
+  { id: 'components-text-field--disabled', keys: ['Tab'], focused: 'input' },
+  { id: 'components-dialog--default', keys: ['Tab', 'Enter'], focused: 'input' },
+  { id: 'components-dialog--open', keys: ['Tab', 'Tab', 'Tab', 'Tab'], focused: 'button' },
+  // F6 reaches the notifications, Tab the toast, Tab again Undo. Focus inside holds the timer.
+  { id: 'components-toast--undo', keys: ['F6', 'Tab', 'Tab'], focused: 'button' },
 ];
 
 test.beforeAll(() => {

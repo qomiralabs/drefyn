@@ -29,7 +29,8 @@ const storiesOf = (file: string): Record<string, Story> => {
 };
 
 // One story per state that applies. Success and error are not button states (the result is
-// shown where the change happened), so Button has none; a menu is never empty.
+// shown where the change happened), so Button has none; a menu is never empty. A toast is
+// the success and error state of other things, so its stories are its tones.
 const REQUIRED: Record<string, string[]> = {
   button: [
     'Actions',
@@ -51,6 +52,10 @@ const REQUIRED: Record<string, string[]> = {
   icons: ['All'],
   switch: ['Disabled', 'Off', 'On', 'Settings'],
   menu: ['Default', 'IconTrigger', 'InARow', 'Open', 'Sections'],
+  toast: ['ErrorToast', 'Message', 'Stack', 'Undo'],
+  tooltip: ['DisabledReason', 'Open', 'Toolbar'],
+  dialog: ['Default', 'Failed', 'NoFields', 'Open', 'Submitting'],
+  'text-field': ['Default', 'Disabled', 'Invalid', 'ReadOnly', 'Sizes', 'WithDescription'],
 };
 
 // Stories that show a disabled or busy control. The browser paint check opens each and
@@ -59,12 +64,17 @@ const DISABLED: Record<string, string[]> = {
   button: ['Disabled'],
   switch: ['Disabled'],
   menu: ['Open'],
+  tooltip: ['DisabledReason'],
+  // The close button waits while a submit is in flight.
+  dialog: ['Submitting'],
+  'text-field': ['Disabled'],
 };
 
 // Stories that show a busy button at rest. Busy keeps its variant's paint, so it is checked
 // apart from disabled.
 const BUSY: Record<string, string[]> = {
   button: ['Busy'],
+  dialog: ['Submitting'],
 };
 
 describe('the component stories', () => {

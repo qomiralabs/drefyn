@@ -213,6 +213,12 @@ describe('Tailwind theme', () => {
     expect(ruleBody(css, 'h-shell-bar')).toMatch(/height: var\(--dr-shell-bar\)/);
   });
 
+  it('clears the bottom safe area with a spacing utility on the token', async () => {
+    const css = await build(['mb-safe-bottom', 'pb-safe-bottom']);
+    expect(ruleBody(css, 'mb-safe-bottom')).toMatch(/margin-bottom: var\(--dr-safe-bottom\)/);
+    expect(ruleBody(css, 'pb-safe-bottom')).toMatch(/padding-bottom: var\(--dr-safe-bottom\)/);
+  });
+
   it('lays out the landing column, the drawer and the inspector from the tokens', async () => {
     const css = await build(['max-w-landing', 'w-shell-drawer', 'w-shell-inspector']);
     expect(ruleBody(css, 'max-w-landing')).toMatch(/max-width: var\(--dr-landing\)/);

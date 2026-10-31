@@ -38,8 +38,8 @@ function withoutPress<T extends object>(props: T): Partial<T> {
 }
 
 // A native button with no hooks, so it renders on the server and works with JS off.
-// Disabled and busy drop the click handler and render type="button": there is no script to
-// cancel a submit, and that is the only way a focusable button cannot post its form.
+// Disabled and busy drop every press handler and render type="button": there is no script
+// to cancel a submit, and that is the only way a focusable button cannot post its form.
 export function Button({
   variant = 'secondary',
   size = 'md',

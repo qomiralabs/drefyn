@@ -38,7 +38,7 @@ const each = (
     bgs.map((bg) => ({ component, fg, bg, kind, ...(role === undefined ? {} : { role }) })),
   );
 
-// Every colour combination the first batch of components paints, by component. A new
+// Every colour combination the components paint, by component. A new
 // combination is added here with the component, and must be a measured pair before it ships.
 const USES: Use[] = [
   ...each('Button primary', ['accent.on'], ['accent.ink', 'accent.press'], 'text'),
@@ -79,6 +79,34 @@ const USES: Use[] = [
   ...each('Menu item', ['text.body', 'text.secondary'], [...ON, ...FILLS], 'text'),
   ...each('Menu item focus', ['focus.ring'], FILLS, 'non-text'),
   ...each('Menu disabled item', ['disabled.text'], ON, 'text', 'disabled'),
+  // Toasts, tooltips and dialogs float on the overlay surface too.
+  ...each('Toast title', ['text.body'], ON, 'text'),
+  ...each('Toast description', ['text.secondary'], ON, 'text'),
+  ...each('Toast undo', ['accent.ink'], [...ON, ...FILLS], 'text'),
+  ...each('Toast dismiss', ['text.secondary'], [...ON, ...FILLS], 'text'),
+  ...each('Toast error icon', ['state.broken.mark'], ON, 'non-text'),
+  ...each('Toast focus', ['focus.ring'], ON, 'non-text'),
+  ...each('Tooltip text', ['text.body'], ON, 'text'),
+  ...each('Dialog title', ['text.ink'], ON, 'text'),
+  ...each('Dialog text', ['text.body', 'text.secondary'], ON, 'text'),
+  ...each('Dialog close', ['text.secondary'], [...ON, ...FILLS], 'text'),
+  ...each('Dialog focus', ['focus.ring'], ON, 'non-text'),
+  // A field sits on ground or raised; read only fields fill with raised.
+  ...each('TextField label', ['text.body'], ON, 'text'),
+  ...each('TextField value', ['text.ink'], ON, 'text'),
+  ...each('TextField placeholder and description', ['text.secondary'], ON, 'text'),
+  ...each('TextField edge', ['border.control'], ON, 'non-text'),
+  ...each('TextField invalid edge', ['state.broken.mark'], ON, 'non-text'),
+  ...each('TextField error', ['state.broken.text'], ON, 'text'),
+  ...each('TextField focus', ['focus.ring'], ON, 'non-text'),
+  ...each('TextField disabled', ['disabled.text'], ['disabled.fill', ...ON], 'text', 'disabled'),
+  ...each(
+    'TextField disabled',
+    ['disabled.edge'],
+    ['disabled.fill', ...ON],
+    'non-text',
+    'disabled',
+  ),
 ];
 
 const key = (p: { mode: Mode; fg: string; bg: string; kind: PairKind }) =>
@@ -91,10 +119,21 @@ const disabled = keys(expandPairs(disabledPairs));
 const never = keys([...expandPairs(forbiddenPairs), ...expandPairs(ruledOutPairs)]);
 
 describe('colour combinations the components paint', () => {
-  it('lists every component in the batch', () => {
+  it('lists every component that paints colour', () => {
     const named = new Set(USES.map((u) => u.component.split(' ')[0]));
     expect([...named].sort()).toEqual(
-      ['Badge', 'Button', 'EmptyState', 'Menu', 'StatusDot', 'Switch'].sort(),
+      [
+        'Badge',
+        'Button',
+        'Dialog',
+        'EmptyState',
+        'Menu',
+        'StatusDot',
+        'Switch',
+        'TextField',
+        'Toast',
+        'Tooltip',
+      ].sort(),
     );
   });
 

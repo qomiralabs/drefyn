@@ -16,7 +16,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Row actions, the account menu, "more". Keyboard: Enter, Space or ArrowDown opens on the first item, ArrowUp on the last; arrows, Home and End move; typing a letter jumps; Enter runs; Escape closes and returns focus to the trigger; Tab and Shift+Tab close and move on from the trigger, as they would if the menu were closed. A disabled item stays reachable by the arrows and is announced as unavailable. Stories that start open open only in their own view, so this page stays readable.',
+          'Row actions, the account menu, "more". Keyboard: Enter, Space or ArrowDown opens on the first item, ArrowUp on the last; arrows, Home and End move; typing a letter jumps; Enter runs; Escape closes and returns focus to the trigger; Tab and Shift+Tab close and move on from the trigger, as they would if the menu were closed. A disabled item stays reachable by the arrows and is announced as unavailable. Stories that start open do so only in their own view, so this page stays readable.',
       },
     },
   },
@@ -136,7 +136,12 @@ export const InARow: Story = {
         <div className="flex flex-wrap items-center gap-12">
           <Button>Edit component</Button>
           <Menu
-            trigger="Payments API"
+            trigger={
+              <>
+                Payments API
+                <IconChevronDown />
+              </>
+            }
             onAction={(id) => {
               run(NAMES[id] ?? id);
             }}

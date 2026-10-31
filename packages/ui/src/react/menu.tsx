@@ -44,9 +44,9 @@ export function Menu({
   // Tab and Shift+Tab close the menu and move on from the trigger, as if it had never opened,
   // so a keyboard user keeps their place. React Aria handles Tab on the document in the
   // capture phase and stops it there, steering focus to the end of the modal popover, so
-  // this listens on the window, which runs first. Closing synchronously unmounts the popover
-  // and its listener; focus goes back to the trigger and the browser's own Tab runs from
-  // there.
+  // this listens on the window, which runs first. Closing synchronously unmounts the popover,
+  // and React Aria's listener with it; focus goes back to the trigger and the browser's own
+  // Tab runs from there.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // Option+Tab is how Safari moves to buttons by default, so it counts as Tab here.

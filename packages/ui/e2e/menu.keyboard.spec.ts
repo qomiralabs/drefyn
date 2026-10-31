@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import { docsEntry, expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
 
 const STORY = 'components-menu--default';
 const ROW = 'components-menu--in-a-row';
@@ -37,7 +37,7 @@ async function openInRow(page: Page, browserName: string) {
 
 // A menu that starts open is modal, so on the docs page it would hide everything else.
 test('the menu docs page opens no menu and leaves every heading readable', async ({ page }) => {
-  await openPage(page, { id: 'components-menu--docs', type: 'docs' }, 'light');
+  await openPage(page, docsEntry('components-menu--docs'), 'light');
   await expect(page.getByRole('menu')).toHaveCount(0);
   // Storybook names each story heading with its anchor link first.
   await expect(page.getByRole('heading', { name: / Open$/ })).toBeVisible();

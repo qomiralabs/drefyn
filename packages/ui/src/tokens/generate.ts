@@ -192,6 +192,8 @@ function sharedEntries(t: Tokens): Entry[] {
     entries.push([`--dr-shell-${kebab(k)}`, rem(v)]);
   }
   entries.push(['--dr-gutter', rem(t.layout.gutter.wide)]);
+  // 0px, not 0: a unitless fallback breaks if the value ever lands inside calc().
+  entries.push(['--dr-safe-bottom', `env(${t.layout.safeArea.bottom}, 0px)`]);
   return entries;
 }
 
@@ -289,6 +291,8 @@ export function renderTailwindCss(t: Tokens = source): string {
     lines.push(`--color-${utilityColorName(name)}: var(${name})`);
   }
   for (const k of Object.keys(t.space)) lines.push(`--spacing-${k}: var(--dr-space-${k})`);
+  // A spacing key, so mb-safe-bottom and pb-safe-bottom exist; nothing else should use it.
+  lines.push('--spacing-safe-bottom: var(--dr-safe-bottom)');
   // Sizes are heights and squares only, never padding or gaps: h-control-md, size-icon-sm.
   for (const [group, steps] of Object.entries(t.size)) {
     for (const k of Object.keys(steps)) {

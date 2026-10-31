@@ -292,6 +292,9 @@ const layout = {
   // The drawer is wider than the nav so long project names and 32 px targets fit, and leaves
   // 6rem of scrim to tap at 390 px. The inspector is incident mode's side column.
   shell: { bar: 48, nav: 240, navCollapsed: 48, drawer: 288, inspector: 320 },
+  // The device's own inset at the bottom edge, such as a phone's home indicator, so toasts and
+  // the bottom sheet clear it. It is the device's value, not a design one, and 0 elsewhere.
+  safeArea: { bottom: 'safe-area-inset-bottom' },
 } as const;
 
 export const tokens = {

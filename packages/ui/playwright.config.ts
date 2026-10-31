@@ -31,22 +31,29 @@ export default defineConfig({
   projects: [
     {
       name: 'keyboard-chromium',
-      testMatch: /(\.keyboard|theme|network|paint|address)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint|address|docs-ready)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'keyboard-firefox',
-      testMatch: /(\.keyboard|theme|network|paint|address)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint|address|docs-ready)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'keyboard-webkit',
-      testMatch: /(\.keyboard|theme|network|paint|address)\.spec\.ts$/,
+      testMatch: /(\.keyboard|theme|network|paint|address|docs-ready)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     // The network specs run here too, so the axe job itself proves the outside request guard.
     { name: 'axe', testMatch: /(axe|network)\.spec\.ts$/, use: { ...chromium } },
-    { name: 'visual', testMatch: /visual\.spec\.ts$/, use: { ...chromium } },
+    // Chromium re-rasters only the part of a tile that changed, and how frames coalesce
+    // decides that clip, so antialiased corners near a repaint (a focus move, an overlay)
+    // came out a colour step apart between runs. Whole tile raster makes it repeatable.
+    {
+      name: 'visual',
+      testMatch: /visual\.spec\.ts$/,
+      use: { ...chromium, launchOptions: { args: ['--disable-partial-raster'] } },
+    },
     {
       name: 'reduced-motion',
       testMatch: /reduced-motion\.spec\.ts$/,

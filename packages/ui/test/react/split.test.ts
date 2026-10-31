@@ -20,6 +20,7 @@ const serverRenderProps: Record<string, Record<string, unknown>> = {
   EmptyState: { title: 'No components yet', children: 'Add one to start.' },
   StatusDot: { state: 'live', children: 'Syncing' },
   StatusPip: { state: 'fresh', label: 'Operational' },
+  TextField: { id: 'site-name', label: 'Site name' },
 };
 
 function renderServerSafe(module: Record<string, unknown>): Map<string, string> {
@@ -96,6 +97,9 @@ describe('the server and client split', () => {
     expect(isServerSafe('Badge')).toBe(true);
     expect(isServerSafe('BadgeGroup')).toBe(false);
     expect(isServerSafe('Menu')).toBe(false);
+    expect(isServerSafe('TextField')).toBe(true);
+    expect(isServerSafe('Tooltip')).toBe(false);
+    expect(isServerSafe('toast')).toBe(false);
   });
 });
 
