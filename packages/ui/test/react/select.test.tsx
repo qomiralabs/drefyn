@@ -153,7 +153,10 @@ describe('Select', () => {
     await userEvent.setup().click(trigger());
     expect(listbox().getAttribute('aria-busy')).toBe('true');
     expect(listbox().querySelectorAll('[data-skeleton]').length).toBe(3);
-    expect(screen.queryAllByRole('option')).toEqual([]);
+    // React Aria wraps an empty list's content in one option, so the reader hears the wait.
+    const waiting = within(listbox()).getAllByRole('option');
+    expect(waiting.map((o) => o.textContent)).toEqual(['Loading options']);
+    expect(waiting[0]?.hasAttribute('aria-selected')).toBe(false);
   });
 
   it('refuses an empty list that is not loading', () => {
@@ -183,23 +186,31 @@ describe('Select', () => {
   });
 });
 
+// Arrow key travel through a disabled option is proven in the browser specs: happy-dom puts
+// focus on the popover instead of the list, which no engine does.
 describe('a disabled option', () => {
-  it('is reached by the arrow keys, announced as unavailable and never chosen', async () => {
+  it('is announced as unavailable and never chosen by a press or Enter', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<Region onChange={onChange} />);
-    trigger().focus();
-    await user.keyboard('{Enter}');
-    await user.keyboard('{ArrowDown}{ArrowDown}');
+    await user.click(trigger());
     const ap = option('Asia Pacific');
-    expect(document.activeElement).toBe(ap);
     expect(ap.getAttribute('aria-disabled')).toBe('true');
+    expect(option(/Europe/).hasAttribute('aria-disabled')).toBe(false);
+    await user.click(ap);
+    ap.focus();
     await user.keyboard('{Enter}');
     expect(listbox()).toBeDefined();
-    await user.click(ap);
     expect(onChange).not.toHaveBeenCalled();
-    await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(option('South America'));
+    expect(trigger().textContent).toContain('Choose a region');
+  });
+
+  it('paints with the disabled text and takes no hover fill', async () => {
+    render(<Region />);
+    await userEvent.setup().click(trigger());
+    const classes = classesOf(option('Asia Pacific'));
+    expect(classes).toContain('text-disabled-text');
+    expect(classes.filter((c) => c.includes('bg-hover') || /(^|:)opacity-/.test(c))).toEqual([]);
   });
 });
 

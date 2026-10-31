@@ -2,8 +2,9 @@ import type { Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
 import { docsEntry, expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
 
+// React Aria names the trigger by its value, then its label.
 const trigger = (page: Page, label = 'Region') =>
-  page.getByRole('button', { name: new RegExp(`^${label}`) });
+  page.getByRole('button', { name: new RegExp(`${label}$`) });
 const option = (page: Page, name: string) =>
   page.getByRole('option', { name: new RegExp(`^${name}`) });
 
@@ -132,6 +133,6 @@ for (const theme of THEMES) {
     const list = page.getByRole('listbox');
     await expect(list).toBeVisible();
     await expect(list).toHaveAttribute('aria-busy', 'true');
-    await expect(page.getByRole('option')).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveText(['Loading options']);
   });
 }

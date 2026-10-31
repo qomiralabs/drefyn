@@ -40,9 +40,9 @@ test('axe covers every story and docs page the build lists', () => {
   expect(planned).toBe((stories + docs) * THEMES.length * WIDTHS.length);
 });
 
-// The shortcut item exclusion must stay that narrow, so each near miss is run through the
+// The separate cue exclusion must stay that narrow, so each near miss is run through the
 // same filter and must still be reported.
-const CASES = [
+const CASES: { name: string; item: string; reported: boolean; role?: string }[] = [
   {
     name: 'a menu item with its key and aria-keyshortcuts',
     item: '<div role="menuitem" tabindex="-1" aria-label="Open monitor" aria-keyshortcuts="O">Open monitor <kbd>O</kbd></div>',
@@ -63,13 +63,37 @@ const CASES = [
     item: '<button type="button" aria-label="Open monitor" aria-keyshortcuts="O">Open monitor <kbd>O</kbd></button>',
     reported: true,
   },
+  {
+    name: 'an option with its description in aria-describedby',
+    role: 'listbox',
+    item: '<div role="option" tabindex="0" aria-selected="true" aria-labelledby="l" aria-describedby="d"><span id="l">Europe</span><span id="d">Frankfurt and Dublin</span></div>',
+    reported: false,
+  },
+  {
+    name: 'the same option without aria-describedby',
+    role: 'listbox',
+    item: '<div role="option" tabindex="0" aria-selected="true" aria-labelledby="l"><span id="l">Europe</span><span id="d">Frankfurt and Dublin</span></div>',
+    reported: true,
+  },
+  {
+    name: 'an option whose description lives outside it',
+    role: 'listbox',
+    item: '<div role="option" tabindex="0" aria-selected="true" aria-labelledby="l" aria-describedby="far"><span id="l">Europe</span><span>Frankfurt and Dublin</span></div><span id="far">Frankfurt and Dublin</span>',
+    reported: true,
+  },
+  {
+    name: 'an option with text beyond its label and description',
+    role: 'listbox',
+    item: '<div role="option" tabindex="0" aria-selected="true" aria-labelledby="l" aria-describedby="d"><span id="l">Europe</span><span id="d">Frankfurt and Dublin</span><span>Delete region</span></div>',
+    reported: true,
+  },
 ];
 
-for (const { name, item, reported } of CASES) {
+for (const { name, item, reported, role = 'menu' } of CASES) {
   test(`${SHORTCUT_ITEM_RULE} is ${reported ? 'reported' : 'let through'} for ${name}`, async ({
     page,
   }) => {
-    const html = `<!doctype html><html lang="en"><head><title>Menu</title></head><body><main><div role="menu" aria-label="Actions">${item}</div></main></body></html>`;
+    const html = `<!doctype html><html lang="en"><head><title>Menu</title></head><body><main><div role="${role}" aria-label="Actions">${item}</div></main></body></html>`;
     await page.route(`${ORIGIN}/axe-case.html`, (route) =>
       route.fulfill({ contentType: 'text/html', body: html }),
     );

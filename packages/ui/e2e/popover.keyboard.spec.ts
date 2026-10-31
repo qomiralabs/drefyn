@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
-import { expect, openStory, tabKey, test, THEMES } from './fixtures.ts';
+import { tokens } from '../src/index.ts';
+import { expect, openStory, recordTransitions, tabKey, test, THEMES } from './fixtures.ts';
 
 const ROW = 'components-popover--in-a-row';
 const trigger = (page: Page) => page.getByRole('button', { name: 'Filters' });
@@ -91,6 +92,17 @@ for (const theme of THEMES) {
     await expect(trigger(page)).toBeFocused();
   });
 
+  test(`a second click on the trigger closes it and keeps focus there in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, ROW, theme);
+    await trigger(page).click();
+    await expect(panel(page)).toBeVisible();
+    await trigger(page).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(trigger(page)).toHaveAttribute('aria-expanded', 'false');
+  });
+
   test(`a click on the switch inside keeps it open in ${theme}`, async ({ page }) => {
     await openStory(page, ROW, theme);
     await trigger(page).click();
@@ -111,3 +123,21 @@ for (const theme of THEMES) {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 }
+
+// With motion allowed the panel fades and travels the enter distance on the duration token.
+// The reduced motion project proves the same opening only fades.
+test('the panel fades in and travels the enter distance', async ({ page }) => {
+  await openStory(page, 'components-popover--default', 'light');
+  const recorded = await recordTransitions(page);
+  await trigger(page).click();
+  await expect(panel(page)).toBeVisible();
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+  const started = await recorded();
+  const base = tokens.motion.duration.base.ms;
+  expect(started).toEqual(
+    expect.arrayContaining([
+      { element: 'div', property: 'opacity', ms: base },
+      { element: 'div', property: 'translate', ms: base },
+    ]),
+  );
+});

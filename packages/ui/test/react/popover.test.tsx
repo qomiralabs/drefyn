@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tokens } from '../../src/index.ts';
 import { Button, IconMore, Popover, Switch } from '../../src/react/index.ts';
 import { classesOf } from './classes.ts';
 
@@ -124,6 +125,24 @@ describe('Popover', () => {
     );
   });
 
+  it('closes on a second press of its trigger', async () => {
+    const user = userEvent.setup();
+    render(<Filters />);
+    await user.click(trigger());
+    await user.click(trigger());
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('closes when focus moves to another control on the page', async () => {
+    const user = userEvent.setup();
+    render(<Filters />);
+    await user.click(trigger());
+    act(() => {
+      screen.getByRole('button', { name: 'Before' }).focus();
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('ignores Ctrl+Tab and Cmd+Tab', async () => {
     const user = userEvent.setup();
     render(<Filters />);
@@ -187,6 +206,9 @@ describe('Popover', () => {
     const moves = classes.filter((c) => c.includes('translate'));
     expect(moves.length).toBeGreaterThan(0);
     for (const c of moves) expect(c).toMatch(/^motion-safe:/);
+    // The travel is the enter distance, which happens to sit on the spacing scale.
+    const travel = moves.map((c) => /-translate-y-(\d+)$/.exec(c)?.[1]).filter(Boolean);
+    expect(travel).toEqual([String(tokens.motion.distance.enter)]);
   });
 
   it('refuses held state without onOpenChange, and open with defaultOpen, by type', () => {

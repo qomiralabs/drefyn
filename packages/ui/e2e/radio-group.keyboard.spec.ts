@@ -53,7 +53,10 @@ for (const theme of THEMES) {
     await page.keyboard.press(tabKey(browserName));
     const first = radio(page, 'Public');
     await expect(first).toBeFocused();
-    await expect(first).toHaveAccessibleDescription('Anyone with the link, and search engines.');
+    // React Aria joins the group's description to each radio after the radio's own.
+    await expect(first).toHaveAccessibleDescription(
+      'Anyone with the link, and search engines. You can change this at any time.',
+    );
     await page.keyboard.press('Space');
     await expect(first).toBeChecked();
   });
