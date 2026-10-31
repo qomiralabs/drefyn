@@ -8,4 +8,9 @@ export const egressAllowList = [
     reason:
       'GitHub API client for the review gate in CI; the host is api.github.com or GITHUB_API_URL from the Actions runner, never customer input',
   },
+  {
+    path: 'packages/email/test/support/servers.ts',
+    reason:
+      'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',
+  },
 ] as const satisfies readonly { path: string; reason: string }[];

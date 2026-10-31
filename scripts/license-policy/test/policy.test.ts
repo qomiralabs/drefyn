@@ -232,6 +232,7 @@ describe('license-policy cli', () => {
           mpl('@axe-core/playwright'),
         ],
         'CC-BY-4.0': [mpl('caniuse-lite', 'CC-BY-4.0')],
+        'MIT-0': [mpl('nodemailer', 'MIT-0')],
       }),
     );
     const code = main(['--input', input], { out: () => undefined, err: () => undefined });

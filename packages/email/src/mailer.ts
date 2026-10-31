@@ -5,6 +5,8 @@ import { isHeaderSafe } from './headers.ts';
 import { sendLog, safeLogger, safeMetrics, type SendFacts } from './logs.ts';
 import { messageIdFor } from './message-id.ts';
 import { renderMail } from './render.ts';
+import { abortError } from './smtp/errors.ts';
+import { createSmtpTransport } from './smtp/nodemailer.ts';
 import type {
   EmailConfig,
   EmailDeps,
@@ -19,6 +21,7 @@ import type {
   SendResult,
   TransportError,
   TransportPhase,
+  TransportProgress,
 } from './types.ts';
 
 type SmtpEmailConfig = Extract<EmailConfig, { kind: 'smtp' }>;
@@ -36,14 +39,16 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set<TransportError['code']>([
   'email.rejected',
   'email.unknown_outcome',
 ]);
-const PHASES: ReadonlySet<string> = new Set<TransportPhase>([
+// In the order a send moves through them.
+const PHASE_ORDER: readonly TransportPhase[] = [
   'connect',
   'tls',
   'auth',
   'envelope',
   'data',
   'after_data',
-]);
+];
+const PHASES: ReadonlySet<string> = new Set<TransportPhase>(PHASE_ORDER);
 const LOST: TransportError = Object.freeze({ code: 'email.unknown_outcome', phase: 'after_data' });
 
 const failure = (error: EmailError): SendResult => ({ ok: false, error });
@@ -78,9 +83,10 @@ async function callTransport(
   envelope: Envelope,
   mail: RenderedMail,
   signal: AbortSignal,
+  progress: TransportProgress,
 ): Promise<TransportError | null> {
   try {
-    const result: unknown = await transport.deliver(envelope, mail, signal);
+    const result: unknown = await transport.deliver(envelope, mail, signal, progress);
     if (typeof result !== 'object' || result === null) return LOST;
     const { ok, error } = result as { ok?: unknown; error?: Partial<TransportError> };
     if (ok === true) return null;
@@ -103,6 +109,7 @@ async function callTransport(
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(done, ms);
     function done() {
@@ -129,6 +136,13 @@ const early = (result: SendResult): Outcome => ({ result, attempts: 0 });
 interface Delivery {
   readonly error: TransportError | null;
   readonly attempts: number;
+}
+
+interface Running {
+  // The caller's answer, at the latest when the deadline fires.
+  readonly answer: Promise<Delivery>;
+  // When the transport let go of its connection, which can be after the answer.
+  readonly settled: Promise<void>;
 }
 
 // The clock is injected for tests. One that throws or returns nonsense falls back to
@@ -177,11 +191,7 @@ function notConfigured(deps: EmailDeps): Mailer {
 
 export function createMailer(config: EmailConfig, deps: EmailDeps): Mailer {
   if (config.kind === 'none') return notConfigured(deps);
-  if (deps.transport === undefined) {
-    // TODO(#153): build the SMTP transport from config here instead of refusing.
-    throw new Error('email transport is required with DREFYN_EMAIL_TRANSPORT=smtp');
-  }
-  return smtpMailer(config, deps, deps.transport);
+  return smtpMailer(config, deps, deps.transport ?? createSmtpTransport(config.smtp));
 }
 
 function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTransport): Mailer {
@@ -230,31 +240,38 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
   }
 
   // One deadline over every attempt. When it fires the transport is told through its
-  // signal, and the caller gets its answer whether or not the transport listens.
-  async function deliver(envelope: Envelope, mail: RenderedMail): Promise<Delivery> {
+  // signal, and the caller gets its answer whether or not the transport listens. The
+  // answer depends on how far the transport said it got: once DATA started, the relay
+  // may hold the message, so the outcome is unknown rather than a timeout.
+  function deliver(envelope: Envelope, mail: RenderedMail): Running {
     const controller = new AbortController();
     let attempts = 0;
+    let reached = 0;
+    const progress: TransportProgress = (phase) => {
+      const at = PHASE_ORDER.indexOf(phase);
+      if (at > reached) reached = at;
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<Delivery>((resolve) => {
       timer = setTimeout(() => {
         controller.abort();
-        resolve({ error: { code: 'email.timeout', phase: 'connect' }, attempts });
+        resolve({ error: abortError(PHASE_ORDER[reached] ?? 'connect'), attempts });
       }, deadlineMs);
     });
     const work = (async (): Promise<Delivery> => {
       for (;;) {
         attempts += 1;
-        const error = await callTransport(transport, envelope, mail, controller.signal);
+        reached = 0;
+        const error = await callTransport(transport, envelope, mail, controller.signal, progress);
         if (error === null || attempts >= 2 || !retryable(error)) return { error, attempts };
         await sleep(RETRY_MIN_MS + Math.random() * RETRY_SPREAD_MS, controller.signal);
         if (controller.signal.aborted) return { error, attempts };
       }
     })();
-    try {
-      return await Promise.race([work, deadline]);
-    } finally {
+    const answer = Promise.race([work, deadline]).finally(() => {
       clearTimeout(timer);
-    }
+    });
+    return { answer, settled: work.then(() => undefined) };
   }
 
   function envelopeFor(to: NormalizedEmailAddress, key: string): Envelope {
@@ -322,12 +339,15 @@ function smtpMailer(config: SmtpEmailConfig, deps: EmailDeps, transport: MailTra
       release();
       return early(fail('email.unavailable'));
     }
-    const running = deliver(envelope, rendered.value);
-    const tracked = running.then(() => undefined);
-    active.add(tracked);
-    const { error, attempts } = await running;
-    active.delete(tracked);
-    release();
+    const { answer, settled } = deliver(envelope, rendered.value);
+    // The slot is held until the transport has closed its connection, so a relay that
+    // stalls past the deadline can never have more live connections than the limit.
+    active.add(settled);
+    void settled.then(() => {
+      active.delete(settled);
+      release();
+    });
+    const { error, attempts } = await answer;
     if (breaker.record(healthOf(error), gate === 'trial', clock())) {
       logger.warn('email.breaker_open', {});
       metrics.counter('email_breaker_open_total', 1);

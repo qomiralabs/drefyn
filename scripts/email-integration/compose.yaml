@@ -1,0 +1,63 @@
+# Mailpit for the @drefyn/email integration tests only. Started by
+# scripts/email-integration.sh, which makes the certificates and the AUTH password.
+# The digest is the multi arch index (amd64 and arm64) of v1.32.0, MIT.
+x-mailpit: &mailpit
+  profiles: [test]
+  image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  tmpfs: [/tmp]
+  pids_limit: 128
+  mem_limit: 256m
+  volumes:
+    - ${DREFYN_EMAIL_IT_CERTS:?run scripts/email-integration.sh}:/certs:ro
+  healthcheck:
+    test: [CMD, /mailpit, readyz]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 10s
+    start_interval: 1s
+
+x-env: &env # Old messages are dropped past this, so a long run cannot fill memory.
+  MP_MAX_MESSAGES: '500'
+  # The API answers only to loopback names, which closes DNS rebinding.
+  MP_ALLOWED_HOSTS: localhost,127.0.0.1
+
+services:
+  # No TLS: the plaintext opt in, and the refusal when STARTTLS is not offered.
+  plain:
+    <<: *mailpit
+    environment:
+      <<: *env
+    ports: [127.0.0.1:53025:1025, 127.0.0.1:53080:8025]
+  # A certificate from the test CA, STARTTLS required, AUTH with the generated password.
+  starttls:
+    <<: *mailpit
+    environment:
+      <<: *env
+      MP_SMTP_TLS_CERT: /certs/server.pem
+      MP_SMTP_TLS_KEY: /certs/server.key
+      MP_SMTP_REQUIRE_STARTTLS: 'true'
+      MP_SMTP_AUTH_FILE: /certs/auth.txt
+    ports: [127.0.0.1:53587:1025, 127.0.0.1:53081:8025]
+  # The same certificate on implicit TLS, as hosted reaches its relay.
+  implicit:
+    <<: *mailpit
+    environment:
+      <<: *env
+      MP_SMTP_TLS_CERT: /certs/server.pem
+      MP_SMTP_TLS_KEY: /certs/server.key
+      MP_SMTP_REQUIRE_TLS: 'true'
+      MP_SMTP_AUTH_FILE: /certs/auth.txt
+    ports: [127.0.0.1:53465:1025, 127.0.0.1:53082:8025]
+  # A self signed certificate, refused until DREFYN_SMTP_CA_FILE names it.
+  selfsigned:
+    <<: *mailpit
+    environment:
+      <<: *env
+      MP_SMTP_TLS_CERT: /certs/self.pem
+      MP_SMTP_TLS_KEY: /certs/self.key
+      MP_SMTP_REQUIRE_STARTTLS: 'true'
+    ports: [127.0.0.1:53588:1025, 127.0.0.1:53083:8025]

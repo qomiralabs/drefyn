@@ -14,7 +14,7 @@ const config = parseEmailConfig(process.env);
 logEmailConfig(config, logger);
 if (!config.ok) process.exit(1);
 
-const mailer = createMailer(config.value, { linkOrigin, logger, metrics, transport });
+const mailer = createMailer(config.value, { linkOrigin, logger, metrics });
 const result = await mailer.send(
   address,
   { template: 'sign_in_code', purpose: 'sign_in', code, link, expiresInMinutes: 10 },
@@ -30,8 +30,10 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   `{ code: 'email.config_invalid', key, reason }` and never holds the value. The SMTP
   password is a `Secret` that prints, logs and serialises as `[redacted]`.
 - `createMailer(config, deps)`: with `kind: 'none'` it reports `configured: false` and
-  every send returns `email.not_configured`. With SMTP config it needs `deps.transport`
-  until the SMTP transport lands.
+  every send returns `email.not_configured`. With SMTP config it builds the SMTP transport
+  from config, unless `deps.transport` overrides it. It never throws for a config
+  `parseEmailConfig` returned.
+- `createSmtpTransport(smtpConfig)` is that transport, for a caller that wraps it.
 - `renderMail(message, { linkOrigin })` returns the subject, preheader, HTML and text, or
   `email.input_invalid` naming the field. It never throws.
 - `isHeaderSafe(name, value)` is the check every header value passes.
@@ -64,7 +66,11 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   4xx at the greeting or to MAIL or RCPT. Never after the final dot (`email.unknown_outcome`),
   and never for 5xx, TLS or auth failures.
 - One deadline (`DREFYN_SMTP_SEND_DEADLINE_MS`, 15 s) covers every attempt. When it fires
-  the transport's signal aborts and the send returns `email.timeout`.
+  the transport's signal aborts. The send returns `email.timeout` if the transport had not
+  reached DATA, and `email.unknown_outcome` if it had, since the relay may hold the mail.
+- A transport reports how far it got through the `progress` argument of `deliver`
+  (`connect`, `auth`, `envelope`, `data`, `after_data`). The slot a send holds is freed
+  only when `deliver` settles, which for SMTP is once its socket has closed.
 - After 5 consecutive relay failures the breaker fails sends with `email.unavailable` for
   30 s, then lets one trial send decide.
 - The `Message-ID` is derived from the idempotency key and the sender domain, so a retry
@@ -87,7 +93,25 @@ Metrics: `email_sends_total{template,purpose,outcome}`,
 `email_send_duration_ms{template,outcome}`, `email_render_duration_ms{template}`,
 `email_queue_depth`, `email_breaker_open_total` and `email_dropped_on_shutdown_total`.
 
+## SMTP
+
+- Nodemailer 10.2.1, pinned exactly, imported only by `src/smtp/nodemailer.ts`. Each send
+  opens its own connection, sends one message with an explicit envelope and quits.
+- `implicit` TLS (the default on 465) or `starttls` with STARTTLS required (any other
+  port). Certificates are always checked; there is no key that turns that off. A private
+  CA goes in `DREFYN_SMTP_CA_FILE`, an IP literal host takes `DREFYN_SMTP_TLS_SERVERNAME`.
+  A TLS failure is `email.tls_failed` and is never retried in plaintext.
+- Plaintext only with `DREFYN_SMTP_TLS=none`, `DREFYN_SMTP_ALLOW_PLAINTEXT=true` and no
+  credentials.
+- Errors are mapped from Nodemailer's codes and the reply code only. The message is never
+  read, because it holds addresses and the relay's reply text.
+- From goes in as a name and an address, so the display name is quoted.
+
+Integration tests: `bash scripts/email-integration.sh` makes throwaway certificates and an
+AUTH password, starts four Mailpit containers on loopback, runs `test:integration` and
+removes everything.
+
 ## Not here yet
 
-The SMTP transport and the designed templates come next. Until then one plain placeholder
+The designed templates come next. Until then one plain placeholder
 template renders every message.
