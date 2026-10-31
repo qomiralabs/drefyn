@@ -170,7 +170,13 @@ export interface Envelope {
   readonly headers: ReadonlyMap<string, string>;
 }
 
+// How far a send got. `data` means the relay took DATA; a final reply read there is a
+// known answer. `after_data` means the message went out and no final reply was read, so
+// the relay may have queued it.
 export type TransportPhase = 'connect' | 'tls' | 'auth' | 'envelope' | 'data' | 'after_data';
+
+// Called as a send moves on, so the mailer knows how far it got when its deadline fires.
+export type TransportProgress = (phase: TransportPhase) => void;
 
 export interface TransportError {
   readonly code: Exclude<
@@ -187,10 +193,13 @@ export interface TransportError {
 
 export interface MailTransport {
   readonly kind: 'smtp' | 'test' | (string & {});
+  // Settles only once the connection for this send is closed, abort included, so the
+  // mailer can hold the send's slot until the socket is really gone.
   deliver(
     envelope: Envelope,
     mail: RenderedMail,
     signal: AbortSignal,
+    progress?: TransportProgress,
   ): Promise<Result<{ readonly messageId: string }, TransportError>>;
   close(): Promise<void>;
 }

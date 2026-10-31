@@ -46,6 +46,9 @@ jobs:
       # tenancy files to 95 percent: some of them only run against a real Postgres.
       - name: Unit and integration tests with merged coverage
         run: pnpm --filter @drefyn/db test:merged
+      # Sessions, revocation and step up against the same stack, on databases of their own.
+      - name: Auth integration tests
+        run: pnpm --filter @drefyn/auth test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the
@@ -121,3 +124,27 @@ jobs:
         env:
           DREFYN_UPGRADE_TEST_PROJECT: drefyn-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/selfhost-upgrade-test.sh
+
+  email:
+    name: e2e (email smtp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # A project of its own per attempt, so a rerun never meets a stale container.
+      COMPOSE_PROJECT_NAME: drefyn-email-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Makes fresh certificates and an AUTH password, starts Mailpit by digest, runs the
+      # SMTP integration tests and removes the containers and the certificates.
+      - name: SMTP integration tests against Mailpit
+        run: bash scripts/email-integration.sh

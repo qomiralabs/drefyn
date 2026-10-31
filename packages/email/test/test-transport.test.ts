@@ -115,6 +115,44 @@ describe('createTestTransport', () => {
     );
   });
 
+  it('reports progress up to the phase it hangs in, and the lost reply when it hangs after data', async () => {
+    const transport = createTestTransport();
+    const m = await mail(signIn());
+    const cases = [
+      [undefined, [], { code: 'email.timeout', phase: 'connect' }],
+      ['connect', ['connect'], { code: 'email.timeout', phase: 'connect' }],
+      ['auth', ['connect', 'auth'], { code: 'email.timeout', phase: 'auth' }],
+      ['envelope', ['connect', 'auth', 'envelope'], { code: 'email.timeout', phase: 'envelope' }],
+      [
+        'data',
+        ['connect', 'auth', 'envelope', 'data'],
+        { code: 'email.unknown_outcome', phase: 'after_data' },
+      ],
+      [
+        'after_data',
+        ['connect', 'auth', 'envelope', 'data', 'after_data'],
+        { code: 'email.unknown_outcome', phase: 'after_data' },
+      ],
+    ] as const;
+    for (const [phase, reported, error] of cases) {
+      const seen: string[] = [];
+      const controller = new AbortController();
+      transport.hangNext(phase);
+      const pending = transport.deliver(envelope(), m, controller.signal, (p) => seen.push(p));
+      await new Promise((r) => setImmediate(r));
+      controller.abort();
+      expect(await pending, String(phase)).toEqual({ ok: false, error });
+      expect(seen, String(phase)).toEqual(reported);
+    }
+  });
+
+  it('reports every phase on a send that goes through', async () => {
+    const transport = createTestTransport();
+    const seen: string[] = [];
+    await transport.deliver(envelope(), await mail(signIn()), never, (p) => seen.push(p));
+    expect(seen).toEqual(['connect', 'envelope', 'data', 'after_data']);
+  });
+
   it('clears captures and planned outcomes', async () => {
     const transport = createTestTransport();
     const m = await mail(signIn());
