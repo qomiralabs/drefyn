@@ -43,6 +43,14 @@ without one of those.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
   known, with every setting empty. `drefyn_auth` holds grants only on the identity tables and
   its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+- `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
+  before any key or organization is proved, with every setting empty. Its transaction type,
+  `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
+  that table only and holds only when no organization, project or user is set, so tenant or
+  user work, which also runs as `drefyn_app`, reads and writes no row there.
+- `withTenant` work is typed `TenantSchema` and `withOrganization` work `OrganizationSchema`:
+  neither names an identity or limiter table (organization scope keeps `users`, with
+  `drefyn_app`'s columns, for the members page).
 - `closeDatabase(db)` ends the pool. It is safe to call twice; later work fails with
   `DB_UNAVAILABLE`.
 
@@ -109,6 +117,43 @@ projects of one organization needs a reviewed entry in the allow list. A publish
 `drefyn_public_reader` and the `published_read` policy, which needs both organization and
 project. It must be added to the published allow list in `src/allow-lists.ts`.
 
+### Identity and limiter tables
+
+`users`, `identities`, `sessions`, `password_credentials`, `email_challenges`, `oauth_states`,
+`auth_rate_limits` and `api_key_failures` carry no `organization_id`: a person exists before
+and across organizations. Each is on the global table list with a reason. `drefyn_auth`
+reaches the six sign in tables and never `sessions` or `api_key_failures`; `drefyn_app` reaches
+the person's own `users`, `identities`, `sessions` and `password_credentials` rows under
+`withUser`, holds nothing on `email_challenges`, `oauth_states` and `auth_rate_limits`, and
+writes `api_key_failures` only through `withApiKeyLimiter`.
+
+On `users` and `password_credentials` every select, insert and update is per column. The
+columns each role may touch are written once in `src/identity-columns.ts`; the catalog allow
+list and the `AuthSchema` and `UserSchema` table types are both built from it, so selecting
+`email_verified_at` under `withUser` does not compile, and the database refuses it too.
+`drefyn_app` reads `id`, `email`, `display_name` and `created_at` of users and updates only
+`display_name` and `updated_at`; only `drefyn_auth` writes the address.
+
+`reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
+`reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
+fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
+and return each window's count and seconds until it ends. Each runs in a transaction of its
+own (1 s timeout) and commits before it returns, so the count stands whatever the caller's
+work does and the row lock is held for one statement only. The key is a 32 byte HMAC made by
+the caller, so no address or IP is stored. Parallel calls on one key queue on its row, so each
+sees its own count.
+
+`selectAll()` on `users` or `password_credentials` fails lint (`drefyn/no-select-all`): it
+sends `select *`, which the per column grants refuse for every role.
+
+`deleteExpired(tx, rules, { batchSize })` deletes rows a fixed time after a timestamp column,
+by database time, at most `batchSize` (5000) per rule, and returns counts by table.
+`AUTH_EXPIRY_RULES` clears ended limiter windows and challenges and OAuth states 24 hours after
+expiry; `API_KEY_EXPIRY_RULES` clears ended API key windows. `createExpiryCleanup({ rules,
+transact, onDeleted, logger })` runs them at most once a minute per process, never twice at
+once, reports every count, and never rejects: a failure logs `db_expiry_cleanup_failed` with
+the table names and the DbError code only. A later table registers its own rule beside these.
+
 `drefyn_owner` matches no policy, so migrations cannot read or change tenant rows. Data
 changes run as jobs through `withTenant`, one transaction per tenant.
 
@@ -143,7 +188,11 @@ and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alik
 to `PUBLIC`, restrictive ones included; a unique key without `organization_id` on a tenant table
 unless it is on the global unique list; and on `users` and `password_credentials`, any table
 level `SELECT` or `UPDATE` and any column grant off the column grant list, so a new column is
-closed until someone grants it.
+closed until someone grants it. Insert is per column there too, so no insert can set a column
+such as `email_verified_at` that the role was not given. It refuses any grant to `drefyn_app`,
+even one column, on the auth only tables (`email_challenges`, `oauth_states`,
+`auth_rate_limits`), and checks each column grant entry names `SELECT`, `INSERT` or `UPDATE`,
+`drefyn_app` or `drefyn_auth`, and a table on the column grant list.
 
 `check:sources` fails on migration DDL aimed at an extension or schema `extensions`, and on a
 session level tenant setting (a plain or session `SET` of a `drefyn.` setting, or `set_config`
@@ -174,8 +223,11 @@ with `is_local` false) in any tracked file.
   `postgres`; anywhere else it must be `verify-full`.
 - `createDatabase`, `createPublishedDatabase`, `createAuthDatabase`, `withTenant`,
   `withOrganization`, `withPublishedReader`, `withUser`, `withAuth`, `closeDatabase`,
-  `toSafeInteger`, `newId`: see Tenant access. `AuthSchema` and `UserSchema` are the
-  transaction types; both stay empty until the identity tables exist.
+  `withApiKeyLimiter`, `toSafeInteger`, `newId`: see Tenant access. `AuthSchema`,
+  `UserSchema` and `ApiKeyLimiterSchema` are the transaction types.
+- `reserveAuthRateWindows`, `reserveApiKeyFailureWindows`, `deleteExpired`,
+  `createExpiryCleanup`, `AUTH_EXPIRY_RULES`, `API_KEY_EXPIRY_RULES`: see Identity and limiter
+  tables.
 - `DbError`, `DbErrorCode`.
 
 ## `drefyn migrate`

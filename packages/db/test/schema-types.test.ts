@@ -91,8 +91,25 @@ describe('renderSchema', () => {
     expect(clash).toMatch(/export interface ABTable1 \{/);
   });
 
-  it('matches the committed file for the shipped migrations, which add no tables', () => {
-    expect(readFileSync(committedTypesPath, 'utf8')).toBe(renderSchema([]));
+  // check:types compares the file with a migrated database in the e2e job; here the file
+  // must at least carry the header and every shipped table.
+  it('keeps the generated header and names every shipped table', () => {
+    const committed = readFileSync(committedTypesPath, 'utf8');
+    expect(committed.startsWith(renderSchema([]).split('\n// Tables in schema app')[0] ?? '')).toBe(
+      true,
+    );
+    for (const table of [
+      'api_key_failures',
+      'auth_rate_limits',
+      'email_challenges',
+      'identities',
+      'oauth_states',
+      'password_credentials',
+      'sessions',
+      'users',
+    ]) {
+      expect(committed).toContain(`// app.${table}\n`);
+    }
   });
 });
 

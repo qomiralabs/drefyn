@@ -1,9 +1,10 @@
 # `@drefyn/auth`
 
-Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. This
-first slice holds only pure pieces: config parsing, key derivation, credential formats,
-input validators, the built in password rules, log redaction and the permission model.
-Nothing here touches a database, the network or the file system.
+Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. So far it
+holds config parsing, key derivation, credential formats, input validators, the built in
+password rules, log redaction, the permission model and the rate limiters. Only the limiters
+reach the database, and only through `@drefyn/db`; nothing here touches the network or the
+file system.
 
 ## Entry points
 
@@ -60,6 +61,34 @@ const api = parseApiAuthConfig(process.env); // API service
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
+
+## Rate limits
+
+- `rateKeyForIp(ip)` gives the value a per IP bucket is keyed by: `ip4:a.b.c.d`, or the /64 of
+  an IPv6 address in one fixed spelling (`ip6:2001:0db8:0001:0002::/64`). An IPv4 mapped
+  address reads as its IPv4 address. Anything else, zone ids included, is
+  `AUTH_INPUT_INVALID`.
+- `createRateLimiter({ db, keys, limits, metrics, logger })` returns `reserve(bucket, value)`.
+  The stored key is `HMAC(subkey_rate, bucket, ...value)`. Each call counts one attempt
+  against every window of the bucket in a short transaction of its own, committed before it
+  returns. Past any limit it throws `AUTH_RATE_LIMITED` with `retryAfterSeconds`, the longest
+  wait of the windows that refused; a database failure is `AUTH_UNAVAILABLE`. The first
+  refusal in a window of `email_send_address_ceiling` also counts `auth.email_ceiling_hit`
+  and logs the bucket and the first 16 hex digits of the key, never the address; later
+  refusals in that window record nothing, so strangers cannot flood the log.
+- `createApiKeyFailureLimiter({ db, config })` is the API service's: keyed with
+  `DREFYN_API_RATE_LIMIT_KEY` through `parseApiAuthConfig`, committed through
+  `withApiKeyLimiter`.
+
+The contract for every flow: await `reserve` before the work it limits and outside that
+work's transaction. A wrong code or password is thrown from the work and rolls its
+transaction back; a count made inside it would go with it, and its row lock would queue every
+other request on that key behind the work. The same holds for the per challenge attempt
+count: it is incremented and committed before the code is compared. Slow work such as
+password hashing holds no connection.
+
+The buckets and defaults are in `RATE_BUCKETS` and the Config section. `email_send_device`
+(10 a day) is configured for the known device exemption, which the email sign in flow adds.
 
 ## Credential formats
 

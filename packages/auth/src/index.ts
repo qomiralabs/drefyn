@@ -49,6 +49,18 @@ export {
   type VerifyFragment,
 } from './tokens.ts';
 export { safeReturnTo } from './return-to.ts';
+export { rateKeyForIp } from './client-ip.ts';
+export {
+  createApiKeyFailureLimiter,
+  createRateLimiter,
+  type ApiKeyFailureLimiter,
+  type ApiKeyFailureLimiterDeps,
+  type AuthLogger,
+  type AuthMetricName,
+  type AuthMetrics,
+  type RateLimiter,
+  type RateLimiterDeps,
+} from './rate-limiter.ts';
 export { normalizeAddress } from './address.ts';
 export {
   KEYBOARD_ROWS,
