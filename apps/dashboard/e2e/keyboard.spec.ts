@@ -39,6 +39,9 @@ test('Tab goes skip link, top bar left to right, then the sidebar', async ({
   ]);
 });
 
+// Text only the command bar's own chunk carries: its empty results line.
+const COMMAND_BAR_MARK = 'Nothing matches';
+
 test.describe('command bar', () => {
   for (const key of ['Control+k', 'Meta+k']) {
     test(`${key} opens it with focus in its search field, and again closes it`, async ({
@@ -102,15 +105,27 @@ test.describe('command bar', () => {
   test('a failed chunk shows the error toast, no spinner, and the next press works', async ({
     page,
   }) => {
+    // The command bar's chunk fails however and whenever it is fetched, by its content, not
+    // by timing: a route set after the load missed a copy fetched while the page settled.
+    let blocked = 0;
+    await page.route('**/_next/static/**/*.js', async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      if (body.includes(COMMAND_BAR_MARK)) {
+        blocked += 1;
+        await route.abort('failed');
+        return;
+      }
+      await route.fulfill({ response, body });
+    });
     await openShell(page, ROUTES.overview);
-    await page.waitForLoadState('networkidle');
-    await page.route('**/_next/static/**/*.js', (route) => route.abort('failed'));
     await page.keyboard.press('ControlOrMeta+k');
     const toast = page.getByRole('region', { name: /notification/i });
     // An error: announced at once, and it stays until dismissed.
     await expect(toast.getByRole('alert')).toHaveText('Could not open search. Try again.');
     await expect(commandBar(page)).toBeHidden();
     await expect(page.getByRole('progressbar')).toHaveCount(0);
+    expect(blocked, 'the command bar chunk was requested and refused').toBeGreaterThan(0);
     await page.unrouteAll({ behavior: 'wait' });
     await page.keyboard.press('ControlOrMeta+k');
     await expect(commandBar(page)).toBeVisible();
