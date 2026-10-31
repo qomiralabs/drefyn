@@ -176,6 +176,28 @@ describe('Menu', () => {
     expect(el.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('draws a round trigger as a circle, edge and fills included, and a square one by default', () => {
+    render(
+      <>
+        <Menu trigger="MO" triggerLabel="MO, account for Maya Okafor" triggerShape="round">
+          <MenuItem id="profile">Profile</MenuItem>
+        </Menu>
+        <Menu trigger="Payments API">
+          <MenuItem id="open">Open monitor</MenuItem>
+        </Menu>
+      </>,
+    );
+    const round = classesOf(screen.getByRole('button', { name: /account for/ }));
+    expect(round).toContain('rounded-full');
+    expect(round).not.toContain('rounded-sm');
+    // The secondary edge and the hover and open fills sit on the circle itself.
+    expect(round).toEqual(expect.arrayContaining(['border-rule-strong', 'hover:bg-hover']));
+    expect(round).toContain('aria-expanded:bg-pressed');
+    const square = classesOf(screen.getByRole('button', { name: 'Payments API' }));
+    expect(square).toContain('rounded-sm');
+    expect(square).not.toContain('rounded-full');
+  });
+
   it('uses DOM names and React Aria names only where the DOM has none, never is* or onPress', () => {
     // @ts-expect-error disabled, not isDisabled.
     const a = <MenuItem id="x" isDisabled children="Open monitor" />;

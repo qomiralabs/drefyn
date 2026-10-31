@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { createRef, type ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buttonClasses } from '../../src/react/button-classes.ts';
 import { Button, IconCheck } from '../../src/react/index.ts';
 import { classesOf, FORBIDDEN_LOOKS, only } from './classes.ts';
 
@@ -543,4 +544,17 @@ describe('press handlers on a Button that cannot act', () => {
       expect(onFocus).toHaveBeenCalled();
     });
   }
+});
+
+describe('buttonClasses shape', () => {
+  it('is square unless asked for round, with exactly one radius', () => {
+    const look = { variant: 'secondary', size: 'md', disabled: false, iconOnly: true } as const;
+    const square = buttonClasses(look).split(' ');
+    const round = buttonClasses({ ...look, shape: 'round' }).split(' ');
+    expect(square.filter((c) => c.startsWith('rounded-'))).toEqual(['rounded-sm']);
+    expect(round.filter((c) => c.startsWith('rounded-'))).toEqual(['rounded-full']);
+    expect(round.filter((c) => !c.startsWith('rounded-'))).toEqual(
+      square.filter((c) => !c.startsWith('rounded-')),
+    );
+  });
 });
