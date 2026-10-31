@@ -9,9 +9,9 @@ import {
   type QueryResult,
   type Transaction,
 } from 'kysely';
-import type { AuthSchema, UserSchema } from '@drefyn/db';
-import type { UserId } from '@drefyn/tenancy';
-import type { SessionStore } from '../src/index.ts';
+import type { AuthSchema, OrganizationSchema, UserSchema } from '@drefyn/db';
+import type { OrganizationId, UserId } from '@drefyn/tenancy';
+import type { OrganizationStore, SessionStore } from '../src/index.ts';
 
 export interface Statement {
   readonly sql: string;
@@ -20,6 +20,11 @@ export interface Statement {
 
 export type Event =
   | { readonly kind: 'begin'; readonly scope: 'user' | 'auth'; readonly userId?: UserId }
+  | {
+      readonly kind: 'begin';
+      readonly scope: 'organization';
+      readonly organizationId: OrganizationId;
+    }
   | { readonly kind: 'statement'; readonly statement: Statement }
   | { readonly kind: 'commit' }
   | { readonly kind: 'rollback' };
@@ -77,7 +82,7 @@ export function scriptedStore(respond: Responder = () => []) {
     destroy: () => Promise.resolve(),
   };
 
-  const kysely = new Kysely<UserSchema & AuthSchema>({
+  const kysely = new Kysely<UserSchema & AuthSchema & OrganizationSchema>({
     dialect: {
       createAdapter: () => new PostgresAdapter(),
       createDriver: () => driver,
@@ -86,7 +91,7 @@ export function scriptedStore(respond: Responder = () => []) {
     },
   });
 
-  const store: SessionStore = {
+  const store: SessionStore & OrganizationStore = {
     user<T>(userId: UserId, work: (tx: Transaction<UserSchema>) => Promise<T>): Promise<T> {
       events.push({ kind: 'begin', scope: 'user', userId });
       return kysely.transaction().execute((tx) => work(tx as unknown as Transaction<UserSchema>));
@@ -94,6 +99,15 @@ export function scriptedStore(respond: Responder = () => []) {
     auth<T>(work: (tx: Transaction<AuthSchema>) => Promise<T>): Promise<T> {
       events.push({ kind: 'begin', scope: 'auth' });
       return kysely.transaction().execute((tx) => work(tx as unknown as Transaction<AuthSchema>));
+    },
+    organization<T>(
+      organizationId: OrganizationId,
+      work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
+    ): Promise<T> {
+      events.push({ kind: 'begin', scope: 'organization', organizationId });
+      return kysely
+        .transaction()
+        .execute((tx) => work(tx as unknown as Transaction<OrganizationSchema>));
     },
   };
 

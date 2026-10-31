@@ -2,9 +2,10 @@
 
 Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. So far it
 holds config parsing, key derivation, credential formats, input validators, the built in
-password rules, log redaction, the permission model, the rate limiters and database
-sessions with step up. Only the limiters and the session files reach the database, and only
-through `@drefyn/db`; nothing here touches the network or the file system.
+password rules, log redaction, the permission model, the rate limiters, database sessions
+with step up, and organizations. Only the limiters, the session files and organizations reach
+the database, and only through `@drefyn/db`; nothing here touches the network or the file
+system.
 
 ## Entry points
 
@@ -198,5 +199,29 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
   `startStepUpCode` and `verifyStepUpCode` send an 8 digit code bound to the asking session
   (10 minutes, 5 attempts, single use). Both refresh `authenticated_at` on the same row and
   record `step_up_method`.
+- `resolveAccess(cookie, slug)` is the guard's one call: `{ kind: 'ok', access, touchDue }`,
+  `{ kind: 'signed_out' }` or `{ kind: 'not_member' }`. It runs the same session proof first,
+  then, only after a match, one read of the slug, the organization and the person's own
+  membership. An unknown slug and a slug of an organization the person is not in give the
+  same `not_member`. `AccessContext` is branded, so only this package can build one.
+
+## Organizations
+
+```ts
+const orgs = createOrganizations(config, { db, authDb, logger, initialTier: 'self_hosted' });
+```
+
+- `initialTier` is `self_hosted` for the self host bootstrap and `free` for hosted signup; the
+  caller sets it, never a request. Anything else fails at construction with
+  `AUTH_CONFIG_INVALID`.
+- `createOrganization(session, { name, slug })` checks the name and slug, counts `org_create`
+  (3 a day per person), then writes the organization, its slug and the owner membership in
+  one organization transaction. `AUTH_INPUT_INVALID` for a name with `://`, `www.` or a
+  domain like string (checked after NFKC, which is also the stored form), `AUTH_SLUG_INVALID`
+  outside `^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$` or on `RESERVED_SLUGS`,
+  `AUTH_SLUG_TAKEN` when another organization holds it, `AUTH_RATE_LIMITED` past the cap.
+  Logs carry public ids only (`auth.organization_created` at info, when the logger has it).
+- `listMyOrganizations(session)` reads under the person's own context: only organizations
+  they belong to, with slug, role, tier and read only state.
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.

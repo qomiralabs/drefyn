@@ -882,7 +882,10 @@ grant select, insert, update, delete on app.ok_auth_dml to drefyn_auth;`,
 create unique index ok_slugs_slug_key on app.ok_slugs (slug);`,
     );
     const allow = lists([], {
-      globalUniqueConstraints: [reviewed('app.ok_slugs.ok_slugs_slug_key')],
+      globalUniqueConstraints: [
+        ...FIXTURE_ALLOW_LISTS.globalUniqueConstraints,
+        reviewed('app.ok_slugs.ok_slugs_slug_key'),
+      ],
     });
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);

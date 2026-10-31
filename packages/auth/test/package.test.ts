@@ -47,14 +47,15 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter and the session files.
-  it('reaches the database only from the limiter and sessions, and no network or file anywhere', () => {
+  // the limiter, the session files and organizations.
+  it('reaches the database only from the limiter, sessions and organizations, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
       'sessions.ts': database,
       'session-support.ts': database,
       'step-up.ts': database,
+      'organizations.ts': database,
     };
     const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
     for (const file of files) {
@@ -82,12 +83,15 @@ describe('the main entry', () => {
         'PROJECT_ROLES',
         'RATE_BUCKETS',
         'REDACTED',
+        'RESERVED_SLUGS',
+        'SLUG_PATTERN',
         'SecretValue',
         'canAssign',
         'checkCommonPassword',
         'constantTimeEqual',
         'cookieNames',
         'createApiKeyFailureLimiter',
+        'createOrganizations',
         'createRateLimiter',
         'createSessions',
         'decodeSecret',
@@ -107,7 +111,9 @@ describe('the main entry', () => {
         'parseChallengeId',
         'parseCode',
         'parseInvitationToken',
+        'parseOrganizationName',
         'parseSessionToken',
+        'parseSlug',
         'parseVerifyFragment',
         'permissionsFor',
         'rateKeyForIp',

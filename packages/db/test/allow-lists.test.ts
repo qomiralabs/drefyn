@@ -134,10 +134,6 @@ describe('allow lists', () => {
     expect(access.map((p) => p.name)).toEqual(['app.api_key_failures.api_access']);
   });
 
-  it('start with no global unique key', () => {
-    expect(GLOBAL_UNIQUE_CONSTRAINTS).toEqual([]);
-  });
-
   it('grant drefyn_app only id, email, display_name and created_at on users', () => {
     const appSelect = COLUMN_GRANTS.filter(
       (g) =>
@@ -349,5 +345,43 @@ describe('allow lists', () => {
     const problems = allowListProblems(change(ALLOW_LISTS));
     expect(problems.length).toBeGreaterThan(0);
     expect(problems.every((p) => p.rule === 'allow_list')).toBe(true);
+  });
+});
+
+describe('organization entries', () => {
+  it('list the one global unique key, the slug namespace, with its reason', () => {
+    expect(GLOBAL_UNIQUE_CONSTRAINTS.map((e) => e.name)).toEqual([
+      'app.organization_slugs.organization_slugs_slug_key',
+    ]);
+    expect(GLOBAL_UNIQUE_CONSTRAINTS[0]?.reason).toMatch(/one public namespace/);
+  });
+
+  it('keep the organization tables off the global and auth lists', () => {
+    const names = (list: readonly { name: string }[]) => list.map((e) => e.name);
+    for (const table of ['organizations', 'organization_slugs', 'memberships', 'projects']) {
+      expect(names(GLOBAL_TABLES)).not.toContain(`app.${table}`);
+      expect(names(AUTH_TABLES)).not.toContain(`app.${table}`);
+    }
+  });
+
+  it('let a user context only select the organizations and slugs it is a member of', () => {
+    const byName = new Map(USER_POLICIES.map((p) => [p.name, p]));
+    for (const table of ['organizations', 'organization_slugs']) {
+      const policy = byName.get(`app.${table}.member_read`);
+      expect(policy, table).toMatchObject({
+        command: 'select',
+        roles: ['drefyn_app'],
+        withCheck: null,
+      });
+      expect(policy?.using).toContain('app.memberships');
+      expect(policy?.using).toContain('app.current_user_id()');
+    }
+    expect(byName.get('app.memberships.self_read')).toMatchObject({
+      command: 'select',
+      roles: ['drefyn_app'],
+      using: '(user_id = app.current_user_id())',
+      withCheck: null,
+    });
+    expect(byName.has('app.projects.member_read')).toBe(false);
   });
 });

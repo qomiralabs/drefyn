@@ -59,6 +59,17 @@ export interface IdentitiesTable {
   created_at: Generated<Date>;
 }
 
+// app.memberships
+export interface MembershipsTable {
+  id: Generated<string>;
+  organization_id: string;
+  user_id: string;
+  role: string;
+  default_project_role: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.oauth_states
 export interface OauthStatesTable {
   state_hash: Buffer;
@@ -73,10 +84,39 @@ export interface OauthStatesTable {
   created_at: Generated<Date>;
 }
 
+// app.organization_slugs
+export interface OrganizationSlugsTable {
+  slug: string;
+  organization_id: string;
+  created_at: Generated<Date>;
+}
+
+// app.organizations
+export interface OrganizationsTable {
+  organization_id: string;
+  name: string;
+  plan_tier: string;
+  read_only_since: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.password_credentials
 export interface PasswordCredentialsTable {
   user_id: string;
   phc: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.projects
+export interface ProjectsTable {
+  id: Generated<string>;
+  organization_id: string;
+  product: string;
+  slug: string;
+  name: string;
+  read_only_since: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -112,8 +152,12 @@ export interface Schema {
   auth_rate_limits: AuthRateLimitsTable;
   email_challenges: EmailChallengesTable;
   identities: IdentitiesTable;
+  memberships: MembershipsTable;
   oauth_states: OauthStatesTable;
+  organization_slugs: OrganizationSlugsTable;
+  organizations: OrganizationsTable;
   password_credentials: PasswordCredentialsTable;
+  projects: ProjectsTable;
   sessions: SessionsTable;
   users: UsersTable;
 }
