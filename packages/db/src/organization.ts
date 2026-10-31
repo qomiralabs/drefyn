@@ -9,7 +9,6 @@ export type OrganizationView<S> = {
 
 // The identity and limiter tables belong to a person or to sign in, never to an
 // organization. users stays, with drefyn_app's granted columns, for the members page.
-// eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- only users until the organization tables exist
 export type OrganizationSchema = OrganizationView<Omit<Schema, PersonalTableName | 'users'>> & {
   users: AppUsersTable;
 };
@@ -17,5 +16,4 @@ export type OrganizationSchema = OrganizationView<Omit<Schema, PersonalTableName
 // Project work: the project and organization tables, never an identity or limiter table. A
 // project path runs with an attacker supplied tenant, so it must not even name the API key
 // throttle or anyone's address.
-// eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty until the first project table exists
 export type TenantSchema = Omit<Schema, PersonalTableName | 'users'>;

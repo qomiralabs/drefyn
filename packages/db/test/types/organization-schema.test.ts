@@ -29,12 +29,8 @@ async function compileOnly(): Promise<void> {
       )
       .select(['organizations.name', 'organization_slugs.slug', 'memberships.role'])
       .execute();
-    // @ts-expect-error a user context reads organizations, it never writes them
-    await tx.insertInto('organizations').values({ name: 'x', plan_tier: 'free' }).execute();
-    // @ts-expect-error nor renames one
+    // @ts-expect-error a user context reads organizations, it never renames one
     await tx.updateTable('organizations').set({ name: 'x' }).execute();
-    // @ts-expect-error nor takes a slug
-    await tx.insertInto('organization_slugs').values({ slug: 'x' }).execute();
     // @ts-expect-error nor changes its own role
     await tx.updateTable('memberships').set({ role: 'owner' }).execute();
     // @ts-expect-error projects are organization work, not the person's
@@ -73,9 +69,11 @@ describe('organization schema types', () => {
 
   it('leave nothing insertable or updatable in them under a user context', () => {
     expectTypeOf<keyof Insertable<UserSchema['organizations']>>().toEqualTypeOf<never>();
+    // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty is the point: nothing is updatable
     expectTypeOf<keyof Updateable<UserSchema['organizations']>>().toEqualTypeOf<never>();
     expectTypeOf<keyof Insertable<UserSchema['organization_slugs']>>().toEqualTypeOf<never>();
     expectTypeOf<keyof Insertable<UserSchema['memberships']>>().toEqualTypeOf<never>();
+    // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty is the point: nothing is updatable
     expectTypeOf<keyof Updateable<UserSchema['memberships']>>().toEqualTypeOf<never>();
   });
 

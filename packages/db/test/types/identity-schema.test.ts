@@ -30,9 +30,9 @@ async function compileOnly(): Promise<void> {
     // @ts-expect-error api_key_failures is the limiter's alone
     await tx.insertInto('api_key_failures').values({}).execute();
     // @ts-expect-error users is not a project table
-    await tx.selectFrom('users').select('id').execute();
+    tx.selectFrom('users');
     // @ts-expect-error nor are the sign in tables
-    await tx.selectFrom('auth_rate_limits').select('bucket').execute();
+    tx.selectFrom('auth_rate_limits');
   });
 
   await withUser(db, user, async (tx) => {

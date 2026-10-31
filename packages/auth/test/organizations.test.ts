@@ -25,9 +25,9 @@ const MEMBERSHIP = '01890a5d-ac96-774b-bcce-b302099a8071';
 const NAME = 'Acme Widgets';
 const SLUG = 'acme-widgets';
 
-const isOrgInsert = (s: Statement) => /^insert into "organizations"/.test(s.sql);
-const isSlugInsert = (s: Statement) => /^insert into "organization_slugs"/.test(s.sql);
-const isMemberInsert = (s: Statement) => /^insert into "memberships"/.test(s.sql);
+const isOrgInsert = (s: Statement) => s.sql.startsWith('insert into "organizations"');
+const isSlugInsert = (s: Statement) => s.sql.startsWith('insert into "organization_slugs"');
+const isMemberInsert = (s: Statement) => s.sql.startsWith('insert into "memberships"');
 
 // The three inserts answer as the database would when nothing is in the way.
 const happy: Responder = (s) => {
@@ -71,7 +71,7 @@ function setup(respond: Responder = happy, extra: Partial<OrganizationsDeps> = {
   return { orgs, scripted, lines, limiter };
 }
 
-const failed = <T>(result: { ok: true; value: T } | { ok: false; error: AuthError }) => {
+const failed = (result: { ok: true; value: unknown } | { ok: false; error: AuthError }) => {
   if (result.ok) throw new Error('expected a failure');
   return result.error;
 };

@@ -196,15 +196,12 @@ describeWithStack('organizations against Postgres', () => {
     const made = await h.organizations().createOrganization(session, { name, slug: s });
     if (!made.ok) throw made.error;
     const lines = h.logs.slice(before);
-    expect(lines).toEqual([
-      expect.objectContaining({
-        level: 'info',
-        event: 'auth.organization_created',
-        fields: expect.objectContaining({
-          organizationId: toPublicId('org', made.value.organizationId),
-        }),
-      }),
-    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: 'info',
+      event: 'auth.organization_created',
+      fields: { organizationId: toPublicId('org', made.value.organizationId) },
+    });
     expect(JSON.stringify(lines)).not.toContain(name);
     expect(JSON.stringify(lines)).not.toContain(s);
   });

@@ -161,6 +161,19 @@ const selfAccess = (table: string): PolicyEntry => ({
   reason: 'the signed in person reaches only their own rows; grants decide the commands',
 });
 
+// pg_get_expr prints the subquery over three lines; kept exact so review compares the text.
+const memberOf = (table: string) =>
+  `(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = ${table}.organization_id) AND (m.user_id = app.current_user_id()))))`;
+
+const memberRead = (table: string, reason: string): PolicyEntry => ({
+  name: `app.${table}.member_read`,
+  command: 'select',
+  roles: ['drefyn_app'],
+  using: memberOf(table),
+  withCheck: null,
+  reason,
+});
+
 export const USER_POLICIES: readonly PolicyEntry[] = [
   authAccess('users', 'sign in looks a person up by address before anyone is known'),
   {
@@ -196,9 +209,31 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     reason:
       'failed key checks are counted before any key, and so any organization, is proved; only the empty context withApiKeyLimiter sets reaches the rows',
   },
+  {
+    name: 'app.memberships.self_read',
+    command: 'select',
+    roles: ['drefyn_app'],
+    using: OWNED,
+    withCheck: null,
+    reason: 'the signed in person lists the organizations they belong to; never a write',
+  },
+  memberRead(
+    'organizations',
+    'a member reads the organization under a user context; a non member reads nothing',
+  ),
+  memberRead(
+    'organization_slugs',
+    'a member resolves the slug under a user context; a non member slug resolves to nothing',
+  ),
 ];
 
-export const GLOBAL_UNIQUE_CONSTRAINTS: readonly AllowEntry[] = [];
+export const GLOBAL_UNIQUE_CONSTRAINTS: readonly AllowEntry[] = [
+  {
+    name: 'app.organization_slugs.organization_slugs_slug_key',
+    reason:
+      'organization URL names are one public namespace; a taken slug is visible at creation and nothing else is',
+  },
+];
 
 export const COLUMN_GRANT_TABLES: readonly AllowEntry[] = [
   {
@@ -245,8 +280,11 @@ export type AuthTableName =
   | 'email_challenges'
   | 'oauth_states'
   | 'auth_rate_limits';
-export type UserTableName = 'users' | 'identities' | 'sessions' | 'password_credentials';
+// The organization tables a user context reads, through the person's own memberships.
+export type MemberTableName = 'memberships' | 'organizations' | 'organization_slugs';
+export type UserTableName =
+  'users' | 'identities' | 'sessions' | 'password_credentials' | MemberTableName;
 
 // Identity tables organization scope never names. users stays, for the members page.
 export type PersonalTableName =
-  Exclude<AuthTableName | UserTableName, 'users'> | 'api_key_failures';
+  Exclude<AuthTableName | UserTableName, 'users' | MemberTableName> | 'api_key_failures';

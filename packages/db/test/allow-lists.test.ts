@@ -134,10 +134,6 @@ describe('allow lists', () => {
     expect(access.map((p) => p.name)).toEqual(['app.api_key_failures.api_access']);
   });
 
-  it('start with no global unique key', () => {
-    expect(GLOBAL_UNIQUE_CONSTRAINTS).toEqual([]);
-  });
-
   it('grant drefyn_app only id, email, display_name and created_at on users', () => {
     const appSelect = COLUMN_GRANTS.filter(
       (g) =>

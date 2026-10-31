@@ -22,11 +22,18 @@ const sessions: pg.Client[] = [];
 
 async function as(role: 'app' | 'auth'): Promise<pg.Client> {
   const client = await rawSession(role, db.name);
+  // The harness drops each database after its file and ends what is still connected.
+  client.on('error', () => undefined);
   sessions.push(client);
   return client;
 }
 
-type Scope = { readonly user: string } | { readonly org: string };
+// Every block opens its own sessions, so they are closed once, after the whole file.
+afterAll(async () => {
+  for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
+});
+
+type Scope = { readonly user: string } | { readonly org: string; readonly project?: string };
 
 // The statements run in one transaction under the given setting and roll back, so each
 // case starts from the seeded rows.
@@ -37,6 +44,7 @@ async function within<T>(client: pg.Client, scope: Scope, work: () => Promise<T>
       await client.query("select set_config('drefyn.user_id', $1, true)", [scope.user]);
     } else {
       await client.query("select set_config('drefyn.organization_id', $1, true)", [scope.org]);
+      await client.query("select set_config('drefyn.project_id', $1, true)", [scope.project ?? '']);
     }
     return await work();
   } finally {
@@ -94,10 +102,6 @@ describeWithStack('organization tables', () => {
     await seed();
   });
 
-  afterAll(async () => {
-    for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
-  });
-
   describe('under a user context', () => {
     it('a member reads their organization, its slug and their own membership', async () => {
       const app = await as('app');
@@ -120,7 +124,7 @@ describeWithStack('organization tables', () => {
         { user: USER_A },
         async () =>
           (
-            await app.query(
+            await app.query<{ organization_id: string }>(
               "select organization_id from app.organization_slugs where slug = 'globex'",
             )
           ).rows,
@@ -133,7 +137,7 @@ describeWithStack('organization tables', () => {
       const rows = await within(
         app,
         { user: USER_A },
-        async () => (await app.query('select id from app.projects')).rows,
+        async () => (await app.query<{ id: string }>('select id from app.projects')).rows,
       );
       expect(rows).toEqual([]);
     });
@@ -297,7 +301,11 @@ describeWithStack('a project table pointing at app.projects', () => {
       app.query(
         `insert into app.fixture_pages (organization_id, project_id, body) values ('${ORG_B}', '${project}', 'x')`,
       );
-    expect(await within(app, { org: ORG_B }, () => sqlState(insert(PROJECT_B)))).toBe('no error');
-    expect(await within(app, { org: ORG_B }, () => sqlState(insert(PROJECT_A)))).toBe('23503');
+    expect(
+      await within(app, { org: ORG_B, project: PROJECT_B }, () => sqlState(insert(PROJECT_B))),
+    ).toBe('no error');
+    expect(
+      await within(app, { org: ORG_B, project: PROJECT_A }, () => sqlState(insert(PROJECT_A))),
+    ).toBe('23503');
   });
 });
