@@ -12,3 +12,9 @@
 [data-icon] * {
   vector-effect: non-scaling-stroke;
 }
+
+/* A select's list is at least as wide as its trigger. React Aria measures the trigger into
+   --trigger-width on the popover; a bracket utility for it would be an arbitrary value. */
+[data-select-popover] {
+  min-width: var(--trigger-width);
+}

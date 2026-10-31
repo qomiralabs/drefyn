@@ -4,6 +4,7 @@ import {
   expect,
   FOUNDATIONS,
   openStory,
+  recordTransitions,
   storyIds,
   sweepTimeout,
   test,
@@ -123,4 +124,49 @@ for (const theme of THEMES) {
     expect(transitions.filter((t) => MOVING.test(t.property))).toEqual([]);
     expect(transitions.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
   });
+}
+
+// Overlays and tabs fade in. Every transition the opening starts is caught as it starts, so
+// a fade that never runs fails, and so does any property that moves or a fade past the cap.
+const OPENED: {
+  id: string;
+  role: 'dialog' | 'listbox' | 'tabpanel';
+  open: (page: Page) => Promise<void>;
+}[] = [
+  {
+    id: 'components-popover--default',
+    role: 'dialog',
+    open: (page) => page.getByRole('button', { name: 'Filters' }).click(),
+  },
+  {
+    id: 'components-select--default',
+    role: 'listbox',
+    open: (page) => page.getByRole('button', { name: /Region$/ }).click(),
+  },
+  {
+    id: 'components-tabs--default',
+    role: 'tabpanel',
+    open: (page) => page.getByRole('tab', { name: 'History' }).click(),
+  },
+];
+
+for (const theme of THEMES) {
+  for (const { id, role, open } of OPENED) {
+    test(`${id} fades in without travelling, within the cap, in ${theme}`, async ({ page }) => {
+      await openStory(page, id, theme);
+      const recorded = await recordTransitions(page);
+      await open(page);
+      await expect(page.getByRole(role)).toBeVisible();
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+      const started = await recorded();
+      expect(
+        started.some((t) => t.property === 'opacity'),
+        'an opacity fade ran',
+      ).toBe(true);
+      expect(started.filter((t) => MOVING.test(t.property))).toEqual([]);
+      expect(started.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
+      const settled = await transitionsIn(page);
+      expect(settled.filter((t) => MOVING.test(t.property))).toEqual([]);
+    });
+  }
 }

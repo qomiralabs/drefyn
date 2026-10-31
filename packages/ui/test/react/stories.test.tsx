@@ -56,6 +56,13 @@ const REQUIRED: Record<string, string[]> = {
   tooltip: ['DisabledReason', 'Open', 'Toolbar'],
   dialog: ['Default', 'Failed', 'NoFields', 'Open', 'Submitting'],
   'text-field': ['Default', 'Disabled', 'Invalid', 'ReadOnly', 'Sizes', 'WithDescription'],
+  checkbox: ['Checked', 'Default', 'Disabled', 'Indeterminate', 'Invalid', 'WithDescription'],
+  'radio-group': ['Default', 'Disabled', 'Horizontal', 'Invalid', 'WithDescriptions'],
+  // An empty list is refused, so a select has a loading state but no empty one.
+  select: ['Chosen', 'Default', 'Disabled', 'Invalid', 'Loading', 'Open', 'Sizes'],
+  popover: ['Default', 'Failed', 'IconTrigger', 'InARow', 'Loading', 'Open'],
+  // The panel holds the loading and empty states; the tabs themselves have neither.
+  tabs: ['Default', 'Disabled', 'EmptyPanel', 'LoadingPanel', 'Manual', 'WithCounts'],
 };
 
 // Stories that show a disabled or busy control. The browser paint check opens each and
@@ -68,6 +75,11 @@ const DISABLED: Record<string, string[]> = {
   // The close button waits while a submit is in flight.
   dialog: ['Submitting'],
   'text-field': ['Disabled'],
+  checkbox: ['Disabled'],
+  'radio-group': ['Disabled'],
+  // The open list shows a disabled option.
+  select: ['Disabled', 'Open'],
+  tabs: ['Disabled'],
 };
 
 // Stories that show a busy button at rest. Busy keeps its variant's paint, so it is checked

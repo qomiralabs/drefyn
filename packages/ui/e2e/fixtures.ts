@@ -280,3 +280,37 @@ export async function holdToasts(page: Page): Promise<void> {
   await expect(notifications).toBeVisible();
   await notifications.hover({ position: { x: 1, y: 1 } });
 }
+
+export interface StartedTransition {
+  // The element's role, or its tag when it has none.
+  element: string;
+  property: string;
+  ms: number;
+}
+
+// Starts recording transitions as each one begins, which catches the fade of an overlay or a
+// panel that a reading after the fact would miss. The returned function reads them.
+export async function recordTransitions(page: Page): Promise<() => Promise<StartedTransition[]>> {
+  await page.evaluate(() => {
+    const ms = (value: string) =>
+      value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000;
+    const seen: { element: string; property: string; ms: number }[] = [];
+    (window as unknown as { __transitions: typeof seen }).__transitions = seen;
+    document.addEventListener('transitionrun', (event) => {
+      if (!(event.target instanceof Element)) return;
+      const style = getComputedStyle(event.target);
+      const properties = style.transitionProperty.split(',').map((p) => p.trim());
+      const durations = style.transitionDuration.split(',').map((d) => ms(d.trim()));
+      const at = properties.findIndex((p) => p === event.propertyName || p === 'all');
+      seen.push({
+        element: event.target.getAttribute('role') ?? event.target.tagName.toLowerCase(),
+        property: event.propertyName,
+        ms: durations[Math.max(at, 0) % durations.length] ?? 0,
+      });
+    });
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { __transitions: StartedTransition[] }).__transitions,
+    );
+}
