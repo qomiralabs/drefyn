@@ -1,5 +1,8 @@
-import { afterEach, beforeAll, expect, it, vi } from 'vitest';
-import type { CookieSpec, SessionInfo } from '../../src/index.ts';
+import { withAuth, withUser } from '@drefyn/db';
+import { toPublicId } from '@drefyn/tenancy';
+import type { Transaction } from 'kysely';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { CookieSpec, SessionInfo, SessionStore } from '../../src/index.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
@@ -239,5 +242,186 @@ describeWithStack('sessions against Postgres', () => {
     await h.sql(`delete from app.users where id = '${a.user}';`);
     expect(await h.sql(`select count(*) from app.sessions where user_id = '${a.user}';`)).toBe('0');
     await expect(a.sessions.resolveSession(a.cookie)).resolves.toBeNull();
+  });
+
+  describe('signOutOtherSessions', () => {
+    // Every column of every row of the user, so "unchanged" means byte for byte.
+    const rowsOf = (user: string) =>
+      h.sql(
+        `select coalesce(string_agg(s::text, '|' order by id), '') from app.sessions s where user_id = '${user}';`,
+      );
+
+    const valueOf = (cookies: readonly CookieSpec[]) => cookieOf(h, cookies);
+
+    async function withOthers(count: number) {
+      const first = await signIn();
+      await h.sql(
+        `update app.sessions set method = 'password', step_up_method = 'email' where id = '${first.session.sessionId}';`,
+      );
+      const others = [];
+      for (let i = 0; i < count; i += 1) {
+        others.push(
+          await first.sessions.startSession(browser(), { userId: first.user, method: 'google' }),
+        );
+      }
+      const session = await first.sessions.resolveSession(first.cookie);
+      if (session === null) throw new Error('first session did not resolve');
+      return { ...first, session, others };
+    }
+
+    it('reissues this browser on a new row that copies the old one, and every old cookie stops working', async () => {
+      const a = await withOthers(2);
+      const bystander = await signIn();
+      const old = await h.sql(
+        `select method || '|' || step_up_method || '|' || authenticated_at::text || '|' || user_agent || '|' || expires_at::text from app.sessions where id = '${a.session.sessionId}';`,
+      );
+      const result = await a.sessions.signOutOtherSessions(a.session, {
+        ...browser(),
+        userAgent: 'SomethingElse/2.0',
+      });
+      if (!result.ok) throw result.error;
+      expect(result.value.revoked).toBe(2);
+      const next = valueOf(result.value.setCookies);
+      const resolved = await a.sessions.resolveSession(next);
+      expect(resolved?.userId).toBe(a.user);
+      expect(resolved?.sessionId).not.toBe(a.session.sessionId);
+      expect(next).not.toBe(a.cookie);
+      expect(await h.sql(`select count(*) from app.sessions where user_id = '${a.user}';`)).toBe(
+        '1',
+      );
+      const now = await h.sql(
+        `select method || '|' || step_up_method || '|' || authenticated_at::text || '|' || user_agent || '|' || expires_at::text from app.sessions where user_id = '${a.user}';`,
+      );
+      expect(now).toBe(old);
+      expect(now).toContain('Integration/1.0');
+      // The old cookie, the same value copied to another machine and resolved by another
+      // instance, and the other browsers' cookies.
+      await expect(a.sessions.resolveSession(a.cookie)).resolves.toBeNull();
+      await expect(h.sessions().resolveSession(a.cookie)).resolves.toBeNull();
+      for (const other of a.others) {
+        await expect(a.sessions.resolveSession(valueOf(other.setCookies))).resolves.toBeNull();
+      }
+      await expect(bystander.sessions.resolveSession(bystander.cookie)).resolves.not.toBeNull();
+    });
+
+    it('sets Max-Age to the seconds left on the old row, within a second', async () => {
+      const a = await withOthers(0);
+      await h.sql(
+        `update app.sessions set expires_at = now() + interval '3 days 5 hours' where id = '${a.session.sessionId}';`,
+      );
+      const result = await a.sessions.signOutOtherSessions(a.session, browser());
+      if (!result.ok) throw result.error;
+      const cookie = result.value.setCookies.find((c) => c.name === h.config.cookies.session);
+      const left = Number(
+        await h.sql(
+          `select extract(epoch from expires_at - now())::bigint from app.sessions where user_id = '${a.user}';`,
+        ),
+      );
+      expect(Math.abs((cookie?.maxAgeSeconds ?? 0) - left)).toBeLessThanOrEqual(1);
+      expect(cookie?.maxAgeSeconds).toBeLessThan(30 * 86_400);
+    });
+
+    it('refuses a sign in older than 15 minutes and changes no row', async () => {
+      const a = await withOthers(2);
+      await h.sql(
+        `update app.sessions set authenticated_at = now() - interval '16 minutes' where id = '${a.session.sessionId}';`,
+      );
+      const before = await rowsOf(a.user);
+      const result = await a.sessions.signOutOtherSessions(a.session, browser());
+      expect(!result.ok && result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+      expect(await rowsOf(a.user)).toBe(before);
+    });
+
+    it('refuses a current row revoked from another tab and changes no row', async () => {
+      const a = await withOthers(2);
+      const tab = a.others[0];
+      if (tab === undefined) throw new Error('no other session');
+      await a.sessions.revokeSession(tab.session, a.session.sessionId);
+      const before = await rowsOf(a.user);
+      const result = await a.sessions.signOutOtherSessions(a.session, browser());
+      expect(!result.ok && result.error.code).toBe('AUTH_SESSION_INVALID');
+      expect(await rowsOf(a.user)).toBe(before);
+    });
+
+    it('two parallel calls from two cookies of one user leave exactly one live session', async () => {
+      const a = await withOthers(1);
+      const other = a.others[0];
+      if (other === undefined) throw new Error('no other session');
+      const b = await a.sessions.resolveSession(valueOf(other.setCookies));
+      if (b === null) throw new Error('second session did not resolve');
+      const results = await Promise.all([
+        a.sessions.signOutOtherSessions(a.session, browser()),
+        h.sessions().signOutOtherSessions(b, browser()),
+      ]);
+      const won = results.filter((r) => r.ok);
+      const lost = results.filter((r) => !r.ok);
+      expect(won).toHaveLength(1);
+      expect(lost.map((r) => r.error.code)).toEqual(['AUTH_SESSION_INVALID']);
+      expect(await h.sql(`select count(*) from app.sessions where user_id = '${a.user}';`)).toBe(
+        '1',
+      );
+      const [winner] = won;
+      if (winner === undefined) throw new Error('no winner');
+      await expect(
+        a.sessions.resolveSession(valueOf(winner.value.setCookies)),
+      ).resolves.toMatchObject({ userId: a.user });
+    });
+
+    it('a delete that fails after the insert leaves every original row and no new one', async () => {
+      const a = await withOthers(2);
+      const before = await rowsOf(a.user);
+      // Kysely keeps its state in private fields, so methods run bound to the real object.
+      const failingDelete = <S>(tx: Transaction<S>): Transaction<S> =>
+        new Proxy(tx, {
+          get(target, key) {
+            if (key === 'deleteFrom') {
+              return () => {
+                throw new Error('injected delete failure');
+              };
+            }
+            const value: unknown = Reflect.get(target, key, target);
+            return typeof value === 'function'
+              ? (value as (...a: unknown[]) => unknown).bind(target)
+              : value;
+          },
+        });
+      const store: SessionStore = {
+        user: (userId, work) => withUser(h.db, { userId }, (tx) => work(failingDelete(tx))),
+        auth: (work) => withAuth(h.authDb, work),
+      };
+      const sessions = h.sessions({ store });
+      const result = await sessions.signOutOtherSessions(a.session, browser());
+      expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+      expect(await rowsOf(a.user)).toBe(before);
+      await expect(a.sessions.resolveSession(a.cookie)).resolves.not.toBeNull();
+    });
+
+    it('logs scope and count for both calls, and no cookie value, secret or address', async () => {
+      const a = await withOthers(1);
+      const mark = h.logs.length;
+      const result = await a.sessions.signOutOtherSessions(a.session, browser());
+      if (!result.ok) throw result.error;
+      const b = await signIn();
+      await b.sessions.signOutEverywhere(b.session);
+      const lines = h.logs.slice(mark);
+      expect(lines.filter((l) => l.event === 'auth.sessions_revoked')).toEqual([
+        {
+          level: 'info',
+          event: 'auth.sessions_revoked',
+          fields: { scope: 'others', revoked: 1, userId: toPublicId('usr', a.user) },
+        },
+        {
+          level: 'info',
+          event: 'auth.sessions_revoked',
+          fields: { scope: 'all', revoked: 1, userId: toPublicId('usr', b.user) },
+        },
+      ]);
+      const text = JSON.stringify(lines);
+      expect(text).not.toContain(a.cookie);
+      expect(text).not.toContain(valueOf(result.value.setCookies));
+      expect(text).not.toContain(b.cookie);
+      expect(text).not.toContain('203.0.113.9');
+      expect(text).not.toContain('@example.com');
+    });
   });
 });
