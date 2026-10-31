@@ -16,3 +16,12 @@ Attribution 4.0 International licence: https://creativecommons.org/licenses/by/4
 
 Next.js reads this data through browserslist when it builds the dashboard. Drefyn does not
 modify it, and it is not sent to browsers.
+
+## nodemailer
+
+Licence: MIT-0
+
+Nodemailer by Andris Reinman and contributors (https://github.com/nodemailer/nodemailer),
+used as the SMTP client of `@drefyn/email`. MIT No Attribution: it may be used, changed and
+shipped without keeping a notice. Listed here because the licence policy names every
+shipped package outside its allow list.

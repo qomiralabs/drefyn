@@ -12,12 +12,14 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@drefyn/address": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "@drefyn/ui": "workspace:*",
+    "nodemailer": "10.2.1",
     "zod": "4.6.7"
   },
   "peerDependencies": {

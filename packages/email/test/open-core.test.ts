@@ -67,6 +67,65 @@ describe('open core', () => {
     }
   });
 
+  it('imports only the connection and composer parts of nodemailer, pinned exactly', () => {
+    const file = join(src, 'smtp', 'nodemailer.ts');
+    expect(
+      specifiers(file)
+        .filter((spec) => spec.startsWith('nodemailer'))
+        .sort(),
+    ).toEqual(['nodemailer/lib/mail-composer', 'nodemailer/lib/smtp-connection']);
+    const deps = (manifest['dependencies'] as Record<string, string> | undefined) ?? {};
+    expect(deps['nodemailer']).toBe('10.2.1');
+  });
+
+  it('reveals the SMTP password only in the nodemailer wrapper, once', () => {
+    const callers: string[] = [];
+    for (const file of files) {
+      const source = ts.createSourceFile(
+        file,
+        readFileSync(file, 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const visit = (node: ts.Node) => {
+        // Any read of reveal counts, called or passed along, so it cannot be smuggled out.
+        if (ts.isPropertyAccessExpression(node) && node.name.text === 'reveal') {
+          callers.push(relative(root, file));
+        }
+        if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+          if (node.argumentExpression.text === 'reveal') callers.push(relative(root, file));
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    expect(callers).toEqual([join('src', 'smtp', 'nodemailer.ts')]);
+  });
+
+  it('never turns off certificate checks, and has no key that could', () => {
+    for (const file of files) {
+      const rel = relative(root, file);
+      const text = readFileSync(file, 'utf8');
+      // Every mention is followed by true, in the type and in the value.
+      expect(text, rel).not.toMatch(/rejectUnauthorized(?!\s*:\s*true\b)/);
+      expect(text, rel).not.toMatch(/checkServerIdentity|NODE_TLS_REJECT_UNAUTHORIZED/);
+      expect(text, rel).not.toMatch(/opportunisticTLS(?!\s*:\s*false\b)/);
+    }
+    const options = readFileSync(join(src, 'smtp', 'options.ts'), 'utf8');
+    expect(options).toMatch(/^ {6}rejectUnauthorized: true,$/m);
+    for (const key of main.EMAIL_CONFIG_KEYS) {
+      expect(key).not.toMatch(/VERIFY|INSECURE|UNAUTHORI[SZ]ED|REJECT|SKIP|IGNORE/);
+    }
+  });
+
+  it('never imports the test servers or anything else under test', () => {
+    for (const file of files) {
+      for (const spec of specifiers(file)) {
+        expect(spec, relative(root, file)).not.toMatch(/(^|\/)test\/|support\/servers/);
+      }
+    }
+  });
+
   it('does not depend on auth or the React UI entry', () => {
     expect(dependencyNames).not.toContain('@drefyn/auth');
     for (const file of files) {
@@ -165,6 +224,7 @@ describe('package entries', () => {
         'SECURITY_NOTICE_KINDS',
         'SIGN_IN_CODE_PURPOSES',
         'createMailer',
+        'createSmtpTransport',
         'isHeaderSafe',
         'logEmailConfig',
         'parseEmailConfig',
