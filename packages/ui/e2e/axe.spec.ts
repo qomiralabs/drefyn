@@ -18,6 +18,8 @@ for (const entry of targets) {
       }) => {
         if (width === '390') await page.setViewportSize(MOBILE);
         await openPage(page, entry, theme);
+        // An overlay that starts open fades in; colour contrast is read once it is opaque.
+        await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
         const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
         expect(await reportedViolations(page, results)).toEqual([]);
       });

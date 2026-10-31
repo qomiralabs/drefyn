@@ -297,8 +297,9 @@ export async function recordTransitions(page: Page): Promise<() => Promise<Start
     const seen: { element: string; property: string; ms: number }[] = [];
     (window as unknown as { __transitions: typeof seen }).__transitions = seen;
     // Storybook's loader and docs chrome run colour transitions of their own; only the
-    // story and the overlays it opens at the end of the body are recorded.
-    const chrome = '#storybook-docs, [class^="sb-"], [class*=" sb-"]';
+    // story and the overlays it opens at the end of the body are recorded. Storybook marks
+    // the body itself with sb- classes, so the body is not chrome. Use on story views only.
+    const chrome = '#storybook-docs, :not(body)[class^="sb-"], :not(body)[class*=" sb-"]';
     document.addEventListener('transitionrun', (event) => {
       if (!(event.target instanceof Element)) return;
       if (event.target.closest(chrome) !== null) return;
