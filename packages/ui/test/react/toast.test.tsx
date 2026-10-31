@@ -553,10 +553,13 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 );
 
 describe('toast() under any sequence of steps', () => {
+  // 200 sequences take about a third of a second here, but CI runners under coverage were
+  // forty times slower, so the test gets its own budget. One region serves every sequence,
+  // as in an app, and each sequence closes its toast before the next.
   it('runs Undo at most once, and never from Cmd or Ctrl+Z once the toast is gone', () => {
+    render(<ToastRegion />);
     fc.assert(
       fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
-        const { unmount } = render(<ToastRegion />);
         let runs = 0;
         const handle = show({
           title: 'Archived Pricing',
@@ -594,10 +597,9 @@ describe('toast() under any sequence of steps', () => {
           act(() => {
             handle.close();
           });
-          unmount();
         }
       }),
       { numRuns: 200 },
     );
-  });
+  }, 60_000);
 });
