@@ -103,6 +103,21 @@ for (const theme of THEMES) {
     await expect(trigger(page)).toHaveAttribute('aria-expanded', 'false');
   });
 
+  test(`a select inside it is chosen with the pointer and the panel stays open in ${theme}`, async ({
+    page,
+  }) => {
+    await openStory(page, 'components-popover--with-select', theme);
+    await trigger(page).click();
+    await expect(panel(page)).toBeVisible();
+    await page.getByRole('button', { name: /Region$/ }).click();
+    await page.getByRole('option', { name: 'United States' }).click();
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(panel(page)).toBeVisible();
+    await expect(page.getByText(/^Region: /)).toHaveText('Region: us');
+    await page.mouse.click(4, 4);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
   test(`a click on the switch inside keeps it open in ${theme}`, async ({ page }) => {
     await openStory(page, ROW, theme);
     await trigger(page).click();

@@ -60,7 +60,7 @@ const REQUIRED: Record<string, string[]> = {
   'radio-group': ['Default', 'Disabled', 'Horizontal', 'Invalid', 'WithDescriptions'],
   // An empty list is refused, so a select has a loading state but no empty one.
   select: ['Chosen', 'Default', 'Disabled', 'Invalid', 'Loading', 'Open', 'Sizes'],
-  popover: ['Default', 'Failed', 'IconTrigger', 'InARow', 'Loading', 'Open'],
+  popover: ['Default', 'Failed', 'IconTrigger', 'InARow', 'Loading', 'Open', 'WithSelect'],
   // The panel holds the loading and empty states; the tabs themselves have neither.
   tabs: ['Default', 'Disabled', 'EmptyPanel', 'LoadingPanel', 'Manual', 'WithCounts'],
 };

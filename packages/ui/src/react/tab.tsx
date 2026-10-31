@@ -4,14 +4,17 @@ import { Tab as AriaTab } from 'react-aria-components';
 import { markDisabled } from './field-parts.tsx';
 import { useUnavailable } from './unavailable.ts';
 
-export interface TabProps {
+interface TabBase {
   value: string;
   children: string;
   // A count shown after the label in tabular figures, such as the pages behind the tab.
   count?: number;
-  // Stays reachable by the arrow keys, announces as unavailable and is never shown.
-  disabled?: boolean;
 }
+
+// A disabled tab stays reachable by the arrow keys and is never shown, so it must say why:
+// the reason is joined to the tab and shown in a tooltip on hover and focus.
+export type TabProps = TabBase &
+  ({ disabled?: false; reason?: never } | { disabled: true; reason: string });
 
 const counts = new Intl.NumberFormat('en');
 

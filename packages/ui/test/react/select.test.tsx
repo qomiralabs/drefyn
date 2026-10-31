@@ -16,7 +16,7 @@ function Region(props: Props) {
         Europe
       </SelectOption>
       <SelectOption value="us">United States</SelectOption>
-      <SelectOption value="ap" disabled>
+      <SelectOption value="ap" disabled description="Not on your plan">
         Asia Pacific
       </SelectOption>
       <SelectOption value="sa">South America</SelectOption>
@@ -54,7 +54,7 @@ describe('Select', () => {
     ).toEqual([
       expect.stringContaining('Europe'),
       'United States',
-      'Asia Pacific',
+      expect.stringContaining('Asia Pacific'),
       'South America',
     ]);
   });
@@ -209,6 +209,17 @@ describe('a disabled option', () => {
     expect(listbox()).toBeDefined();
     expect(onChange).not.toHaveBeenCalled();
     expect(trigger().textContent).toContain('Choose a region');
+  });
+
+  it('keeps its description readable in secondary text, so the reason can be read', async () => {
+    render(<Region />);
+    await userEvent.setup().click(trigger());
+    const ap = option('Asia Pacific');
+    const label = within(ap).getByText('Asia Pacific');
+    const reason = within(ap).getByText('Not on your plan');
+    expect(classesOf(label.closest('[class*="text-"]') ?? ap)).toContain('text-disabled-text');
+    expect(classesOf(reason)).toContain('text-secondary');
+    expect(classesOf(reason)).not.toContain('text-disabled-text');
   });
 
   it('paints with the disabled text and takes no hover fill', async () => {

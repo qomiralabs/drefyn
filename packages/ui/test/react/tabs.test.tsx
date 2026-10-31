@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from '../../src/react/index.ts';
 import { classesOf } from './classes.ts';
@@ -19,7 +20,7 @@ function Views(props: Props) {
         <Tab value="stale" count={12}>
           Out of date
         </Tab>
-        <Tab value="drafts" disabled>
+        <Tab value="drafts" disabled reason="Drafts open once the site has a reviewer.">
           Drafts
         </Tab>
         <Tab value="history">History</Tab>
@@ -176,7 +177,7 @@ describe('a disabled Tab', () => {
     render(
       <Tabs>
         <TabList label="Site views">
-          <Tab value="drafts" disabled>
+          <Tab value="drafts" disabled reason="Drafts open once the site has a reviewer.">
             Drafts
           </Tab>
           <Tab value="pages">Pages</Tab>
@@ -186,5 +187,142 @@ describe('a disabled Tab', () => {
       </Tabs>,
     );
     expect(shown()).toBe('Every page on the site.');
+  });
+});
+
+// A Tab inside a component of the caller's, so the Tabs cannot see it among its children.
+function Wrapped(props: { value: string; children: string; reason?: string }) {
+  return props.reason === undefined ? (
+    <Tab value={props.value}>{props.children}</Tab>
+  ) : (
+    <Tab value={props.value} disabled reason={props.reason}>
+      {props.children}
+    </Tab>
+  );
+}
+
+const REASON = 'Not on your plan.';
+
+describe('a disabled Tab is never shown', () => {
+  it('shows no panel and selects nothing when every tab is disabled, even on a click', async () => {
+    render(
+      <Tabs>
+        <TabList label="Views">
+          <Tab value="a" disabled reason={REASON}>
+            Alpha
+          </Tab>
+          <Tab value="b" disabled reason={REASON}>
+            Beta
+          </Tab>
+        </TabList>
+        <TabPanel value="a">Panel A</TabPanel>
+        <TabPanel value="b">Panel B</TabPanel>
+      </Tabs>,
+    );
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    await userEvent.setup().click(tab(/^Beta/));
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    for (const t of screen.getAllByRole('tab')) {
+      expect(t.getAttribute('aria-selected'), t.textContent).not.toBe('true');
+    }
+  });
+
+  it('skips a wrapped disabled first tab on the first render', () => {
+    render(
+      <Tabs>
+        <TabList label="Views">
+          <Wrapped value="a" reason={REASON}>
+            Alpha
+          </Wrapped>
+          <Wrapped value="b">Beta</Wrapped>
+        </TabList>
+        <TabPanel value="a">Panel A</TabPanel>
+        <TabPanel value="b">Panel B</TabPanel>
+      </Tabs>,
+    );
+    expect(shown()).toBe('Panel B');
+    expect(tab(/^Alpha/).getAttribute('aria-selected')).not.toBe('true');
+  });
+
+  it('skips a defaultValue that names a disabled tab', () => {
+    render(<Views defaultValue="drafts" />);
+    expect(shown()).toBe('Every page on the site.');
+    expect(tab(/^Drafts/).getAttribute('aria-selected')).not.toBe('true');
+  });
+
+  it('skips a controlled value that names a disabled tab', () => {
+    render(<Views value="drafts" />);
+    expect(shown()).toBe('Every page on the site.');
+    expect(tab(/^Drafts/).getAttribute('aria-selected')).not.toBe('true');
+  });
+});
+
+describe('a disabled Tab says why', () => {
+  const describedBy = (el: HTMLElement) =>
+    (el.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? '')
+      .join(' ');
+
+  it('joins its reason to aria-describedby', () => {
+    render(<Views />);
+    expect(describedBy(tab(/^Drafts/))).toBe('Drafts open once the site has a reviewer.');
+    expect(tab(/^Pages/).hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('shows the reason in a tooltip on keyboard focus, and Escape hides it without moving focus', async () => {
+    const user = userEvent.setup();
+    render(<Views />);
+    tab(/^Pages/).focus();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(document.activeElement).toBe(tab(/^Drafts/));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Drafts open once the site has a reviewer.');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(document.activeElement).toBe(tab(/^Drafts/));
+    await user.keyboard('{ArrowRight}');
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('shows the reason on hover', async () => {
+    render(<Views />);
+    await userEvent.setup().hover(tab(/^Drafts/));
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      'Drafts open once the site has a reviewer.',
+    );
+    act(() => {
+      fireEvent.pointerLeave(tab(/^Drafts/));
+    });
+  });
+
+  it('needs a reason when disabled, by type and at render', () => {
+    const a = (
+      // @ts-expect-error a disabled tab needs a reason.
+      <Tab value="drafts" disabled>
+        Drafts
+      </Tab>
+    );
+    const b = (
+      // @ts-expect-error a reason only belongs to a disabled tab.
+      <Tab value="drafts" reason="Why">
+        Drafts
+      </Tab>
+    );
+    expect([a, b]).toHaveLength(2);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(() =>
+      render(
+        <Tabs>
+          <TabList label="Views">
+            <Tab value="a" disabled reason=" ">
+              Alpha
+            </Tab>
+          </TabList>
+          <TabPanel value="a">A</TabPanel>
+        </Tabs>,
+      ),
+    ).toThrow(/reason/);
   });
 });

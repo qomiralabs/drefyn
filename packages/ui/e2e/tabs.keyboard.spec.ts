@@ -75,10 +75,32 @@ for (const theme of THEMES) {
     await page.keyboard.press('Space');
     await drafts.click({ force: true });
     await expect(tab(page, 'Pages')).toHaveAttribute('aria-selected', 'true');
-    await expect(panel(page)).toHaveText('Drafts open once the site has a reviewer.');
+    await expect(panel(page)).toHaveText('Every page on the site, newest first.');
     await page.keyboard.press('ArrowRight');
     await expect(tab(page, 'History')).toBeFocused();
     await expect(panel(page)).toHaveText('Every publish, with who approved it.');
+  });
+
+  test(`a disabled tab reads its reason, shows it on focus and hover, and Escape hides it in ${theme}`, async ({
+    page,
+    browserName,
+  }) => {
+    await openStory(page, 'components-tabs--disabled', theme);
+    const reason = 'Drafts open once the site has a reviewer.';
+    const drafts = tab(page, 'Drafts');
+    await expect(drafts).toHaveAccessibleDescription(reason);
+    await page.keyboard.press(tabKey(browserName));
+    await page.keyboard.press('ArrowRight');
+    await expect(drafts).toBeFocused();
+    const tip = page.getByRole('tooltip');
+    await expect(tip).toHaveText(reason);
+    await page.keyboard.press('Escape');
+    await expect(tip).toHaveCount(0);
+    await expect(drafts).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(tip).toHaveCount(0);
+    await drafts.hover();
+    await expect(tip).toHaveText(reason);
   });
 
   test(`counts read in tabular figures in ${theme}`, async ({ page }) => {

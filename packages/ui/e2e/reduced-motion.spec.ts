@@ -150,6 +150,29 @@ const OPENED: {
   },
 ];
 
+// Storybook draws its own loader and chrome with transitions of its own; only the story's
+// elements and the overlays it opens may be recorded.
+test('the transition recorder ignores Storybook chrome', async ({ page }) => {
+  await openStory(page, 'components-tabs--default', 'light');
+  const recorded = await recordTransitions(page);
+  await page.evaluate(async () => {
+    const chrome = document.createElement('div');
+    chrome.className = 'sb-loader';
+    const story = document.createElement('span');
+    story.setAttribute('role', 'note');
+    for (const el of [chrome, story]) {
+      el.style.transition = 'color 200ms';
+      el.style.color = 'rgb(0, 0, 0)';
+    }
+    document.body.append(chrome);
+    document.querySelector('#storybook-root')?.append(story);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    for (const el of [chrome, story]) el.style.color = 'rgb(255, 0, 0)';
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect((await recorded()).map((t) => t.element)).toEqual(['note']);
+});
+
 for (const theme of THEMES) {
   for (const { id, role, open } of OPENED) {
     test(`${id} fades in without travelling, within the cap, in ${theme}`, async ({ page }) => {

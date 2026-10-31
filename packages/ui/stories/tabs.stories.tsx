@@ -8,7 +8,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Views of one thing that share a place on the page, such as the pages of a site and the ones out of date. Tabs that change the address are links in a nav, not tabs. Keyboard: Tab enters on the selected tab and Tab again moves into its panel; the left and right arrows, Home and End move between tabs. With automatic activation a panel shows as the arrows reach its tab; with manual activation, for panels that fetch, Enter or Space shows it. A disabled tab stays reachable by the arrows and is announced as unavailable, but is never shown. A newly shown panel fades in; nothing slides.',
+          'Views of one thing that share a place on the page, such as the pages of a site and the ones out of date. Tabs that change the address are links in a nav, not tabs. Keyboard: Tab enters on the selected tab and Tab again moves into its panel; the left and right arrows, Home and End move between tabs. With automatic activation a panel shows as the arrows reach its tab; with manual activation, for panels that fetch, Enter or Space shows it. A disabled tab stays reachable by the arrows, is announced as unavailable with its reason, shows the reason in a tooltip on hover and focus, and is never shown. A newly shown panel fades in; nothing slides.',
       },
     },
   },
@@ -108,13 +108,13 @@ export const Disabled: Story = {
       <Tabs>
         <TabList label="Site views">
           <Tab value="pages">Pages</Tab>
-          <Tab value="drafts" disabled>
+          <Tab value="drafts" disabled reason="Drafts open once the site has a reviewer.">
             Drafts
           </Tab>
           <Tab value="history">History</Tab>
         </TabList>
         <TabPanel value="pages">
-          <Panel>Drafts open once the site has a reviewer.</Panel>
+          <Panel>Every page on the site, newest first.</Panel>
         </TabPanel>
         <TabPanel value="drafts">
           <Panel>Drafts waiting for review.</Panel>

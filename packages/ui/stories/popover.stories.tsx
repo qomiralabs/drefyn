@@ -1,6 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { ReactNode } from 'react';
-import { Button, IconMore, Popover, Skeleton, Switch } from '../src/react/index.ts';
+import { useState, type ReactNode } from 'react';
+import {
+  Button,
+  IconMore,
+  Popover,
+  Select,
+  SelectOption,
+  Skeleton,
+  Switch,
+} from '../src/react/index.ts';
 
 const meta = {
   title: 'Components/Popover',
@@ -8,7 +16,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Rich content that floats by its trigger and leaves the page usable: filters, the inbox, the detail behind a freshness badge. It is not modal, so the rest of the page stays readable. For a task that needs input and a Save button, use a Dialog. Keyboard: Enter or Space opens and moves focus into the panel, which reads its heading; Tab moves through the panel; Tab past the last control closes it and moves on from the trigger, and Shift+Tab before the first closes it on the trigger; Escape or a press outside closes it and returns focus to the trigger. Stories that start open do so only in their own view, so this page stays readable.',
+          'Rich content that floats by its trigger and leaves the page usable: filters, the inbox, the detail behind a freshness badge. It is not modal, so the rest of the page stays readable. For a task that needs input and a Save button, use a Dialog. Keyboard: Enter or Space opens and moves focus into the panel, which reads its heading; Tab moves through the panel; Tab past the last control closes it and moves on from the trigger, and Shift+Tab before the first closes it on the trigger; Escape or a press outside closes it and returns focus to the trigger; a press inside a list it opened, such as the list of a select, is not outside. Use a popover for a panel with a title or controls; short read only text belongs in a Tooltip. Stories that start open do so only in their own view, so this page stays readable.',
       },
     },
   },
@@ -114,4 +122,33 @@ export const InARow: Story = {
       <Button>Share page</Button>
     </Frame>
   ),
+};
+
+// A select inside the panel: its list opens in its own layer, and choosing from it with the
+// pointer must keep the panel open.
+function WithSelectPanel() {
+  const [region, setRegion] = useState('none');
+  return (
+    <Frame>
+      <div className="flex flex-col items-start gap-16">
+        <Popover trigger="Filters" title="Filter pages">
+          <div className="flex w-shell-nav flex-col gap-16">
+            <Select label="Region" placeholder="Any region" onChange={setRegion}>
+              <SelectOption value="eu">Europe</SelectOption>
+              <SelectOption value="us">United States</SelectOption>
+            </Select>
+            <Switch>Only stale pages</Switch>
+          </div>
+        </Popover>
+        <output aria-live="polite" className="text-body-s text-secondary">
+          Region: {region}
+        </output>
+      </div>
+    </Frame>
+  );
+}
+
+export const WithSelect: Story = {
+  name: 'With a select',
+  render: () => <WithSelectPanel />,
 };

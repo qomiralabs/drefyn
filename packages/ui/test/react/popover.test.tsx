@@ -3,7 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tokens } from '../../src/index.ts';
-import { Button, IconMore, Popover, Switch } from '../../src/react/index.ts';
+import { Button, IconMore, Popover, Select, SelectOption, Switch } from '../../src/react/index.ts';
 import { classesOf } from './classes.ts';
 
 afterEach(cleanup);
@@ -91,6 +91,24 @@ describe('Popover', () => {
     await user.click(trigger());
     await user.click(screen.getByRole('switch', { name: 'Only stale pages' }));
     expect(panel()).toBeDefined();
+  });
+
+  it('keeps open while a select inside it is used with the pointer, and the choice lands', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Popover trigger="Filters" title="Filter pages">
+        <Select label="Region" onChange={onChange}>
+          <SelectOption value="eu">Europe</SelectOption>
+          <SelectOption value="us">United States</SelectOption>
+        </Select>
+      </Popover>,
+    );
+    await user.click(trigger());
+    await user.click(screen.getByRole('button', { name: /Region$/ }));
+    await user.click(screen.getByRole('option', { name: 'United States' }));
+    expect(onChange.mock.calls).toEqual([['us']]);
+    expect(screen.getByRole('dialog', { name: 'Filter pages' })).toBeDefined();
   });
 
   it('closes when Tab leaves its last control and moves on from the trigger', async () => {
