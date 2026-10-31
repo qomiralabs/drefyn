@@ -34,14 +34,14 @@
       "reason": "Dev only, never shipped. Runs axe over Storybook stories in the component accessibility checks."
     },
     {
-      "name": "nodemailer",
-      "license": "MIT-0",
-      "reason": "The SMTP client for @drefyn/email, pinned exactly and imported by one wrapper file. MIT-0 is MIT without the attribution clause, so it asks less than MIT. Named here rather than added to the allow list, so a new MIT-0 package still gets a look. Accepted by the owner on 2026-10-31."
-    },
-    {
       "name": "caniuse-lite",
       "license": "CC-BY-4.0",
       "reason": "Browser support data that Next ships in the dashboard's server build through browserslist; it is read at build and server time and never sent to browsers. Reviewed under CC-BY-4.0, which allows commercial use with attribution, given in THIRD_PARTY_NOTICES.md."
+    },
+    {
+      "name": "nodemailer",
+      "license": "MIT-0",
+      "reason": "The SMTP client for @drefyn/email, pinned exactly and imported by one wrapper file. MIT-0 is MIT without the attribution clause, so it asks less than MIT. Named here rather than added to the allow list, so a new MIT-0 package still gets a look. Accepted by the owner on 2026-10-31."
     }
   ],
   "forbidden": [

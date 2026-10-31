@@ -31,6 +31,7 @@ const installed: LicenseReport = {
     pkg('@axe-core/playwright', 'MPL-2.0', '4.14.0'),
   ],
   'CC-BY-4.0': [pkg('caniuse-lite', 'CC-BY-4.0', '1.0.30001750')],
+  'MIT-0': [pkg('nodemailer', 'MIT-0', '10.2.1')],
   MIT: [pkg('left-pad', 'MIT')],
 };
 
@@ -46,6 +47,7 @@ describe('policy.json', () => {
       'axe-core',
       '@axe-core/playwright',
       'caniuse-lite',
+      'nodemailer',
     ]);
     expect(real.exceptions.filter((e) => e.pattern !== undefined).map((e) => e.pattern)).toEqual([
       '^lightningcss-(darwin|linux|win32|freebsd|android)-(x64|arm64|arm|ia32)(-gnu|-musl|-msvc|-gnueabihf)?$',
@@ -60,6 +62,15 @@ describe('policy.json', () => {
     expect(exception?.license).toBe(license);
     expect(exception?.devOnly).toBe(true);
     expect(exception?.reason).toMatch(/^Dev only, never shipped\. \S/);
+  });
+
+  // The email package ships it as its SMTP client. MIT-0 asks for no notice at all.
+  it('excepts nodemailer under MIT-0 in production, by name only', () => {
+    const exception = real.exceptions.find((e) => e.name === 'nodemailer');
+    expect(exception?.license).toBe('MIT-0');
+    expect(exception?.devOnly).toBeUndefined();
+    expect(exception?.pattern).toBeUndefined();
+    expect(real.allow).not.toContain('MIT-0');
   });
 
   // The dashboard ships Next, and Next ships browserslist data from caniuse-lite.
@@ -99,6 +110,9 @@ describe('near misses of the exact name exceptions', () => {
     ['caniuse-lite-fork', 'CC-BY-4.0'],
     ['caniuse', 'CC-BY-4.0'],
     ['Caniuse-lite', 'CC-BY-4.0'],
+    ['nodemailer-plus', 'MIT-0'],
+    ['@nodemailer/x', 'MIT-0'],
+    ['left-pad-0', 'MIT-0'],
   ])('%s under %s is a violation', (name, license) => {
     const result = checkLicenses(withExtra(pkg(name, license)), real);
     expect(result.violations).toEqual([{ name, versions: ['1.0.0'], license }]);
@@ -386,7 +400,7 @@ describe('license-policy cli with lockfile and production tree', () => {
     expect(res.err).toBe('');
     expect(res.code).toBe(0);
     expect(res.out).toContain(
-      'licenses: 6 packages checked, 5 by exception (@axe-core/playwright, axe-core, caniuse-lite, lightningcss, lightningcss-darwin-arm64), 0 violations',
+      'licenses: 7 packages checked, 6 by exception (@axe-core/playwright, axe-core, caniuse-lite, lightningcss, lightningcss-darwin-arm64, nodemailer), 0 violations',
     );
     expect(res.out).toContain('lockfile: 3 packages checked, 0 forbidden');
     expect(res.out).toContain('production: 0 packages checked, 0 dev only');
