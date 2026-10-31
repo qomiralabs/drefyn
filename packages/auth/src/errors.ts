@@ -78,6 +78,8 @@ export interface AuthErrorDetail {
   // Fixed text written in this package; never a value from config or a request.
   readonly reason?: string;
   readonly retryAfterSeconds?: number;
+  // The failure underneath, for the server log; never part of the message.
+  readonly cause?: unknown;
 }
 
 export class AuthError extends Error {
@@ -88,7 +90,7 @@ export class AuthError extends Error {
   constructor(code: AuthErrorCode, detail: AuthErrorDetail = {}) {
     const text =
       detail.key === undefined ? MESSAGES[code] : `${detail.key} ${detail.reason ?? 'is invalid'}`;
-    super(`${code}: ${text}`);
+    super(`${code}: ${text}`, detail.cause === undefined ? undefined : { cause: detail.cause });
     this.code = code;
     if (detail.key !== undefined) this.key = detail.key;
     if (detail.retryAfterSeconds !== undefined) this.retryAfterSeconds = detail.retryAfterSeconds;

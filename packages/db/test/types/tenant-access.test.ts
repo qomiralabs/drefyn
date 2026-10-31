@@ -25,6 +25,7 @@ import {
   type PublishedDatabase,
   type PublishedSchema,
   type Schema,
+  type TenantSchema,
   type UserSchema,
 } from '../../src/index.ts';
 import type { AuthTableName, PublishedTableName, UserTableName } from '../../src/allow-lists.ts';
@@ -171,7 +172,7 @@ describe('tenant access types', () => {
     expectTypeOf(withTenant<number>)
       .parameter(2)
       .parameter(0)
-      .toEqualTypeOf<Transaction<Schema>>();
+      .toEqualTypeOf<Transaction<TenantSchema>>();
     expectTypeOf(withOrganization<number>)
       .parameter(2)
       .parameter(0)
@@ -191,10 +192,8 @@ describe('tenant access types', () => {
   });
 
   it('build AuthSchema and UserSchema from their table lists only', () => {
-    /* eslint-disable @typescript-eslint/no-generated-empty-object-type -- empty until the identity tables exist */
-    expectTypeOf<AuthSchema>().toEqualTypeOf<NamedTables<Schema, AuthTableName>>();
-    expectTypeOf<UserSchema>().toEqualTypeOf<NamedTables<Schema, UserTableName>>();
-    /* eslint-enable @typescript-eslint/no-generated-empty-object-type */
+    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<AuthTableName>();
+    expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName>();
     expectTypeOf<
       keyof NamedTables<FixtureSchema, 'fixture_drafts'>
     >().toEqualTypeOf<'fixture_drafts'>();
