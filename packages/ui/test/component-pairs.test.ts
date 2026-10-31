@@ -142,6 +142,8 @@ const USES: Use[] = [
   ...each('Select focus', ['focus.ring'], [...ON, ...FILLS], 'non-text'),
   ...each('Select option', ['text.body', 'text.secondary'], [...ON, ...FILLS], 'text'),
   ...each('Select tick', ['accent.ink'], [...ON, ...FILLS], 'text'),
+  // A disabled option takes no fill and keeps its reason in secondary text.
+  ...each('Select disabled option reason', ['text.secondary'], ON, 'text'),
   ...each('Select disabled', ['disabled.text'], ['disabled.fill', ...ON], 'text', 'disabled'),
   ...each('Select disabled', ['disabled.edge'], ['disabled.fill', ...ON], 'non-text', 'disabled'),
   ...each('Popover heading', ['text.ink'], ON, 'text'),
@@ -152,6 +154,8 @@ const USES: Use[] = [
   ...each('Tabs indicator', ['accent.ink'], ON, 'non-text'),
   ...each('Tabs focus', ['focus.ring'], ON, 'non-text'),
   ...each('Tabs disabled', ['disabled.text'], ON, 'text', 'disabled'),
+  // A disabled tab's reason shows in a tooltip on the overlay surface.
+  ...each('Tabs reason tooltip', ['text.body'], ON, 'text'),
 ];
 
 const key = (p: { mode: Mode; fg: string; bg: string; kind: PairKind }) =>

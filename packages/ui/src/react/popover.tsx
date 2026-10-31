@@ -48,6 +48,20 @@ const stopsIn = (root: HTMLElement): HTMLElement[] =>
     (el) => el.tabIndex >= 0 && el.closest('[inert]') === null,
   );
 
+// True when the target sits in a layer that a control inside the panel opened. React Aria
+// renders a select's list, a menu or a nested popover at the end of the page, and points the
+// open trigger at it with aria-controls, so ownership is read from there.
+function openedFrom(panel: HTMLElement | null, target: Node): boolean {
+  if (panel === null) return false;
+  for (let el = target instanceof Element ? target : target.parentElement; el !== null;) {
+    if (el.id !== '' && panel.querySelector(`[aria-controls~="${CSS.escape(el.id)}"]`) !== null) {
+      return true;
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
 // A trigger styled by the button class function and a non modal panel on the overlay
 // surface, so the rest of the page stays readable and usable while it is open. Focus moves
 // into the panel, which reads its heading. The panel renders at the end of the page, so
@@ -101,11 +115,13 @@ export function Popover(props: PopoverProps): ReactNode {
       if (back) event.preventDefault();
     };
     // A non modal popover in React Aria closes only when focus moves to another control, so a
-    // press on the page itself is caught here. Presses on the trigger are its own toggle.
+    // press on the page itself is caught here. Presses on the trigger are its own toggle, and
+    // presses in a layer the panel opened, such as a select's list, are inside.
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (panelRef.current?.contains(target) === true) return;
+      const panel = panelRef.current;
+      if (panel?.contains(target) === true || openedFrom(panel, target)) return;
       if (triggerRef.current?.contains(target) === true) return;
       closeNow();
     };

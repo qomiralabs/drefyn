@@ -41,10 +41,9 @@ export function SelectOption({
           <span className="flex min-w-0 flex-1 flex-col">
             <Text slot="label">{children}</Text>
             {description === undefined ? null : (
-              <Text
-                slot="description"
-                className={`text-caption ${disabled ? 'text-disabled-text' : 'text-secondary'}`}
-              >
+              // The description carries a disabled option's reason, so it stays readable;
+              // only the label takes the disabled colour.
+              <Text slot="description" className="text-caption text-secondary">
                 {description}
               </Text>
             )}
