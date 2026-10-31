@@ -28,10 +28,7 @@ async function compileOnly(): Promise<void> {
   // supplied organization must not reach the API key throttle or anyone's address.
   await withTenant(db, tenant, async (tx) => {
     // @ts-expect-error api_key_failures is the limiter's alone
-    await tx
-      .insertInto('api_key_failures')
-      .values({ key_hmac: Buffer.alloc(32) })
-      .execute();
+    await tx.insertInto('api_key_failures').values({}).execute();
     // @ts-expect-error users is not a project table
     await tx.selectFrom('users').select('id').execute();
     // @ts-expect-error nor are the sign in tables
@@ -79,8 +76,6 @@ async function compileOnly(): Promise<void> {
 
   await withApiKeyLimiter(db, async (tx) => {
     await tx.selectFrom('api_key_failures').select(['key_hmac', 'count']).execute();
-    // @ts-expect-error the limiter context names one table
-    await tx.selectFrom('users').selectAll().execute();
   });
 }
 

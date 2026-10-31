@@ -2,12 +2,11 @@ import {
   reserveApiKeyFailureWindows,
   reserveAuthRateWindows,
   type ApiKeyFailureRequest,
-  type ApiKeyLimiterSchema,
-  type AuthSchema,
+  type AuthDatabase,
+  type Database,
   type RateWindowRequest,
   type WindowCount,
 } from '@drefyn/db';
-import type { Transaction } from 'kysely';
 import { RATE_BUCKETS, type RateBucket } from './config-keys.ts';
 import type { ApiAuthConfig, RateLimit } from './config.ts';
 import { AuthError } from './errors.ts';
@@ -25,12 +24,13 @@ export interface AuthLogger {
 }
 
 export interface RateLimiterDeps {
+  readonly db: AuthDatabase;
   readonly keys: AuthKeys;
   readonly limits: Readonly<Record<RateBucket, readonly RateLimit[]>>;
   readonly metrics?: AuthMetrics;
   readonly logger?: AuthLogger;
   readonly reserve?: (
-    tx: Transaction<AuthSchema>,
+    db: AuthDatabase,
     request: RateWindowRequest,
   ) => Promise<readonly WindowCount[]>;
 }
@@ -38,13 +38,10 @@ export interface RateLimiterDeps {
 export interface RateLimiter {
   // The stored key for a bucket and value: HMAC(subkey_rate, bucket, ...value).
   keyFor(bucket: RateBucket, value: readonly MacPart[]): Buffer;
-  // Counts one attempt and refuses with AUTH_RATE_LIMITED when any window is past its limit.
-  // Call it first in the withAuth transaction, before the work it limits.
-  reserve(
-    tx: Transaction<AuthSchema>,
-    bucket: RateBucket,
-    value: readonly MacPart[],
-  ): Promise<void>;
+  // Counts one attempt, committed in its own transaction, and refuses with AUTH_RATE_LIMITED
+  // when any window is past its limit. Await it before the work it limits and outside that
+  // work's transaction: the count then stands whatever the work does.
+  reserve(bucket: RateBucket, value: readonly MacPart[]): Promise<void>;
 }
 
 const CEILING: RateBucket = 'email_send_address_ceiling';
@@ -52,17 +49,26 @@ const KNOWN: ReadonlySet<string> = new Set(RATE_BUCKETS);
 // Enough of the HMAC for an operator to tie log lines together; it says nothing of the address.
 const LOGGED_KEY_HEX = 16;
 
-// The refusal for the first window past its limit, or null. The retry is the longest of the
+interface Refusal {
+  readonly error: AuthError;
+  // True for the one reservation that first passed a limit in its window.
+  readonly first: boolean;
+}
+
+// The refusal when any window is past its limit, or null. The retry is the longest of the
 // windows that refused, since every one of them has to reopen.
-function refusal(counts: readonly WindowCount[], limits: readonly RateLimit[]): AuthError | null {
+function refusal(counts: readonly WindowCount[], limits: readonly RateLimit[]): Refusal | null {
   let retry = 0;
+  let first = false;
   for (const window of counts) {
     const limit = limits.find((l) => l.windowSeconds === window.windowSeconds);
     if (limit !== undefined && window.count > limit.count) {
       retry = Math.max(retry, window.retryAfterSeconds);
+      first ||= window.count === limit.count + 1;
     }
   }
-  return retry === 0 ? null : new AuthError('AUTH_RATE_LIMITED', { retryAfterSeconds: retry });
+  if (retry === 0) return null;
+  return { error: new AuthError('AUTH_RATE_LIMITED', { retryAfterSeconds: retry }), first };
 }
 
 async function counted<T>(work: () => Promise<T>): Promise<T> {
@@ -87,17 +93,18 @@ export function createRateLimiter(deps: RateLimiterDeps): RateLimiter {
     deps.keys.mac('rate', [bucket, ...value]);
   return Object.freeze({
     keyFor,
-    async reserve(tx: Transaction<AuthSchema>, bucket: RateBucket, value: readonly MacPart[]) {
+    async reserve(bucket: RateBucket, value: readonly MacPart[]) {
       if (!KNOWN.has(bucket)) throw new AuthError('AUTH_INPUT_INVALID');
       const limits = deps.limits[bucket];
       const keyHmac = keyFor(bucket, value);
       const counts = await counted(() =>
-        reserve(tx, { bucket, keyHmac, windowSeconds: limits.map((l) => l.windowSeconds) }),
+        reserve(deps.db, { bucket, keyHmac, windowSeconds: limits.map((l) => l.windowSeconds) }),
       );
       const refused = refusal(counts, limits);
       if (refused === null) return;
-      // Strangers flooding one address: an operator needs to see it as it happens.
-      if (bucket === CEILING) {
+      // Strangers flooding one address: an operator needs to see it, once per window, since
+      // a line per refusal would let anyone flood the warn log.
+      if (bucket === CEILING && refused.first) {
         quietly(() => deps.metrics?.increment('auth.email_ceiling_hit'));
         quietly(() =>
           deps.logger?.warn('auth.email_ceiling_hit', {
@@ -106,22 +113,24 @@ export function createRateLimiter(deps: RateLimiterDeps): RateLimiter {
           }),
         );
       }
-      throw refused;
+      throw refused.error;
     },
   });
 }
 
 export interface ApiKeyFailureLimiterDeps {
+  readonly db: Database;
   readonly config: ApiAuthConfig;
   readonly reserve?: (
-    tx: Transaction<ApiKeyLimiterSchema>,
+    db: Database,
     request: ApiKeyFailureRequest,
   ) => Promise<readonly WindowCount[]>;
 }
 
 export interface ApiKeyFailureLimiter {
-  // Counts one failed key check for a client key from rateKeyForIp, inside withApiKeyLimiter.
-  reserve(tx: Transaction<ApiKeyLimiterSchema>, clientKey: string): Promise<void>;
+  // Counts one failed key check for a client key from rateKeyForIp, committed in its own
+  // transaction through withApiKeyLimiter.
+  reserve(clientKey: string): Promise<void>;
 }
 
 // The API service's limiter: its own HMAC key, its own table, no auth secret or role.
@@ -129,13 +138,13 @@ export function createApiKeyFailureLimiter(deps: ApiKeyFailureLimiterDeps): ApiK
   const reserve = deps.reserve ?? reserveApiKeyFailureWindows;
   const limits = deps.config.apiKeyFail;
   return Object.freeze({
-    async reserve(tx: Transaction<ApiKeyLimiterSchema>, clientKey: string) {
+    async reserve(clientKey: string) {
       const keyHmac = deps.config.failureKey(['api_key_fail', clientKey]);
       const counts = await counted(() =>
-        reserve(tx, { keyHmac, windowSeconds: limits.map((l) => l.windowSeconds) }),
+        reserve(deps.db, { keyHmac, windowSeconds: limits.map((l) => l.windowSeconds) }),
       );
       const refused = refusal(counts, limits);
-      if (refused !== null) throw refused;
+      if (refused !== null) throw refused.error;
     },
   });
 }

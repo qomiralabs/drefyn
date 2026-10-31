@@ -1,5 +1,5 @@
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
-import { sql } from 'kysely';
+import { sql, type Transaction } from 'kysely';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ALLOW_LISTS, type AllowLists } from '../../src/allow-lists.ts';
 import { runCheckCatalog } from '../../src/catalog-check.ts';
@@ -10,7 +10,6 @@ import {
   withOrganization,
   withTenant,
   type Database,
-  type Schema,
 } from '../../src/index.ts';
 import { rejected } from '../support.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
@@ -101,8 +100,9 @@ describeWithStack('withTenant when the connection goes away', () => {
   it('refuses to stream, since the connection must stay inside the transaction', async () => {
     const error = await rejected(
       withTenant(app, TENANT, async (tx) => {
-        // The fixture tables are not in the generated schema, so the name is cast.
-        const notes = tx.selectFrom('fixture_notes' as keyof Schema).selectAll();
+        // The fixture tables are not in the generated schema, so the transaction is cast.
+        const fixtures = tx as unknown as Transaction<{ fixture_notes: { body: string } }>;
+        const notes = fixtures.selectFrom('fixture_notes').selectAll();
         for await (const row of notes.stream()) {
           return row;
         }

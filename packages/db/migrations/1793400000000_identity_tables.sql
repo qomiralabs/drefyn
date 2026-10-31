@@ -80,6 +80,10 @@ create index sessions_user_id_expires_at_idx on app.sessions (user_id, expires_a
 alter table app.sessions enable row level security;
 alter table app.sessions force row level security;
 
+-- Stated in full, so a later change to the default privileges cannot change this table.
+revoke all on app.sessions from drefyn_app;
+grant select, insert, update, delete on app.sessions to drefyn_app;
+
 create policy self_access on app.sessions to drefyn_app
   using (user_id = app.current_user_id()) with check (user_id = app.current_user_id());
 

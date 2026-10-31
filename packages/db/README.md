@@ -45,8 +45,12 @@ without one of those.
   its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
-  `ApiKeyLimiterSchema`, names `api_key_failures` alone, and the `api_access` policy exists on
-  that table only, so an attacker supplied organization can steer it nowhere else.
+  `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
+  that table only and holds only when no organization, project or user is set, so tenant or
+  user work, which also runs as `drefyn_app`, reads and writes no row there.
+- `withTenant` work is typed `TenantSchema` and `withOrganization` work `OrganizationSchema`:
+  neither names an identity or limiter table (organization scope keeps `users`, with
+  `drefyn_app`'s columns, for the members page).
 - `closeDatabase(db)` ends the pool. It is safe to call twice; later work fails with
   `DB_UNAVAILABLE`.
 
@@ -130,12 +134,17 @@ list and the `AuthSchema` and `UserSchema` table types are both built from it, s
 `drefyn_app` reads `id`, `email`, `display_name` and `created_at` of users and updates only
 `display_name` and `updated_at`; only `drefyn_auth` writes the address.
 
-`reserveAuthRateWindows(tx, { bucket, keyHmac, windowSeconds })` and
-`reserveApiKeyFailureWindows(tx, { keyHmac, windowSeconds })` count one attempt against each
+`reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
+`reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
-and return each window's count and seconds until it ends. The key is a 32 byte HMAC made by
+and return each window's count and seconds until it ends. Each runs in a transaction of its
+own (1 s timeout) and commits before it returns, so the count stands whatever the caller's
+work does and the row lock is held for one statement only. The key is a 32 byte HMAC made by
 the caller, so no address or IP is stored. Parallel calls on one key queue on its row, so each
 sees its own count.
+
+`selectAll()` on `users` or `password_credentials` fails lint (`drefyn/no-select-all`): it
+sends `select *`, which the per column grants refuse for every role.
 
 `deleteExpired(tx, rules, { batchSize })` deletes rows a fixed time after a timestamp column,
 by database time, at most `batchSize` (5000) per rule, and returns counts by table.
@@ -143,7 +152,7 @@ by database time, at most `batchSize` (5000) per rule, and returns counts by tab
 expiry; `API_KEY_EXPIRY_RULES` clears ended API key windows. `createExpiryCleanup({ rules,
 transact, onDeleted, logger })` runs them at most once a minute per process, never twice at
 once, reports every count, and never rejects: a failure logs `db_expiry_cleanup_failed` with
-table names only. A later table registers its own rule beside these.
+the table names and the DbError code only. A later table registers its own rule beside these.
 
 `drefyn_owner` matches no policy, so migrations cannot read or change tenant rows. Data
 changes run as jobs through `withTenant`, one transaction per tenant.

@@ -13,3 +13,9 @@ export type OrganizationView<S> = {
 export type OrganizationSchema = OrganizationView<Omit<Schema, PersonalTableName | 'users'>> & {
   users: AppUsersTable;
 };
+
+// Project work: the project and organization tables, never an identity or limiter table. A
+// project path runs with an attacker supplied tenant, so it must not even name the API key
+// throttle or anyone's address.
+// eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty until the first project table exists
+export type TenantSchema = Omit<Schema, PersonalTableName | 'users'>;

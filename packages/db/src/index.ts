@@ -48,6 +48,6 @@ export {
   type RateWindowRequest,
   type WindowCount,
 } from './rate-windows.ts';
-export type { OrganizationSchema } from './organization.ts';
+export type { OrganizationSchema, TenantSchema } from './organization.ts';
 export type { PublishedSchema } from './published.ts';
 export type { Schema } from './schema.generated.ts';

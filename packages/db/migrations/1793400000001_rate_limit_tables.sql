@@ -41,7 +41,14 @@ create index api_key_failures_window_end_idx on app.api_key_failures (window_end
 alter table app.api_key_failures enable row level security;
 alter table app.api_key_failures force row level security;
 
-create policy api_access on app.api_key_failures to drefyn_app using (true) with check (true);
+revoke all on app.api_key_failures from drefyn_app;
+grant select, insert, update, delete on app.api_key_failures to drefyn_app;
+
+-- Only in the empty context withApiKeyLimiter sets: tenant and user work runs as drefyn_app
+-- too, and must not reset or inflate the throttle.
+create policy api_access on app.api_key_failures to drefyn_app
+  using (app.current_org() is null and app.current_project() is null and app.current_user_id() is null)
+  with check (app.current_org() is null and app.current_project() is null and app.current_user_id() is null);
 
 -- Down Migration
 drop table app.api_key_failures;

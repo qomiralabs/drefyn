@@ -19,10 +19,9 @@ import type { ApiKeyLimiterSchema, AuthSchema, UserSchema } from './contexts.ts'
 import { DbError } from './errors.ts';
 import { toDbError } from './pg-errors.ts';
 import { hidePgEnvironment, sslOption } from './pg-session.ts';
-import type { OrganizationSchema } from './organization.ts';
+import type { OrganizationSchema, TenantSchema } from './organization.ts';
 import type { PublishedSchema } from './published.ts';
 import { assertRoleSafe, readRoleFacts, type PoolKind } from './role-check.ts';
-import type { Schema } from './schema.generated.ts';
 import {
   APP_TIMEOUT_MAX_MS,
   AUTH_SETTINGS,
@@ -521,7 +520,7 @@ function stateOf(kind: PoolKind, db: unknown, what: string): PoolState {
 export async function withTenant<T>(
   db: Database,
   tenant: TenantRef & { readonly userId?: never },
-  work: (tx: Transaction<Schema>) => Promise<T>,
+  work: (tx: Transaction<TenantSchema>) => Promise<T>,
   options?: TransactionOptions,
 ): Promise<T> {
   const state = stateOf('app', db, 'withTenant');

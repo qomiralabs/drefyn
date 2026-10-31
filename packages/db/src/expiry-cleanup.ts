@@ -122,7 +122,7 @@ export interface ExpiryCleanupOptions<S> {
   readonly transact: (work: (tx: Transaction<S>) => Promise<ExpiryCounts>) => Promise<ExpiryCounts>;
   readonly batchSize?: number;
   readonly now?: () => number;
-  // For the deletion counts metric, once per rule per run, zero included.
+  // For the deletion counts metric, once per table per run, zero included.
   readonly onDeleted?: (table: string, count: number) => void;
   readonly logger?: DbLogger;
 }
@@ -164,11 +164,13 @@ export function createExpiryCleanup<S>(options: ExpiryCleanupOptions<S>): Expiry
         const counts = await options.transact((tx) => deleteExpired(tx, rules, { batchSize }));
         report(counts);
         return counts;
-      } catch {
+      } catch (error) {
         try {
-          // Table names only: an error's text can carry values from the statement.
+          // Table names and the fixed DbError code only: an error's text can carry values from
+          // the statement. The code tells a timeout from an outage.
           options.logger?.warn('db_expiry_cleanup_failed', {
             tables: [...new Set(rules.map((r) => r.table))].join(','),
+            code: error instanceof DbError ? error.code : 'unknown',
           });
         } catch {
           // Logging is best effort.

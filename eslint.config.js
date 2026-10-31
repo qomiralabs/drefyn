@@ -58,6 +58,9 @@ export default tseslint.config(
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
+      // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * is refused
+      // there for every role, so it must not compile into a query either.
+      'drefyn/no-select-all': ['error', { tables: ['users', 'password_credentials'] }],
     },
   },
   {

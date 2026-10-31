@@ -136,6 +136,9 @@ export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
 ];
 
 const SELF = '(id = app.current_user_id())';
+// The context withApiKeyLimiter sets: no organization, project or user.
+const LIMITER_CONTEXT =
+  '((app.current_org() IS NULL) AND (app.current_project() IS NULL) AND (app.current_user_id() IS NULL))';
 const OWNED = '(user_id = app.current_user_id())';
 
 // The sign in role reaches every row of its tables: it looks people up before anyone is
@@ -188,10 +191,10 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     name: 'app.api_key_failures.api_access',
     command: 'all',
     roles: ['drefyn_app'],
-    using: 'true',
-    withCheck: 'true',
+    using: LIMITER_CONTEXT,
+    withCheck: LIMITER_CONTEXT,
     reason:
-      'failed key checks are counted before any key, and so any organization, is proved; withApiKeyLimiter names only this table',
+      'failed key checks are counted before any key, and so any organization, is proved; only the empty context withApiKeyLimiter sets reaches the rows',
   },
 ];
 

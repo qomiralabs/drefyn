@@ -1,9 +1,14 @@
-import { sql, type Transaction } from 'kysely';
-import type { ApiKeyLimiterSchema, AuthSchema } from './contexts.ts';
+import { sql } from 'kysely';
+import { withApiKeyLimiter, withAuth, type AuthDatabase, type Database } from './database.ts';
 import { DbError } from './errors.ts';
 
 // Fixed window counters. One upsert per window takes a row lock, so parallel reservations on
 // one key queue on that row and each sees its own count: no burst gets past the limit.
+//
+// Each reservation runs and commits in a transaction of its own, before the caller's work.
+// Inside the caller's transaction, a failed attempt thrown from the work would roll its own
+// count back, and the row lock would be held for the whole work, queueing every other
+// request on that key behind it.
 
 export interface WindowCount {
   readonly windowSeconds: number;
@@ -82,40 +87,47 @@ const returned = sql`
   returning extract(epoch from (window_end - window_start))::int as window_seconds, count,
             greatest(1, ceil(extract(epoch from (window_end - now()))))::int as retry_after`;
 
-// Counts one sign in attempt against each window of a bucket. Runs inside the caller's
-// withAuth transaction, before the work it limits.
+// The statement is one round trip; a stalled row should fail fast rather than hold a
+// connection of the small auth pool.
+const RESERVE_TIMEOUT_MS = 1000;
+
+// Counts one sign in attempt against each window of a bucket, committed before it returns.
 export async function reserveAuthRateWindows(
-  tx: Transaction<AuthSchema>,
+  db: AuthDatabase,
   request: RateWindowRequest,
 ): Promise<readonly WindowCount[]> {
   if (!BUCKET.test(request.bucket)) throw invalid('has a bucket that is not a short identifier');
   const key = checkKey(request.keyHmac);
   const seconds = checkWindows(request.windowSeconds);
-  const result = await sql<Row>`
+  const query = sql<Row>`
     with w as (${windows(seconds)})
     insert into app.auth_rate_limits as t (bucket, key_hmac, window_start, window_end, count)
     select ${request.bucket}, ${key}, w.start, w.start + make_interval(secs => w.seconds), 1
       from w
     on conflict (bucket, key_hmac, window_start, window_end)
     do update set count = least(t.count + 1, ${COUNT_CAP})
-    ${returned}`.execute(tx);
+    ${returned}`;
+  const result = await withAuth(db, (tx) => query.execute(tx), { timeoutMs: RESERVE_TIMEOUT_MS });
   return toCounts(result.rows, seconds);
 }
 
-// Counts one failed API key check against each window. Runs inside withApiKeyLimiter.
+// Counts one failed API key check against each window, committed before it returns.
 export async function reserveApiKeyFailureWindows(
-  tx: Transaction<ApiKeyLimiterSchema>,
+  db: Database,
   request: ApiKeyFailureRequest,
 ): Promise<readonly WindowCount[]> {
   const key = checkKey(request.keyHmac);
   const seconds = checkWindows(request.windowSeconds);
-  const result = await sql<Row>`
+  const query = sql<Row>`
     with w as (${windows(seconds)})
     insert into app.api_key_failures as t (key_hmac, window_start, window_end, count)
     select ${key}, w.start, w.start + make_interval(secs => w.seconds), 1
       from w
     on conflict (key_hmac, window_start, window_end)
     do update set count = least(t.count + 1, ${COUNT_CAP})
-    ${returned}`.execute(tx);
+    ${returned}`;
+  const result = await withApiKeyLimiter(db, (tx) => query.execute(tx), {
+    timeoutMs: RESERVE_TIMEOUT_MS,
+  });
   return toCounts(result.rows, seconds);
 }
