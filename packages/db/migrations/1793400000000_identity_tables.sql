@@ -117,7 +117,8 @@ create policy self_access on app.password_credentials to drefyn_app
 create table app.email_challenges (
   id uuid primary key default uuidv7(),
   email_normalized text not null check (char_length(email_normalized) between 3 and 254),
-  purpose text not null check (purpose in ('sign_in', 'link_identity', 'step_up', 'cli_link',
+  -- The CLI links through a session method, so it has no challenge purpose.
+  purpose text not null check (purpose in ('sign_in', 'link_identity', 'step_up',
                                            'password_reset', 'email_change')),
   -- The signed in person an email change belongs to, matched to the session at completion.
   user_id uuid references app.users (id) on delete cascade,

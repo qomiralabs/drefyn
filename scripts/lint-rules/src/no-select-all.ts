@@ -32,11 +32,22 @@ function literals(node: unknown): string[] {
   return [];
 }
 
-// "app.users as u" names the table users and the alias u.
+// "app.users as u" names the table users and the alias u. Split on whitespace, never a regex
+// around "as": table names are source text, and an overlapping pattern backtracks without
+// bound on a long run of spaces. Any shape other than "table" or "table as alias" is kept
+// whole, so it names no table.
 function nameAndAlias(text: string): { table: string; alias: string } {
-  const [table = '', alias] = text.trim().split(/\s+as\s+/i);
-  const bare = table.replace(/^app\./, '');
-  return { table: bare, alias: alias ?? bare };
+  const tokens = text.trim().split(/\s+/);
+  const [first = '', middle = '', last = ''] = tokens;
+  if (tokens.length === 1) {
+    const bare = first.replace(/^app\./, '');
+    return { table: bare, alias: bare };
+  }
+  if (tokens.length === 3 && middle.toLowerCase() === 'as') {
+    return { table: first.replace(/^app\./, ''), alias: last };
+  }
+  const whole = text.trim().replace(/^app\./, '');
+  return { table: whole, alias: whole };
 }
 
 interface MethodCall {
