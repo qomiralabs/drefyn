@@ -1,6 +1,7 @@
 import { beforeAll, expect, it } from 'vitest';
 import { decodeSecret, sha256 } from '../../src/index.ts';
 import {
+  insideOneWindow,
   configWith,
   flowFor,
   newBrowser,
@@ -90,6 +91,7 @@ describeWithStack('known devices against Postgres', () => {
   });
 
   it('a known device is never refused by the ceiling, and a fresh browser at the ceiling is', async () => {
+    await insideOneWindow(h, 30);
     const flow = flowFor(
       h,
       configWith({
@@ -115,6 +117,7 @@ describeWithStack('known devices against Postgres', () => {
   });
 
   it('a device cookie known for one person gives no exemption for another address', async () => {
+    await insideOneWindow(h, 30);
     const flow = flowFor(h, configWith({ DREFYN_AUTH_RATE_EMAIL_SEND_ADDRESS_CEILING: '2/1d' }));
     const mine = address('mine');
     const theirs = address('theirs');

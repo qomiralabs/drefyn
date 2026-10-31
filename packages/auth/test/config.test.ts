@@ -35,6 +35,7 @@ describe('parseAuthConfig defaults', () => {
       pre: '__Host-drefyn_pre',
       oauth: '__Host-drefyn_oauth',
       invite: '__Host-drefyn_invite',
+      device: '__Host-drefyn_device',
     });
     expect(config.trustedProxyHops).toBe(0);
     expect(config.clientIpHeader).toBeNull();
@@ -153,6 +154,7 @@ describe('parseAuthConfig defaults', () => {
         pre: 'drefyn_pre',
         oauth: 'drefyn_oauth',
         invite: 'drefyn_invite',
+        device: 'drefyn_device',
       });
     }
   });

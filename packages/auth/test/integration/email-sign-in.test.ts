@@ -1,13 +1,15 @@
 import fc from 'fast-check';
-import { beforeAll, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { formatChallengeId, type AuthConfig, type CookieSpec } from '../../src/index.ts';
 import {
+  insideOneWindow,
   configWith,
   flowFor,
   newBrowser,
   requestCode,
   wrongCode,
   type Browser,
+  withCompareSpy,
   type Flow,
 } from './support/email.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
@@ -30,7 +32,7 @@ const address = (label: string) => `${label}${String((n += 1))}@example.com`;
 const sessionCookie = (config: AuthConfig, cookies: readonly CookieSpec[]) =>
   cookies.find((c) => c.name === config.cookies.session)?.value;
 
-async function signedUpFlow(): Promise<Flow> {
+function signedUpFlow(): Flow {
   return flowFor(h, configWith({ DREFYN_AUTH_SIGNUP: 'open' }));
 }
 
@@ -40,7 +42,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('a right code from the asking browser signs in once, with method email', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('known');
     await h.user(email);
     const b = newBrowser();
@@ -62,7 +64,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('a typed code with no challenge id finds this browser’s newest challenge', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('typed');
     await h.user(email);
     const b = newBrowser();
@@ -74,7 +76,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('keeps a safe returnTo and drops one that leaves the origin', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('return');
     await h.user(email);
     for (const [given, kept] of [
@@ -96,7 +98,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('without the binding cookie verify answers AUTH_CHALLENGE_BINDING and uses no attempt', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('bind');
     await h.user(email);
     const asking = newBrowser();
@@ -119,7 +121,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('a new challenge from browser B leaves browser A’s open challenge valid', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('m1');
     await h.user(email);
     const a = newBrowser();
@@ -134,7 +136,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('a new challenge from the same browser replaces its older one', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('same');
     await h.user(email);
     const b = newBrowser();
@@ -148,8 +150,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('200 parallel verifies against one challenge never let more than 5 attempts through', async () => {
-    const config = configWith({ DREFYN_AUTH_SIGNUP: 'open' });
-    const compare = vi.spyOn(config.keys, 'verify');
+    const { config, compare } = withCompareSpy(configWith({ DREFYN_AUTH_SIGNUP: 'open' }));
     const flow = flowFor(h, config);
     const email = address('m2');
     await h.user(email);
@@ -172,7 +173,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('after 5 wrong codes even the right one is refused', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('five');
     await h.user(email);
     const b = newBrowser();
@@ -187,7 +188,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('a code past its 10 minutes is refused by database time', async () => {
-    const flow = await signedUpFlow();
+    const flow = signedUpFlow();
     const email = address('late');
     await h.user(email);
     const b = newBrowser();
@@ -206,6 +207,7 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('code_verify stops a browser after 10 failed codes in the hour, across challenges', async () => {
+    await insideOneWindow(h, 30);
     const flow = flowFor(
       h,
       configWith({ DREFYN_AUTH_SIGNUP: 'open', DREFYN_AUTH_RATE_CODE_VERIFY: '10/1h' }),
@@ -235,11 +237,13 @@ describeWithStack('email code sign in against Postgres', () => {
   });
 
   it('property: no sequence of guesses gets more than 5 compares per challenge or 10 per browser an hour', async () => {
-    const config = configWith({
-      DREFYN_AUTH_SIGNUP: 'open',
-      DREFYN_AUTH_RATE_CODE_VERIFY: '10/1h',
-    });
-    const compare = vi.spyOn(config.keys, 'verify');
+    await insideOneWindow(h, 30);
+    const { config, compare } = withCompareSpy(
+      configWith({
+        DREFYN_AUTH_SIGNUP: 'open',
+        DREFYN_AUTH_RATE_CODE_VERIFY: '10/1h',
+      }),
+    );
     const flow = flowFor(h, config);
     await fc.assert(
       fc.asyncProperty(
@@ -394,7 +398,7 @@ describeWithStack('email code sign in against Postgres', () => {
     }
 
     it('verifyEmailCode never creates a session from a step up code, and spends none of its attempts', async () => {
-      const flow = await signedUpFlow();
+      const flow = signedUpFlow();
       const { email, b, sent, challenge } = await stepUpMail(flow);
       const before = await sessionsOf(email);
       const result = await flow.signIn.verifyEmailCode(b.context(), { challenge, code: sent.code });
@@ -408,7 +412,7 @@ describeWithStack('email code sign in against Postgres', () => {
     });
 
     it('verifyLinkCode sends a step up code to the step up check for the signed in session', async () => {
-      const flow = await signedUpFlow();
+      const flow = signedUpFlow();
       const { email, b, session, sent, challenge } = await stepUpMail(flow);
       await h.sql(
         `update app.sessions set authenticated_at = now() - interval '1 hour' where id = '${session.sessionId}';`,
@@ -425,7 +429,7 @@ describeWithStack('email code sign in against Postgres', () => {
     });
 
     it('verifyLinkCode refuses a step up code with no session, and signs in from a sign in code', async () => {
-      const flow = await signedUpFlow();
+      const flow = signedUpFlow();
       const { email, b, sent, challenge } = await stepUpMail(flow);
       const before = await sessionsOf(email);
       const signedOut = await flow.signIn.verifyLinkCode(b.context(), null, {

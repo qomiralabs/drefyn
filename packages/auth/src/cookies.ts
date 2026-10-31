@@ -5,6 +5,8 @@ export interface CookieNames {
   readonly pre: string;
   readonly oauth: string;
   readonly invite: string;
+  // Never an authenticator: it only picks a rate limit bucket for a browser seen before.
+  readonly device: string;
 }
 
 // Browsers refuse the __Host- prefix without Secure, so the plain http loopback setup
@@ -16,6 +18,7 @@ export function cookieNames(secure: boolean): CookieNames {
     pre: `${prefix}drefyn_pre`,
     oauth: `${prefix}drefyn_oauth`,
     invite: `${prefix}drefyn_invite`,
+    device: `${prefix}drefyn_device`,
   });
 }
 

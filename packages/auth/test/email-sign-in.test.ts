@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import type * as Crypto from 'node:crypto';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   SIGN_IN_CODE_PURPOSES,
@@ -25,7 +26,7 @@ import {
 
 // Real implementations underneath; the spies only watch, except where a test pins a value.
 vi.mock('node:crypto', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:crypto')>();
+  const actual = await importOriginal<typeof Crypto>();
   return {
     ...actual,
     randomInt: vi.fn(actual.randomInt),
@@ -133,7 +134,7 @@ describe('the compare', () => {
   });
 
   it('drops typed spaces, tabs and no break spaces, and nothing else', async () => {
-    for (const typed of ['4831 2097', '4831\t2097', '4831 2097', ' 48312097 ']) {
+    for (const typed of ['4831 2097', '4831\t2097', '4831\u00a02097', ' 48312097 ']) {
       const { result } = await verify(typed, '48312097');
       expect(result.ok).toBe(true);
     }

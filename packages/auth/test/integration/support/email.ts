@@ -1,3 +1,4 @@
+import { expect, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
   createEmailSignIn,
@@ -29,6 +30,14 @@ export function configWith(env: Readonly<Record<string, string>> = {}): AuthConf
   });
 }
 
+// The config is frozen all the way down, so a spy on the compare needs its own keys object
+// that calls through to the real one.
+export function withCompareSpy(config: AuthConfig) {
+  const { keys } = config;
+  const compare = vi.fn((...args: Parameters<typeof keys.verify>) => keys.verify(...args));
+  return { config: { ...config, keys: { ...config.keys, verify: compare } }, compare };
+}
+
 export interface Flow {
   readonly config: AuthConfig;
   readonly mail: TestAuthMailer;
@@ -43,8 +52,11 @@ export function flowFor(
   mail: TestAuthMailer = createTestAuthMailer(),
 ): Flow {
   const logger = {
+    info(event: string, fields: Readonly<Record<string, string | number | boolean>>) {
+      h.logs.push({ level: 'info', event, fields });
+    },
     warn(event: string, fields: Readonly<Record<string, string | number | boolean>>) {
-      h.logs.push({ event, fields });
+      h.logs.push({ level: 'warn', event, fields });
     },
   };
   const sessions = createSessions(config, {
@@ -106,3 +118,63 @@ export async function requestCode(flow: Flow, browser: Browser, email: string) {
 
 export const wrongCode = (code: string) =>
   String((Number(code) + 1) % 100_000_000).padStart(8, '0');
+
+// Rate windows are aligned to the database clock (10 minutes, an hour, a day). A test that
+// counts against a limit waits until it can finish inside one of each, so a window edge in
+// the middle never resets a count it relies on.
+export async function insideOneWindow(h: Harness, budgetSeconds: number): Promise<void> {
+  const left = Number(
+    await h.sql(
+      `select least(600 - mod(e, 600), 3600 - mod(e, 3600), 86400 - mod(e, 86400)) from (select floor(extract(epoch from now()))::bigint as e) t;`,
+    ),
+  );
+  if (left > budgetSeconds) return;
+  await new Promise((resolve) => setTimeout(resolve, (left + 1) * 1000));
+}
+
+export interface Wire {
+  readonly ok: boolean;
+  readonly shape: string;
+  readonly retryAfterSeconds: number | null;
+}
+
+// What the browser sees, with a new random cookie value reduced to its length. Retry-After
+// comes from the window clock, not the address, so it is kept apart and compared to the
+// second.
+export function wireOf(
+  result:
+    | { readonly ok: true; readonly value: { readonly setCookies: readonly CookieSpec[] } }
+    | {
+        readonly ok: false;
+        readonly error: {
+          readonly code: string;
+          readonly message: string;
+          readonly retryAfterSeconds?: number;
+        };
+      },
+): Wire {
+  if (!result.ok) {
+    return {
+      ok: false,
+      shape: JSON.stringify({ code: result.error.code, message: result.error.message }),
+      retryAfterSeconds: result.error.retryAfterSeconds ?? null,
+    };
+  }
+  const { setCookies, ...rest } = result.value;
+  return {
+    ok: true,
+    shape: JSON.stringify({
+      keys: Object.keys(rest).sort(),
+      cookies: setCookies.map((c) => [c.name, c.maxAgeSeconds, c.value.length]),
+    }),
+    retryAfterSeconds: null,
+  };
+}
+
+export function expectSameWire(a: Wire, b: Wire): void {
+  expect(a.shape).toBe(b.shape);
+  expect(a.retryAfterSeconds === null).toBe(b.retryAfterSeconds === null);
+  if (a.retryAfterSeconds !== null && b.retryAfterSeconds !== null) {
+    expect(Math.abs(a.retryAfterSeconds - b.retryAfterSeconds)).toBeLessThanOrEqual(1);
+  }
+}

@@ -1,9 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { AuthMetricName, CookieSpec } from '../../src/index.ts';
+import type { AuthMetricName } from '../../src/index.ts';
 import {
+  expectSameWire,
   flowFor,
+  insideOneWindow,
   newBrowser,
   requestCode,
+  wireOf,
   wrongCode,
   type Browser,
   type Flow,
@@ -26,24 +29,6 @@ const attackerIp = (prefix: number, host = 1) =>
   `2001:db8:bad:${prefix.toString(16)}::${String(host)}`;
 const shadowIp = (prefix: number, host = 1) =>
   `2001:db8:5ad:${prefix.toString(16)}::${String(host)}`;
-
-type Start = Awaited<ReturnType<Flow['signIn']['startEmailSignIn']>>;
-
-// What the browser sees, with a new random cookie value reduced to its length.
-function wire(result: Start): string {
-  if (!result.ok) {
-    return JSON.stringify({
-      code: result.error.code,
-      retryAfterSeconds: result.error.retryAfterSeconds ?? null,
-      message: result.error.message,
-    });
-  }
-  const { setCookies, ...rest } = result.value;
-  return JSON.stringify({
-    keys: Object.keys(rest).sort(),
-    cookies: setCookies.map((c: CookieSpec) => [c.name, c.maxAgeSeconds, c.value.length]),
-  });
-}
 
 describe.each([4, 16])('with %i attacker prefixes', (prefixes) => {
   describeWithStack('the address ceiling is not a remote lockout', () => {
@@ -70,6 +55,8 @@ describe.each([4, 16])('with %i attacker prefixes', (prefixes) => {
     });
 
     it('the victim still signs in from their own browser, and a fresh browser is refused', async () => {
+      // Every count here must land in one window of each length.
+      await insideOneWindow(h, 120);
       const victim = `victim${String(prefixes)}@example.com`;
       const shadow = `nobody${String(prefixes)}@example.com`;
       await h.user(victim);
@@ -109,7 +96,7 @@ describe.each([4, 16])('with %i attacker prefixes', (prefixes) => {
         const shadowed = await flow.signIn.startEmailSignIn(mirror.context({ ip: mirrorIp }), {
           email: mirrorTo,
         });
-        expect(wire(result)).toBe(wire(shadowed));
+        expectSameWire(wireOf(result), wireOf(shadowed));
         if (result.ok) {
           b.apply(result.value.setCookies);
           await result.value.send();
@@ -178,8 +165,7 @@ describe.each([4, 16])('with %i attacker prefixes', (prefixes) => {
 
       // Non vacuity: a fresh browser from a fresh prefix is refused, and only the ceiling can
       // refuse it there.
-      const before = metrics.filter((m) => m === 'auth.email_ceiling_hit').length;
-      expect(before).toBeGreaterThanOrEqual(1);
+      expect(metrics).toContain('auth.email_ceiling_hit');
       const stranger = await flow.signIn.startEmailSignIn(newBrowser(FRESH_IP).context(), {
         email: victim,
       });
@@ -195,6 +181,6 @@ describe.each([4, 16])('with %i attacker prefixes', (prefixes) => {
       if (again === null) throw new Error('the victim got no mail during the attack');
       const last = await flow.signIn.verifyEmailCode(v.context(), again);
       expect(last.ok).toBe(true);
-    });
+    }, 300_000);
   });
 });
