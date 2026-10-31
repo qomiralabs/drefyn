@@ -25,6 +25,7 @@ import {
   type PublishedDatabase,
   type PublishedSchema,
   type Schema,
+  type TenantSchema,
   type UserSchema,
 } from '../../src/index.ts';
 import type { AuthTableName, PublishedTableName, UserTableName } from '../../src/allow-lists.ts';
@@ -171,7 +172,7 @@ describe('tenant access types', () => {
     expectTypeOf(withTenant<number>)
       .parameter(2)
       .parameter(0)
-      .toEqualTypeOf<Transaction<Schema>>();
+      .toEqualTypeOf<Transaction<TenantSchema>>();
     expectTypeOf(withOrganization<number>)
       .parameter(2)
       .parameter(0)

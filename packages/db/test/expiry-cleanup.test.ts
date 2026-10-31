@@ -7,6 +7,7 @@ import {
   deleteExpired,
   type ExpiryRule,
 } from '../src/index.ts';
+import { DbError } from '../src/errors.ts';
 import { thrown } from './support.ts';
 
 interface TwoTables {
@@ -96,6 +97,7 @@ describe('createExpiryCleanup', () => {
   });
 
   it('runs once for callers that arrive while a run is in flight', async () => {
+    let clock = 0;
     let release: (value: typeof ok) => void = () => undefined;
     const transact = vi.fn(
       () =>
@@ -103,8 +105,10 @@ describe('createExpiryCleanup', () => {
           release = resolve;
         }),
     );
-    const cleanup = createExpiryCleanup({ rules: RULES, transact, now: () => 0 });
+    const cleanup = createExpiryCleanup({ rules: RULES, transact, now: () => clock });
     const first = cleanup.maybeRun();
+    // Past the minute, so only the run in flight can stop the second call.
+    clock += 60_000;
     const second = cleanup.maybeRun();
     release(ok);
     expect(await first).toEqual(ok);
@@ -137,13 +141,30 @@ describe('createExpiryCleanup', () => {
       logger: { warn },
     });
     expect(await cleanup.maybeRun()).toBeNull();
-    expect(warn).toHaveBeenCalledWith('db_expiry_cleanup_failed', { tables: 'first,second' });
+    expect(warn).toHaveBeenCalledWith('db_expiry_cleanup_failed', {
+      tables: 'first,second',
+      code: 'unknown',
+    });
     expect(JSON.stringify(warn.mock.calls)).not.toContain('hunter2');
     expect(await cleanup.maybeRun()).toBeNull();
     expect(transact).toHaveBeenCalledTimes(1);
     clock += 60_000;
     await cleanup.maybeRun();
     expect(transact).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs the DbError code, which tells an outage from a timeout', async () => {
+    const warn = vi.fn();
+    const cleanup = createExpiryCleanup({
+      rules: RULES,
+      transact: () => Promise.reject(new DbError('DB_TIMEOUT', 'statement timed out')),
+      logger: { warn },
+    });
+    await cleanup.maybeRun();
+    expect(warn).toHaveBeenCalledWith('db_expiry_cleanup_failed', {
+      tables: 'first,second',
+      code: 'DB_TIMEOUT',
+    });
   });
 
   it('survives a logger and a counter that throw', async () => {

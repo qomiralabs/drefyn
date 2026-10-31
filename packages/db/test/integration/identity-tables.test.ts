@@ -185,6 +185,38 @@ describeWithStack('identity tables', () => {
     });
   });
 
+  // The policy holds only in the empty context withApiKeyLimiter sets, so tenant or user
+  // work cannot reset or inflate the API key throttle whatever its grants say.
+  describe('api_key_failures outside the limiter context', () => {
+    const ORG = '01a14984-4476-77ce-9335-1280000000c1';
+    const row = `insert into app.api_key_failures (key_hmac, window_start, window_end, count)
+       values (decode(repeat('0a', 32), 'hex'), now(), now() + interval '1 minute', 59)`;
+
+    it.each([
+      ['an organization', 'drefyn.organization_id', ORG],
+      ['a user', 'drefyn.user_id', USER_A],
+    ])('reads, deletes and writes nothing under %s context', async (_label, setting, value) => {
+      const app = await as('app');
+      await app.query(row);
+      await app.query('begin');
+      try {
+        await app.query('select set_config($1, $2, true)', [setting, value]);
+        expect(
+          (await app.query('select count(*)::int as n from app.api_key_failures')).rows,
+        ).toEqual([{ n: 0 }]);
+        expect((await app.query('delete from app.api_key_failures')).rowCount).toBe(0);
+        expect((await app.query('update app.api_key_failures set count = 1')).rowCount).toBe(0);
+        expect(await sqlState(app.query(row.replace("'0a'", "'0b'")))).toBe('42501');
+      } finally {
+        await app.query('rollback');
+      }
+      expect((await app.query('select count from app.api_key_failures')).rows).toEqual([
+        { count: 59 },
+      ]);
+      await app.query('delete from app.api_key_failures');
+    });
+  });
+
   describe('table privileges', () => {
     it.each(['email_challenges', 'oauth_states', 'auth_rate_limits'])(
       'gives drefyn_app nothing on %s',

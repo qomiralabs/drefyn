@@ -1,5 +1,4 @@
-import type { ApiKeyLimiterSchema, AuthSchema, WindowCount } from '@drefyn/db';
-import type { Transaction } from 'kysely';
+import type { AuthDatabase, Database, WindowCount } from '@drefyn/db';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthError,
@@ -14,8 +13,9 @@ import {
 } from '../src/index.ts';
 import { base64url, validEnv } from './support.ts';
 
-const tx = {} as Transaction<AuthSchema>;
-const apiTx = {} as Transaction<ApiKeyLimiterSchema>;
+// The store is replaced in every test, so the handles never open anything.
+const db = {} as AuthDatabase;
+const appDb = {} as Database;
 const keys = deriveAuthKeys(new Uint8Array(32).fill(7));
 const { rateLimits } = parseAuthConfig(validEnv());
 
@@ -28,7 +28,7 @@ interface Request {
 // Answers each window with the given count and a retry of the window's own length.
 function store(count: (windowSeconds: number) => number) {
   const requests: Request[] = [];
-  const reserve = vi.fn((_tx: unknown, request: Request): Promise<readonly WindowCount[]> => {
+  const reserve = vi.fn((_db: unknown, request: Request): Promise<readonly WindowCount[]> => {
     requests.push(request);
     return Promise.resolve(
       request.windowSeconds.map((windowSeconds) => ({
@@ -81,8 +81,8 @@ describe('the bucket list', () => {
 describe('createRateLimiter', () => {
   it('keys each bucket with HMAC(subkey_rate, bucket, value) and sends every window', async () => {
     const { reserve, requests } = store(() => 1);
-    const limiter = createRateLimiter({ keys, limits: rateLimits, reserve });
-    await limiter.reserve(tx, 'email_send', ['a@example.com', rateKeyForIp('203.0.113.7')]);
+    const limiter = createRateLimiter({ db, keys, limits: rateLimits, reserve });
+    await limiter.reserve('email_send', ['a@example.com', rateKeyForIp('203.0.113.7')]);
     expect(requests).toEqual([
       {
         bucket: 'email_send',
@@ -96,7 +96,7 @@ describe('createRateLimiter', () => {
   });
 
   it('gives each bucket its own key for the same value', () => {
-    const limiter = createRateLimiter({ keys, limits: rateLimits });
+    const limiter = createRateLimiter({ db, keys, limits: rateLimits });
     const seen = new Set(
       RATE_BUCKETS.map((bucket) => limiter.keyFor(bucket, ['same']).toString('hex')),
     );
@@ -104,7 +104,7 @@ describe('createRateLimiter', () => {
   });
 
   it('shares a bucket for two addresses in one /64 and splits two /64s', () => {
-    const limiter = createRateLimiter({ keys, limits: rateLimits });
+    const limiter = createRateLimiter({ db, keys, limits: rateLimits });
     const key = (ip: string) => limiter.keyFor('email_send_ip', [rateKeyForIp(ip)]).toString('hex');
     expect(key('2001:db8:1:2::1')).toBe(key('2001:db8:1:2:aaaa:bbbb:cccc:dddd'));
     expect(key('2001:db8:1:2::1')).not.toBe(key('2001:db8:1:3::1'));
@@ -112,38 +112,42 @@ describe('createRateLimiter', () => {
 
   it('lets the limit through and refuses the next with the longest retry', async () => {
     const atLimit = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 3).reserve,
     });
-    await atLimit.reserve(tx, 'email_send', ['a']);
+    await atLimit.reserve('email_send', ['a']);
     const over = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       // Over the 10 minute limit of 3 and under the daily limit of 10.
-      reserve: store((w) => (w === 600 ? 4 : 4)).reserve,
+      reserve: store(() => 4).reserve,
     });
-    const error = await limited(over.reserve(tx, 'email_send', ['a']));
+    const error = await limited(over.reserve('email_send', ['a']));
     expect(error.retryAfterSeconds).toBe(300);
     const both = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 11).reserve,
     });
-    expect((await limited(both.reserve(tx, 'email_send', ['a']))).retryAfterSeconds).toBe(43_200);
+    expect((await limited(both.reserve('email_send', ['a']))).retryAfterSeconds).toBe(43_200);
   });
 
   it('records auth.email_ceiling_hit and logs only the hashed key when the ceiling is hit', async () => {
     const increment = vi.fn();
     const warn = vi.fn();
     const limiter = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 31).reserve,
       metrics: { increment },
       logger: { warn },
     });
-    await limited(limiter.reserve(tx, 'email_send_address_ceiling', ['victim@example.com']));
+    await limited(limiter.reserve('email_send_address_ceiling', ['victim@example.com']));
     expect(increment).toHaveBeenCalledWith('auth.email_ceiling_hit');
     const hashed = keys
       .mac('rate', ['email_send_address_ceiling', 'victim@example.com'])
@@ -156,31 +160,71 @@ describe('createRateLimiter', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('victim');
   });
 
+  it('takes the longest wait of the refusing windows, whatever their order', async () => {
+    const longFirst = (_db: unknown, request: Request): Promise<readonly WindowCount[]> =>
+      Promise.resolve(
+        [...request.windowSeconds].reverse().map((windowSeconds) => ({
+          windowSeconds,
+          count: 99,
+          retryAfterSeconds: windowSeconds === 86_400 ? 50_000 : 120,
+        })),
+      );
+    const limiter = createRateLimiter({ db, keys, limits: rateLimits, reserve: longFirst });
+    expect((await limited(limiter.reserve('email_send', ['a']))).retryAfterSeconds).toBe(50_000);
+  });
+
+  // Strangers can push one address past the ceiling all day; the warn log and the metric
+  // must say so once per window, not once per refused request.
+  it('records the ceiling hit once per window, on the first refusal only', async () => {
+    const increment = vi.fn();
+    const warn = vi.fn();
+    let count = 30;
+    const limiter = createRateLimiter({
+      db,
+      keys,
+      limits: rateLimits,
+      reserve: store(() => {
+        count += 1;
+        return count;
+      }).reserve,
+      metrics: { increment },
+      logger: { warn },
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await limited(limiter.reserve('email_send_address_ceiling', ['victim@example.com']));
+    }
+    expect(increment).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('records nothing at the ceiling itself, or when another bucket is over', async () => {
     const increment = vi.fn();
     const warn = vi.fn();
     const at = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 30).reserve,
       metrics: { increment },
       logger: { warn },
     });
-    await at.reserve(tx, 'email_send_address_ceiling', ['a']);
+    await at.reserve('email_send_address_ceiling', ['a']);
     const other = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 99).reserve,
       metrics: { increment },
       logger: { warn },
     });
-    await limited(other.reserve(tx, 'email_send', ['a']));
+    await limited(other.reserve('email_send', ['a']));
     expect(increment).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
   });
 
   it('still refuses when the metric or the logger throws', async () => {
     const limiter = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: store(() => 31).reserve,
@@ -195,13 +239,13 @@ describe('createRateLimiter', () => {
         },
       },
     });
-    await limited(limiter.reserve(tx, 'email_send_address_ceiling', ['a']));
+    await limited(limiter.reserve('email_send_address_ceiling', ['a']));
   });
 
   it('refuses a bucket it does not know before any SQL', async () => {
     const { reserve } = store(() => 1);
-    const limiter = createRateLimiter({ keys, limits: rateLimits, reserve });
-    const error = await limiter.reserve(tx, 'email_bomb' as RateBucket, ['a']).then(
+    const limiter = createRateLimiter({ db, keys, limits: rateLimits, reserve });
+    const error = await limiter.reserve('email_bomb' as RateBucket, ['a']).then(
       () => undefined,
       (e: unknown) => e,
     );
@@ -213,11 +257,12 @@ describe('createRateLimiter', () => {
   it('turns a database failure into AUTH_UNAVAILABLE and keeps the cause', async () => {
     const cause = new Error('connection lost');
     const limiter = createRateLimiter({
+      db,
       keys,
       limits: rateLimits,
       reserve: () => Promise.reject(cause),
     });
-    const error = await limiter.reserve(tx, 'oauth_start', ['ip4:203.0.113.7']).then(
+    const error = await limiter.reserve('oauth_start', ['ip4:203.0.113.7']).then(
       () => undefined,
       (e: unknown) => e,
     );
@@ -235,13 +280,14 @@ describe('createApiKeyFailureLimiter', () => {
   it('keys with the API rate limit key, never the auth secret', async () => {
     const requests: { keyHmac: Uint8Array; windowSeconds: readonly number[] }[] = [];
     const limiter = createApiKeyFailureLimiter({
+      db: appDb,
       config,
-      reserve: (_tx, request) => {
+      reserve: (_db, request) => {
         requests.push(request);
         return Promise.resolve([{ windowSeconds: 60, count: 1, retryAfterSeconds: 30 }]);
       },
     });
-    await limiter.reserve(apiTx, rateKeyForIp('2001:db8:1:2::9'));
+    await limiter.reserve(rateKeyForIp('2001:db8:1:2::9'));
     expect(requests).toEqual([
       {
         keyHmac: config.failureKey(['api_key_fail', 'ip6:2001:0db8:0001:0002::/64']),
@@ -255,15 +301,17 @@ describe('createApiKeyFailureLimiter', () => {
 
   it('refuses past 60 failures a minute', async () => {
     const limiter = createApiKeyFailureLimiter({
+      db: appDb,
       config,
       reserve: () => Promise.resolve([{ windowSeconds: 60, count: 61, retryAfterSeconds: 12 }]),
     });
-    const error = await limited(limiter.reserve(apiTx, 'ip4:203.0.113.7'));
+    const error = await limited(limiter.reserve('ip4:203.0.113.7'));
     expect(error.retryAfterSeconds).toBe(12);
     const at = createApiKeyFailureLimiter({
+      db: appDb,
       config,
       reserve: () => Promise.resolve([{ windowSeconds: 60, count: 60, retryAfterSeconds: 12 }]),
     });
-    await at.reserve(apiTx, 'ip4:203.0.113.7');
+    await at.reserve('ip4:203.0.113.7');
   });
 });

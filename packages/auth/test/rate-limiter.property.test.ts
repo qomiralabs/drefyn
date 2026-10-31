@@ -1,11 +1,10 @@
-import type { AuthSchema, WindowCount } from '@drefyn/db';
+import type { AuthDatabase, WindowCount } from '@drefyn/db';
 import fc from 'fast-check';
-import type { Transaction } from 'kysely';
 import { expect, it } from 'vitest';
 import { AuthError, createRateLimiter, deriveAuthKeys, parseAuthConfig } from '../src/index.ts';
 import { runs, validEnv } from './support.ts';
 
-const tx = {} as Transaction<AuthSchema>;
+const db = {} as AuthDatabase;
 const keys = deriveAuthKeys(new Uint8Array(32).fill(3));
 
 // A fixed window store with the same rules as the upsert: one counter per bucket, key and
@@ -13,7 +12,7 @@ const keys = deriveAuthKeys(new Uint8Array(32).fill(3));
 function memoryStore(clock: { now: number }) {
   const counts = new Map<string, number>();
   return (
-    _tx: unknown,
+    _db: unknown,
     request: { bucket: string; keyHmac: Uint8Array; windowSeconds: readonly number[] },
   ): Promise<readonly WindowCount[]> =>
     Promise.resolve(
@@ -44,13 +43,18 @@ it('never lets more than the limit through in any window, over random sequences'
   await fc.assert(
     fc.asyncProperty(fc.array(step, { minLength: 1, maxLength: 120 }), async (steps) => {
       const clock = { now: 1_700_000_000 };
-      const limiter = createRateLimiter({ keys, limits: rateLimits, reserve: memoryStore(clock) });
+      const limiter = createRateLimiter({
+        db,
+        keys,
+        limits: rateLimits,
+        reserve: memoryStore(clock),
+      });
       const allowed = new Map<string, number>();
       for (const { advance, who } of steps) {
         clock.now += advance;
         let ok = true;
         try {
-          await limiter.reserve(tx, 'email_send', [who]);
+          await limiter.reserve('email_send', [who]);
         } catch (error) {
           expect(error).toBeInstanceOf(AuthError);
           expect((error as AuthError).retryAfterSeconds).toBeGreaterThanOrEqual(1);

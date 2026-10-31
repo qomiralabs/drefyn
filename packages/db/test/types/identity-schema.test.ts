@@ -1,25 +1,43 @@
 // Checked by `pnpm typecheck`: each @ts-expect-error fails the build if the line below it
 // starts to compile. The function body never runs; vitest only confirms the file loads.
 import type { UserRef } from '@drefyn/tenancy';
-import type { Insertable, Updateable } from 'kysely';
+import type { Insertable, Transaction, Updateable } from 'kysely';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   withApiKeyLimiter,
   withAuth,
+  withTenant,
   withUser,
   type ApiKeyLimiterSchema,
   type AuthDatabase,
   type AuthSchema,
   type Database,
   type OrganizationSchema,
+  type TenantSchema,
   type UserSchema,
 } from '../../src/index.ts';
+import type { TenantRef } from '@drefyn/tenancy';
 
 declare const db: Database;
 declare const authDb: AuthDatabase;
 declare const user: UserRef;
+declare const tenant: TenantRef;
 
 async function compileOnly(): Promise<void> {
+  // Project work can name no identity or limiter table: a tenant path with an attacker
+  // supplied organization must not reach the API key throttle or anyone's address.
+  await withTenant(db, tenant, async (tx) => {
+    // @ts-expect-error api_key_failures is the limiter's alone
+    await tx
+      .insertInto('api_key_failures')
+      .values({ key_hmac: Buffer.alloc(32) })
+      .execute();
+    // @ts-expect-error users is not a project table
+    await tx.selectFrom('users').select('id').execute();
+    // @ts-expect-error nor are the sign in tables
+    await tx.selectFrom('auth_rate_limits').select('bucket').execute();
+  });
+
   await withUser(db, user, async (tx) => {
     await tx.selectFrom('users').select(['id', 'email', 'display_name', 'created_at']).execute();
     // @ts-expect-error drefyn_app holds no select on email_verified_at
@@ -100,6 +118,17 @@ describe('identity schema types', () => {
     expectTypeOf<keyof Updateable<AuthSchema['users']>>().toEqualTypeOf<
       'email' | 'email_normalized' | 'email_verified_at' | 'updated_at'
     >();
+  });
+
+  it('give project scope none of the identity or limiter tables', () => {
+    expectTypeOf(withTenant<number>)
+      .parameter(2)
+      .parameter(0)
+      .toEqualTypeOf<Transaction<TenantSchema>>();
+    expectTypeOf<TenantSchema>().not.toHaveProperty('users');
+    expectTypeOf<TenantSchema>().not.toHaveProperty('api_key_failures');
+    expectTypeOf<TenantSchema>().not.toHaveProperty('sessions');
+    expectTypeOf<TenantSchema>().not.toHaveProperty('auth_rate_limits');
   });
 
   it('keep organization scope away from every identity table but users', () => {

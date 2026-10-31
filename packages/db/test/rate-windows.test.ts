@@ -1,15 +1,15 @@
-import type { Transaction } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import {
   reserveApiKeyFailureWindows,
   reserveAuthRateWindows,
-  type ApiKeyLimiterSchema,
-  type AuthSchema,
+  type AuthDatabase,
+  type Database,
 } from '../src/index.ts';
 
-// Every refusal happens before SQL, so a transaction that cannot run anything is enough.
-const authTx = {} as Transaction<AuthSchema>;
-const apiTx = {} as Transaction<ApiKeyLimiterSchema>;
+// Every refusal happens before a connection is opened, so handles that open nothing are
+// enough; the message shows the request itself was refused, not the handle.
+const authTx = {} as AuthDatabase;
+const apiTx = {} as Database;
 const KEY = new Uint8Array(32);
 
 describe('rate window requests', () => {
@@ -33,13 +33,17 @@ describe('rate window requests', () => {
   ])('refuse %s', async (_label, request) => {
     await expect(reserveAuthRateWindows(authTx, request)).rejects.toMatchObject({
       code: 'DB_CONFIG_INVALID',
+      message: expect.stringContaining('rate window request') as unknown,
     });
   });
 
   it('refuse an API key failure key that is not 32 bytes', async () => {
     await expect(
       reserveApiKeyFailureWindows(apiTx, { keyHmac: new Uint8Array(33), windowSeconds: [60] }),
-    ).rejects.toMatchObject({ code: 'DB_CONFIG_INVALID' });
+    ).rejects.toMatchObject({
+      code: 'DB_CONFIG_INVALID',
+      message: expect.stringContaining('rate window request') as unknown,
+    });
   });
 
   it('never put the key bytes in the error', async () => {
