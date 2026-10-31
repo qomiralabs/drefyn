@@ -434,9 +434,10 @@ test.describe('account initials', () => {
         // pairs, which caption type in a 32 px circle allows, and 4 px above and below.
         const side = (sizes.width - sizes.text) / 2 - 1;
         const above = (sizes.height - sizes.textHeight) / 2 - 1;
-        console.log(
-          `${initials} at ${size}: ${side.toFixed(1)} px beside, ${above.toFixed(1)} px above`,
-        );
+        test.info().annotations.push({
+          type: 'clear space',
+          description: `${initials} at ${size}: ${side.toFixed(1)} px beside, ${above.toFixed(1)} px above`,
+        });
         expect(side).toBeGreaterThanOrEqual(2);
         expect(above).toBeGreaterThanOrEqual(4);
       });

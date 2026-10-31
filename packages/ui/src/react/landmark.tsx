@@ -30,8 +30,8 @@ export function useLandmark(
 ): LandmarkProps {
   // React Aria registers only a ref that holds an element, so an empty one leaves the cycle.
   const none = useRef<HTMLElement>(null);
-  // The landmark itself takes focus, as in React Aria's own regions. Focusing it directly
-  // skips the state change its default focus makes, so the page does not render on F6.
+  // The landmark itself takes focus, as in React Aria's own regions, through the element
+  // rather than React Aria's default, which sets state in this component to do it.
   const focus = useCallback(() => {
     ref.current?.focus();
   }, [ref]);
