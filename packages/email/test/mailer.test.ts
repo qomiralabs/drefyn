@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto';
+import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMailer,
+  parseEmailConfig,
   type EmailConfig,
   type Envelope,
   type MailTransport,
   type SendResult,
   type TransportError,
+  type TransportProgress,
 } from '../src/index.ts';
 import { createTestTransport, type TestTransport } from '../src/testing.ts';
-import { ORIGIN, TENANT, recorder, signIn, smtpConfig } from './support.ts';
+import { ORIGIN, TENANT, recorder, runs, signIn, smtpConfig } from './support.ts';
 
 // Only timers and Date are faked: React's server renderer schedules its own work with
 // setImmediate, which has to keep running for a render to finish.
@@ -45,9 +48,9 @@ function spyOn(test: TestTransport = createTestTransport()): Spy {
     closed: 0,
     transport: {
       kind: 'test',
-      deliver: (envelope, mail, signal) => {
+      deliver: (envelope, mail, signal, progress) => {
         spy.deliveries.push({ envelope, signal });
-        return test.deliver(envelope, mail, signal);
+        return test.deliver(envelope, mail, signal, progress);
       },
       close: () => {
         spy.closed += 1;
@@ -90,11 +93,49 @@ describe('a mailer with no transport', () => {
     expect(await mailer.drain(10)).toEqual({ dropped: 0 });
   });
 
-  it('refuses to start with SMTP config and no transport', () => {
+  it('builds the SMTP transport from config when none is passed', () => {
     const rec = recorder();
-    expect(() => createMailer(smtpConfig(), { linkOrigin: ORIGIN, ...rec })).toThrow(
-      'email transport is required',
+    const mailer = createMailer(smtpConfig(), { linkOrigin: ORIGIN, ...rec });
+    expect(mailer.configured).toBe(true);
+  });
+
+  it('never throws for any config the parser returns', () => {
+    const value = fc.oneof(
+      fc.constant(undefined),
+      fc.constantFrom('', 'true', 'false', 'none', 'implicit', 'starttls', 'TLSv1.3', '465', '25'),
+      fc.integer({ min: 0, max: 70_000 }).map(String),
+      fc.string({ maxLength: 12 }),
     );
+    const env = fc.record({
+      DREFYN_EMAIL_TRANSPORT: fc.constantFrom('smtp', 'none', undefined),
+      DREFYN_SMTP_HOST: fc.constantFrom('smtp.drefyn.test', '127.0.0.1', '::1', undefined),
+      DREFYN_SMTP_PORT: value,
+      DREFYN_SMTP_TLS: value,
+      DREFYN_SMTP_ALLOW_PLAINTEXT: value,
+      DREFYN_SMTP_USER: fc.constantFrom('relay', undefined),
+      DREFYN_SMTP_PASSWORD: fc.constantFrom('pw', undefined),
+      DREFYN_SMTP_TLS_MIN_VERSION: value,
+      DREFYN_SMTP_CONNECT_TIMEOUT_MS: value,
+      DREFYN_SMTP_SEND_DEADLINE_MS: value,
+      DREFYN_SMTP_MAX_CONCURRENT: value,
+      DREFYN_EMAIL_QUEUE_MAX: value,
+    });
+    let built = 0;
+    fc.assert(
+      fc.property(env, (patch) => {
+        const parsed = parseEmailConfig({
+          DREFYN_EMAIL_FROM: 'mail@drefyn.test',
+          ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
+        });
+        if (!parsed.ok) return;
+        const rec = recorder();
+        const mailer = createMailer(parsed.value, { linkOrigin: ORIGIN, ...rec });
+        expect(mailer.configured).toBe(parsed.value.kind === 'smtp');
+        built += 1;
+      }),
+      { ...runs, numRuns: 300 },
+    );
+    expect(built).toBeGreaterThan(30);
   });
 });
 
@@ -293,6 +334,92 @@ describe('deadline', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await until(() => settled !== undefined);
     expect(settled && !settled.ok && settled.error.code).toBe('email.timeout');
+  });
+
+  it.each([
+    ['connect', 'email.timeout', true],
+    ['auth', 'email.timeout', true],
+    ['envelope', 'email.timeout', true],
+    ['data', 'email.unknown_outcome', false],
+    ['after_data', 'email.unknown_outcome', false],
+  ] as const)(
+    'maps a deadline after the transport reached %s to %s',
+    async (phase, code, retryable) => {
+      const { mailer, spy, lines } = setup();
+      spy.test.hangNext(phase);
+      let settled: SendResult | undefined;
+      void send(mailer).then((r) => (settled = r));
+      await until(() => spy.deliveries.length === 1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await until(() => settled !== undefined);
+      expect(settled).toEqual({ ok: false, error: { code, retryable } });
+      expect(spy.deliveries).toHaveLength(1);
+      const outcome = code === 'email.timeout' ? 'timeout' : 'unknown_outcome';
+      expect(lines.find((l) => l.event === 'email.send')?.fields['outcome']).toBe(outcome);
+    },
+  );
+
+  it('keeps the furthest phase a transport reported and ignores nonsense', async () => {
+    let report: TransportProgress | undefined;
+    const transport: MailTransport = {
+      kind: 'test',
+      deliver: (_envelope, _mail, signal, progress) => {
+        report = progress;
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ ok: false, error: { code: 'email.timeout', phase: 'connect' } });
+          });
+        });
+      },
+      close: () => Promise.resolve(),
+    };
+    const rec = recorder();
+    const mailer = createMailer(smtpConfig(), { linkOrigin: ORIGIN, ...rec, transport });
+    let settled: SendResult | undefined;
+    void send(mailer).then((r) => (settled = r));
+    await until(() => report !== undefined);
+    report?.('data');
+    report?.('connect');
+    report?.('nonsense' as never);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await until(() => settled !== undefined);
+    expect(settled && !settled.ok && settled.error.code).toBe('email.unknown_outcome');
+  });
+
+  it('holds the slot after the deadline until the transport lets go of the connection', async () => {
+    const releases: (() => void)[] = [];
+    let calls = 0;
+    const transport: MailTransport = {
+      kind: 'test',
+      deliver: () => {
+        calls += 1;
+        return new Promise((resolve) => {
+          releases.push(() => {
+            resolve({ ok: false, error: { code: 'email.timeout', phase: 'connect' } });
+          });
+        });
+      },
+      close: () => Promise.resolve(),
+    };
+    const rec = recorder();
+    const mailer = createMailer(smtpConfig({ DREFYN_SMTP_MAX_CONCURRENT: '1' }), {
+      linkOrigin: ORIGIN,
+      ...rec,
+      transport,
+      clock: () => Date.now(),
+    });
+    let first: SendResult | undefined;
+    void send(mailer, 'code:1').then((r) => (first = r));
+    void send(mailer, 'code:2');
+    await until(() => calls === 1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await until(() => first !== undefined);
+    expect(first && !first.ok && first.error.code).toBe('email.timeout');
+    // The caller has its answer, but the first connection is still open.
+    await flush();
+    expect(calls).toBe(1);
+    releases[0]?.();
+    await until(() => calls === 2);
   });
 });
 
