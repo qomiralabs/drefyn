@@ -26,9 +26,34 @@ const icons = Object.entries(components)
   .filter(([name]) => name.startsWith('Icon'))
   .map(([name, value]) => [name, value as FunctionComponent<IconProps>] as const);
 
-// The icons this batch draws: state shapes, the error mark and the menu triggers. The set
-// grows with the components that need it, never ahead of them.
-const V1 = ['alert', 'check', 'chevron-down', 'clock', 'cross', 'hatch', 'more'];
+// State shapes, the error mark, the menu triggers and the dashboard shell's icons. The set
+// grows with the screens that need it, never ahead of them.
+const V1 = [
+  'alert',
+  'card',
+  'chart',
+  'check',
+  'chevron-down',
+  'clock',
+  'code',
+  'commit',
+  'cross',
+  'globe',
+  'hatch',
+  'home',
+  'inbox',
+  'incident',
+  'lock',
+  'menu',
+  'more',
+  'page',
+  'pulse',
+  'schema',
+  'search',
+  'settings',
+  'up-down',
+  'users',
+];
 
 const SHAPES = 'path, line, rect, circle, polyline, polygon, ellipse';
 
@@ -124,4 +149,38 @@ describe('the icon set', () => {
       });
     });
   }
+});
+
+describe('Mark', () => {
+  it('draws the d and its ascender on its own 100 unit grid in the current colour', () => {
+    const { container } = render(createElement(components.Mark));
+    const svg = only(container.querySelectorAll('svg'));
+    expect(svg.getAttribute('viewBox')).toBe('0 0 100 100');
+    expect(svg.getAttribute('fill')).toBe('none');
+    expect(svg.getAttribute('stroke')).toBe('currentColor');
+    expect(svg.getAttribute('stroke-linejoin')).toBe('miter');
+    expect(svg.getAttribute('data-mark')).toBe('');
+    expect(svg.querySelectorAll('path')).toHaveLength(2);
+  });
+
+  it('is decorative by default and a named image with a label', () => {
+    const { container, rerender } = render(createElement(components.Mark));
+    const svg = () => only(container.querySelectorAll('svg'));
+    expect(svg().getAttribute('aria-hidden')).toBe('true');
+    expect(svg().getAttribute('focusable')).toBe('false');
+    rerender(createElement(components.Mark, { label: 'Drefyn' }));
+    expect(screen.getByRole('img', { name: 'Drefyn' })).toBe(svg());
+    expect(svg().hasAttribute('aria-hidden')).toBe(false);
+  });
+
+  it('takes its size from the icon size tokens, medium by default', () => {
+    const { container, rerender } = render(createElement(components.Mark));
+    const svg = () => only(container.querySelectorAll('svg'));
+    expect(classesOf(svg())).toContain('size-icon-md');
+    for (const size of ['sm', 'md', 'lg'] as const) {
+      rerender(createElement(components.Mark, { size }));
+      expect(classesOf(svg()), size).toContain(`size-icon-${size}`);
+      expect(svg().hasAttribute('width')).toBe(false);
+    }
+  });
 });

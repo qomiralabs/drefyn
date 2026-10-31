@@ -5,9 +5,11 @@ import {
   commandBar,
   NEEDS_YOU,
   main,
+  MOBILE,
   openShell,
   products,
   ROUTES,
+  TABLET,
   THEMES,
   useTheme,
 } from './fixtures.ts';
@@ -327,7 +329,8 @@ test.describe('command bar content', () => {
     const bar = await open(page);
     const options = bar.getByRole('option');
     for (const option of await options.all()) {
-      await expect(option.locator(':scope > svg[data-icon]')).toHaveCount(1);
+      // The kind icon leads the row, in a span that gives it the secondary ink.
+      await expect(option.locator(':scope > span:first-child > svg[data-icon]')).toHaveCount(1);
     }
     await expect(options.filter({ hasText: 'Payments API docs, Docs project' })).toContainText(
       'Out of date',
@@ -354,11 +357,11 @@ test.describe('command bar content', () => {
     await expect(bar.getByRole('option')).toHaveText([/^Plan and usage/]);
   });
 
-  test('the clear button is the brand close icon and empties the field', async ({ page }) => {
+  test('the clear button is the package cross icon and empties the field', async ({ page }) => {
     const bar = await open(page);
     await page.keyboard.type('pay');
     const clear = bar.getByRole('button', { name: 'Clear search' });
-    await expect(clear.locator('svg[data-icon="close"]')).toHaveCount(1);
+    await expect(clear.locator('svg[data-icon="cross"]')).toHaveCount(1);
     await clear.click();
     await expect(bar.getByRole('combobox')).toHaveValue('');
   });
@@ -384,4 +387,60 @@ test.describe('command bar content', () => {
     await bar.getByRole('button', { name: 'Clear search' }).click();
     await expect(status).toHaveText('');
   });
+});
+
+// Two initials need clear space inside their circle, and the circle lines up with the other
+// controls in the bar. MW and WM are about the widest pairs Inter sets.
+test.describe('account initials', () => {
+  const SIZES = { desktop: { width: 1280, height: 800 }, tablet: TABLET, phone: MOBILE };
+  for (const [size, viewport] of Object.entries(SIZES)) {
+    for (const initials of ['MO', 'MW', 'WM']) {
+      test(`${initials} has room inside a circle as tall as the inbox at ${size} width`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await openShell(page, ROUTES.overview);
+        // The trigger itself is the circle; the initials are the text inside it. Held as a
+        // handle, since the text it is found by changes next.
+        const account = banner(page).getByRole('button', { name: /account for/ });
+        const label = await account.getByText('MO', { exact: true }).elementHandle();
+        await label.evaluate((el, text) => {
+          el.textContent = text;
+        }, initials);
+        const inbox = banner(page).getByRole('button', { name: /^Inbox/ });
+        const sizes = await label.evaluate((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const text = range.getBoundingClientRect();
+          const circle = el.closest('button');
+          if (circle === null) throw new Error('the initials are not inside the trigger');
+          const box = circle.getBoundingClientRect();
+          return {
+            width: box.width,
+            height: box.height,
+            text: text.width,
+            textHeight: text.height,
+          };
+        });
+        // Edge and fills follow the circle: no square behind it.
+        await expect(account).toHaveCSS('border-top-left-radius', '9999px');
+        await expect(account).toHaveCSS('border-bottom-right-radius', '9999px');
+        const inboxBox = await inbox.boundingBox();
+        expect(inboxBox).not.toBeNull();
+        if (inboxBox === null) return;
+        expect(sizes.height).toBe(inboxBox.height);
+        expect(sizes.width).toBe(sizes.height);
+        // Clear space inside the 1 px edge: at least the 2 px space step beside the widest
+        // pairs, which caption type in a 32 px circle allows, and 4 px above and below.
+        const side = (sizes.width - sizes.text) / 2 - 1;
+        const above = (sizes.height - sizes.textHeight) / 2 - 1;
+        test.info().annotations.push({
+          type: 'clear space',
+          description: `${initials} at ${size}: ${side.toFixed(1)} px beside, ${above.toFixed(1)} px above`,
+        });
+        expect(side).toBeGreaterThanOrEqual(2);
+        expect(above).toBeGreaterThanOrEqual(4);
+      });
+    }
+  }
 });

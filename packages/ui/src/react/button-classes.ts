@@ -12,12 +12,25 @@ export interface ButtonLook {
   busy?: boolean;
   // A square button that shows only an icon, such as a menu's "more" trigger.
   iconOnly?: boolean;
+  // Round for a control that is a circle, such as the account avatar, so its edge and fills
+  // follow the circle instead of sitting square behind it.
+  shape?: ButtonShape;
 }
+
+export type ButtonShape = 'square' | 'round';
+
+const SHAPE: Record<ButtonShape, string> = { square: 'rounded-sm', round: 'rounded-full' };
+
+// A round secondary control is a chip, such as initials, so it rests on the raised fill
+// where a square one rests on the ground. Hover and pressed fills are the same for both.
+const ROUND_REST: Partial<Record<ButtonLookVariant, string>> = {
+  secondary: 'border-rule-strong bg-raised text-body',
+};
 
 // Both labels of a button that can be busy sit in one grid cell, so the grid is always
 // there and a button looks the same whether or not it can be busy.
 const BASE =
-  'inline-grid shrink-0 place-items-center rounded-sm border font-medium whitespace-nowrap select-none transition-colors duration-fast ease-enter focus-visible:focus-ring';
+  'inline-grid shrink-0 place-items-center border font-medium whitespace-nowrap select-none transition-colors duration-fast ease-enter focus-visible:focus-ring';
 
 const SIZE: Record<ButtonSize, string> = {
   sm: 'h-control-sm px-8 text-body-s',
@@ -65,13 +78,15 @@ export function buttonClasses({
   disabled,
   busy = false,
   iconOnly = false,
+  shape = 'square',
 }: ButtonLook): string {
   const box = iconOnly ? ICON_ONLY[size] : SIZE[size];
+  const rest = (shape === 'round' ? ROUND_REST[variant] : undefined) ?? REST[variant];
   let paint: string;
   if (disabled) paint = DISABLED[variant];
-  else if (busy) paint = `${REST[variant]} data-busy:cursor-progress`;
-  else paint = `${REST[variant]} ${LIVE[variant]}`;
-  return `${BASE} ${box} ${paint}`;
+  else if (busy) paint = `${rest} data-busy:cursor-progress`;
+  else paint = `${rest} ${LIVE[variant]}`;
+  return `${BASE} ${SHAPE[shape]} ${box} ${paint}`;
 }
 
 // The cell each label takes. Both labels of a button that can be busy share it.

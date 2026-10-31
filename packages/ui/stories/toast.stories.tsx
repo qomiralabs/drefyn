@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Button, toast, ToastRegion } from '../src/react/index.ts';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Button, toast, ToastRegion, useLandmark } from '../src/react/index.ts';
 import { tokens } from '../src/index.ts';
 
 const seconds = (ms: number) => ms / 1000;
@@ -142,4 +142,63 @@ export const Stack: Story = {
       {(show) => <Button onClick={show}>Show three</Button>}
     </Frame>
   ),
+};
+
+// A page that holds its own landmarks through useLandmark, as the dashboard shell does, so
+// F6 moves bar, sidebar, main, notifications and round again. The docs page already has its
+// own landmarks, so there the parts are plain boxes outside the cycle.
+function InAPageView({ landmarks }: { landmarks: boolean }) {
+  // Div refs fit both element kinds the parts render as.
+  const bar = useRef<HTMLDivElement>(null);
+  const nav = useRef<HTMLDivElement>(null);
+  const main = useRef<HTMLDivElement>(null);
+  const skip = !landmarks;
+  const barProps = useLandmark(bar, { role: 'banner', skip });
+  const navProps = useLandmark(nav, { role: 'navigation', label: 'Pages', skip });
+  const mainProps = useLandmark(main, { role: 'main', skip });
+  const Bar = landmarks ? 'header' : 'div';
+  const Nav = landmarks ? 'nav' : 'div';
+  const Main = landmarks ? 'main' : 'div';
+  const zone = 'outline-none focus-visible:focus-ring-inset';
+  return (
+    <div className="flex min-h-full flex-col">
+      <Bar
+        ref={bar}
+        {...barProps}
+        className={`flex items-center gap-12 border-b border-rule px-24 py-12 ${zone}`}
+      >
+        <span className="font-medium text-ink">Payments API</span>
+        <Button>Publish</Button>
+      </Bar>
+      <div className="flex flex-1">
+        <Nav
+          ref={nav}
+          {...navProps}
+          className={`flex w-shell-nav-collapsed flex-col gap-8 border-e border-rule p-12 sm:w-shell-nav ${zone}`}
+        >
+          <a href="#pricing" className="rounded-sm text-body focus-visible:focus-ring">
+            Pricing
+          </a>
+          <a href="#guides" className="rounded-sm text-body focus-visible:focus-ring">
+            Guides
+          </a>
+        </Nav>
+        <Main ref={main} {...mainProps} className={`min-w-0 flex-1 ${zone}`}>
+          <Frame toasts={(run) => [archived(run)]} now={landmarks}>
+            {(show) => (
+              <>
+                <Button onClick={show}>Archive page</Button>
+                <Button>Edit page</Button>
+              </>
+            )}
+          </Frame>
+        </Main>
+      </div>
+    </div>
+  );
+}
+
+export const InAPage: Story = {
+  name: 'In a page',
+  render: (_args, context) => <InAPageView landmarks={inStoryView(context)} />,
 };

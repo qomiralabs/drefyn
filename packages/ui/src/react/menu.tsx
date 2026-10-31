@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Button, Menu as AriaMenu, MenuTrigger, Popover } from 'react-aria-components';
-import { buttonClasses, LABEL_CELL, type ButtonSize } from './button-classes.ts';
+import { buttonClasses, LABEL_CELL, type ButtonShape, type ButtonSize } from './button-classes.ts';
 
 export interface MenuProps {
   // What the trigger shows.
@@ -11,6 +11,9 @@ export interface MenuProps {
   triggerLabel?: string;
   variant?: 'secondary' | 'quiet';
   size?: ButtonSize;
+  // Round when the trigger is a circle, such as initials; its edge, hover and open fills
+  // then follow the circle.
+  triggerShape?: ButtonShape;
   // The menu's accessible name; the trigger names it when this is not set.
   label?: string;
   onAction?: (id: string) => void;
@@ -30,6 +33,7 @@ export function Menu({
   triggerLabel,
   variant = 'secondary',
   size = 'md',
+  triggerShape = 'square',
   label,
   onAction,
   defaultOpen = false,
@@ -67,7 +71,7 @@ export function Menu({
       <Button
         ref={triggerRef}
         {...(iconOnly ? { 'aria-label': triggerLabel } : {})}
-        className={`${buttonClasses({ variant, size, disabled: false, iconOnly })} aria-expanded:bg-pressed`}
+        className={`${buttonClasses({ variant, size, disabled: false, iconOnly, shape: triggerShape })} aria-expanded:bg-pressed`}
       >
         <span className={LABEL_CELL}>{trigger}</span>
       </Button>
