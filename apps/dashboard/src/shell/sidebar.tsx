@@ -1,20 +1,22 @@
 'use client';
+import { IconCross, IconPage, IconPulse, IconSchema, useLandmark } from '@drefyn/ui/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import type { ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
-import { ICON_BY_NAME, IconClose, IconPage, IconPulse, IconSchema } from './icons.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
 import { parseShellPath, shellHref } from './route.ts';
+import { ICON_BY_NAME } from './section-icons.ts';
 import { ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
 import { OrganizationMenu } from './top-bar.tsx';
 
-const ICONS: Record<SectionIcon, (props: { tone?: 'current' | 'secondary' }) => ReactNode> =
-  ICON_BY_NAME;
+type ShellIcon = (props: { size?: 'sm' | 'md' }) => ReactNode;
 
-const PRODUCT_ICON: Record<ProductId, (props: { tone?: 'current' | 'secondary' }) => ReactNode> = {
+const ICONS: Record<SectionIcon, ShellIcon> = ICON_BY_NAME;
+
+const PRODUCT_ICON: Record<ProductId, ShellIcon> = {
   docs: IconPage,
   studio: IconSchema,
   status: IconPulse,
@@ -22,6 +24,17 @@ const PRODUCT_ICON: Record<ProductId, (props: { tone?: 'current' | 'secondary' }
 
 // Labels leave the screen on the tablet rail but stay in the accessibility tree.
 const RAIL_HIDDEN = 'sm:max-md:sr-only';
+
+// Below 40rem the sidebar is a drawer, out of the page until it opens.
+const PHONE = '(width < 40rem)';
+const onPhoneChange = (onChange: () => void) => {
+  const query = window.matchMedia(PHONE);
+  query.addEventListener('change', onChange);
+  return () => {
+    query.removeEventListener('change', onChange);
+  };
+};
+const onPhone = () => window.matchMedia(PHONE).matches;
 
 interface Item {
   readonly href: string;
@@ -43,7 +56,9 @@ function NavLink({ item, current }: { item: Item; current: boolean }): ReactNode
           : 'border-transparent text-body hover:bg-hover hover:text-ink',
       ].join(' ')}
     >
-      <Icon tone={current ? 'current' : 'secondary'} />
+      <span className={current ? 'inline-flex shrink-0' : 'inline-flex shrink-0 text-secondary'}>
+        <Icon />
+      </span>
       <span className={`min-w-0 flex-1 truncate ${RAIL_HIDDEN}`}>{item.label}</span>
       {item.meta === undefined ? null : (
         <>
@@ -62,6 +77,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const here = parseShellPath(pathname);
   const { org, drawerOpen, setDrawerOpen } = useShell();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const project = here?.project === undefined ? undefined : data.projects[here.project];
   const product = project === undefined ? undefined : here?.product;
 
@@ -87,6 +103,13 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
         }));
   const productLabel = PRODUCTS.find((p) => p.id === product)?.label;
   const label = project?.name ?? data.organization.name;
+  // A closed drawer is display none, which cannot take focus, so F6 passes it by.
+  const phone = useSyncExternalStore(onPhoneChange, onPhone, () => false);
+  const landmark = useLandmark(navRef, {
+    role: 'navigation',
+    label,
+    skip: phone && !drawerOpen,
+  });
 
   // The drawer is modal on phones: everything else is inert, focus starts on its close
   // button, Escape and the scrim close it, and focus goes back to the menu button.
@@ -134,10 +157,10 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           nav inside stays under the bar. On phones the column steps aside for the drawer. */}
       <div className="contents sm:block sm:shrink-0 sm:border-e sm:border-rule">
         <nav
+          ref={navRef}
           id="shell-nav"
-          aria-label={label}
           data-region="nav"
-          tabIndex={-1}
+          {...landmark}
           className={[
             'flex-col gap-16 overflow-y-auto bg-ground px-8 py-12 outline-none focus-visible:focus-ring-inset',
             'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav',
@@ -158,7 +181,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
                 }}
                 className="inline-grid size-control-md cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring"
               >
-                <IconClose />
+                <IconCross />
               </button>
             </div>
             <ProductsNav org={org} label="Products, in menu" opens={data.opens} variant="drawer" />

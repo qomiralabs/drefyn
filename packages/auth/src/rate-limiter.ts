@@ -21,6 +21,8 @@ export interface AuthMetrics {
 // Fields are ids, bucket names and hashed keys; never an address, an IP or a code.
 export interface AuthLogger {
   warn(event: string, fields: Readonly<Record<string, string | number | boolean>>): void;
+  // Optional, so a sink that only takes warnings still fits; routine events are then dropped.
+  info?(event: string, fields: Readonly<Record<string, string | number | boolean>>): void;
 }
 
 export interface RateLimiterDeps {

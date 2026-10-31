@@ -69,3 +69,15 @@ export function quietWarn(
     // A log line is never worth a failed request.
   }
 }
+
+export function quietInfo(
+  logger: AuthLogger,
+  event: string,
+  fields: Readonly<Record<string, string>>,
+): void {
+  try {
+    logger.info?.(event, fields);
+  } catch {
+    // A log line is never worth a failed request.
+  }
+}

@@ -1,10 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   addField,
   banner,
   commandBar,
+  DESKTOP,
   focused,
   focusedRegion,
+  main,
+  MOBILE,
+  notifications,
   openShell,
   products,
   ROUTES,
@@ -34,6 +38,9 @@ test('Tab goes skip link, top bar left to right, then the sidebar', async ({
     expect.stringMatching(/^a Overview/),
   ]);
 });
+
+// Text only the command bar's own chunk carries: its empty results line.
+const COMMAND_BAR_MARK = 'Nothing matches';
 
 test.describe('command bar', () => {
   for (const key of ['Control+k', 'Meta+k']) {
@@ -98,14 +105,27 @@ test.describe('command bar', () => {
   test('a failed chunk shows the error toast, no spinner, and the next press works', async ({
     page,
   }) => {
+    // The command bar's chunk fails however and whenever it is fetched, by its content, not
+    // by timing: a route set after the load missed a copy fetched while the page settled.
+    let blocked = 0;
+    await page.route('**/_next/static/**/*.js', async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      if (body.includes(COMMAND_BAR_MARK)) {
+        blocked += 1;
+        await route.abort('failed');
+        return;
+      }
+      await route.fulfill({ response, body });
+    });
     await openShell(page, ROUTES.overview);
-    await page.waitForLoadState('networkidle');
-    await page.route('**/_next/static/**/*.js', (route) => route.abort('failed'));
     await page.keyboard.press('ControlOrMeta+k');
     const toast = page.getByRole('region', { name: /notification/i });
-    await expect(toast.getByText('Could not open search. Try again.')).toBeVisible();
+    // An error: announced at once, and it stays until dismissed.
+    await expect(toast.getByRole('alert')).toHaveText('Could not open search. Try again.');
     await expect(commandBar(page)).toBeHidden();
     await expect(page.getByRole('progressbar')).toHaveCount(0);
+    expect(blocked, 'the command bar chunk was requested and refused').toBeGreaterThan(0);
     await page.unrouteAll({ behavior: 'wait' });
     await page.keyboard.press('ControlOrMeta+k');
     await expect(commandBar(page)).toBeVisible();
@@ -122,6 +142,72 @@ test('F6 and Shift+F6 move between the top bar, the sidebar and main', async ({ 
   expect(forward).toEqual(['banner', 'nav Payments API docs', 'main', 'banner']);
   await page.keyboard.press('Shift+F6');
   expect(await focusedRegion(page)).toBe('main');
+});
+
+// A placeholder action in the account menu says it is not available yet in a toast, which
+// is the shared one from @drefyn/ui.
+async function showToast(page: Page): Promise<void> {
+  const account = banner(page).getByRole('button', { name: /^MO/ });
+  await account.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: /Keyboard shortcuts/ }).click();
+  await expect(
+    notifications(page).getByText('The shortcuts sheet is not available yet.'),
+  ).toBeVisible();
+}
+
+test('F6 goes into the notifications after main and out again, both ways', async ({ page }) => {
+  await openShell(page, ROUTES.project);
+  await showToast(page);
+  await main(page).focus();
+  const forward: string[] = [];
+  for (let i = 0; i < 2; i += 1) {
+    await page.keyboard.press('F6');
+    forward.push(await focusedRegion(page));
+  }
+  expect(forward).toEqual(['notifications', 'banner']);
+  const back: string[] = [];
+  for (let i = 0; i < 2; i += 1) {
+    await page.keyboard.press('Shift+F6');
+    back.push(await focusedRegion(page));
+  }
+  expect(back).toEqual(['notifications', 'main']);
+  // The toast never took focus on its own: it got it only from F6.
+  await expect(notifications(page)).toBeVisible();
+});
+
+test('the toast is the shared one: bottom left, Shift+F6 from the bar reaches it, Dismiss closes it', async ({
+  page,
+  browserName,
+}) => {
+  await page.setViewportSize(DESKTOP);
+  await openShell(page, ROUTES.overview);
+  await showToast(page);
+  const region = notifications(page);
+  const box = await region.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  expect(box.x).toBeLessThan(DESKTOP.width / 4);
+  expect(DESKTOP.height - (box.y + box.height)).toBeLessThanOrEqual(24 + 1);
+  // Focus is back on the account menu in the bar; the notifications are last in the cycle.
+  await page.keyboard.press('Shift+F6');
+  await expect(region).toBeFocused();
+  await page.keyboard.press(tabKey(browserName));
+  await page.keyboard.press(tabKey(browserName));
+  await expect(region.getByRole('button', { name: 'Dismiss' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(region).toHaveCount(0);
+});
+
+test('on a phone F6 skips the sidebar that stepped aside for the drawer', async ({ page }) => {
+  await page.setViewportSize(MOBILE);
+  await openShell(page, ROUTES.project);
+  const forward: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    await page.keyboard.press('F6');
+    forward.push(await focusedRegion(page));
+  }
+  expect(forward).toEqual(['banner', 'main', 'banner']);
 });
 
 test('G then 3 opens Status, but never from inside a field', async ({ page }) => {

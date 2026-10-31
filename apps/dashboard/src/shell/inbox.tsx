@@ -1,9 +1,9 @@
 'use client';
+import { IconInbox } from '@drefyn/ui/react';
 import Link from 'next/link';
 import { useRef, useState, type ReactNode } from 'react';
 import { Dialog, Heading, Popover } from 'react-aria-components';
 import type { InboxItem } from './data.ts';
-import { IconInbox } from './icons.tsx';
 
 // One inbox for the organization. The count is a plain number in a neutral keycap: red
 // means broken, and nothing here is broken.

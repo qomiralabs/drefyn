@@ -40,6 +40,21 @@ export {
   type StartedSession,
   type StepUpMethod,
 } from './sessions.ts';
+export { type AccessContext, type AccessResult } from './access.ts';
+export {
+  createOrganizations,
+  type InitialTier,
+  type OrganizationStore,
+  type OrganizationSummary,
+  type Organizations,
+  type OrganizationsDeps,
+} from './organizations.ts';
+export {
+  RESERVED_SLUGS,
+  SLUG_PATTERN,
+  parseOrganizationName,
+  parseSlug,
+} from './organization-rules.ts';
 export {
   type AuthMailer,
   type PasswordVerifier,

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { PLACEHOLDER_SHELL } from '../../fixtures/shell.ts';
 import { guardOrganization } from '../../server/guard.ts';
 import { ShellFrame } from '../../shell/frame.tsx';
+import { ShellMain } from '../../shell/main.tsx';
 import { Sidebar } from '../../shell/sidebar.tsx';
 import { TopBar } from '../../shell/top-bar.tsx';
 
@@ -28,13 +29,7 @@ export default async function OrgLayout({
       <TopBar data={PLACEHOLDER_SHELL} />
       <div className="flex">
         <Sidebar data={PLACEHOLDER_SHELL} />
-        <main
-          id="main"
-          tabIndex={-1}
-          className="min-w-0 flex-1 outline-none focus-visible:focus-ring-inset"
-        >
-          {children}
-        </main>
+        <ShellMain>{children}</ShellMain>
       </div>
     </ShellFrame>
   );

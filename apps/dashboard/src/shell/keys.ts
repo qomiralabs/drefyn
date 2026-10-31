@@ -1,13 +1,5 @@
 // Keyboard rules for the shell, kept apart from React so they can be tested on their own.
 
-// Where focus goes on F6 (forward) or Shift+F6 (back). From outside every region, forward
-// starts at the first and back at the last.
-export function nextRegion(current: number, count: number, back: boolean): number {
-  if (count === 0) return -1;
-  if (current < 0) return back ? count - 1 : 0;
-  return (current + (back ? count - 1 : 1)) % count;
-}
-
 // Single key shortcuts must not fire while someone types.
 export function isTyping(el: Element | null): boolean {
   if (el === null) return false;

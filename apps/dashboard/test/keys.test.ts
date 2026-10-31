@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTyping, nextRegion, SEQUENCE_WINDOW_MS, sequenceTarget } from '../src/shell/keys.ts';
+import { isTyping, SEQUENCE_WINDOW_MS, sequenceTarget } from '../src/shell/keys.ts';
 
 const el = (tagName: string, attrs: Record<string, string> = {}, editable = false) =>
   ({
@@ -7,22 +7,6 @@ const el = (tagName: string, attrs: Record<string, string> = {}, editable = fals
     isContentEditable: editable,
     getAttribute: (name: string) => attrs[name] ?? null,
   }) as unknown as Element;
-
-describe('nextRegion', () => {
-  it('cycles forward and back through the regions', () => {
-    expect([0, 1, 2].map((i) => nextRegion(i, 3, false))).toEqual([1, 2, 0]);
-    expect([0, 1, 2].map((i) => nextRegion(i, 3, true))).toEqual([2, 0, 1]);
-  });
-
-  it('starts at the first going forward and at the last going back from outside', () => {
-    expect(nextRegion(-1, 3, false)).toBe(0);
-    expect(nextRegion(-1, 3, true)).toBe(2);
-  });
-
-  it('has nowhere to go without regions', () => {
-    expect(nextRegion(-1, 0, false)).toBe(-1);
-  });
-});
 
 describe('isTyping', () => {
   it.each([

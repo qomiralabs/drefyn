@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button, toast, ToastRegion } from '../../src/react/index.ts';
 import { tokens } from '../../src/index.ts';
@@ -530,4 +531,100 @@ describe('the toast look', () => {
       ).toEqual([]);
     }
   });
+});
+
+// Any order of the ways a person or a timer can end a toast. Each step happens to the one
+// toast with Undo; a tick moves the clock by up to twice its wait. A burst sends two or three
+// presses inside one act, so the later ones land before React renders the toast away, as a
+// double click or a click and a shortcut in one frame would.
+type Press = 'undo-click' | 'meta-z' | 'ctrl-z';
+type Step =
+  | { kind: 'burst'; presses: Press[] }
+  | { kind: 'undo-click' }
+  | { kind: 'meta-z' }
+  | { kind: 'ctrl-z' }
+  | { kind: 'dismiss' }
+  | { kind: 'close' }
+  | { kind: 'tick'; ms: number };
+
+const press: fc.Arbitrary<Press> = fc.constantFrom('undo-click', 'meta-z', 'ctrl-z');
+
+const step: fc.Arbitrary<Step> = fc.oneof(
+  fc.record({
+    kind: fc.constant('burst' as const),
+    presses: fc.array(press, { minLength: 2, maxLength: 3 }),
+  }),
+  fc.constant({ kind: 'undo-click' as const }),
+  fc.constant({ kind: 'meta-z' as const }),
+  fc.constant({ kind: 'ctrl-z' as const }),
+  fc.constant({ kind: 'dismiss' as const }),
+  fc.constant({ kind: 'close' as const }),
+  fc.record({ kind: fc.constant('tick' as const), ms: fc.integer({ min: 0, max: LONG * 2 }) }),
+);
+
+describe('toast() under any sequence of steps', () => {
+  // 200 sequences take about a third of a second here, but CI runners under coverage were
+  // forty times slower, so the test gets its own budget. One region serves every sequence,
+  // as in an app, and each sequence closes its toast before the next.
+  it('runs Undo at most once, and never from Cmd or Ctrl+Z once the toast is gone', () => {
+    render(<ToastRegion />);
+    fc.assert(
+      fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
+        let runs = 0;
+        const handle = show({
+          title: 'Archived Pricing',
+          undo: () => {
+            runs += 1;
+          },
+        });
+        try {
+          for (const s of steps) {
+            const before = runs;
+            const present = queryCard('Archived Pricing') !== null;
+            act(() => {
+              const el = queryCard('Archived Pricing');
+              if (s.kind === 'burst') {
+                // The Undo button is found once, as a second click in the same frame would
+                // reach the button still on screen.
+                const undoButton =
+                  el === null ? null : within(el).getByRole('button', { name: 'Undo' });
+                for (const p of s.presses) {
+                  if (p === 'undo-click') {
+                    if (undoButton !== null) fireEvent.click(undoButton);
+                  } else {
+                    fireEvent.keyDown(document.body, {
+                      key: 'z',
+                      ...(p === 'meta-z' ? { metaKey: true } : { ctrlKey: true }),
+                    });
+                  }
+                }
+              } else if (s.kind === 'undo-click' && el !== null) {
+                fireEvent.click(within(el).getByRole('button', { name: 'Undo' }));
+              } else if (s.kind === 'meta-z') {
+                fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+              } else if (s.kind === 'ctrl-z') {
+                fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+              } else if (s.kind === 'dismiss' && el !== null) {
+                fireEvent.click(within(el).getByRole('button', { name: 'Dismiss' }));
+              } else if (s.kind === 'close') {
+                handle.close();
+              } else if (s.kind === 'tick') {
+                vi.advanceTimersByTime(s.ms);
+              }
+            });
+            expect(runs).toBeLessThanOrEqual(1);
+            // A toast that timed out, was dismissed or closed takes no shortcut.
+            if (!present && (s.kind === 'meta-z' || s.kind === 'ctrl-z')) {
+              expect(runs).toBe(before);
+            }
+          }
+        } finally {
+          act(() => {
+            handle.close();
+          });
+        }
+      }),
+      { numRuns: 200 },
+    );
+  }, 60_000);
 });

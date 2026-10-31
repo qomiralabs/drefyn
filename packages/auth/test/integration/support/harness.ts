@@ -13,10 +13,12 @@ import {
 import type { UserId } from '@drefyn/tenancy';
 import { afterAll, describe, inject } from 'vitest';
 import {
+  createOrganizations,
   createSessions,
   parseAuthConfig,
   type AuthConfig,
   type AuthLogger,
+  type OrganizationsDeps,
   type SessionsDeps,
 } from '../../../src/index.ts';
 import { validEnv } from '../../support.ts';
@@ -37,7 +39,8 @@ export interface Harness {
   sql(text: string): Promise<string>;
   user(email?: string): Promise<UserId>;
   sessions(extra?: Partial<SessionsDeps>): ReturnType<typeof createSessions>;
-  readonly logs: { event: string; fields: unknown }[];
+  organizations(extra?: Partial<OrganizationsDeps>): ReturnType<typeof createOrganizations>;
+  readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
 }
 
 // One database per file, cloned from the migrated template and dropped after the file.
@@ -71,10 +74,13 @@ export function harness() {
     );
     open.push(authDb);
     const config = parseAuthConfig(validEnv(randomBytes(32).toString('base64url')));
-    const logs: { event: string; fields: unknown }[] = [];
+    const logs: { level: 'info' | 'warn'; event: string; fields: unknown }[] = [];
     const logger: AuthLogger = {
+      info(event, fields) {
+        logs.push({ level: 'info', event, fields });
+      },
       warn(event, fields) {
-        logs.push({ event, fields });
+        logs.push({ level: 'warn', event, fields });
       },
     };
     return {
@@ -96,6 +102,14 @@ export function harness() {
         return id;
       },
       sessions: (extra = {}) => createSessions(config, { db, authDb, logger, ...extra }),
+      organizations: (extra = {}) =>
+        createOrganizations(config, {
+          db,
+          authDb,
+          logger,
+          initialTier: 'self_hosted',
+          ...extra,
+        }),
     };
   };
 }

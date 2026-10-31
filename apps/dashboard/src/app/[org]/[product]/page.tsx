@@ -1,10 +1,9 @@
-import { ButtonLink } from '@drefyn/ui/react';
+import { ButtonLink, IconLock } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { PLACEHOLDER } from '../../../fixtures/placeholder.ts';
 import { projectsOf } from '../../../fixtures/projects.ts';
 import { guardOrganization } from '../../../server/guard.ts';
-import { IconLock } from '../../../shell/icons.tsx';
 import { PRODUCTS } from '../../../shell/products.ts';
 import { parseShellPath, shellHref } from '../../../shell/route.ts';
 import { Answer, Calm, Eyebrow, Head, Ranked } from '../../../views/calm.tsx';

@@ -158,6 +158,12 @@ In an app that uses Tailwind:
 - Mount `<ToastRegion />` once per app, then call `toast({ title, description, undo, tone })`
   from anywhere. It returns a handle with `close()`. Undo runs once and Cmd or Ctrl+Z runs the
   newest one when focus is not in a text field. `tone: 'error'` stays until dismissed.
+- F6 reaches the notifications through React Aria's landmark cycle. A page with its own bar,
+  sidebar or main puts each in the same cycle with `useLandmark(ref, { role, label })` and
+  spreads the props it returns on the native element; without that, F6 can enter the
+  notifications but not leave them. Pass `skip` while a landmark is display none, such as a
+  closed phone drawer. Never add a second F6 handler.
+
 - `Tooltip` wraps one Button or ButtonLink. Its text describes the control and is never its
   only name. A disabled Button keeps hover and focus, so a tooltip can say why.
 - `Dialog` takes a `trigger`, or `open` and `onOpenChange` from the caller. `footer` may be a
@@ -167,14 +173,24 @@ In an app that uses Tailwind:
   it renders on the server and posts with JS off. A disabled field still posts its value,
   because it is `aria-disabled` plus `readOnly`, so servers must ignore fields a person could
   not change.
+- `Menu` takes `triggerShape="round"` when its trigger is a circle, such as initials, so the
+  edge and the hover and open fills follow the circle.
+
+### Icons and the mark
+
+- One file per icon in `src/react/icons/`, drawn on the 24 grid, exported as `Icon<Name>` with
+  `size` and `label`. They take the current text colour; wrap one in a `text-secondary` span
+  for secondary ink. Apps draw no svg of their own.
+- `Mark` is the Drefyn mark on its own 100 unit grid, decorative unless given a `label`.
 
 ### Writing a component
 
 - One component per file in `src/react/`, exported from `src/react/index.ts` by name. Never
   `export *`: the split test reads the barrel to know which file each export comes from.
 - Components are server components by default and ship no JS. A file that calls a hook or
-  imports `react-aria-components` starts with `'use client'` as its first statement. The
-  barrel never does. Badges, status marks, skeletons, empty states, buttons and icons must stay
+  imports `react-aria-components` or `react-aria` starts with `'use client'` as its first
+  statement. The barrel never does. Apps never import `react-aria` themselves: hooks they
+  need, such as `useLandmark`, come from this package. Badges, status marks, skeletons, empty states, buttons and icons must stay
   server safe; the split test renders each one with `renderToStaticMarkup`.
 - Style only with token utilities. `style` and `dangerouslySetInnerHTML` are lint errors in
   `src/react/`, and Motion is a lint error everywhere except the dashboard and website apps.

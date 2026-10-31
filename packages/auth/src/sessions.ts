@@ -3,10 +3,12 @@ import { withAuth, withUser, type AuthDatabase, type Database, type UserSchema }
 import { idOf, type OrganizationId, type UserId } from '@drefyn/tenancy';
 import { randomBytes } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
+import { grantAccess, type AccessResult } from './access.ts';
 import type { AuthConfig } from './config.ts';
 import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
+import { isSlugShape } from './organization-rules.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
   asId,
@@ -87,6 +89,8 @@ export interface Sessions extends StepUps {
   ): Promise<StartedSession>;
   resolve(cookie: string | undefined): Promise<ResolvedSession | null>;
   resolveSession(cookie: string | undefined): Promise<SessionInfo | null>;
+  // The guard's one call. Read only: a due touch is reported, never written here.
+  resolveAccess(cookie: string | undefined, slug: string): Promise<AccessResult>;
   touchSession(ref: SessionRef): Promise<void>;
   signOut(s: SessionInfo): Promise<readonly CookieSpec[]>;
   signOutEverywhere(s: SessionInfo): Promise<number>;
@@ -110,6 +114,9 @@ const DUMMY_HASH = Buffer.alloc(32);
 // error, so the db layer passes it through untouched.
 class Refused extends Error {}
 const REFUSED = new Refused('refused');
+
+const SIGNED_OUT: AccessResult = Object.freeze({ kind: 'signed_out' });
+const NOT_MEMBER: AccessResult = Object.freeze({ kind: 'not_member' });
 
 const method = (value: string): SessionMethod => {
   if (!METHODS.has(value)) throw new Error('stored session method is unknown');
@@ -299,6 +306,46 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
 
     async resolveSession(cookie) {
       return (await resolve(cookie))?.session ?? null;
+    },
+
+    async resolveAccess(cookie, slug) {
+      const token = parseSessionToken(cookie);
+      if (token === null) return SIGNED_OUT;
+      try {
+        return await store.user(token.userId, async (tx) => {
+          const row = await prove(tx, token, idleDays);
+          if (!row?.live) throw REFUSED;
+          // A slug that cannot exist needs no read; it answers like an unknown one.
+          if (!isSlugShape(slug)) return NOT_MEMBER;
+          // Only after the proof: the slug, the organization and the person's own
+          // membership, each readable here only through that membership.
+          const member = await tx
+            .selectFrom('organization_slugs as s')
+            .innerJoin('organizations as o', 'o.organization_id', 's.organization_id')
+            .innerJoin('memberships as m', (join) =>
+              join
+                .onRef('m.organization_id', '=', 's.organization_id')
+                .on('m.user_id', '=', sql<string>`app.current_user_id()`),
+            )
+            .select(['s.organization_id', 'm.role', 'm.default_project_role', 'o.plan_tier'])
+            .where('s.slug', '=', slug)
+            .executeTakeFirst();
+          if (member === undefined) return NOT_MEMBER;
+          const access = grantAccess({
+            organizationId: idOf('org', member.organization_id),
+            userId: token.userId,
+            sessionId: token.sessionId,
+            role: member.role,
+            defaultProjectRole: member.default_project_role,
+            tier: member.plan_tier,
+            authenticatedAt: row.authenticated_at,
+          });
+          return { kind: 'ok', access, touchDue: row.touch_due } as const;
+        });
+      } catch (error) {
+        if (error === REFUSED) return SIGNED_OUT;
+        throw unavailable(error);
+      }
     },
 
     async touchSession(ref) {
