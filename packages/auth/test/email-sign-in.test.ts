@@ -6,6 +6,7 @@ import {
   createCodeIssuer,
   createEmailSignIn,
   formatChallengeId,
+  parseAuthConfig,
   parseSignInCodePurpose,
   parseVerifyFragment,
   sha256,
@@ -23,6 +24,7 @@ import {
   on,
   unitDeps,
 } from './email-fixtures.ts';
+import { validEnv } from './support.ts';
 
 // Real implementations underneath; the spies only watch, except where a test pins a value.
 vi.mock('node:crypto', async (importOriginal) => {
@@ -317,5 +319,39 @@ describe('start', () => {
     expect(buckets).toEqual(
       expect.arrayContaining(['email_send', 'email_send_ip', 'email_send_address_ceiling']),
     );
+  });
+});
+
+// A tripwire on the work start does: the same reservations, transactions and invitation
+// lookups for every address in every mode, so neither a count nor a time can tell a known
+// address from an unknown one.
+describe('start does the same work for every address', () => {
+  const modes = ['open', 'closed', 'invite_only'] as const;
+
+  async function workFor(mode: (typeof modes)[number], known: boolean) {
+    const cfg = parseAuthConfig({ ...validEnv(), DREFYN_AUTH_SIGNUP: mode });
+    const t = unitDeps(emailResponder({ known }));
+    const hasPending = vi.fn(() => Promise.resolve(false));
+    const flow = createEmailSignIn(cfg, { ...t.deps, invitations: { hasPending } });
+    const result = await flow.startEmailSignIn(browser(), { email: ADDRESS });
+    expect(result.ok).toBe(true);
+    return {
+      reservations: (t.limiter.reserve as Mock).mock.calls.length,
+      transactions: t.scripted.events.filter((e) => e.kind === 'begin').length,
+      statements: t.scripted.statements().length,
+      invitationLookups: hasPending.mock.calls.length,
+    };
+  }
+
+  it('makes 3 reservations and 2 store transactions with sign up closed', async () => {
+    for (const known of [true, false]) {
+      const work = await workFor('closed', known);
+      expect(work.reservations).toBe(3);
+      expect(work.transactions).toBe(2);
+    }
+  });
+
+  it.each(modes)('counts the same for known and unknown addresses in %s mode', async (mode) => {
+    expect(await workFor(mode, true)).toEqual(await workFor(mode, false));
   });
 });
