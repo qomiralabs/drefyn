@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from '../../src/react/index.ts';
 import { classesOf } from './classes.ts';
 
@@ -324,5 +324,48 @@ describe('a disabled Tab says why', () => {
         </Tabs>,
       ),
     ).toThrow(/reason/);
+  });
+});
+
+// A Tab that disables itself through its own state, so the Tabs above it does not render.
+let setSelfOff: (off: boolean) => void = () => undefined;
+function SelfDisabling() {
+  const [off, setOff] = useState(false);
+  setSelfOff = setOff;
+  return off ? (
+    <Tab value="a" disabled reason={REASON}>
+      Alpha
+    </Tab>
+  ) : (
+    <Tab value="a">Alpha</Tab>
+  );
+}
+
+describe('a Tab that disables itself after mount', () => {
+  it('moves the selection on, and back when it is enabled again and chosen', async () => {
+    render(
+      <Tabs>
+        <TabList label="Views">
+          <SelfDisabling />
+          <Tab value="b">Beta</Tab>
+        </TabList>
+        <TabPanel value="a">Panel A</TabPanel>
+        <TabPanel value="b">Panel B</TabPanel>
+      </Tabs>,
+    );
+    expect(shown()).toBe('Panel A');
+    act(() => {
+      setSelfOff(true);
+    });
+    expect(shown()).toBe('Panel B');
+    expect(tab(/^Alpha/).getAttribute('aria-selected')).not.toBe('true');
+    act(() => {
+      setSelfOff(false);
+    });
+    expect(shown()).toBe('Panel A');
+    await userEvent.setup().click(tab(/^Beta/));
+    expect(shown()).toBe('Panel B');
+    await userEvent.setup().click(tab(/^Alpha/));
+    expect(shown()).toBe('Panel A');
   });
 });

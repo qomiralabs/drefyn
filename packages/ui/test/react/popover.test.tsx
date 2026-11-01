@@ -111,6 +111,35 @@ describe('Popover', () => {
     expect(screen.getByRole('dialog', { name: 'Filter pages' })).toBeDefined();
   });
 
+  it('keeps both open while a select in a popover inside a popover is used, and an outside press closes both', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <div>
+        <Button>Elsewhere</Button>
+        <Popover trigger="Filters" title="Filter pages">
+          <Popover trigger="More filters" title="More filters">
+            <Select label="Region" onChange={onChange}>
+              <SelectOption value="eu">Europe</SelectOption>
+              <SelectOption value="us">United States</SelectOption>
+            </Select>
+          </Popover>
+        </Popover>
+      </div>,
+    );
+    await user.click(trigger());
+    await user.click(screen.getByRole('button', { name: 'More filters' }));
+    await user.click(screen.getByRole('button', { name: /Region$/ }));
+    await user.click(screen.getByRole('option', { name: 'United States' }));
+    expect(onChange.mock.calls).toEqual([['us']]);
+    expect(screen.getByRole('dialog', { name: 'Filter pages' })).toBeDefined();
+    expect(screen.getByRole('dialog', { name: 'More filters' })).toBeDefined();
+    fireEvent.pointerDown(document.body);
+    fireEvent.pointerUp(document.body);
+    fireEvent.click(document.body);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('closes when Tab leaves its last control and moves on from the trigger', async () => {
     const user = userEvent.setup();
     render(<Filters />);
