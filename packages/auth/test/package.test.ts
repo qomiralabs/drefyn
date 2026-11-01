@@ -47,8 +47,8 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter, the session files and organizations.
-  it('reaches the database only from the limiter, sessions and organizations, and no network or file anywhere', () => {
+  // the limiter, the session files, organizations, devices and email sign in.
+  it('reaches the database only from the limiter, sessions, organizations, devices and email sign in, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -56,6 +56,8 @@ describe('package layout', () => {
       'session-support.ts': database,
       'step-up.ts': database,
       'organizations.ts': database,
+      'email-sign-in.ts': database,
+      'devices.ts': database,
     };
     const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
     for (const file of files) {
@@ -75,6 +77,8 @@ describe('the main entry', () => {
       [
         'AUTH_CONFIG_KEYS',
         'AuthError',
+        'DEVICES_PER_USER',
+        'DEVICE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
         'ORG_ROLES',
@@ -84,6 +88,7 @@ describe('the main entry', () => {
         'RATE_BUCKETS',
         'REDACTED',
         'RESERVED_SLUGS',
+        'SIGN_IN_CODE_PURPOSES',
         'SLUG_PATTERN',
         'SecretValue',
         'canAssign',
@@ -91,11 +96,14 @@ describe('the main entry', () => {
         'constantTimeEqual',
         'cookieNames',
         'createApiKeyFailureLimiter',
+        'createCodeIssuer',
+        'createEmailSignIn',
         'createOrganizations',
         'createRateLimiter',
         'createSessions',
         'decodeSecret',
         'deriveAuthKeys',
+        'deviceHash',
         'encodeSecret',
         'formatApiKey',
         'formatChallengeId',
@@ -113,16 +121,19 @@ describe('the main entry', () => {
         'parseInvitationToken',
         'parseOrganizationName',
         'parseSessionToken',
+        'parseSignInCodePurpose',
         'parseSlug',
         'parseVerifyFragment',
         'permissionsFor',
         'rateKeyForIp',
+        'recordDevice',
         'redact',
         'redactText',
         'safeReturnTo',
         'serializeCookie',
         'sessionCookieValue',
         'sha256',
+        'userAgentFamily',
       ].sort(),
     );
   });

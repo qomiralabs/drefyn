@@ -678,6 +678,25 @@ grant select (body) on app.bad_auth_column_option to drefyn_auth with grant opti
     mentions: ['UPDATE'],
     up: () => 'grant update on app.password_credentials to drefyn_auth;',
   },
+  // System columns are read too, or a ctid or xmin grant would pass unseen.
+  'a system column grant off the list on users': {
+    rule: 'column_grant',
+    object: 'app.users',
+    mentions: ['app.users.xmin', 'SELECT', 'drefyn_auth'],
+    up: () => 'grant select (xmin) on app.users to drefyn_auth;',
+  },
+  'a ctid grant on known_devices for drefyn_app': {
+    rule: 'column_grant',
+    object: 'app.known_devices',
+    mentions: ['app.known_devices.ctid', 'drefyn_app'],
+    up: () => 'grant select (ctid) on app.known_devices to drefyn_app;',
+  },
+  'a column grant off the list on known_devices for drefyn_auth': {
+    rule: 'column_grant',
+    object: 'app.known_devices',
+    mentions: ['app.known_devices.user_agent_family', 'drefyn_auth'],
+    up: () => 'grant select (user_agent_family) on app.known_devices to drefyn_auth;',
+  },
   'a table level insert on password_credentials for drefyn_app': {
     rule: 'column_grant',
     object: 'app.password_credentials',

@@ -71,6 +71,7 @@ describe('organization schema types', () => {
       | 'identities'
       | 'sessions'
       | 'password_credentials'
+      | 'known_devices'
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'

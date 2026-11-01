@@ -110,11 +110,12 @@ describe('allow lists', () => {
   });
 
   // The sign in role reaches the tables sign in needs and nothing after it.
-  it('let drefyn_auth reach the six sign in tables, never sessions or the API limiter', () => {
+  it('let drefyn_auth reach the seven sign in tables, never sessions or the API limiter', () => {
     expect(AUTH_TABLES.map((t) => t.name).sort()).toEqual([
       'app.auth_rate_limits',
       'app.email_challenges',
       'app.identities',
+      'app.known_devices',
       'app.oauth_states',
       'app.password_credentials',
       'app.users',
@@ -165,8 +166,9 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('control the grants on users and password_credentials by column', () => {
+  it('control the grants on users, password_credentials and known_devices by column', () => {
     expect(COLUMN_GRANT_TABLES.map((t) => t.name).sort()).toEqual([
+      'app.known_devices',
       'app.password_credentials',
       'app.users',
     ]);

@@ -94,6 +94,30 @@ export {
   type VerifyFragment,
 } from './tokens.ts';
 export { safeReturnTo } from './return-to.ts';
+export {
+  SIGN_IN_CODE_PURPOSES,
+  createCodeIssuer,
+  createEmailSignIn,
+  parseSignInCodePurpose,
+  type CodeIssuer,
+  type CodeIssuerDeps,
+  type EmailSessions,
+  type EmailSignIn,
+  type EmailSignInDeps,
+  type IssueInput,
+  type Issued,
+  type LinkVerified,
+  type Linking,
+  type PendingInvitations,
+  type SignedIn,
+} from './email-sign-in.ts';
+export {
+  DEVICES_PER_USER,
+  DEVICE_MAX_AGE_SECONDS,
+  deviceHash,
+  recordDevice,
+  userAgentFamily,
+} from './devices.ts';
 export { rateKeyForIp } from './client-ip.ts';
 export {
   createApiKeyFailureLimiter,

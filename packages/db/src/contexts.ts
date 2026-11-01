@@ -1,7 +1,9 @@
 import type { AuthTableName, MemberTableName, UserTableName } from './allow-lists.ts';
 import type {
+  AppKnownDevicesTable,
   AppPasswordCredentialsTable,
   AppUsersTable,
+  AuthKnownDevicesTable,
   AuthPasswordCredentialsTable,
   AuthUsersTable,
 } from './identity-columns.ts';
@@ -12,16 +14,21 @@ import type { ColumnType, Schema } from './schema.generated.ts';
 export type NamedTables<S, T extends string> = { [K in keyof S & T]: S[K] };
 
 // The column controlled tables, swapped for the columns the role was granted.
-type WithColumns<S, Users, Credentials> = Omit<S, 'users' | 'password_credentials'> & {
+type WithColumns<S, Users, Credentials, Devices> = Omit<
+  S,
+  'users' | 'password_credentials' | 'known_devices'
+> & {
   users: Users;
   password_credentials: Credentials;
+  known_devices: Devices;
 };
 
 // The identity tables drefyn_auth may touch, before anyone is signed in.
 export type AuthSchema = WithColumns<
   NamedTables<Schema, AuthTableName>,
   AuthUsersTable,
-  AuthPasswordCredentialsTable
+  AuthPasswordCredentialsTable,
+  AuthKnownDevicesTable
 >;
 
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
@@ -36,7 +43,12 @@ type ReadOnlyTables<S, T extends string> = Omit<S, T> & {
 
 // The signed in person's own rows, and the organizations they belong to, read only.
 export type UserSchema = ReadOnlyTables<
-  WithColumns<NamedTables<Schema, UserTableName>, AppUsersTable, AppPasswordCredentialsTable>,
+  WithColumns<
+    NamedTables<Schema, UserTableName>,
+    AppUsersTable,
+    AppPasswordCredentialsTable,
+    AppKnownDevicesTable
+  >,
   MemberTableName
 >;
 

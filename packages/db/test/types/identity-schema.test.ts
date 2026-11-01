@@ -95,12 +95,14 @@ describe('identity schema types', () => {
       | 'email_challenges'
       | 'oauth_states'
       | 'auth_rate_limits'
+      | 'known_devices'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
       | 'users'
       | 'identities'
       | 'sessions'
       | 'password_credentials'
+      | 'known_devices'
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'
@@ -121,6 +123,16 @@ describe('identity schema types', () => {
     >();
   });
 
+  it('let the auth role see only whether a device is known and when it was last seen', () => {
+    expectTypeOf<keyof AuthSchema['known_devices']>().toEqualTypeOf<
+      'user_id' | 'device_hash' | 'last_seen_at'
+    >();
+    expectTypeOf<keyof Insertable<AuthSchema['known_devices']>>().toEqualTypeOf<never>();
+    expectTypeOf<keyof Insertable<UserSchema['known_devices']>>().toEqualTypeOf<
+      'user_id' | 'device_hash' | 'user_agent_family'
+    >();
+  });
+
   it('give project scope none of the identity or limiter tables', () => {
     expectTypeOf(withTenant<number>)
       .parameter(2)
@@ -137,6 +149,7 @@ describe('identity schema types', () => {
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('email_challenges');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('api_key_failures');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('password_credentials');
+    expectTypeOf<OrganizationSchema>().not.toHaveProperty('known_devices');
     expectTypeOf<OrganizationSchema['users']>().toEqualTypeOf<UserSchema['users']>();
   });
 

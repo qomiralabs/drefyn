@@ -34,6 +34,8 @@ export const AUTH_EXPIRY_RULES: readonly ExpiryRule<AuthSchema>[] = Object.freez
   // A day past expiry, so support can still see a failed sign in the person just reported.
   { table: 'email_challenges', column: 'expires_at', afterSeconds: DAY },
   { table: 'oauth_states', column: 'expires_at', afterSeconds: DAY },
+  // Browsers keep a cookie at most 400 days, so an older row can never match one again.
+  { table: 'known_devices', column: 'last_seen_at', afterSeconds: 400 * DAY },
 ]);
 
 export const API_KEY_EXPIRY_RULES: readonly ExpiryRule<ApiKeyLimiterSchema>[] = Object.freeze([

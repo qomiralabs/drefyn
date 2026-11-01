@@ -2,7 +2,13 @@ import { withAuth, withUser } from '@drefyn/db';
 import { toPublicId } from '@drefyn/tenancy';
 import type { Transaction } from 'kysely';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { CookieSpec, SessionInfo, SessionStore } from '../../src/index.ts';
+import {
+  decodeSecret,
+  sha256,
+  type CookieSpec,
+  type SessionInfo,
+  type SessionStore,
+} from '../../src/index.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
@@ -268,6 +274,44 @@ describeWithStack('sessions against Postgres', () => {
       if (session === null) throw new Error('first session did not resolve');
       return { ...first, session, others };
     }
+
+    const devicesOf = (user: string) =>
+      h.sql(
+        `select coalesce(string_agg(encode(device_hash, 'hex') || ':' || user_agent_family, ','), '') from app.known_devices where user_id = '${user}';`,
+      );
+
+    async function knownDevice(user: string, n: number) {
+      await h.sql(
+        `insert into app.known_devices (user_id, device_hash, user_agent_family) values ('${user}', decode(lpad(to_hex(${String(n)}), 64, '0'), 'hex'), 'Chrome on Windows');`,
+      );
+    }
+
+    it('forgets every known device, records this browser on a new device cookie, and returns it', async () => {
+      const a = await withOthers(1);
+      await knownDevice(a.user, 1);
+      await knownDevice(a.user, 2);
+      const result = await a.sessions.signOutOtherSessions(a.session, {
+        ...browser(),
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
+      });
+      if (!result.ok) throw result.error;
+      const device = result.value.setCookies.find((c) => c.name === h.config.cookies.device);
+      const bytes = decodeSecret(device?.value);
+      if (bytes === null) throw new Error('no device cookie in setCookies');
+      expect(device?.maxAgeSeconds).toBe(400 * 86_400);
+      expect(await devicesOf(a.user)).toBe(`${sha256(bytes).toString('hex')}:Firefox on Linux`);
+    });
+
+    it('signOutEverywhere forgets every known device and reissues nothing', async () => {
+      const a = await signIn();
+      await knownDevice(a.user, 3);
+      await knownDevice(a.user, 4);
+      const other = await signIn();
+      await knownDevice(other.user, 5);
+      await a.sessions.signOutEverywhere(a.session);
+      expect(await devicesOf(a.user)).toBe('');
+      expect(await devicesOf(other.user)).not.toBe('');
+    });
 
     it('reissues this browser on a new row that copies the old one, and every old cookie stops working', async () => {
       const a = await withOthers(2);

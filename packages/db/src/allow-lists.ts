@@ -87,6 +87,10 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
     reason:
       'failed API key checks keyed by an HMAC of the client IP, checked before any key is proved',
   },
+  {
+    name: 'app.known_devices',
+    reason: 'browsers one person signed in from, keyed by user, never by tenant',
+  },
 ];
 
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
@@ -125,6 +129,11 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
   { name: 'app.email_challenges', reason: 'email codes are created and redeemed before sign in' },
   { name: 'app.oauth_states', reason: 'OAuth state is created and redeemed before sign in' },
   { name: 'app.auth_rate_limits', reason: 'sign in limits are reserved before any work' },
+  {
+    name: 'app.known_devices',
+    reason:
+      'the send limit checks a device before sign in; the cleanup deletes devices unseen for 400 days',
+  },
 ];
 
 const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limiter keys';
@@ -200,6 +209,23 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   authAccess('email_challenges', 'codes are created and redeemed before sign in'),
   authAccess('oauth_states', 'OAuth state is created and redeemed before sign in'),
   authAccess('auth_rate_limits', 'limits are reserved before sign in'),
+  selfAccess('known_devices'),
+  {
+    name: 'app.known_devices.auth_read',
+    command: 'select',
+    roles: ['drefyn_auth'],
+    using: 'true',
+    withCheck: null,
+    reason: 'the send limit checks a device before anyone is signed in; grants allow 4 columns',
+  },
+  {
+    name: 'app.known_devices.auth_expire',
+    command: 'delete',
+    roles: ['drefyn_auth'],
+    using: "(last_seen_at < (now() - '400 days'::interval))",
+    withCheck: null,
+    reason: 'the expiry cleanup may remove only devices unseen for 400 days, whatever it sends',
+  },
   {
     name: 'app.api_key_failures.api_access',
     command: 'all',
@@ -244,6 +270,10 @@ export const COLUMN_GRANT_TABLES: readonly AllowEntry[] = [
     name: 'app.password_credentials',
     reason: 'holds password hashes; each role gets exactly the columns its flows use',
   },
+  {
+    name: 'app.known_devices',
+    reason: 'the auth role must never read a future column, nor the family it has no use for',
+  },
 ];
 
 export const COLUMN_GRANTS: readonly ColumnGrantEntry[] = IDENTITY_COLUMN_GRANTS.map((grant) => ({
@@ -279,11 +309,12 @@ export type AuthTableName =
   | 'password_credentials'
   | 'email_challenges'
   | 'oauth_states'
-  | 'auth_rate_limits';
+  | 'auth_rate_limits'
+  | 'known_devices';
 // The organization tables a user context reads, through the person's own memberships.
 export type MemberTableName = 'memberships' | 'organizations' | 'organization_slugs';
 export type UserTableName =
-  'users' | 'identities' | 'sessions' | 'password_credentials' | MemberTableName;
+  'users' | 'identities' | 'sessions' | 'password_credentials' | 'known_devices' | MemberTableName;
 
 // Identity tables organization scope never names. users stays, for the members page.
 export type PersonalTableName =

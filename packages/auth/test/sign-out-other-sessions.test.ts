@@ -1,6 +1,6 @@
 import { idOf, toPublicId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
-import { serializeCookie, type CookieSpec } from '../src/index.ts';
+import { decodeSecret, serializeCookie, type CookieSpec } from '../src/index.ts';
 import {
   NEW_SECRET,
   NEW_SESSION,
@@ -47,6 +47,46 @@ const sessionCookie = (cookies: readonly CookieSpec[], name = config.cookies.ses
   cookies.find((c) => c.name === name);
 
 describe('signOutOtherSessions', () => {
+  it('gives this browser a new device cookie whose hash is the one row it records', async () => {
+    const { sessions, scripted } = setup(rotation([lockRow()]));
+    const result = await sessions.signOutOtherSessions(sessionInfo(), {
+      ...browser(),
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
+    });
+    if (!result.ok) throw result.error;
+    const device = sessionCookie(result.value.setCookies, config.cookies.device);
+    expect(device?.maxAgeSeconds).toBe(400 * 86_400);
+    const bytes = decodeSecret(device?.value);
+    if (bytes === null) throw new Error('no device cookie');
+    const insert = scripted
+      .statements()
+      .find((st) => st.sql.startsWith('insert into "known_devices"'));
+    expect(insert?.parameters).toEqual([USER, sha(bytes), 'Firefox on Linux']);
+    const order = scripted.statements().map((st) => st.sql.split(' ').slice(0, 3).join(' '));
+    // Forgotten before the new one is recorded, so the new row is the only one left.
+    expect(order.indexOf('delete from "known_devices"')).toBeLessThan(
+      order.indexOf('insert into "known_devices"'),
+    );
+  });
+
+  it('records no device and sets no device cookie when the rotation is refused', async () => {
+    const { sessions, scripted } = setup(rotation([lockRow({ recent: false })]));
+    const result = await sessions.signOutOtherSessions(sessionInfo(), browser());
+    expect(!result.ok && result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    expect(scripted.statements().some((st) => st.sql.includes('"known_devices"'))).toBe(false);
+  });
+
+  it('signOutEverywhere forgets every known device in the same transaction and sets nothing', async () => {
+    const { sessions, scripted } = setup(rotation([lockRow()]));
+    await sessions.signOutEverywhere(sessionInfo());
+    const kinds = scripted.events.map((e) => e.kind);
+    expect(kinds).toEqual(['begin', 'statement', 'statement', 'commit']);
+    const [, forget] = scripted.statements();
+    expect(forget?.sql).toMatch(
+      /^delete from "known_devices" where "user_id" = app\.current_user_id\(\)$/,
+    );
+  });
+
   it('locks, inserts the new row, deletes every other row and commits, in one transaction', async () => {
     const { sessions, scripted } = setup(
       rotation([lockRow(), lockRow({ id: OTHER_SESSION, recent: false })]),
@@ -58,10 +98,17 @@ describe('signOutOtherSessions', () => {
       'statement',
       'statement',
       'statement',
+      'statement',
+      'statement',
       'commit',
     ]);
     expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
-    const [lock, insert, del] = scripted.statements();
+    const [lock, insert, del, forget, device] = scripted.statements();
+    // Known devices are reset in the same transaction: all forgotten, this browser recorded.
+    expect(forget?.sql).toMatch(
+      /^delete from "known_devices" where "user_id" = app\.current_user_id\(\)$/,
+    );
+    expect(device?.sql).toMatch(/^insert into "known_devices"/);
     expect(lock && isLock(lock)).toBe(true);
     expect(lock?.sql).toMatch(
       /where "user_id" = app\.current_user_id\(\) order by "id" for update$/,
