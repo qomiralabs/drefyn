@@ -1,5 +1,14 @@
 'use client';
-import { Children, isValidElement, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Children,
+  isValidElement,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Tabs as AriaTabs, type Key } from 'react-aria-components';
 import { Tab } from './tab.tsx';
 import { TabRegistryContext } from './tab-registry.ts';
@@ -67,9 +76,23 @@ export function Tabs({
   const known = (): Known => (registry.current.size > 0 ? [...registry.current] : tabsIn(children));
   const shown = resolve(wanted, known());
 
+  // What this render shows, for the check below, which a Tab can call between renders.
+  const view = useRef({ wanted, shown });
+  useLayoutEffect(() => {
+    view.current = { wanted, shown };
+  });
+
+  // Renders again only when the tabs now resolve to another tab than the one shown, so a
+  // report never loops: the render it causes resolves to what it shows.
+  const changed = useCallback(() => {
+    const now = view.current;
+    if (resolve(now.wanted, [...registry.current]) !== now.shown) refresh((n) => n + 1);
+  }, []);
+  const context = useMemo(() => ({ tabs: registry, changed }), [changed]);
+
   // Runs after every Tab has reported itself and before paint, so a wrapped disabled Tab the
-  // elements hid moves the selection on before its panel is ever seen.
-  // New children can bring new tabs, so they count as a reason to look again.
+  // elements hid moves the selection on before its panel is ever seen. New children can bring
+  // new tabs, so they count as a reason to look again.
   useLayoutEffect(() => {
     if (resolve(wanted, [...registry.current]) !== shown) refresh((n) => n + 1);
   }, [wanted, shown, children]);
@@ -86,7 +109,7 @@ export function Tabs({
       keyboardActivation={activation}
       className="flex flex-col"
     >
-      <TabRegistryContext value={registry}>{children}</TabRegistryContext>
+      <TabRegistryContext value={context}>{children}</TabRegistryContext>
     </AriaTabs>
   );
 }

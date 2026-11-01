@@ -48,16 +48,24 @@ const stopsIn = (root: HTMLElement): HTMLElement[] =>
     (el) => el.tabIndex >= 0 && el.closest('[inert]') === null,
   );
 
-// True when the target sits in a layer that a control inside the panel opened. React Aria
-// renders a select's list, a menu or a nested popover at the end of the page, and points the
-// open trigger at it with aria-controls, so ownership is read from there.
+// True when the target sits in a layer the panel opened, directly or through layers those
+// opened in turn, such as a select's list in a popover inside this one. React Aria renders
+// each layer at the end of the page and points its open trigger at it with aria-controls, so
+// ownership is followed from the panel's controls, layer by layer, each layer once.
 function openedFrom(panel: HTMLElement | null, target: Node): boolean {
   if (panel === null) return false;
-  for (let el = target instanceof Element ? target : target.parentElement; el !== null;) {
-    if (el.id !== '' && panel.querySelector(`[aria-controls~="${CSS.escape(el.id)}"]`) !== null) {
-      return true;
+  const seen = new Set<Element>([panel]);
+  const layers: Element[] = [panel];
+  for (let layer = layers.pop(); layer !== undefined; layer = layers.pop()) {
+    for (const control of layer.querySelectorAll('[aria-controls]')) {
+      for (const id of (control.getAttribute('aria-controls') ?? '').split(/\s+/)) {
+        const opened = id === '' ? null : document.getElementById(id);
+        if (opened === null || seen.has(opened)) continue;
+        if (opened.contains(target)) return true;
+        seen.add(opened);
+        layers.push(opened);
+      }
     }
-    el = el.parentElement;
   }
   return false;
 }
