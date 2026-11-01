@@ -493,7 +493,10 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         // filling the shared ceiling cannot lock the person out of their own devices.
         if (known && hash !== null) await limiter.reserve('email_send_device', [address, hash]);
         else await limiter.reserve('email_send_address_ceiling', [address]);
-        const deliver = userId !== null || (await mayCreate(address));
+        // Asked for every address, known or not: skipping it for known ones would let the
+        // lookup's time say which addresses have an account.
+        const allowed = await mayCreate(address);
+        const deliver = userId !== null || allowed;
         const issued = await issuer.issue(b, {
           purpose: PURPOSE,
           email: address,
