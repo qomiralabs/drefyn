@@ -81,7 +81,9 @@ describe('writes of the user address', () => {
       fc
         .array(fc.boolean(), { minLength: word.length, maxLength: word.length })
         .map((upper) =>
-          [...word].map((ch, i) => (upper[i] === true ? ch.toUpperCase() : ch)).join(''),
+          word.replace(/[a-z]/g, (ch: string, i: number) =>
+            upper[i] === true ? ch.toUpperCase() : ch,
+          ),
         );
     fc.assert(
       fc.property(

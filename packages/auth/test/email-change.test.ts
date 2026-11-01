@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import type * as Crypto from 'node:crypto';
-import { DbError } from '@drefyn/db';
+import { DbError, type AuthDatabase, type Database } from '@drefyn/db';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   AuthError,
@@ -10,6 +10,7 @@ import {
   formatChallengeId,
   sha256,
   type AuthLogger,
+  type RateLimiter,
 } from '../src/index.ts';
 import { createTestAuthMailer } from '../src/testing.ts';
 import { scriptedStore, type Responder, type Statement } from './scripted-store.ts';
@@ -102,6 +103,10 @@ function setup(script: Script = {}, refuse?: (bucket: string) => boolean) {
   return { change, scripted, mail, limiter, logs };
 }
 
+// The calls only, read off the mock so no method is passed around unbound.
+const callsOf = (limiter: RateLimiter) =>
+  (limiter.reserve as Mock<(bucket: string, value: readonly unknown[]) => Promise<void>>).mock
+    .calls;
 const sqlOf = (statements: readonly Statement[]) => statements.map((s) => s.sql);
 const writesTo = (statements: readonly Statement[], table: string) =>
   statements.filter((s) => /^\s*(insert|update|delete)\b/i.test(s.sql) && s.sql.includes(table));
@@ -112,7 +117,7 @@ describe('startEmailChange', () => {
     const result = await change.startEmailChange(browser(), session, { newEmail: NEW });
     expect(!result.ok && result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
     expect(scripted.writes()).toEqual([]);
-    expect(limiter.reserve).not.toHaveBeenCalled();
+    expect(callsOf(limiter)).toEqual([]);
     expect(mail.calls).toEqual([]);
   });
 
@@ -156,10 +161,8 @@ describe('startEmailChange', () => {
       b.value.setCookies.map((c) => [c.name, c.maxAgeSeconds, c.value.length]),
     );
     expect(sqlOf(free.scripted.statements())).toEqual(sqlOf(taken.scripted.statements()));
-    expect(free.limiter.reserve).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(taken.limiter.reserve).mock.calls.map((c) => c[0])).toEqual(
-      vi.mocked(free.limiter.reserve).mock.calls.map((c) => c[0]),
-    );
+    expect(callsOf(free.limiter)).toHaveLength(3);
+    expect(callsOf(taken.limiter).map((c) => c[0])).toEqual(callsOf(free.limiter).map((c) => c[0]));
     await a.value.send();
     await b.value.send();
     expect(free.mail.calls).toHaveLength(1);
@@ -190,7 +193,8 @@ describe('startEmailChange', () => {
     const { change, scripted, limiter } = setup({}, (bucket) => bucket === 'email_send');
     const result = await change.startEmailChange(browser(), session, { newEmail: NEW });
     expect(!result.ok && result.error.code).toBe('AUTH_RATE_LIMITED');
-    expect(limiter.reserve).toHaveBeenCalledWith('email_send', [NEW, expect.any(Buffer)]);
+    expect(callsOf(limiter)[0]?.[0]).toBe('email_send');
+    expect(callsOf(limiter)[0]?.[1]?.[0]).toBe(NEW);
     expect(writesTo(scripted.statements(), 'email_challenges')).toEqual([]);
   });
 
@@ -228,7 +232,7 @@ describe('completeEmailChange', () => {
     const result = await complete(t);
     expect(!result.ok && result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
     expect(t.scripted.writes()).toEqual([]);
-    expect(t.limiter.reserve).not.toHaveBeenCalled();
+    expect(callsOf(t.limiter)).toEqual([]);
   });
 
   it('runs the guarded update, clears the old address challenges and the other sessions', async () => {
@@ -402,7 +406,7 @@ describe('completeEmailChange', () => {
     const t = setup({}, (bucket) => bucket === 'code_verify');
     const result = await complete(t);
     expect(!result.ok && result.error.code).toBe('AUTH_RATE_LIMITED');
-    expect(t.limiter.reserve).toHaveBeenCalledWith('code_verify', [NEW, sha256(PRE)]);
+    expect(callsOf(t.limiter)).toContainEqual(['code_verify', [NEW, sha256(PRE)]]);
     expect(writesTo(t.scripted.statements(), '"users"')).toEqual([]);
   });
 
@@ -429,7 +433,7 @@ describe('completeEmailChange', () => {
     const scripted = scriptedStore((s) => {
       if (on(s, 'update', 'email_challenges')) {
         updates += 1;
-        return updates === 1 ? (responder()(s) as Record<string, unknown>[]) : [];
+        return updates === 1 ? responder()(s) : [];
       }
       return responder()(s);
     });
@@ -500,5 +504,36 @@ describe('the verify link', () => {
       code: RIGHT,
     });
     expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+});
+
+describe('construction', () => {
+  const mailer = createTestAuthMailer().mailer;
+
+  it('builds its own store and limiter from the two databases, and fails closed on them', async () => {
+    const db = {} as unknown as Database;
+    const authDb = {} as unknown as AuthDatabase;
+    const change = createEmailChange(config, {
+      db,
+      authDb,
+      logger: recordingLogger().logger,
+      mailer,
+      metrics: { increment: () => undefined },
+    });
+    const result = await change.startEmailChange(browser(), session, { newEmail: NEW });
+    expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('refuses to start without databases or the parts they would make', () => {
+    expect(() => createEmailChange(config, { logger: recordingLogger().logger, mailer })).toThrow(
+      TypeError,
+    );
+    expect(() =>
+      createEmailChange(config, {
+        store: scriptedStore().store,
+        logger: recordingLogger().logger,
+        mailer,
+      }),
+    ).toThrow(TypeError);
   });
 });

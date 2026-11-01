@@ -22,6 +22,7 @@ import {
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
+const anyDate: unknown = expect.any(Date);
 let h: Harness;
 let flow: Flow;
 let change: EmailChange;
@@ -210,11 +211,11 @@ describeWithStack('email change against Postgres', () => {
     const contested = address('contested');
     const mail = await startChange(p, contested);
     if (mail === null) throw new Error('no code was mailed');
-    let release = () => {};
+    let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let ready = () => {};
+    let ready: () => void = () => undefined;
     const inserted = new Promise<void>((resolve) => {
       ready = resolve;
     });
@@ -289,7 +290,7 @@ describeWithStack('email change against Postgres', () => {
     await expect(flow.sessions.resolveSession(cookieOf(laptop))).resolves.toBeNull();
     await expect(flow.sessions.resolveSession(p.cookie)).resolves.toMatchObject({ email: next });
     expect(flow.mail.notices.slice(noticesBefore)).toEqual([
-      { to: p.email, notice: { kind: 'email_changed', newAddress: next, at: expect.any(Date) } },
+      { to: p.email, notice: { kind: 'email_changed', newAddress: next, at: anyDate } },
     ]);
     expect(
       await h.sql(
