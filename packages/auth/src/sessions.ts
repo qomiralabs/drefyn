@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import { grantAccess, type AccessResult } from './access.ts';
 import type { AuthConfig } from './config.ts';
+import { forgetDevices, resetDevices } from './devices.ts';
 import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
@@ -418,13 +419,16 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     async signOutEverywhere(s) {
       let revoked: number;
       try {
-        const rows = await store.user(s.userId, (tx) =>
-          tx
+        const rows = await store.user(s.userId, async (tx) => {
+          const gone = await tx
             .deleteFrom('sessions')
             .where('user_id', '=', sql<string>`app.current_user_id()`)
             .returning('id')
-            .execute(),
-        );
+            .execute();
+          // A copied device cookie must not keep its rate limit exemption either.
+          await forgetDevices(tx);
+          return gone;
+        });
         revoked = rows.length;
       } catch (error) {
         throw unavailable(error);
@@ -433,7 +437,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       return revoked;
     },
 
-    async signOutOtherSessions(s) {
+    async signOutOtherSessions(s, b) {
       const secret = random(SECRET_BYTES);
       try {
         const rotated = await store.user(s.userId, async (tx) => {
@@ -497,9 +501,8 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .where('id', '<>', inserted.id)
             .returning('id')
             .execute();
-          // TODO(#130): in this transaction, delete the user's known devices, record this
-          // browser's new device hash with its user_agent_family, and add its cookie here.
-          const deviceCookies: readonly CookieSpec[] = [];
+          // This browser keeps a device, on a new cookie; every copy of an old one is forgotten.
+          const deviceCookies = await resetDevices(tx, config, s.userId, b.userAgent, random);
           return {
             sessionId: idOf('ses', inserted.id),
             // The old row of this browser is among the deleted and is not counted.

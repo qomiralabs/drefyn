@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/integration/**/*.test.ts'],
+    // Timing runs alone afterwards, in vitest.integration.serial.config.ts.
+    exclude: ['test/integration/serial/**', '**/node_modules/**'],
     globalSetup: ['test/integration/support/global-setup.ts'],
     restoreMocks: true,
     testTimeout: 60_000,

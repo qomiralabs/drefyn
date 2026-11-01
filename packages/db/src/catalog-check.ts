@@ -341,6 +341,8 @@ select n.nspname || '.' || t.relname as table_name, i.relname::text as index_nam
 const HAS_ORGANIZATION = `exists (select from pg_attribute o where o.attrelid = c.oid
                  and o.attname = 'organization_id' and o.attnum > 0 and not o.attisdropped)`;
 
+// System columns count too: a grant on ctid is invisible to a check that reads only user
+// columns, and the expiry cleanup needs exactly one such grant.
 const RELATION_GRANTS = `
 select n.nspname || '.' || c.relname as object, c.relkind::text as kind,
        null::text as column_name, ${GRANTEE} as grantee, a.privilege_type as privilege,
@@ -357,7 +359,7 @@ select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text, ${GRAN
   join pg_class c on c.oid = att.attrelid
   join pg_namespace n on n.oid = c.relnamespace
   cross join lateral aclexplode(att.attacl) a
- where n.nspname = 'app' and att.attnum > 0 and not att.attisdropped and att.attacl is not null
+ where n.nspname = 'app' and att.attnum <> 0 and not att.attisdropped and att.attacl is not null
    and a.grantee <> c.relowner
  order by 1, 3 nulls first, 4, 5`;
 
@@ -1031,7 +1033,7 @@ select n.nspname || '.' || c.relname, c.relkind::text, att.attname::text,
   join pg_class c on c.oid = att.attrelid
   join pg_namespace n on n.oid = c.relnamespace
   cross join lateral aclexplode(att.attacl) a
- where n.nspname = 'app' and att.attnum > 0 and not att.attisdropped and att.attacl is not null
+ where n.nspname = 'app' and att.attnum <> 0 and not att.attisdropped and att.attacl is not null
    and a.grantee = ${APP_ROLE_OID}
  order by 1, 3 nulls first, 4`;
 
