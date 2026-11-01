@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts && vitest run --config vitest.integration.serial.config.ts"
   },
   "dependencies": {
     "@drefyn/address": "workspace:*",

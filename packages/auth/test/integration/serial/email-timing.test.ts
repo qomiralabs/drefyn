@@ -1,7 +1,7 @@
 import { beforeAll, expect, it } from 'vitest';
-import { createTestAuthMailer } from '../../src/testing.ts';
-import { configWith, flowFor, newBrowser } from './support/email.ts';
-import { describeWithStack, harness, type Harness } from './support/harness.ts';
+import { createTestAuthMailer } from '../../../src/testing.ts';
+import { configWith, flowFor, newBrowser } from '../support/email.ts';
+import { describeWithStack, harness, type Harness } from '../support/harness.ts';
 
 // The response never waits on mail, and its time says nothing about the address: a
 // transport that takes 2 s per message, known and unknown addresses interleaved, every
