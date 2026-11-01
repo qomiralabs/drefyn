@@ -18,6 +18,7 @@ import {
   USER,
   browser,
   config,
+  isEmailRead,
   isProof,
   loopbackConfig,
   sessionInfo,
@@ -336,6 +337,71 @@ describe('startSession', () => {
     expect(scripted.statements().find(isInsert)?.parameters).toContain(null);
   });
 
+  describe('guarded by the password hash a sign in read', () => {
+    const OLD = '$argon2id$v=19$m=19456,t=2,p=1$old$old';
+    const NEW = '$argon2id$v=19$m=24576,t=2,p=1$new$new';
+    const isGuarded = (s: Statement) => /^with .* insert into "sessions"/is.test(s.sql);
+    const isRehash = (s: Statement) => s.sql.startsWith('update "password_credentials"');
+
+    function guardedResponder(stillStored: boolean) {
+      return (s: Statement) => {
+        if (isGuarded(s)) {
+          return stillStored
+            ? [{ id: OTHER_SESSION, authenticated_at: AUTHENTICATED_AT, expires_at: EXPIRES_AT }]
+            : [];
+        }
+        if (isRehash(s)) return [{ user_id: USER }];
+        if (isEmailRead(s)) return [{ email: 'person@example.com' }];
+        return [];
+      };
+    }
+
+    it('checks and locks the hash in the same statement that creates the row', async () => {
+      const { sessions, scripted } = setup(guardedResponder(true));
+      const started = await sessions.startSession(browser(), {
+        userId: USER,
+        method: 'password',
+        credential: { phc: OLD },
+      });
+      expect(started.session.method).toBe('password');
+      const statements = scripted.statements();
+      const guarded = statements.filter(isGuarded);
+      expect(guarded).toHaveLength(1);
+      expect(guarded[0]?.sql).toMatch(/from "password_credentials"/);
+      expect(guarded[0]?.sql).toMatch(/for update/);
+      expect(guarded[0]?.parameters).toContain(OLD);
+      expect(statements.filter(isRehash)).toEqual([]);
+      expect(scripted.events.filter((e) => e.kind === 'begin')).toHaveLength(1);
+    });
+
+    it('refuses with AUTH_CREDENTIALS_INVALID and writes nothing when the hash changed', async () => {
+      const { sessions, scripted } = setup(guardedResponder(false));
+      await expect(
+        sessions.startSession(browser(), {
+          userId: USER,
+          method: 'password',
+          credential: { phc: OLD, rehash: NEW },
+        }),
+      ).rejects.toMatchObject({ code: 'AUTH_CREDENTIALS_INVALID' });
+      expect(scripted.statements().filter(isRehash)).toEqual([]);
+      expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+    });
+
+    it('swaps in the new hash only where the old one is still stored, in the same transaction', async () => {
+      const { sessions, scripted } = setup(guardedResponder(true));
+      await sessions.startSession(browser(), {
+        userId: USER,
+        method: 'password',
+        credential: { phc: OLD, rehash: NEW },
+      });
+      const rehash = scripted.statements().filter(isRehash);
+      expect(rehash).toHaveLength(1);
+      expect(rehash[0]?.sql).toMatch(/where "user_id" = app\.current_user_id\(\) and "phc" = \$/);
+      expect(rehash[0]?.parameters).toEqual([NEW, OLD]);
+      expect(scripted.events.filter((e) => e.kind === 'begin')).toHaveLength(1);
+    });
+  });
+
   it('fails with AUTH_UNAVAILABLE when the insert fails', async () => {
     const { sessions } = setup((s) => {
       if (isInsert(s)) throw new Error('down');
@@ -535,6 +601,16 @@ describe('step up by current password', () => {
     const result = await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'x' });
     expect(verify).toHaveBeenCalledWith(null, 'x');
     expect(!result.ok && result.error.code).toBe('AUTH_CREDENTIALS_INVALID');
+  });
+
+  it('refuses a user with no password row even when the verifier says yes', async () => {
+    const verify = vi.fn(() => Promise.resolve(true));
+    const { sessions, scripted } = setup(stepUpResponder(null), { passwords: { verify } });
+    const result = await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'x' });
+    // The verify still runs, so the refusal costs what a wrong password costs.
+    expect(verify).toHaveBeenCalledWith(null, 'x');
+    expect(!result.ok && result.error.code).toBe('AUTH_CREDENTIALS_INVALID');
+    expect(scripted.writes()).toEqual([]);
   });
 
   it('returns AUTH_RATE_LIMITED before any hash when the bucket is full', async () => {
