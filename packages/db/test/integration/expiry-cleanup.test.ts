@@ -76,7 +76,9 @@ describeWithStack('expiry cleanup', () => {
       known_devices: 1,
     });
     expect(
-      await superuser(`select encode(device_hash, 'hex') from app.known_devices;`, db.name),
+      (
+        await superuser(`select encode(device_hash, 'hex') from app.known_devices;`, db.name)
+      ).trim(),
     ).toBe('0a'.repeat(32));
     expect(apiCounts).toEqual({ api_key_failures: 1 });
     expect(await remaining()).toBe(

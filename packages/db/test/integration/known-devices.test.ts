@@ -66,7 +66,7 @@ async function seed(): Promise<void> {
 }
 
 const count = async (where = 'true') =>
-  superuser(`select count(*) from app.known_devices where ${where};`, db.name);
+  (await superuser(`select count(*) from app.known_devices where ${where};`, db.name)).trim();
 
 describeWithStack('known_devices', () => {
   beforeAll(async () => {
