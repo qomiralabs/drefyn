@@ -260,6 +260,11 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   ),
 ];
 
+// An inviter's stored role bounds the role they invite: an owner any, an admin admin or member,
+// a member none.
+const INVITER_GRANTS_ROLE =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
+
 // The first owner of an organization made in this transaction, or a member the database can
 // see invited: a live invitation of this organization, named by the row, with the same role.
 // Kept exact, as pg_get_expr prints it.
@@ -267,6 +272,23 @@ const MEMBERSHIP_ORIGIN =
   "(((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now())))))";
 
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
+  {
+    name: 'app.invitations.invitation_insert_inviter',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: INVITER_GRANTS_ROLE,
+    reason:
+      'acceptance trusts the invited role, so an invitation grants only what its inviter could: an owner any role, an admin admin or member',
+  },
+  {
+    name: 'app.invitations.invitation_update_inviter',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: 'true',
+    withCheck: INVITER_GRANTS_ROLE,
+    reason: 'a resend or any other update cannot raise the role past what the inviter could grant',
+  },
   {
     name: 'app.memberships.membership_insert_origin',
     command: 'insert',

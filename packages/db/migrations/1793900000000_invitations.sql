@@ -42,6 +42,26 @@ create policy tenant_isolation on app.invitations to drefyn_app
   using (organization_id = app.current_org())
   with check (organization_id = app.current_org());
 
+-- An invitation grants only what its inviter's stored role could: an owner any role, an admin
+-- admin or member, a member nothing. Acceptance trusts the invited role, so this is checked
+-- on every insert and on every update, and a resend cannot raise it either.
+create policy invitation_insert_inviter on app.invitations
+  as restrictive for insert to drefyn_app
+  with check (exists (select from app.memberships m
+                       where m.organization_id = invitations.organization_id
+                         and m.id = invitations.invited_by
+                         and (m.role = 'owner'
+                              or (m.role = 'admin' and invitations.role <> 'owner'))));
+
+create policy invitation_update_inviter on app.invitations
+  as restrictive for update to drefyn_app
+  using (true)
+  with check (exists (select from app.memberships m
+                       where m.organization_id = invitations.organization_id
+                         and m.id = invitations.invited_by
+                         and (m.role = 'owner'
+                              or (m.role = 'admin' and invitations.role <> 'owner'))));
+
 -- Keyed by an HMAC of the address, so the table never holds who asked.
 create table app.invitation_blocks (
   id uuid primary key default uuidv7(),
@@ -110,5 +130,9 @@ alter table app.memberships drop constraint memberships_organization_invitation_
 alter table app.memberships drop column invitation_id;
 
 drop table app.invitation_blocks;
+
+drop policy invitation_update_inviter on app.invitations;
+
+drop policy invitation_insert_inviter on app.invitations;
 
 drop table app.invitations;
