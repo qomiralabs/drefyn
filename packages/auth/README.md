@@ -36,7 +36,9 @@ const api = parseApiAuthConfig(process.env); // API service
   absolute days. Proxy hops must be 0 for a loopback origin. `DREFYN_CLIENT_IP_HEADER`
   is `cloudfront-viewer-address` or unset, and needs hops of 1 or more. While passwords
   are on, `UV_THREADPOOL_SIZE` must be set above 4 and the hash concurrency must be under
-  half of it. Argon2id parameters stay at or above the OWASP floor.
+  half of it. Argon2id parameters stay at or above the OWASP floor, and `crypto.argon2`
+  must exist (Node 24.7 or later on OpenSSL 3.2 or later); without it startup fails with
+  `AUTH_CONFIG_INVALID` naming `DREFYN_AUTH_PASSWORDS`.
 - Rate limits: one `DREFYN_AUTH_RATE_<BUCKET>` key per bucket in `RATE_BUCKETS`. Each
   value is 1 to 3 `count/window` pairs, for example `3/10m,10/1d`, with windows in `s`,
   `m`, `h` or `d` up to `7d`.
@@ -210,7 +212,12 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
 - `requireRecentAuth(session)` answers `AUTH_RECENT_AUTH_REQUIRED` when the last sign in is
   older than 15 minutes by database time. `stepUpWithPassword` counts `password_fail` and
   `password_fail_ip` before the hash and verifies outside any transaction through the
-  `PasswordVerifier` it is given (`AUTH_PASSWORDS_DISABLED` without one).
+  `PasswordVerifier` it is given (`AUTH_PASSWORDS_DISABLED` without one). A user with no
+  password row is refused whatever the verifier answers.
+- `startSession` with `credential: { phc, rehash? }` (password sign in) inserts the row in
+  one statement that locks the password row only while it still holds `phc`; otherwise it
+  throws `AUTH_CREDENTIALS_INVALID` and writes nothing. `rehash` replaces the hash in the
+  same transaction.
   `startStepUpCode` and `verifyStepUpCode` send an 8 digit code bound to the asking session
   (10 minutes, 5 attempts, single use). Both refresh `authenticated_at` on the same row and
   record `step_up_method`.
@@ -255,6 +262,50 @@ purpose, code)`, 10 minutes, 5 attempts, single use. A new challenge replaces on
 - Logs: `auth.email_code_refused` with the outcome code and the first 16 hex digits of the
   `code_verify` key, `auth.sign_in_mail_failed` with the purpose, `auth.device_record_failed`
   with the public user id. Never an address, code, challenge id or cookie.
+
+## Password sign in
+
+```ts
+const hasher = createPasswordHasher({
+  params: config.passwords.argon2,
+  concurrency: config.passwords.hashConcurrency,
+  queueMax: config.passwords.hashQueueMax,
+});
+// One hasher per process, given to both, so one gate bounds every hash.
+const sessions = createSessions(config, { db, authDb, logger, mailer, passwords: hasher });
+const passwords = createPasswordSignIn(config, { db, authDb, logger, sessions, hasher, botCheck });
+const form = passwords.passwordForm(browser); // GET: set form.setCookies, render form.csrf
+const input = readPasswordSignInForm(body); // POST: 8 KiB body, 4 KiB password, one of each field
+const result = await passwords.signInWithPassword(browser, input);
+await passwords.setPassword(session, { newPassword }); // a first password, after a recent sign in
+```
+
+- Argon2id from `node:crypto`, stored as a PHC string. `parsePhc` takes `argon2id` v19
+  only, with parameters from `ARGON2_FLOOR` (m=19456, t=2, p=1) up to m=262144, t=10, p=4.
+- Three steps. A short auth transaction reads the user and hash in one statement, after
+  `password_fail` (address, counted for unknown addresses too) and `password_fail_ip` are
+  reserved. The hash runs outside any transaction. The session step creates the row only
+  while the hash read is still stored, and swaps in a rehash when the parameters moved. A
+  changed hash gets one fresh read and check; a reset between the steps leaves no session.
+- One answer, `AUTH_CREDENTIALS_INVALID`, for an unknown address, a user with no password, a
+  wrong password and an unreadable hash, in every sign up mode. Each pays one full hash at
+  the current parameters (a dummy where there is no real hash), and a miss against an older,
+  cheaper hash waits out the difference to the measured current cost.
+- The hash gate runs `hashConcurrency` at once, queues `hashQueueMax` (64) for up to 2 s,
+  and refuses past that with `AUTH_UNAVAILABLE` and `retryAfterSeconds: 1`.
+- The form binding: `__Host-drefyn_pre` plus a hidden `csrf` field, `HMAC(subkey_csrf,
+pre)`. Without both the post is `AUTH_ORIGIN_REFUSED` and nothing is counted. The Origin
+  check belongs to the dashboard's action wrappers.
+- Passwords are NFKC; 4 KiB raw and 1,024 bytes after NFKC, refused as `AUTH_INPUT_INVALID`.
+  New ones are 15 to 128 characters and pass the common password rules, else
+  `AUTH_PASSWORD_WEAK` with `rules`. `setPassword` never replaces a set password
+  (`AUTH_FORBIDDEN`).
+- `BotCheck` is optional. Set, it runs after the counts and before any read; a refusal, an
+  error or no answer in 3 s is `AUTH_BOT_CHECK_REQUIRED`. Unset with `DREFYN_AUTH_SIGNUP=open`,
+  building the flow logs `auth.signup_open_without_bot_check` once.
+- A sign in records the known device as email sign in does. Logs: `auth.password_refused`
+  (outcome and the first 16 hex digits of the `password_fail` key), `auth.password_set` and
+  `auth.password_hash_unreadable` (public user id). Never a password, address or cookie.
 
 ## Email change
 

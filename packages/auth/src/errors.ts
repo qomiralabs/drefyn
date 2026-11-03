@@ -1,4 +1,5 @@
 import type { AuthConfigKey } from './config-keys.ts';
+import type { WeakPasswordRule } from './password-input.ts';
 
 export type AuthErrorCode =
   | 'AUTH_CONFIG_INVALID'
@@ -78,6 +79,9 @@ export interface AuthErrorDetail {
   // Fixed text written in this package; never a value from config or a request.
   readonly reason?: string;
   readonly retryAfterSeconds?: number;
+  // For AUTH_PASSWORD_WEAK: which rules the password broke, so the form can say why without
+  // ever echoing the password.
+  readonly rules?: readonly WeakPasswordRule[];
   // The failure underneath, for the server log; never part of the message.
   readonly cause?: unknown;
 }
@@ -86,6 +90,7 @@ export class AuthError extends Error {
   readonly code: AuthErrorCode;
   declare readonly key?: AuthConfigKey;
   declare readonly retryAfterSeconds?: number;
+  declare readonly rules?: readonly WeakPasswordRule[];
 
   constructor(code: AuthErrorCode, detail: AuthErrorDetail = {}) {
     const text =
@@ -94,6 +99,7 @@ export class AuthError extends Error {
     this.code = code;
     if (detail.key !== undefined) this.key = detail.key;
     if (detail.retryAfterSeconds !== undefined) this.retryAfterSeconds = detail.retryAfterSeconds;
+    if (detail.rules !== undefined) this.rules = Object.freeze([...detail.rules]);
   }
 }
 
