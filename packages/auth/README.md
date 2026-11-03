@@ -388,6 +388,10 @@ const removed = await account.removePassword(session);
   as unlinking a provider does, so the two cannot both pass the check.
 - A password sign in that checked the old hash creates no session after any of the three,
   because session creation rechecks the stored hash under the row lock.
+- Change and reset take the same `admitNewPassword` step as `setPassword`: the rules before
+  anything is counted, then the breached check (`breachedPasswords`) once the person is
+  proved, so `AUTH_PASSWORD_BREACHED` never answers a stranger. A listed password on reset
+  leaves the code unspent. A configured list that was never opened refuses to start.
 - Notices: `password_reset`, `password_changed`, `password_removed` (and `password_set` from
   `setPassword`), with database time. Logs carry outcome codes and public ids only.
 
