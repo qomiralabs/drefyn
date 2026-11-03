@@ -94,14 +94,16 @@ interface Done {
 
 type Tx = Transaction<OrganizationSchema>;
 
-// Every role change and removal waits here, the lock invite takes too, so the owner count
-// read after it sees every change committed before.
+// Every role change and removal waits here, and on the lock invite takes, so the owner count
+// read after it sees every change committed before. No key update, not update: a key being
+// created checks its organization foreign key with a key share lock, and a full update lock
+// here would deadlock with that key while the code waits on its creator's membership.
 async function lockOrganization(tx: Tx, organizationId: OrganizationId): Promise<void> {
   await tx
     .selectFrom('organizations')
     .select('organization_id')
     .where('organization_id', '=', organizationId)
-    .forUpdate()
+    .forNoKeyUpdate()
     .executeTakeFirstOrThrow();
 }
 
@@ -150,7 +152,7 @@ async function lockTarget(tx: Tx, target: Target): Promise<void> {
     .selectFrom('memberships')
     .select('id')
     .where('id', '=', target.id)
-    .forUpdate()
+    .forNoKeyUpdate()
     .executeTakeFirst();
   if (row === undefined) throw new GuardRefused();
 }

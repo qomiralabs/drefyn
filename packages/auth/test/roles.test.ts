@@ -17,15 +17,18 @@ const AT = new Date('2026-11-03T10:00:00.000Z');
 
 const select = (s: Statement, table: string) =>
   /^select\b/i.test(s.sql) && s.sql.includes(`from "${table}"`);
-const isOrgLock = (s: Statement) => select(s, 'organizations') && s.sql.endsWith(' for update');
+const isOrgLock = (s: Statement) =>
+  select(s, 'organizations') && s.sql.endsWith(' for no key update');
 const isTargetRead = (s: Statement) =>
-  select(s, 'memberships') && s.sql.includes('"m"."id" = ') && !s.sql.endsWith(' for update');
+  select(s, 'memberships') &&
+  s.sql.includes('"m"."id" = ') &&
+  !s.sql.endsWith(' for no key update');
 const isActorRead = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('"user_id" = ') && !s.sql.includes('"m".');
 const isOwnerCount = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('count(*)') && s.sql.includes('"id" <> ');
 const isTargetLock = (s: Statement) =>
-  select(s, 'memberships') && !s.sql.includes('"m".') && s.sql.endsWith(' for update');
+  select(s, 'memberships') && !s.sql.includes('"m".') && s.sql.endsWith(' for no key update');
 const isKeyDelete = (s: Statement) => s.sql.startsWith('delete from "api_keys"');
 const isInvitationDelete = (s: Statement) => s.sql.startsWith('delete from "invitations"');
 const isInvitationCount = (s: Statement) => select(s, 'invitations') && s.sql.includes('count(*)');
@@ -125,7 +128,7 @@ const kinds = (statements: readonly Statement[]) =>
     return s.sql;
   });
 
-// Locks end in "for update", so writes are told apart by their first word.
+// Locks end in "for no key update", so writes are told apart by their first word.
 const writesOf = (s: { statements(): Statement[] }) =>
   s.statements().filter((x) => /^(insert|update|delete)\b/i.test(x.sql));
 
