@@ -10,7 +10,7 @@ export const BREACHED_RECORD_BYTES = 20;
 
 export interface BreachedPasswordFile extends BreachedPasswordCheck {
   readonly records: number;
-  // null when the signal fired before the search finished.
+  // null when the signal had already fired; one read is too short to be worth stopping.
   contains(digest: Uint8Array, signal?: AbortSignal): Promise<boolean | null>;
   close(): Promise<void>;
 }
@@ -93,7 +93,6 @@ export async function openBreachedPasswordFile(
       const { bytesRead } = await handle.read(buffer, 0, bytes, first * BREACHED_RECORD_BYTES);
       // Truncated under us: no answer is better than a wrong one.
       if (bytesRead !== bytes) throw new Error('breached list shrank');
-      if (signal?.aborted === true) return null;
       return search(buffer, count, digest);
     } finally {
       if (spare.length < SPARE_BUFFERS) spare.push(buffer);
