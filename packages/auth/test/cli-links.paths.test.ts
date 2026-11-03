@@ -88,7 +88,10 @@ describe('issuing a CLI link', () => {
       'delete from "cli_sign_in_links"',
       'insert into "cli_sign_in_links"',
     ]);
-    expect(writes[0]?.sql).toContain('"consumed_at" is null');
+    expect(writes[0]).toEqual({
+      sql: 'delete from "cli_sign_in_links" where "user_id" = $1 and "consumed_at" is null',
+      parameters: [USER],
+    });
     expect(writes[1]?.parameters).toContainEqual(sha256(SECRET));
     expect(writes[1]?.sql).toContain("now() + interval '15 minutes'");
     expect(JSON.stringify(writes)).not.toContain(formatCliLinkToken(SECRET));
