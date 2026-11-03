@@ -165,7 +165,12 @@ export function Popover(props: PopoverProps): ReactNode {
         <span className={LABEL_CELL}>{trigger}</span>
       </AriaButton>
       {phone ? (
-        <Sheet title={title ?? triggerLabel ?? triggerText} open={open} onOpenChange={change}>
+        <Sheet
+          title={title ?? triggerLabel ?? triggerText}
+          open={open}
+          onOpenChange={change}
+          trigger={triggerRef}
+        >
           <div className="flex flex-col gap-12 px-8 pt-4 pb-8">{children}</div>
         </Sheet>
       ) : (

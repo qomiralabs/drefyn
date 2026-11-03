@@ -1,5 +1,5 @@
 'use client';
-import { Children, useContext, useState, type ReactNode } from 'react';
+import { Children, useContext, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   Button,
   Label,
@@ -70,7 +70,15 @@ function LoadingRows(): ReactNode {
 
 // The sheet follows the select's own state. React Aria also renders the select's children in
 // a hidden copy to find the options, where that state is missing; nothing is drawn there.
-function SelectSheet({ title, children }: { title: string; children: ReactNode }): ReactNode {
+function SelectSheet({
+  title,
+  trigger,
+  children,
+}: {
+  title: string;
+  trigger: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}): ReactNode {
   const state = useContext(SelectStateContext);
   if (state === null) return null;
   return (
@@ -80,6 +88,7 @@ function SelectSheet({ title, children }: { title: string; children: ReactNode }
       onOpenChange={(next) => {
         state.setOpen(next);
       }}
+      trigger={trigger}
     >
       {children}
     </Sheet>
@@ -123,6 +132,7 @@ export function Select({
   const [own, setOwn] = useState<string | null>(defaultValue ?? null);
   const [open, setOpen] = useState(defaultOpen && !disabled);
   const phone = usePhone();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const chosen = value ?? own;
   const invalid = error !== undefined && error.trim() !== '';
   const list = (
@@ -165,7 +175,10 @@ export function Select({
         </Text>
       )}
       <Button
-        ref={markDisabled(disabled)}
+        ref={(el) => {
+          triggerRef.current = el;
+          markDisabled(disabled)(el);
+        }}
         className={`flex w-full min-w-0 items-center justify-between gap-8 rounded-sm border text-start transition-colors duration-fast ease-enter outline-none data-focus-visible:focus-ring ${SIZE[size]} ${triggerPaint(
           disabled,
           invalid,
@@ -186,7 +199,9 @@ export function Select({
               its Popover passes through; a sheet does not. This one never opens and renders
               nothing on the page. */}
           <Popover isOpen={false}>{list}</Popover>
-          <SelectSheet title={label}>{list}</SelectSheet>
+          <SelectSheet title={label} trigger={triggerRef}>
+            {list}
+          </SelectSheet>
         </>
       ) : (
         <Popover

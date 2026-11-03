@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -301,5 +301,55 @@ describe('the phone sheet', () => {
     await user.click(overlay);
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Invite people' })).toBeDefined();
+  });
+
+  // WebKit sometimes left focus on the dialog under a sheet closed by a press. Whatever React
+  // Aria does first, the trigger ends with focus unless focus moved somewhere new.
+  const nextFrame = () =>
+    act(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        }),
+    );
+
+  it('returns focus to the trigger when it was left on the layer that holds it', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog trigger="Invite" title="Invite people">
+        <Region />
+      </Dialog>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Invite' }));
+    const region = screen.getByRole('button', { name: /Region/ });
+    await user.click(region);
+    const dialog = screen.getByRole('dialog', { name: 'Invite people' });
+    // Close and move focus to the dialog in the same task, before any frame, as WebKit did.
+    act(() => {
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+    });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    dialog.focus();
+    await nextFrame();
+    await nextFrame();
+    expect(document.activeElement).toBe(region);
+  });
+
+  it('leaves focus that moved somewhere new where it is', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <Actions />
+        <button type="button">Elsewhere</button>
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Payments API' }));
+    await user.keyboard('{Escape}');
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    elsewhere.focus();
+    await nextFrame();
+    expect(document.activeElement).toBe(elsewhere);
   });
 });

@@ -1,5 +1,13 @@
 'use client';
-import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { Dialog as AriaDialog, Heading, Modal, ModalOverlay } from 'react-aria-components';
 import { tokens } from '../tokens/tokens.ts';
 import { buttonClasses } from './button-classes.ts';
@@ -47,7 +55,35 @@ export interface SheetProps {
   // The opener's own state, passed in so a sheet inside a dialog never takes the dialog's.
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // What opened it, where focus goes back when it closes.
+  trigger: RefObject<HTMLElement | null>;
   children: ReactNode;
+}
+
+// React Aria returns focus when a sheet closes, but a sheet stacked over a dialog closed by a
+// press sometimes left WebKit's focus on the dialog, whose own scope took it first. After
+// React Aria has had its turn, focus left on the page or on the layer that holds the trigger
+// goes to the trigger. Focus that moved on, such as into a dialog a menu item opened, stays.
+function useReturnFocus(open: boolean, trigger: RefObject<HTMLElement | null>): void {
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+      return;
+    }
+    if (!wasOpen.current) return;
+    wasOpen.current = false;
+    // Registered after React Aria's own restore, so it runs after it.
+    const frame = requestAnimationFrame(() => {
+      const target = trigger.current;
+      const active = document.activeElement;
+      if (target === null || !target.isConnected || active === target) return;
+      if (active === null || active === document.body || active.contains(target)) target.focus();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [open, trigger]);
 }
 
 // The bottom sheet that Select, Menu and Popover open in on a phone. Each keeps its own
@@ -56,7 +92,8 @@ export interface SheetProps {
 // and Close all shut it and send focus back to the trigger. Over an open dialog it is the
 // topmost layer, so those close it alone. The scrim fades on the duration token; the panel
 // rises on the move token, which reduced motion sets to zero, leaving the fade.
-export function Sheet({ title, open, onOpenChange, children }: SheetProps): ReactNode {
+export function Sheet({ title, open, onOpenChange, trigger, children }: SheetProps): ReactNode {
+  useReturnFocus(open, trigger);
   return (
     <ModalOverlay
       isOpen={open}

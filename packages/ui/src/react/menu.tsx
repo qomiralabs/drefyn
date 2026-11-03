@@ -112,7 +112,12 @@ export function Menu({
         <span className={LABEL_CELL}>{trigger}</span>
       </Button>
       {phone ? (
-        <Sheet title={label ?? triggerLabel ?? triggerText} open={open} onOpenChange={setOpen}>
+        <Sheet
+          title={label ?? triggerLabel ?? triggerText}
+          open={open}
+          onOpenChange={setOpen}
+          trigger={triggerRef}
+        >
           {list}
         </Sheet>
       ) : (
