@@ -335,6 +335,63 @@ const done = await change.completeEmailChange(browser, session, { challenge, cod
   `auth.email_changed` (count of sessions ended), `auth.email_change_notice_failed`, each with
   public user and session ids. Never an address or code.
 
+## GitHub and Google
+
+```ts
+const oauth = createOAuth(config, { db, authDb, logger, mailer, sessions, invitations }); // mailer also has sendSecurityNotice
+const started = await oauth.startOAuth(browser, { provider, purpose, returnTo, session }); // purpose: sign_in, link or step_up
+// set started.value.setCookies, then 302 to started.value.redirectTo
+const done = await oauth.completeOAuth(browser, { provider, query }); // the callback's query only
+// done.value.kind: signed_in, stepped_up, linked (run send() in after()) or link_pending (run send() in after())
+const removed = await oauth.unlinkIdentity(session, { provider }); // then in after(): await removed.value.send()
+```
+
+- A provider is on only when both of its `DREFYN_AUTH_<PROVIDER>_CLIENT_ID` and
+  `_CLIENT_SECRET` are set; otherwise `AUTH_OAUTH_DISABLED`. Secrets come from the
+  environment only and stay in a `SecretValue`.
+- Start counts `oauth_start` on the IP or /64, stores a row in `oauth_states` keyed by
+  `sha256(state)` with the provider, purpose, PKCE verifier, Google nonce, the browser's
+  pre cookie hash, the safe `returnTo` and, for link and step up, the user, for 10 minutes.
+  It sets `__Host-drefyn_oauth` to the state. PKCE S256 is always sent. `redirect_uri` is
+  `DREFYN_APP_ORIGIN` plus `/auth/oauth/<provider>/callback`; nothing from the request
+  reaches it. Endpoints are fixed in code, never discovered.
+- The callback needs the query `state` equal to the cookie (constant time), deletes the
+  row (single use, even when it refuses), and needs the same provider, browser and an
+  unexpired row; otherwise `AUTH_OAUTH_STATE_INVALID`. openid-client then checks the
+  state, PKCE and, for Google, the ID token: issuer, audience, nonce, expiry and the
+  signature through Google's JWKS (`enableNonRepudiationChecks`).
+- GitHub's subject is the numeric `id`, never `login`, and its address is the primary
+  verified entry of `GET /user/emails`. Google's is `sub` and a verified `email`. Provider
+  tokens never leave the provider module: nothing stores or logs them.
+- Sign in: a known identity signs in its user. An unknown identity with a verified address
+  matching no user creates one (subject to `DREFYN_AUTH_SIGNUP`). An unverified address is
+  `AUTH_OAUTH_EMAIL_UNVERIFIED`. A verified address matching an existing user is never
+  linked by itself: the answer is `link_pending`, and a `link_identity` code naming the
+  provider and account goes to that address (counted like a sign in mail). Proving it in
+  the same browser through `verifyLinkCode` or `verifyEmailCode` links the identity and
+  signs in with the provider as the method. Sign ins record the browser as a known device.
+- Link needs a session proved within 15 minutes, at start and at the callback; an
+  identity held by someone else, or a second one of a provider, is `AUTH_FORBIDDEN`.
+- Step up refuses an identity not linked to the session's user
+  (`AUTH_STEP_UP_IDENTITY_MISMATCH`). Google sends `prompt=login` and `max_age=0` and needs
+  an `auth_time` within 5 minutes (`AUTH_RECENT_AUTH_REQUIRED`). GitHub cannot force a new
+  sign in, so it is refused (`AUTH_FORBIDDEN`) while the user has another way to step up
+  (email not off, a password, or Google) and is recorded as `github_session` otherwise.
+- Unlink needs a recent sign in and refuses to remove the last way to sign in when email is
+  off. Link and unlink each send a security notice.
+- `src/oauth/fetch.ts` is the only file allowed to call the global `fetch`, and only
+  directly (a scoped egress entry). Each provider reaches its own two hosts over https,
+  with `redirect: 'error'`, any 3xx refused, 5 s and 1 MiB per call. It turns a GitHub token
+  answer of HTTP 200 with an `error` into a 400 with the same bytes, so one mapper reads
+  `ResponseBodyError`: `bad_verification_code` and `expired_token` are
+  `AUTH_OAUTH_STATE_INVALID`; everything else is `AUTH_OAUTH_PROVIDER_ERROR`.
+  `oauthTransport` is for tests only and runs after the host checks.
+- Logs: `auth.oauth_refused` (provider and outcome), `auth.oauth_fetch_refused` (provider and
+  one of `host`, `scheme`, `redirect`, `timeout`, `size`), `auth.oauth_misconfigured`
+  (provider and code, for a wrong client secret, redirect URI or a suspended app),
+  `auth.identity_linked`, `auth.identity_unlinked`, `auth.identity_notice_failed`. Never an
+  address, code, state, token or provider body.
+
 ## Organizations
 
 ```ts

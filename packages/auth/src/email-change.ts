@@ -27,15 +27,25 @@ import {
 import { stepUps, type AuthMailer } from './step-up.ts';
 import { decodeSecret, parseChallengeId, parseCode } from './tokens.ts';
 
-// Security notices: the old address on an email change, every owner on a new API key. The app
-// maps them onto the mail package's notices, with every value as plain text.
+// Security notices auth sends. The app maps each onto the mail package's notice, with every
+// value as plain text.
 export type AuthSecurityNotice =
+  // To the old address.
   | {
       readonly kind: 'email_changed';
       readonly newAddress: string;
       // Database time of the change.
       readonly at: Date;
     }
+  // To the account's address, on every provider link and unlink.
+  | {
+      readonly kind: 'identity_linked' | 'identity_unlinked';
+      readonly provider: 'github' | 'google';
+      // The provider address the identity was linked with.
+      readonly account: string;
+      readonly at: Date;
+    }
+  // To every owner, on a new API key.
   | {
       readonly kind: 'api_key_created';
       readonly organizationId: OrganizationId;

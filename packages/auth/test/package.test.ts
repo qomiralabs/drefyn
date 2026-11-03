@@ -15,6 +15,14 @@ const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as
   dependencies?: Record<string, string>;
 };
 
+// Every source file, in subfolders too, relative to src.
+function sourceFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return sourceFiles(join(dir, entry.name), `${prefix}${entry.name}/`);
+    return entry.name.endsWith('.ts') ? [`${prefix}${entry.name}`] : [];
+  });
+}
+
 function specifiers(file: string): string[] {
   return ts
     .preProcessFile(readFileSync(file, 'utf8'), true, true)
@@ -48,8 +56,9 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, devices, email sign in, email change,
-  // password sign in and API keys.
-  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in, email change, password sign in and API keys, and no network or file anywhere', () => {
+  // password sign in, OAuth and API keys. The OAuth fetch file calls the platform fetch, which
+  // the egress rule scopes.
+  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in, email change, password sign in, OAuth and API keys, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -61,10 +70,12 @@ describe('package layout', () => {
       'email-change.ts': database,
       'devices.ts': database,
       'password-sign-in.ts': database,
+      'oauth.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
     };
-    const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
+    const files = sourceFiles(src);
+    expect(files).toContain('oauth/fetch.ts');
     for (const file of files) {
       for (const spec of specifiers(join(src, file))) {
         if (allowed[file]?.test(spec) === true) continue;
@@ -91,6 +102,7 @@ describe('the main entry', () => {
         'createApiKeyVerifier',
         'createApiKeys',
         'createScopeRegistry',
+        'createOAuth',
         'DEVICES_PER_USER',
         'DEVICE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
