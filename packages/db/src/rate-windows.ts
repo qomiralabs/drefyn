@@ -1,5 +1,9 @@
-import { sql } from 'kysely';
-import { withApiKeyLimiter, withAuth, type AuthDatabase, type Database } from './database.ts';
+import {
+  runAloneOnApiKeyLimiter,
+  runAloneOnAuth,
+  type AuthDatabase,
+  type Database,
+} from './database.ts';
 import { DbError } from './errors.ts';
 
 // Fixed window counters. One upsert per window takes a row lock, so parallel reservations on
@@ -9,6 +13,11 @@ import { DbError } from './errors.ts';
 // Inside the caller's transaction, a failed attempt thrown from the work would roll its own
 // count back, and the row lock would be held for the whole work, queueing every other
 // request on that key behind it.
+//
+// The upsert and its commit go to the server in one message, so the row lock is held only
+// while the server runs it. A key under attack is exactly when hundreds of reservations
+// queue on one row; a pause in this process between the upsert and a separate commit would
+// make all of them wait, then time out.
 
 export interface WindowCount {
   readonly windowSeconds: number;
@@ -55,9 +64,17 @@ function checkWindows(windows: readonly number[]): number[] {
   return [...windows];
 }
 
-function checkKey(key: Uint8Array): Buffer {
+// The statement goes over the simple protocol, which has no parameters, so values are
+// written into the text. Only three kinds ever are, each checked first: the 32 byte key as
+// hex, whole seconds, and a bucket of lower case letters, digits and underscores.
+function keyLiteral(key: Uint8Array): string {
   if (key.length !== KEY_BYTES) throw invalid(`key must be ${String(KEY_BYTES)} bytes`);
-  return Buffer.from(key);
+  return `decode('${Buffer.from(key).toString('hex')}', 'hex')`;
+}
+
+function bucketLiteral(bucket: string): string {
+  if (!BUCKET.test(bucket)) throw invalid('has a bucket that is not a short identifier');
+  return `'${bucket}'`;
 }
 
 interface Row {
@@ -78,12 +95,12 @@ const toCounts = (rows: readonly Row[], order: readonly number[]): WindowCount[]
 
 // Windows start on multiples of their length since the epoch, by the database clock, so
 // every app host agrees on them whatever its own clock says.
-const windows = (seconds: readonly number[]) => sql`
+const windows = (seconds: readonly number[]) => `
   select w as seconds,
          to_timestamp(floor(extract(epoch from now()) / w) * w) as start
-    from unnest(${seconds}::int[]) as w`;
+    from unnest(array[${seconds.map(String).join(', ')}]::int[]) as w`;
 
-const returned = sql`
+const returned = `
   returning extract(epoch from (window_end - window_start))::int as window_seconds, count,
             greatest(1, ceil(extract(epoch from (window_end - now()))))::int as retry_after`;
 
@@ -96,19 +113,19 @@ export async function reserveAuthRateWindows(
   db: AuthDatabase,
   request: RateWindowRequest,
 ): Promise<readonly WindowCount[]> {
-  if (!BUCKET.test(request.bucket)) throw invalid('has a bucket that is not a short identifier');
-  const key = checkKey(request.keyHmac);
+  const bucket = bucketLiteral(request.bucket);
+  const key = keyLiteral(request.keyHmac);
   const seconds = checkWindows(request.windowSeconds);
-  const query = sql<Row>`
+  const statement = `
     with w as (${windows(seconds)})
     insert into app.auth_rate_limits as t (bucket, key_hmac, window_start, window_end, count)
-    select ${request.bucket}, ${key}, w.start, w.start + make_interval(secs => w.seconds), 1
+    select ${bucket}, ${key}, w.start, w.start + make_interval(secs => w.seconds), 1
       from w
     on conflict (bucket, key_hmac, window_start, window_end)
-    do update set count = least(t.count + 1, ${COUNT_CAP})
+    do update set count = least(t.count + 1, ${String(COUNT_CAP)})
     ${returned}`;
-  const result = await withAuth(db, (tx) => query.execute(tx), { timeoutMs: RESERVE_TIMEOUT_MS });
-  return toCounts(result.rows, seconds);
+  const rows = await runAloneOnAuth<Row>(db, statement, { timeoutMs: RESERVE_TIMEOUT_MS });
+  return toCounts(rows, seconds);
 }
 
 // Counts one failed API key check against each window, committed before it returns.
@@ -116,18 +133,18 @@ export async function reserveApiKeyFailureWindows(
   db: Database,
   request: ApiKeyFailureRequest,
 ): Promise<readonly WindowCount[]> {
-  const key = checkKey(request.keyHmac);
+  const key = keyLiteral(request.keyHmac);
   const seconds = checkWindows(request.windowSeconds);
-  const query = sql<Row>`
+  const statement = `
     with w as (${windows(seconds)})
     insert into app.api_key_failures as t (key_hmac, window_start, window_end, count)
     select ${key}, w.start, w.start + make_interval(secs => w.seconds), 1
       from w
     on conflict (key_hmac, window_start, window_end)
-    do update set count = least(t.count + 1, ${COUNT_CAP})
+    do update set count = least(t.count + 1, ${String(COUNT_CAP)})
     ${returned}`;
-  const result = await withApiKeyLimiter(db, (tx) => query.execute(tx), {
+  const rows = await runAloneOnApiKeyLimiter<Row>(db, statement, {
     timeoutMs: RESERVE_TIMEOUT_MS,
   });
-  return toCounts(result.rows, seconds);
+  return toCounts(rows, seconds);
 }
