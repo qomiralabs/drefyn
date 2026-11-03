@@ -27,7 +27,20 @@ const ORG = 'SentinelOrgName';
 const INVITER = 'SentinelInviter';
 const DEVICE = 'SentinelDevice';
 const PASSWORD = 'sentinel-password-123';
-const SECRETS = [ADDRESS, DOMAIN, CODE, PATH, KEY, ORG, INVITER, DEVICE, PASSWORD, 'sentinel'];
+const BLOCK_PATH = '/sentinel-block-qrs';
+const SECRETS = [
+  ADDRESS,
+  DOMAIN,
+  CODE,
+  PATH,
+  KEY,
+  ORG,
+  INVITER,
+  DEVICE,
+  PASSWORD,
+  BLOCK_PATH,
+  'sentinel',
+];
 
 const SEND_FIELDS = new Set([
   'template',
@@ -58,6 +71,7 @@ const messages: readonly MailMessage[] = [
     organizationName: ORG,
     inviterName: INVITER,
     link: new URL(PATH, ORIGIN),
+    blockLink: new URL(BLOCK_PATH, ORIGIN),
     expiresAt: AT,
   },
   {
@@ -75,6 +89,16 @@ const messages: readonly MailMessage[] = [
     organizationName: `${ORG}\n`,
     inviterName: INVITER,
     link: new URL(PATH, ORIGIN),
+    blockLink: new URL(BLOCK_PATH, ORIGIN),
+    expiresAt: AT,
+  },
+  // A refused block link must not be echoed either.
+  {
+    template: 'invitation',
+    organizationName: ORG,
+    inviterName: INVITER,
+    link: new URL(PATH, ORIGIN),
+    blockLink: new URL(`https://${DOMAIN}.test${BLOCK_PATH}`),
     expiresAt: AT,
   },
   {
@@ -150,6 +174,7 @@ describe('logs and metrics', () => {
     const everything = inspect({ lines, calls }, { depth: 20 });
     for (const secret of SECRETS) expect(everything).not.toContain(secret);
     expect(everything).not.toContain(PATH);
+    expect(everything).not.toContain(BLOCK_PATH);
   });
 
   it('log startup events with the key or mode only', () => {

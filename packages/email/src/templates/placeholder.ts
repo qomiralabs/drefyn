@@ -125,6 +125,7 @@ function invitationContent(message: Extract<MailMessage, { template: 'invitation
       { type: 'paragraph', text: `The invitation expires on ${utc(message.expiresAt)}.` },
       { type: 'rule' },
       { type: 'fineprint', text: 'If you did not expect this, you can ignore this email.' },
+      { type: 'action', label: 'I did not expect this', href: message.blockLink },
     ],
   };
 }
