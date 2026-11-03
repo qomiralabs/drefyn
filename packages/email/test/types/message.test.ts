@@ -34,8 +34,17 @@ function compileOnly(): void {
     organizationName: 'A',
     inviterName: 'B',
     link: 'https://app.drefyn.test/invite',
+    blockLink: link,
     expiresAt: new Date(),
   } as const;
+  const noBlockLink = {
+    template: 'invitation',
+    organizationName: 'A',
+    inviterName: 'B',
+    link,
+    expiresAt: new Date(),
+  } as const;
+  const textBlockLink = { ...noBlockLink, blockLink: 'https://app.drefyn.test/block' } as const;
 
   // @ts-expect-error a link_identity code must say which identity is being linked
   const missing: MailMessage = noLinking;
@@ -45,6 +54,10 @@ function compileOnly(): void {
   const provider: MailMessage = otherProvider;
   // @ts-expect-error a link is a URL, not a string
   const text: MailMessage = textLink;
+  // @ts-expect-error an invitation without a way to refuse it must not compile
+  const unblockable: MailMessage = noBlockLink;
+  // @ts-expect-error the block link is a URL, not a string
+  const textBlock: MailMessage = textBlockLink;
   // @ts-expect-error every send needs an idempotency key
   void mailer.send('a@b.test', missing, {});
 
@@ -55,7 +68,9 @@ function compileOnly(): void {
     linking: { provider: 'google', account: 'ada@example.com' },
   };
   void mailer.send('a@b.test', linked, { idempotencyKey: 'code:1' });
-  expect([extra, provider, text]).toBeDefined();
+  const invited: MailMessage = { ...noBlockLink, blockLink: link };
+  void mailer.send('a@b.test', invited, { idempotencyKey: 'invite:1' });
+  expect([extra, provider, text, unblockable, textBlock]).toBeDefined();
 }
 
 describe('message type tests', () => {
