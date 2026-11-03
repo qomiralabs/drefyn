@@ -22,6 +22,9 @@ export function cookieNames(secure: boolean): CookieNames {
   });
 }
 
+// The pre sign in cookie: long enough to fill in a form or wait for a code mail.
+export const PRE_MAX_AGE_SECONDS = 15 * 60;
+
 // Auth decides the flags, so a caller can only say which cookie, what value and how long.
 export interface CookieSpec {
   readonly name: string;
