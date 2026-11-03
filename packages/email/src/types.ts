@@ -96,6 +96,8 @@ export interface InvitationMail {
   readonly organizationName: string;
   readonly inviterName: string;
   readonly link: URL;
+  // Required so no caller can send an invitation the recipient has no way to refuse.
+  readonly blockLink: URL;
   readonly expiresAt: Date;
 }
 

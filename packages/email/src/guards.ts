@@ -121,6 +121,7 @@ const message = z.discriminatedUnion('template', [
     organizationName: name(100),
     inviterName: name(100),
     link: url,
+    blockLink: url,
     expiresAt: date,
   }),
   z.object({ template: z.literal('security_notice'), notice }),
@@ -153,6 +154,9 @@ export function checkMessage(input: unknown, linkOrigin: URL): Result<MailMessag
   const value = parsed.data as MailMessage;
   if (value.template !== 'security_notice' && !linkAllowed(value.link, linkOrigin)) {
     return { ok: false, error: invalidInput('link') };
+  }
+  if (value.template === 'invitation' && !linkAllowed(value.blockLink, linkOrigin)) {
+    return { ok: false, error: invalidInput('blockLink') };
   }
   if (value.template === 'security_notice') {
     const sessions = value.notice.sessionsLink;
