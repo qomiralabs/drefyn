@@ -88,13 +88,25 @@ export interface SessionsDeps {
   readonly store?: SessionStore;
 }
 
+// The password hash a sign in checked, and the new one when its parameters moved.
+export interface CheckedCredential {
+  readonly phc: string;
+  readonly rehash?: string;
+}
+
+export interface StartSessionInput {
+  readonly userId: UserId;
+  readonly method: SessionMethod;
+  // A password sign in: the row is created only while this hash is still the stored one,
+  // so a reset or change after the check leaves no session. A mismatch throws
+  // AUTH_CREDENTIALS_INVALID.
+  readonly credential?: CheckedCredential;
+}
+
 export interface Sessions extends StepUps {
   // Creates the row for a sign in that was just proved. Any session the browser already
   // holds is deleted first, once its cookie proves it, whoever it belongs to.
-  startSession(
-    b: BrowserContext,
-    input: { readonly userId: UserId; readonly method: SessionMethod },
-  ): Promise<StartedSession>;
+  startSession(b: BrowserContext, input: StartSessionInput): Promise<StartedSession>;
   resolve(cookie: string | undefined): Promise<ResolvedSession | null>;
   resolveSession(cookie: string | undefined): Promise<SessionInfo | null>;
   // The guard's one call. Read only: a due touch is reported, never written here.
@@ -203,6 +215,59 @@ function userAgent(value: string): string | null {
   return chars.slice(0, USER_AGENT_MAX).join('');
 }
 
+interface SessionValues {
+  readonly user_id: UserId;
+  readonly secret_hash: Buffer;
+  readonly method: SessionMethod;
+  readonly user_agent: string | null;
+}
+
+// One statement: lock the person's password row while it still holds the hash the sign in
+// checked, and insert the session only from that row. A reset that committed first leaves
+// nothing to select; one that comes later waits on the lock, then deletes this session with
+// the rest.
+async function insertGuarded(
+  tx: Transaction<UserSchema>,
+  values: SessionValues,
+  phc: string,
+  absoluteDays: number,
+) {
+  return tx
+    .with('credential', (db) =>
+      db
+        .selectFrom('password_credentials')
+        .select('user_id')
+        .where('user_id', '=', sql<string>`app.current_user_id()`)
+        .where('phc', '=', phc)
+        .forUpdate(),
+    )
+    .insertInto('sessions')
+    .columns([
+      'user_id',
+      'secret_hash',
+      'method',
+      'user_agent',
+      'authenticated_at',
+      'last_seen_at',
+      'expires_at',
+    ])
+    .expression((eb) =>
+      eb
+        .selectFrom('credential')
+        .select([
+          'credential.user_id',
+          sql<Buffer>`${values.secret_hash}`.as('secret_hash'),
+          sql<string>`${values.method}`.as('method'),
+          sql<string | null>`${values.user_agent}`.as('user_agent'),
+          sql<Date>`now()`.as('authenticated_at'),
+          sql<Date>`now()`.as('last_seen_at'),
+          sql<Date>`now() + make_interval(days => ${absoluteDays})`.as('expires_at'),
+        ]),
+    )
+    .returning(['id', 'authenticated_at', 'expires_at'])
+    .executeTakeFirst();
+}
+
 export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions {
   const store: SessionStore = deps.store ?? {
     user: (userId, work) => withUser(deps.db, { userId }, work),
@@ -280,19 +345,36 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       const secret = random(SECRET_BYTES);
       try {
         const session = await store.user(input.userId, async (tx) => {
-          const row = await tx
-            .insertInto('sessions')
-            .values({
-              user_id: input.userId,
-              secret_hash: sha256(secret),
-              method: input.method,
-              authenticated_at: sql<Date>`now()`,
-              last_seen_at: sql<Date>`now()`,
-              expires_at: sql<Date>`now() + make_interval(days => ${absoluteDays})`,
-              user_agent: userAgent(b.userAgent),
-            })
-            .returning(['id', 'authenticated_at', 'expires_at'])
-            .executeTakeFirstOrThrow();
+          const values = {
+            user_id: input.userId,
+            secret_hash: sha256(secret),
+            method: input.method,
+            user_agent: userAgent(b.userAgent),
+          };
+          const credential = input.credential;
+          const row =
+            credential === undefined
+              ? await tx
+                  .insertInto('sessions')
+                  .values({
+                    ...values,
+                    authenticated_at: sql<Date>`now()`,
+                    last_seen_at: sql<Date>`now()`,
+                    expires_at: sql<Date>`now() + make_interval(days => ${absoluteDays})`,
+                  })
+                  .returning(['id', 'authenticated_at', 'expires_at'])
+                  .executeTakeFirstOrThrow()
+              : await insertGuarded(tx, values, credential.phc, absoluteDays);
+          if (row === undefined) throw new AuthError('AUTH_CREDENTIALS_INVALID');
+          if (credential?.rehash !== undefined) {
+            // The row is locked by the insert above, so this always finds the hash it read.
+            await tx
+              .updateTable('password_credentials')
+              .set({ phc: credential.rehash, updated_at: sql<Date>`now()` })
+              .where('user_id', '=', sql<string>`app.current_user_id()`)
+              .where('phc', '=', credential.phc)
+              .execute();
+          }
           const user = await tx
             .selectFrom('users')
             .select('email')

@@ -190,6 +190,17 @@ describe('createPasswordHasher', () => {
     expect(String(error)).not.toContain('a secret password value');
   });
 
+  it('an argon2 that throws instead of calling back is AUTH_UNAVAILABLE too', async () => {
+    const throwing: Argon2Function = () => {
+      throw new Error('not supported');
+    };
+    await expect(smallHasher({ argon2: throwing }).hash('a long enough one')).rejects.toMatchObject(
+      {
+        code: 'AUTH_UNAVAILABLE',
+      },
+    );
+  });
+
   it('a dummy that failed to build is built again on the next miss', async () => {
     let fail = true;
     const flaky: Argon2Function = (a, p, callback) => {

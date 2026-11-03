@@ -38,6 +38,8 @@ export const csrfFor = (c: AuthConfig, pre: Buffer = PRE) =>
   createPasswordSignIn(c, {
     store: scriptedStore().store,
     logger: recordingLogger().logger,
+    limiter: fakeLimiter(),
+    sessions: fakePasswordSessions(),
   }).passwordForm({
     ip: IP,
     userAgent: 'x',

@@ -1,3 +1,4 @@
+import type { AuthDatabase, Database } from '@drefyn/db';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthError,
@@ -293,7 +294,7 @@ describe('signInWithPassword', () => {
     await flow.signInWithPassword(passwordBrowser(), input({ email: 'nobody@example.com' }));
     expect(vi.mocked(t.limiter.reserve).mock.calls).toEqual([
       ['password_fail', ['nobody@example.com']],
-      ['password_fail_ip', [IP]],
+      ['password_fail_ip', [`ip4:${IP}`]],
     ]);
   });
 
@@ -535,4 +536,52 @@ it('the binding check costs nothing a browser can time per address', () => {
   const b = flow.passwordForm({ ...passwordBrowser(), ip: '198.51.100.1' });
   expect(a.csrf).toBe(b.csrf);
   expect(PRE).toHaveLength(32);
+});
+
+describe('construction and failure paths', () => {
+  it('builds its own store, limiter, sessions and hasher from the two databases', () => {
+    const logger = { warn: () => undefined };
+    const flow = createPasswordSignIn(config, {
+      db: {} as Database,
+      authDb: {} as AuthDatabase,
+      logger,
+    });
+    const form = flow.passwordForm(passwordBrowser(config, null));
+    expect(form.setCookies[0]?.name).toBe(config.cookies.pre);
+  });
+
+  it('refuses to build without databases or the parts they would give', () => {
+    expect(() => createPasswordSignIn(config, { logger: { warn: () => undefined } })).toThrow(
+      TypeError,
+    );
+  });
+
+  it('a session step failure other than a changed hash is passed on', async () => {
+    const t = passwordDeps({ known: true, phc: stored });
+    t.sessions.startSession.mockRejectedValueOnce(new AuthError('AUTH_UNAVAILABLE'));
+    const result = await createPasswordSignIn(config, t.deps).signInWithPassword(
+      passwordBrowser(),
+      input(),
+    );
+    expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+    expect(t.sessions.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('a bot check that never answers fails closed after its timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const t = passwordDeps({ known: true, phc: stored });
+      const flow = createPasswordSignIn(config, {
+        ...t.deps,
+        botCheck: { verify: () => new Promise<boolean>(() => undefined) },
+      });
+      const pending = flow.signInWithPassword(passwordBrowser(), input());
+      await vi.advanceTimersByTimeAsync(3_000);
+      const result = await pending;
+      expect(!result.ok && result.error.code).toBe('AUTH_BOT_CHECK_REQUIRED');
+      expect(t.spy.calls).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

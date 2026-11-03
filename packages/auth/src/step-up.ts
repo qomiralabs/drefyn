@@ -7,6 +7,7 @@ import type { AuthConfig } from './config.ts';
 import type { BrowserContext } from './cookies.ts';
 import { AuthError } from './errors.ts';
 import { lengthPrefixed, sha256 } from './keys.ts';
+import { PASSWORD_RAW_MAX_BYTES } from './password-input.ts';
 import type { AuthLogger, RateLimiter } from './rate-limiter.ts';
 import {
   fail,
@@ -35,7 +36,7 @@ export interface AuthMailer {
 }
 
 // Checks a password against a stored PHC string, or against a dummy when there is none, so
-// both cost the same. The passwords work provides the Argon2id one.
+// both cost the same. createPasswordHasher is the Argon2id one.
 export interface PasswordVerifier {
   verify(phc: string | null, password: string): Promise<boolean>;
 }
@@ -71,8 +72,6 @@ export interface StepUpDeps {
 
 const PURPOSE = 'step_up';
 const MAX_ATTEMPTS = 5;
-// Raw bytes before any normalising, so a huge body never reaches the hash.
-const PASSWORD_MAX_BYTES = 4096;
 // People type the gap the mail shows; spaces, tabs and no break spaces are dropped and
 // nothing else is.
 const TYPED_GAPS = /[\u0020\t\u00a0]/g;
@@ -131,7 +130,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         if (!config.passwords.enabled || verifier === undefined) {
           throw new AuthError('AUTH_PASSWORDS_DISABLED');
         }
-        if (Buffer.byteLength(input.password, 'utf8') > PASSWORD_MAX_BYTES) {
+        if (Buffer.byteLength(input.password, 'utf8') > PASSWORD_RAW_MAX_BYTES) {
           throw new AuthError('AUTH_INPUT_INVALID');
         }
         const ipKey = rateKeyForIp(b.ip);
@@ -152,7 +151,8 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         } catch (error) {
           throw unavailable(error);
         }
-        if (!matched) throw new AuthError('AUTH_CREDENTIALS_INVALID');
+        // No row is a refusal in its own right, whatever a verifier says about null.
+        if (!matched || row === undefined) throw new AuthError('AUTH_CREDENTIALS_INVALID');
         return ok(await mark(s, 'password'));
       } catch (error) {
         return fail(error);

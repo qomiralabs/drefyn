@@ -18,6 +18,7 @@ import {
   USER,
   browser,
   config,
+  EXPIRES_AT,
   isEmailRead,
   isProof,
   loopbackConfig,
