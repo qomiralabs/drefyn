@@ -337,6 +337,28 @@ describe('the phone sheet', () => {
     expect(document.activeElement).toBe(region);
   });
 
+  // Choosing removes the focused option with the sheet. Until focus is back on the trigger,
+  // keys reach no layer: an Escape pressed then left the dialog open.
+  it('puts focus back on the trigger in the same task a choice closes the sheet', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog trigger="Invite" title="Invite people">
+        <Region />
+      </Dialog>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Invite' }));
+    const region = screen.getByRole('button', { name: /Region/ });
+    await user.click(region);
+    const option = screen.getByRole('option', { name: 'United States' });
+    act(() => {
+      fireEvent.keyDown(option, { key: 'Enter' });
+      fireEvent.keyUp(option, { key: 'Enter' });
+    });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(region.textContent).toContain('United States');
+    expect(document.activeElement).toBe(region);
+  });
+
   it('leaves focus that moved somewhere new where it is', async () => {
     const user = userEvent.setup();
     render(
