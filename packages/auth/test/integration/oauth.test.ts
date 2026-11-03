@@ -310,8 +310,11 @@ describeWithStack('OAuth sign in against Postgres and the fake providers', () =>
     );
     expect(await identitiesOf(email)).toBe('1');
     if (verified.value.kind === 'signed_in') await verified.value.signedIn.send?.();
+    // This browser never signed in to the account before, so the link also counts as a
+    // sign in from a new device.
     expect(w.mail.notices.filter((x) => x.to === email).map((x) => x.notice.kind)).toEqual([
       'identity_linked',
+      'new_device_sign_in',
     ]);
   });
 

@@ -57,10 +57,10 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in, OAuth and API keys. The OAuth fetch file calls the platform
-  // fetch, which the egress rule scopes. Files are read only by the breached list lookup and
-  // its build command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
+  // change, password sign in, password account, OAuth and API keys. The OAuth fetch file
+  // calls the platform fetch, which the egress rule scopes. Files are read only by the
+  // breached list lookup and its build command, and the build command is the only writer.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, password account, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -74,6 +74,7 @@ describe('package layout', () => {
       'email-change.ts': database,
       'devices.ts': database,
       'password-sign-in.ts': database,
+      'password-account.ts': database,
       'oauth.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
@@ -118,6 +119,8 @@ describe('the main entry', () => {
         'createOAuth',
         'DEVICES_PER_USER',
         'DEVICE_MAX_AGE_SECONDS',
+        'NEW_DEVICE_AFTER_DAYS',
+        'SESSIONS_PAGE_PLACEHOLDER_PATH',
         'INVITE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
@@ -149,6 +152,7 @@ describe('the main entry', () => {
         'createEmailSignIn',
         'createInvitations',
         'createOrganizations',
+        'createPasswordAccount',
         'createPasswordHasher',
         'createPasswordSignIn',
         'createRateLimiter',
@@ -181,6 +185,7 @@ describe('the main entry', () => {
         'parseVerifyFragment',
         'permissionsFor',
         'rateKeyForIp',
+        'newDeviceNotice',
         'readPasswordSignInForm',
         'recordDevice',
         'redact',

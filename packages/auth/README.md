@@ -225,8 +225,9 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
   password row is refused whatever the verifier answers.
 - `startSession` with `credential: { phc, rehash? }` (password sign in) inserts the row in
   one statement that locks the password row only while it still holds `phc`; otherwise it
-  throws `AUTH_CREDENTIALS_INVALID` and writes nothing. `rehash` replaces the hash in the
-  same transaction.
+  throws `AUTH_CREDENTIALS_INVALID` and writes nothing. The lock is `for share`, or
+  `for update` when `rehash` is given, since the rehash then writes the row in the same
+  transaction and two share locks that both upgrade would deadlock.
   `startStepUpCode` and `verifyStepUpCode` send an 8 digit code bound to the asking session
   (10 minutes, 5 attempts, single use). Both refresh `authenticated_at` on the same row and
   record `step_up_method`.
@@ -305,7 +306,8 @@ const passwords = createPasswordSignIn(config, {
 const form = passwords.passwordForm(browser); // GET: set form.setCookies, render form.csrf
 const input = readPasswordSignInForm(body); // POST: 8 KiB body, 4 KiB password, one of each field
 const result = await passwords.signInWithPassword(browser, input);
-await passwords.setPassword(session, { newPassword }); // a first password, after a recent sign in
+const set = await passwords.setPassword(session, { newPassword }); // a first password, after a recent sign in
+// answer, then in after(): await set.value.send() mails the password set notice
 ```
 
 - Argon2id from `node:crypto`, stored as a PHC string. `parsePhc` takes `argon2id` v19
@@ -347,9 +349,61 @@ pre)`. Without both the post is `AUTH_ORIGIN_REFUSED` and nothing is counted. Th
 - `BotCheck` is optional. Set, it runs after the counts and before any read; a refusal, an
   error or no answer in 3 s is `AUTH_BOT_CHECK_REQUIRED`. Unset with `DREFYN_AUTH_SIGNUP=open`,
   building the flow logs `auth.signup_open_without_bot_check` once.
+- Give it `mailer` (`sendSecurityNotice`) for the password set and new device notices;
+  without one each notice is logged as `auth.password_notice_failed` or
+  `auth.device_notice_failed`.
 - A sign in records the known device as email sign in does. Logs: `auth.password_refused`
   (outcome and the first 16 hex digits of the `password_fail` key), `auth.password_set` and
   `auth.password_hash_unreadable` (public user id). Never a password, address or cookie.
+
+## Password reset, change and removal
+
+```ts
+const account = createPasswordAccount(config, { db, authDb, logger, mailer, sessions, hasher });
+const started = await account.startPasswordReset(browser, { email });
+// set started.value.setCookies, answer, then in after(): await started.value.send()
+const reset = await account.completePasswordReset(browser, { challenge, code, newPassword });
+const changed = await account.changePassword(browser, session, { currentPassword, newPassword });
+const removed = await account.removePassword(session);
+// each answer carries send(): run it after the response to mail the security notice
+```
+
+- Reset is the email code flow with purpose `password_reset`: one answer for every address,
+  the `email_send` limits (the device allowance or the address ceiling) shared with sign in,
+  bound to the browser, 5 tries, 10 minutes. An unknown address gets no mail and a stored
+  MAC no code can match.
+- The verify link answers `{ kind: 'choose_password' }` for a reset code in the browser that
+  asked, and `AUTH_CHALLENGE_BINDING` elsewhere. Nothing is proved or spent until the page
+  posts the code with the new password; a reset code is never a sign in code.
+- Completing runs the new password rules before the attempt is counted, checks the code,
+  hashes outside any transaction, then spends the code. One user transaction writes the
+  hash, deletes every session of the person and gives this browser a new device cookie;
+  then a fresh session starts here, which counts as a recent sign in.
+- Change needs the current password (counted on `password_fail` and `password_fail_ip`, like
+  a sign in) or a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`). The hash is
+  swapped only from the one read, so a change in another tab wins; other sessions end and
+  this browser gets a new device cookie.
+- Removal needs a sign in within 15 minutes and another way in: a linked provider, or email
+  codes not turned off (`AUTH_FORBIDDEN` otherwise). It locks the person's `users` row first,
+  as unlinking a provider does, so the two cannot both pass the check.
+- A password sign in that checked the old hash creates no session after any of the three,
+  because session creation rechecks the stored hash under the row lock.
+- Change and reset take the same `admitNewPassword` step as `setPassword`: the rules before
+  anything is counted, then the breached check (`breachedPasswords`) once the person is
+  proved, so `AUTH_PASSWORD_BREACHED` never answers a stranger. A listed password on reset
+  leaves the code unspent. A configured list that was never opened refuses to start.
+- Notices: `password_reset`, `password_changed`, `password_removed` (and `password_set` from
+  `setPassword`), with database time. Logs carry outcome codes and public ids only.
+
+## New device notice
+
+- `recordDevice` reports `newDevice` when the device cookie is absent, has no row for the
+  person, or was last seen more than `NEW_DEVICE_AFTER_DAYS` (90) ago, decided from the row
+  as it was before the same upsert. Rows still live 400 days, so an old device keeps its
+  send allowance.
+- Email code, password and OAuth sign ins then carry `send()`, which mails
+  `new_device_sign_in` with the method, the browser family, the time and a link to
+  `SESSIONS_PAGE_PLACEHOLDER_PATH`. The sign in that creates the account sends none.
 
 ## Email change
 

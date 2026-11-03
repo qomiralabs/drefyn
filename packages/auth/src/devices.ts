@@ -5,14 +5,23 @@ import { sql, type Transaction } from 'kysely';
 import type { AuthConfig } from './config.ts';
 import type { BrowserContext, CookieSpec } from './cookies.ts';
 import { sha256 } from './keys.ts';
+import type { AuthNoticeMailer } from './email-change.ts';
 import type { AuthLogger } from './rate-limiter.ts';
-import { idFields, quietWarn, type SessionStore } from './session-support.ts';
+import { idFields, quietWarn, type SessionMethod, type SessionStore } from './session-support.ts';
 import { SECRET_BYTES, decodeSecret, encodeSecret } from './tokens.ts';
 
 // Browsers keep a cookie at most 400 days, so the cookie and its row live that long.
 export const DEVICE_MAX_AGE_SECONDS = 400 * 86_400;
 // Enough for a person's phones, laptops and browsers; past it the one seen longest ago goes.
 export const DEVICES_PER_USER = 20;
+// A device unseen this long counts as new again for the notice. The row itself stays for
+// the full cookie lifetime, because it also keeps the device's own send allowance.
+export const NEW_DEVICE_AFTER_DAYS = 90;
+// Where the notice sends people to end sessions. The account settings pages own the real
+// route; this stands in until they land.
+// A fixed number, so it can sit in the statement as a literal.
+const NEW_DEVICE_INTERVAL = sql.raw(`interval '${String(NEW_DEVICE_AFTER_DAYS)} days'`);
+export const SESSIONS_PAGE_PLACEHOLDER_PATH = '/account/sessions';
 // Looked up when the browser has no device cookie, so the lookup always runs.
 const NO_DEVICE = Buffer.alloc(32);
 const NO_USER = '00000000-0000-0000-0000-000000000000';
@@ -75,35 +84,53 @@ export interface DeviceDeps {
   readonly random?: (bytes: number) => Uint8Array;
 }
 
-// Records the browser a person just signed in from, and hands it a device cookie if it had
-// none. Never fails the sign in: a device only ever relaxes a rate limit, so losing one
-// costs the person nothing but that.
+// A sign in from a device the person has not used in NEW_DEVICE_AFTER_DAYS.
+export interface NewDevice {
+  readonly device: string;
+  // Database time of the sign in.
+  readonly at: Date;
+}
+
+export interface RecordedDevice {
+  readonly setCookies: readonly CookieSpec[];
+  readonly newDevice: NewDevice | null;
+}
+
+// Records the browser a person just signed in from, hands it a device cookie if it had
+// none, and says whether the device counts as new. Never fails the sign in: a device only
+// relaxes a rate limit and decides a notice, so losing one costs the person nothing but that.
 export async function recordDevice(
   config: AuthConfig,
   deps: DeviceDeps,
   b: BrowserContext,
   userId: UserId,
-): Promise<readonly CookieSpec[]> {
+): Promise<RecordedDevice> {
   const random = deps.random ?? ((n: number) => randomBytes(n));
   const held = deviceHash(config, b);
   const issued = held === null ? random(SECRET_BYTES) : null;
   const hash = held ?? sha256(issued ?? NO_DEVICE);
+  const family = userAgentFamily(b.userAgent);
+  let seen: { readonly fresh: boolean; readonly at: Date } | undefined;
   try {
-    await deps.store.user(userId, async (tx) => {
-      await tx
+    seen = await deps.store.user(userId, async (tx) => {
+      // The row as it was before this write decides, in the same statement, so two sign ins
+      // from one device at once send one notice.
+      const row = await tx
         .insertInto('known_devices')
-        .values({
-          user_id: userId,
-          device_hash: hash,
-          user_agent_family: userAgentFamily(b.userAgent),
-        })
+        .values({ user_id: userId, device_hash: hash, user_agent_family: family })
         .onConflict((c) =>
           c.columns(['user_id', 'device_hash']).doUpdateSet({
             last_seen_at: sql<Date>`now()`,
             user_agent_family: (e) => e.ref('excluded.user_agent_family'),
           }),
         )
-        .execute();
+        .returning([
+          sql<boolean>`old.last_seen_at is null or old.last_seen_at < now() - ${NEW_DEVICE_INTERVAL}`.as(
+            'fresh',
+          ),
+          sql<Date>`new.last_seen_at`.as('at'),
+        ])
+        .executeTakeFirst();
       // Keeps the newest by last_seen_at; the row just written is always among them.
       await tx
         .deleteFrom('known_devices')
@@ -120,13 +147,58 @@ export async function recordDevice(
             .limit(DEVICES_PER_USER),
         )
         .execute();
+      return row;
     });
   } catch {
     quietWarn(deps.logger, 'auth.device_record_failed', idFields({ userId: ['usr', userId] }));
-    return [];
+    return { setCookies: [], newDevice: null };
   }
-  if (issued === null) return [];
-  return [deviceCookie(config, issued)];
+  const newDevice = seen?.fresh === true ? { device: family, at: seen.at } : null;
+  return { setCookies: issued === null ? [] : [deviceCookie(config, issued)], newDevice };
+}
+
+export interface NewDeviceNoticeInput {
+  readonly to: string;
+  readonly userId: UserId;
+  readonly method: SessionMethod;
+  readonly seen: NewDevice;
+}
+
+// The mail for a sign in from a new device. Never throws; meant to run after the response.
+export function newDeviceNotice(
+  config: AuthConfig,
+  mailer: Partial<AuthNoticeMailer>,
+  logger: AuthLogger,
+  input: NewDeviceNoticeInput,
+): () => Promise<void> {
+  return async () => {
+    try {
+      const send = mailer.sendSecurityNotice;
+      if (send === undefined) throw new Error('no notice mailer');
+      await send.call(mailer, input.to, {
+        kind: 'new_device_sign_in',
+        method: input.method,
+        device: input.seen.device,
+        at: input.seen.at,
+        sessionsLink: new URL(SESSIONS_PAGE_PLACEHOLDER_PATH, config.appOrigin),
+      });
+    } catch {
+      quietWarn(logger, 'auth.device_notice_failed', idFields({ userId: ['usr', input.userId] }));
+    }
+  };
+}
+
+// Both sends, one after the other, for a sign in that owes more than one mail.
+export function sendBoth(
+  first: (() => Promise<void>) | undefined,
+  second: (() => Promise<void>) | undefined,
+): (() => Promise<void>) | undefined {
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return async () => {
+    await first();
+    await second();
+  };
 }
 
 const deviceCookie = (config: AuthConfig, secret: Uint8Array): CookieSpec => ({

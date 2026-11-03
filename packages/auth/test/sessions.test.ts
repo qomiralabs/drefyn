@@ -369,10 +369,23 @@ describe('startSession', () => {
       const guarded = statements.filter(isGuarded);
       expect(guarded).toHaveLength(1);
       expect(guarded[0]?.sql).toMatch(/from "password_credentials"/);
-      expect(guarded[0]?.sql).toMatch(/for update/);
+      // A share lock: parallel sign ins do not queue, and a reset still waits for them.
+      expect(guarded[0]?.sql).toMatch(/for share/);
       expect(guarded[0]?.parameters).toContain(OLD);
       expect(statements.filter(isRehash)).toEqual([]);
       expect(scripted.events.filter((e) => e.kind === 'begin')).toHaveLength(1);
+    });
+
+    it('takes the write lock up front when the sign in also rehashes', async () => {
+      const { sessions, scripted } = setup(guardedResponder(true));
+      await sessions.startSession(browser(), {
+        userId: USER,
+        method: 'password',
+        credential: { phc: OLD, rehash: NEW },
+      });
+      const guarded = scripted.statements().filter(isGuarded);
+      expect(guarded[0]?.sql).toMatch(/for update/);
+      expect(guarded[0]?.sql).not.toMatch(/for share/);
     });
 
     it('refuses with AUTH_CREDENTIALS_INVALID and writes nothing when the hash changed', async () => {

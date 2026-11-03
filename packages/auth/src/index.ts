@@ -181,10 +181,23 @@ export {
 export {
   DEVICES_PER_USER,
   DEVICE_MAX_AGE_SECONDS,
+  NEW_DEVICE_AFTER_DAYS,
+  SESSIONS_PAGE_PLACEHOLDER_PATH,
   deviceHash,
+  newDeviceNotice,
   recordDevice,
   userAgentFamily,
+  type NewDevice,
+  type NewDeviceNoticeInput,
+  type RecordedDevice,
 } from './devices.ts';
+export {
+  createPasswordAccount,
+  type PasswordAccount,
+  type PasswordAccountDeps,
+  type PasswordAccountSessions,
+  type PasswordChanged,
+} from './password-account.ts';
 export { rateKeyForIp } from './client-ip.ts';
 export {
   createApiKeyFailureLimiter,
