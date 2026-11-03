@@ -20,6 +20,7 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  INVITE_MAX_AGE_SECONDS,
   PRE_MAX_AGE_SECONDS,
   cookieNames,
   serializeCookie,
@@ -86,6 +87,7 @@ export {
 } from './organizations.ts';
 export {
   createInvitations,
+  type AcceptedInvitation,
   type AuthInvitationMailer,
   type DefaultProjectRole,
   type InvitationBlockView,

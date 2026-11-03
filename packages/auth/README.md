@@ -245,8 +245,16 @@ const result = await signIn.verifyEmailCode(browser, { challenge, code }); // ch
 
 - Sign in and sign up are one flow. Every address gets the same response and the same
   cookies (`__Host-drefyn_pre`, 15 minutes); the mail goes out only when `send` runs, and
-  `send` never throws. In `invite_only` (without a pending invitation) and `closed`, an
-  unknown address gets the same response and no mail.
+  `send` never throws. In `invite_only` (unless this browser holds a live invitation for
+  the address) and `closed`, an unknown address gets the same response and no mail.
+- In `invite_only` a new user is made only when the `__Host-drefyn_invite` cookie holds a
+  live invitation for exactly the proved address. `invitations` is the object
+  `createInvitations` returns; its `allowsSignUp(token, address)` sends nothing for a
+  missing or unparsable cookie and otherwise one select by invitation id in that
+  invitation's organization, as `drefyn_app`. It is asked at start for every address and
+  again at verify, so an invitation revoked or accepted in between lets nobody in. A
+  database failure there answers no and logs `auth.invitation_check_failed` with the
+  organization id only. OAuth sign up asks the same way.
 - Limits, counted before any work: `email_send` on the address and IP or /64,
   `email_send_ip`, then `email_send_device` for a browser whose device cookie is known for
   the address's user, otherwise the shared `email_send_address_ceiling`.
@@ -458,6 +466,13 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
   inviter must still hold `org.manage_members` and be able to grant the role. The membership
   insert names the invitation, and the invitation is deleted in the same transaction, so a
   second acceptance fails. Removing the inviter deletes their pending invitations.
+- `acceptInvitation` answers `{ access, setCookies }`; the cookies clear the held
+  invitation.
+- `holdInvitation(browser, token)` is what the invite page calls for a signed out person.
+  It only parses (`AUTH_INVITATION_INVALID` for a malformed token) and answers a
+  `__Host-drefyn_invite` cookie (HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 3600) for
+  sign up to read. The newcomer has to sign up in the browser that opened the link, within
+  the hour; the link itself can be opened again for the 7 days the invitation lasts.
 - `readInvitationBlock(token)` is what the block page shows on GET and only reads.
   `blockInvitation(token)` is the page's POST and the only writer of `invitation_blocks`; it
   also drops the pending invitation, and a second call is a no op that still succeeds.

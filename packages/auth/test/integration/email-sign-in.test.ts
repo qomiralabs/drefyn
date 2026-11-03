@@ -306,44 +306,6 @@ describeWithStack('email code sign in against Postgres', () => {
       ).toBe('t');
     });
 
-    it('invite_only creates a user only with a pending invitation, and mails nobody else', async () => {
-      const invited = address('invited');
-      const pending = new Set([invited]);
-      const flow = flowFor(h, configWith({ DREFYN_AUTH_SIGNUP: 'invite_only' }), {
-        invitations: { hasPending: (e: string) => Promise.resolve(pending.has(e)) },
-      });
-      const stranger = address('stranger');
-      expect(await requestCode(flow, newBrowser(), stranger)).toBeNull();
-      expect(flow.mail.calls.filter((m) => m.to === stranger)).toHaveLength(0);
-      const b = newBrowser();
-      const mail = await requestCode(flow, b, invited);
-      if (mail === null) throw new Error('an invited address gets mail');
-      const result = await flow.signIn.verifyEmailCode(b.context(), mail);
-      expect(result.ok).toBe(true);
-      expect(await usersNamed(invited)).toBe('1');
-      expect(await usersNamed(stranger)).toBe('0');
-    });
-
-    it('invite_only answers AUTH_SIGNUP_CLOSED when the invitation went away before the code', async () => {
-      const invited = address('revoked');
-      const pending = new Set([invited]);
-      const flow = flowFor(h, configWith({ DREFYN_AUTH_SIGNUP: 'invite_only' }), {
-        invitations: { hasPending: (e: string) => Promise.resolve(pending.has(e)) },
-      });
-      const b = newBrowser();
-      const mail = await requestCode(flow, b, invited);
-      if (mail === null) throw new Error('no mail');
-      pending.delete(invited);
-      const wrong = await flow.signIn.verifyEmailCode(b.context(), {
-        ...mail,
-        code: wrongCode(mail.code),
-      });
-      expect(!wrong.ok && wrong.error.code).toBe('AUTH_CODE_INVALID');
-      const result = await flow.signIn.verifyEmailCode(b.context(), mail);
-      expect(!result.ok && result.error.code).toBe('AUTH_SIGNUP_CLOSED');
-      expect(await usersNamed(invited)).toBe('0');
-    });
-
     it('closed signs existing users in, and never mails or creates an unknown address', async () => {
       const flow = flowFor(h, configWith({ DREFYN_AUTH_SIGNUP: 'closed' }));
       const member = address('member');

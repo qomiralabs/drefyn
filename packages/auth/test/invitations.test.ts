@@ -537,8 +537,8 @@ describe('acceptInvitation proves the token first (M5)', () => {
     );
     const result = await invitations.acceptInvitation(guest(), token());
     if (!result.ok) throw result.error;
-    expect(result.value).toMatchObject({ organizationId: ORG, userId: USER, role: 'admin' });
-    expect(result.value.permissions).toContain('org.manage_members');
+    expect(result.value.access).toMatchObject({ organizationId: ORG, userId: USER, role: 'admin' });
+    expect(result.value.access.permissions).toContain('org.manage_members');
     const order = scripted.statements().map((s) => {
       if (isProof(s)) return 'proof';
       if (isInviter(s)) return 'inviter';
