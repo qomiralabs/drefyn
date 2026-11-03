@@ -8,11 +8,18 @@ export interface Reply {
 
 // curl, because it sends the Host and forwarding headers exactly as given; fetch replaces
 // Host with the URL's own.
-export function curl(port: number, path: string, headers: readonly string[]): Promise<Reply> {
+export function curl(
+  port: number,
+  path: string,
+  headers: readonly string[],
+  // Sent as the request line as is, which the URL could not express.
+  requestTarget?: string,
+): Promise<Reply> {
   const args = ['--silent', '--show-error', '--http1.1', '--include', '--max-time', '10'];
   args.push('--noproxy', '*');
   for (const header of headers) args.push('--header', header);
-  args.push(`http://127.0.0.1:${String(port)}${path}`);
+  if (requestTarget !== undefined) args.push('--request-target', requestTarget);
+  args.push('--path-as-is', `http://127.0.0.1:${String(port)}${path}`);
   return new Promise((done, fail) => {
     execFile('curl', args, { encoding: 'utf8' }, (error, stdout) => {
       if (error !== null) {

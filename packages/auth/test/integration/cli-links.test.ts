@@ -104,7 +104,10 @@ describeWithStack('drefyn auth link and its redemption', () => {
   it('prints one link on stdout and the rule on stderr, and the link signs in once', async () => {
     const email = `first-${randomBytes(3).toString('hex')}@example.com`;
     const { token, stderr } = await link(email);
-    expect(stderr).toBe('Valid once, for 15 minutes.\n');
+    expect(stderr.endsWith('Valid once, for 15 minutes.\n')).toBe(true);
+    expect(stderr).toContain('"event":"auth.cli_link_created"');
+    expect(stderr).not.toContain(email);
+    expect(stderr).not.toContain(token.slice(7));
     const first = await links().redeem(browser(), token);
     expect(first.ok).toBe(true);
     if (!first.ok) return;

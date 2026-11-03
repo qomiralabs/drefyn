@@ -84,6 +84,13 @@ describe('the wrapper over a real socket, with Next replaced by an echo', () => 
     expect(zero.seen.length).toBe(before);
   });
 
+  it('refuses an absolute form request line with the right Host, before the handler', async () => {
+    const before = zero.seen.length;
+    const reply = await curl(zero.port, '/', [HOST], 'http://evil.example/');
+    expect(reply.status).toBe(400);
+    expect(zero.seen.length).toBe(before);
+  });
+
   it('answers the health check on its own path on the loopback host', async () => {
     const before = zero.seen.length;
     const reply = await curl(zero.port, HEALTH_PATH, [`Host: 127.0.0.1:${String(zero.port)}`]);
@@ -167,6 +174,24 @@ describe.runIf(runBuilt)('the built server behind server.ts', () => {
     const location = reply.headers['location'] ?? '';
     const relative = location.startsWith('/') && !location.startsWith('//');
     expect(relative || location.startsWith(`${ORIGIN}/`), location).toBe(true);
+  });
+
+  it.each(['http://evil.example/', '//evil.example/', '/\\evil.example/'])(
+    'refuses the request target %s, so no redirect can name that host',
+    async (target) => {
+      const reply = await curl(port, '/', [HOST], target);
+      expect(reply.status).toBe(400);
+      expect(reply.headers['location']).toBeUndefined();
+    },
+  );
+
+  it('answers a forged Host upgrade with 421, also after a routed request', async () => {
+    const upgrade = ['Connection: Upgrade', 'Upgrade: websocket'];
+    // Next attaches its own listener on the first routed request, so this must come first.
+    expect((await curl(port, '/', [HOST])).status).toBeLessThan(500);
+    const reply = await curl(port, '/', ['Host: evil.example', ...upgrade]);
+    expect(reply.status).toBe(421);
+    expect(output).not.toContain('dashboard.upgrade_listener_extra');
   });
 
   it('logs auth.threadpool_small never when the pool is 16', () => {

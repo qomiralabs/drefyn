@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { AUTH_COMMAND_USAGE, runAuthCommand } from '../src/command.ts';
+import { AUTH_COMMAND_USAGE, runAuthCommand, terminalLogger } from '../src/command.ts';
 import { validEnv } from './support.ts';
 
 function sink() {
@@ -106,6 +106,32 @@ describe('drefyn auth link and revoke-sessions arguments', () => {
     expect(result.code).toBe(3);
     expect(result.stderr).toContain('DREFYN_AUTH_DATABASE_URL');
     expect(result.stderr).not.toContain('127.0.0.1:1');
+  });
+
+  it('exits 3 when DREFYN_DATABASE_URL is missing, because both roles are needed', async () => {
+    const env: Record<string, string | undefined> = { ...validEnv(), ...DB_ENV };
+    delete env['DREFYN_DATABASE_URL'];
+    const result = await run(['auth', 'link', '--email', 'a@example.com'], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('DREFYN_DATABASE_URL');
+    expect(result.stderr).not.toContain('127.0.0.1:1');
+  });
+
+  it('writes routine events to stderr as JSON lines, and warnings too', () => {
+    const stderr = sink();
+    const logger = terminalLogger(stderr);
+    logger.info?.('auth.cli_link_created', { userId: 'usr_1' });
+    logger.warn('auth.organization_create_failed', { userId: 'usr_1' });
+    expect(
+      stderr.text
+        .trimEnd()
+        .split('\n')
+        .map((l) => JSON.parse(l) as unknown),
+    ).toEqual([
+      { level: 'info', event: 'auth.cli_link_created', userId: 'usr_1' },
+      { level: 'warn', event: 'auth.organization_create_failed', userId: 'usr_1' },
+    ]);
   });
 
   it('exits 2 for an address the rules refuse, before any connection', async () => {

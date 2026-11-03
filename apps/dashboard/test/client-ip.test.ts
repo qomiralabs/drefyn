@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
   FORWARDING_HEADERS,
@@ -13,7 +14,12 @@ import {
   smallThreadPool,
   type WrapperConfig,
 } from '../src/server/client-ip.ts';
-import { HEALTH_PATH, createWrapper, startWrapper } from '../src/server/wrapper.ts';
+import {
+  HEALTH_PATH,
+  createUpgradeWrapper,
+  createWrapper,
+  startWrapper,
+} from '../src/server/wrapper.ts';
 
 const ORIGIN = 'https://app.drefyn.test';
 const config = (env: Record<string, string> = {}) =>
@@ -466,5 +472,106 @@ describe('a handler that fails', () => {
       expect(sent.status).toBe(500);
     });
     expect(warn).toHaveBeenCalledWith('dashboard.request_failed', {});
+  });
+});
+
+const TARGETS = [
+  'http://evil.example/',
+  'https://app.drefyn.test/',
+  'HTTP://evil.example/',
+  '*',
+  'app.drefyn.test:443',
+  '//evil.example/x',
+  '/\\evil.example/x',
+  '',
+];
+
+describe('request targets', () => {
+  it.each(TARGETS)('refuses %j with 400 before Next, even with the right Host', (target) => {
+    const { serve, handle } = wrapper();
+    const { res, sent } = response();
+    serve(request({ host: 'app.drefyn.test' }, target), res);
+    expect(sent.status).toBe(400);
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('refuses an absolute form health check too', () => {
+    const { serve } = wrapper();
+    const { res, sent } = response();
+    serve(request({ host: '127.0.0.1:3000' }, 'http://127.0.0.1/healthz', '127.0.0.1'), res);
+    expect(sent.status).toBe(400);
+  });
+
+  it('lets an ordinary path and query through', async () => {
+    const { serve, handle } = wrapper();
+    serve(request({ host: 'app.drefyn.test' }, '/acme/docs?tab=a//b'), response().res);
+    await vi.waitFor(() => {
+      expect(handle).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+function fakeSocket() {
+  const written: string[] = [];
+  const end = vi.fn((text: string) => {
+    written.push(text);
+  });
+  return { socket: { end } as unknown as Duplex, written, end };
+}
+
+describe('the upgrade wrapper', () => {
+  const HEAD = Buffer.alloc(0);
+
+  function upgrades(listeners = () => 1) {
+    const upgrade = vi.fn();
+    const warn = vi.fn();
+    const serve = createUpgradeWrapper({ config: config(), upgrade, warn, listeners });
+    return { serve, upgrade, warn };
+  }
+
+  it.each([
+    ['a forged Host', { host: 'evil.example' }, '/', '421'],
+    ['a loopback Host', { host: '127.0.0.1:3000' }, HEALTH_PATH, '421'],
+    ['an absolute form target', { host: 'app.drefyn.test' }, 'http://evil.example/', '400'],
+  ])('answers %s on the socket and never reaches Next', (_name, headers, url, status) => {
+    const { serve, upgrade } = upgrades();
+    const { socket, written } = fakeSocket();
+    serve(request(headers, url), socket, HEAD);
+    expect(written.join('')).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
+    expect(written.join('')).toContain('connection: close');
+    expect(upgrade).not.toHaveBeenCalled();
+  });
+
+  it('hands Next a checked upgrade with the rewritten headers', async () => {
+    const { serve, upgrade } = upgrades();
+    const { socket } = fakeSocket();
+    const req = request({ host: 'app.drefyn.test', 'x-forwarded-for': '6.6.6.6' });
+    serve(req, socket, HEAD);
+    await vi.waitFor(() => {
+      expect(upgrade).toHaveBeenCalledWith(req, socket, HEAD);
+    });
+    expect(req.headers['x-forwarded-for']).toBe('192.0.2.50');
+    expect(req.headers['x-forwarded-host']).toBe('app.drefyn.test');
+  });
+
+  it('closes the socket when Next fails on an upgrade', async () => {
+    const warn = vi.fn();
+    const serve = createUpgradeWrapper({
+      config: config(),
+      upgrade: () => Promise.reject(new Error('boom')),
+      warn,
+    });
+    const { socket, written } = fakeSocket();
+    serve(request({ host: 'app.drefyn.test' }), socket, HEAD);
+    await vi.waitFor(() => {
+      expect(written.join('')).toMatch(/^HTTP\/1\.1 500 /);
+    });
+    expect(warn).toHaveBeenCalledWith('dashboard.request_failed', {});
+  });
+
+  it('warns when something else listens for upgrades, because it would skip these checks', () => {
+    const { serve, warn } = upgrades(() => 2);
+    serve(request({ host: 'evil.example' }), fakeSocket().socket, HEAD);
+    expect(warn).toHaveBeenCalledWith('dashboard.upgrade_listener_extra', { listeners: 2 });
   });
 });

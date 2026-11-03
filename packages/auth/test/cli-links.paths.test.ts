@@ -8,6 +8,7 @@ import {
   formatCliLinkToken,
   parseAuthConfig,
   sha256,
+  type AuthMetrics,
   type Organizations,
   type Sessions,
 } from '../src/index.ts';
@@ -271,5 +272,118 @@ describe('operator session revoke', () => {
     const one = await subject.revokeForEmail('a@example.com');
     expect(!one.ok && one.error.code).toBe('AUTH_UNAVAILABLE');
     await expect(subject.revokeAll()).rejects.toMatchObject({ code: 'AUTH_UNAVAILABLE' });
+  });
+});
+
+describe('the redemption counter and refusal reasons', () => {
+  function counted(
+    rows: Parameters<typeof responder>[0],
+    reserve: () => Promise<void> = () => Promise.resolve(),
+    increment: AuthMetrics['increment'] = vi.fn(),
+  ) {
+    const scripted = scriptedStore(responder(rows));
+    const log = logger();
+    const startSession = vi.fn(() => Promise.resolve({ session: {}, setCookies: [] }));
+    const subject = createCliLinks(config, {
+      db: {} as never,
+      authDb: {} as never,
+      logger: log,
+      initialTier: 'self_hosted',
+      store: scripted.store,
+      limiter: { reserve },
+      metrics: { increment },
+      sessions: { startSession } as unknown as Sessions,
+    });
+    return { subject, scripted, log, startSession, increment };
+  }
+
+  const token = formatCliLinkToken(SECRET);
+  const refusedWith = (log: ReturnType<typeof logger>) =>
+    log.info.mock.calls.filter(([event]) => event === 'auth.cli_link_refused').map(([, f]) => f);
+
+  it('counts a redemption once as redeemed', async () => {
+    const { subject, increment } = counted({ link: USER });
+    expect((await subject.redeem(browser, token)).ok).toBe(true);
+    expect(vi.mocked(increment).mock.calls).toEqual([['auth.cli_link', { outcome: 'redeemed' }]]);
+  });
+
+  it.each([
+    ['malformed', 'drf_cl_nope', { link: USER }],
+    ['no_match', token, { link: null }],
+  ] as const)('counts and logs %s once', async (outcome, value, rows) => {
+    const { subject, increment, log } = counted(rows);
+    await subject.redeem(browser, value);
+    expect(vi.mocked(increment).mock.calls).toEqual([['auth.cli_link', { outcome }]]);
+    expect(refusedWith(log)).toEqual([{ reason: outcome }]);
+  });
+
+  it('counts a full bucket as rate_limited and keeps the error', async () => {
+    const { subject, increment, log } = counted({ link: USER }, () =>
+      Promise.reject(new AuthError('AUTH_RATE_LIMITED')),
+    );
+    const result = await subject.redeem(browser, token);
+    expect(!result.ok && result.error.code).toBe('AUTH_RATE_LIMITED');
+    expect(vi.mocked(increment).mock.calls).toEqual([
+      ['auth.cli_link', { outcome: 'rate_limited' }],
+    ]);
+    expect(refusedWith(log)).toEqual([{ reason: 'rate_limited' }]);
+  });
+
+  it('reports an unkeyable address as client_address, never rate_limited', async () => {
+    const reserve = vi.fn(() => Promise.resolve());
+    const { subject, increment, log } = counted({ link: USER }, reserve);
+    const result = await subject.redeem({ ...browser, ip: 'not an ip' }, token);
+    expect(!result.ok && result.error.code).toBe('AUTH_INPUT_INVALID');
+    expect(reserve).not.toHaveBeenCalled();
+    expect(vi.mocked(increment).mock.calls).toEqual([
+      ['auth.cli_link', { outcome: 'client_address' }],
+    ]);
+    expect(refusedWith(log)).toEqual([{ reason: 'client_address' }]);
+  });
+
+  it.each([
+    ['an AuthError', new AuthError('AUTH_UNAVAILABLE')],
+    ['any other failure', new Error('connection reset')],
+    ['an unexpected AuthError', new AuthError('AUTH_FORBIDDEN')],
+  ])('reports a limiter outage from %s as unavailable', async (_name, failure) => {
+    const { subject, increment, log, scripted } = counted({ link: USER }, () =>
+      Promise.reject(failure),
+    );
+    const result = await subject.redeem(browser, token);
+    expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
+    expect(vi.mocked(increment).mock.calls).toEqual([
+      ['auth.cli_link', { outcome: 'unavailable' }],
+    ]);
+    expect(refusedWith(log)).toEqual([{ reason: 'unavailable' }]);
+    expect(scripted.statements()).toEqual([]);
+  });
+
+  it('counts a failed consume and a failed session as unavailable', async () => {
+    const consume = counted({ link: USER });
+    consume.scripted.respondWith(() => {
+      throw new Error('down');
+    });
+    await consume.subject.redeem(browser, token);
+    expect(vi.mocked(consume.increment).mock.calls).toEqual([
+      ['auth.cli_link', { outcome: 'unavailable' }],
+    ]);
+    const session = counted({ link: USER });
+    session.startSession.mockRejectedValueOnce(new Error('insert failed'));
+    await session.subject.redeem(browser, token);
+    expect(vi.mocked(session.increment).mock.calls).toEqual([
+      ['auth.cli_link', { outcome: 'unavailable' }],
+    ]);
+  });
+
+  it('a metrics sink that throws changes nothing', async () => {
+    const { subject } = counted({ link: USER }, undefined, () => {
+      throw new Error('sink down');
+    });
+    expect((await subject.redeem(browser, token)).ok).toBe(true);
+    const refused = counted({ link: null }, undefined, () => {
+      throw new Error('sink down');
+    });
+    const result = await refused.subject.redeem(browser, token);
+    expect(!result.ok && result.error.code).toBe('AUTH_CLI_LINK_INVALID');
   });
 });
