@@ -13,6 +13,7 @@ export type KeyPurpose = (typeof KEY_PURPOSES)[number];
 export type MacPart = string | Uint8Array;
 
 export const MIN_SECRET_BYTES = 32;
+export const BLOCK_KEY_BYTES = 32;
 
 // Changing either label orphans every stored code HMAC and rate limit key, so they are
 // versioned rather than edited.
@@ -94,5 +95,56 @@ export function deriveAuthKeys(secret: Uint8Array, previous?: Uint8Array | null)
       const before = old !== null && constantTimeEqual(macWith(old[purpose], parts), expected);
       return now || before;
     },
+  });
+}
+
+export interface BlockLinkParts {
+  readonly organizationId: string;
+  readonly invitationId: string;
+  readonly emailHmac: Uint8Array;
+  // Unix seconds.
+  readonly expiresAt: number;
+}
+
+// Keyed by DREFYN_AUTH_INVITATION_BLOCK_KEY, which never rotates: a block is a promise to
+// the person who asked, and a key change would silently forget every one of them.
+export interface InvitationBlockKeys {
+  // The stored form of an address in invitation_blocks, so the table never holds it.
+  emailMac(organizationId: string, emailNormalized: string): Buffer;
+  linkTag(parts: BlockLinkParts): Buffer;
+  verifyLinkTag(parts: BlockLinkParts, tag: Uint8Array): boolean;
+}
+
+const BLOCK_SALT = 'drefyn.auth.invitation_block.v1';
+
+const linkParts = (p: BlockLinkParts): MacPart[] => [
+  p.organizationId,
+  p.invitationId,
+  p.emailHmac,
+  String(p.expiresAt),
+];
+
+export function deriveInvitationBlockKeys(root: Uint8Array): InvitationBlockKeys {
+  if (root.length !== BLOCK_KEY_BYTES) {
+    throw new AuthError('AUTH_CONFIG_INVALID', {
+      key: 'DREFYN_AUTH_INVITATION_BLOCK_KEY',
+      reason: 'must be exactly 32 random bytes',
+    });
+  }
+  const derive = (purpose: 'email' | 'link') =>
+    createSecretKey(
+      Buffer.from(
+        hkdfSync('sha256', root, BLOCK_SALT, `drefyn/auth/v1/invitation_block/${purpose}`, 32),
+      ),
+    );
+  const email = derive('email');
+  const link = derive('link');
+  return Object.freeze({
+    emailMac: (organizationId: string, emailNormalized: string) =>
+      macWith(email, ['invitation_block_email', organizationId, emailNormalized]),
+    linkTag: (parts: BlockLinkParts) =>
+      macWith(link, ['invitation_block_link', ...linkParts(parts)]),
+    verifyLinkTag: (parts: BlockLinkParts, tag: Uint8Array) =>
+      constantTimeEqual(macWith(link, ['invitation_block_link', ...linkParts(parts)]), tag),
   });
 }
