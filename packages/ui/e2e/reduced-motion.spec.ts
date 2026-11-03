@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import {
   expect,
   FOUNDATIONS,
+  MOBILE,
   openStory,
   recordTransitions,
   storyIds,
@@ -193,3 +194,47 @@ for (const theme of THEMES) {
     });
   }
 }
+
+// Below the small breakpoint select, menu and popover open in the shared sheet. With motion
+// it rises; here it must only fade, within the cap.
+const SHEETS: { id: string; open: (page: Page) => Promise<void> }[] = [
+  {
+    id: 'components-select--default',
+    open: (page) => page.getByRole('button', { name: /Region$/ }).click(),
+  },
+  {
+    id: 'components-menu--default',
+    open: (page) => page.getByRole('button', { name: 'Payments API' }).click(),
+  },
+  {
+    id: 'components-popover--default',
+    open: (page) => page.getByRole('button', { name: 'Filters' }).click(),
+  },
+];
+
+test.describe('on a phone', () => {
+  test.use({ viewport: MOBILE });
+
+  for (const theme of THEMES) {
+    for (const { id, open } of SHEETS) {
+      test(`${id} opens its sheet with a fade and no travel, within the cap, in ${theme}`, async ({
+        page,
+      }) => {
+        await openStory(page, id, theme);
+        const recorded = await recordTransitions(page);
+        await open(page);
+        await expect(page.locator('[data-sheet] [role="dialog"]')).toBeVisible();
+        await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+        const started = await recorded();
+        expect(
+          started.some((t) => t.property === 'opacity'),
+          'an opacity fade ran',
+        ).toBe(true);
+        expect(started.filter((t) => MOVING.test(t.property))).toEqual([]);
+        expect(started.filter((t) => t.ms > reducedFadeCapMs)).toEqual([]);
+        const settled = await transitionsIn(page);
+        expect(settled.filter((t) => MOVING.test(t.property))).toEqual([]);
+      });
+    }
+  }
+});
