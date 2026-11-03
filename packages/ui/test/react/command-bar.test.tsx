@@ -25,22 +25,26 @@ function Bar(props: Partial<Props>) {
   const [open, setOpen] = useState(true);
   return (
     <CommandBar
-      open={open}
+      items={ITEMS}
+      onAction={() => undefined}
+      {...props}
+      open={props.open ?? open}
       onOpenChange={(next) => {
         setOpen(next);
         props.onOpenChange?.(next);
       }}
-      items={ITEMS}
-      onAction={() => undefined}
-      {...props}
-      {...(props.open === undefined ? {} : { open: props.open })}
     />
   );
 }
 
 const field = () => screen.getByRole('combobox', { name: 'Search or run a command' });
 const rows = () => within(screen.getByRole('listbox')).queryAllByRole('option');
-const names = () => rows().map((r) => r.querySelector('[slot="label"], [data-label]')?.textContent);
+// The label alone, without the context after it; the no results line is not a row.
+const names = () =>
+  rows().flatMap((r) => {
+    const label = r.querySelector('[data-label]');
+    return label === null ? [] : [label.textContent];
+  });
 
 describe('CommandBar', () => {
   it('renders nothing while closed', () => {

@@ -10,7 +10,7 @@ import {
   SelectOption,
   Switch,
 } from '../../src/react/index.ts';
-import { classesOf } from './classes.ts';
+import { classesOf, only } from './classes.ts';
 
 // happy-dom answers matchMedia from the window size, so each test sets the width it needs.
 function atWidth(width: number): void {
@@ -87,10 +87,9 @@ describe('the phone sheet', () => {
   it('draws the scrim, the safe area and the overlay surface', async () => {
     render(<Region />);
     await userEvent.setup().click(screen.getByRole('button', { name: /Region/ }));
-    const overlay = document.querySelector('[data-sheet]');
-    expect(overlay).not.toBeNull();
-    expect(classesOf(overlay as Element)).toContain('bg-overlay-scrim');
-    expect(classesOf(overlay as Element)).toContain('z-overlay');
+    const overlay = only(document.querySelectorAll('[data-sheet]'));
+    expect(classesOf(overlay)).toContain('bg-overlay-scrim');
+    expect(classesOf(overlay)).toContain('z-overlay');
     const panel = sheet();
     expect(classesOf(panel)).toEqual(
       expect.arrayContaining(['bg-overlay', 'pb-safe-bottom', 'rounded-t-md', 'shadow-2']),
@@ -101,15 +100,17 @@ describe('the phone sheet', () => {
     const user = userEvent.setup();
     render(<Region />);
     await user.click(screen.getByRole('button', { name: /Region/ }));
+    // The rows size from the sheet around them; the browser specs measure the height.
     for (const option of screen.getAllByRole('option')) {
-      expect(classesOf(option)).toContain('min-h-row-comfortable');
-      expect(classesOf(option)).not.toContain('min-h-row-compact');
+      expect(isSheet(option)).toBe(true);
+      expect(classesOf(option)).toContain('in-data-sheet:min-h-row-comfortable');
     }
     cleanup();
     render(<Actions />);
     await user.click(screen.getByRole('button', { name: 'Payments API' }));
     for (const item of screen.getAllByRole('menuitem')) {
-      expect(classesOf(item)).toContain('min-h-row-comfortable');
+      expect(isSheet(item)).toBe(true);
+      expect(classesOf(item)).toContain('in-data-sheet:min-h-row-comfortable');
     }
   });
 
@@ -118,6 +119,7 @@ describe('the phone sheet', () => {
     render(<Region />);
     await userEvent.setup().click(screen.getByRole('button', { name: /Region/ }));
     for (const option of screen.getAllByRole('option')) {
+      expect(isSheet(option)).toBe(false);
       expect(classesOf(option)).toContain('min-h-row-compact');
     }
   });

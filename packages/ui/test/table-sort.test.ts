@@ -17,6 +17,12 @@ const words = rowsOf(fc.stringMatching(/^[A-Za-z0-9 ]{0,8}$/));
 const value = (row: Row) => row.key;
 const ids = (rows: readonly Row[]) => rows.map((r) => r.id);
 const position = (row: Row) => Number(row.id.slice(1));
+// Each neighbouring pair, first to last.
+const pairs = <T>(list: readonly T[]): [T, T][] =>
+  list.flatMap((b, i): [T, T][] => {
+    const a = list[i - 1];
+    return i === 0 || a === undefined ? [] : [[a, b]];
+  });
 
 describe('sortRows', () => {
   for (const [kind, rows] of [
@@ -38,9 +44,7 @@ describe('sortRows', () => {
       fc.assert(
         fc.property(rows, fc.constantFrom('ascending', 'descending'), (list, direction) => {
           const sorted = sortRows(list, value, direction);
-          for (let i = 1; i < sorted.length; i += 1) {
-            const a = sorted[i - 1] as Row;
-            const b = sorted[i] as Row;
+          for (const [a, b] of pairs(sorted)) {
             if (a.key === b.key) expect(position(a)).toBeLessThan(position(b));
           }
         }),
@@ -52,13 +56,9 @@ describe('sortRows', () => {
     fc.assert(
       fc.property(numbers, (list) => {
         const up = sortRows(list, value, 'ascending').map((r) => r.key as number);
-        for (let i = 1; i < up.length; i += 1) {
-          expect(up[i - 1] as number).toBeLessThanOrEqual(up[i] as number);
-        }
+        for (const [a, b] of pairs(up)) expect(a).toBeLessThanOrEqual(b);
         const down = sortRows(list, value, 'descending').map((r) => r.key as number);
-        for (let i = 1; i < down.length; i += 1) {
-          expect(down[i - 1] as number).toBeGreaterThanOrEqual(down[i] as number);
-        }
+        for (const [a, b] of pairs(down)) expect(a).toBeGreaterThanOrEqual(b);
       }),
     );
   });

@@ -55,6 +55,12 @@ const dataRows = () =>
   within(grid())
     .getAllByRole('row')
     .filter((r) => within(r).queryAllByRole('columnheader').length === 0);
+// The data row at a position, or a failure that says the table has fewer.
+const rowAt = (n: number): HTMLElement => {
+  const row = dataRows()[n];
+  if (row === undefined) throw new Error(`no row ${String(n)}`);
+  return row;
+};
 const titles = () => dataRows().map((r) => within(r).getByRole('rowheader').textContent);
 const header = (name: string) => screen.getByRole('columnheader', { name: new RegExp(name) });
 
@@ -126,24 +132,25 @@ describe('Table', () => {
 
   it('sets number columns end aligned in tabular figures', () => {
     render(<Pages />);
-    const cell = within(dataRows()[1] as HTMLElement).getAllByRole('gridcell')[0] as HTMLElement;
+    const [cell] = within(rowAt(1)).getAllByRole('gridcell');
+    if (cell === undefined) throw new Error('no cell');
     expect(cell.textContent).toBe('4,800');
     expect(classesOf(cell)).toEqual(expect.arrayContaining(['tabular-nums', 'text-end']));
   });
 
   it('uses compact rows by default and comfortable rows when asked', () => {
     render(<Pages />);
-    expect(classesOf(dataRows()[0] as HTMLElement)).toContain('h-row-compact');
+    expect(classesOf(rowAt(0))).toContain('h-row-compact');
     cleanup();
     render(<Pages density="comfortable" />);
-    expect(classesOf(dataRows()[0] as HTMLElement)).toContain('h-row-comfortable');
+    expect(classesOf(rowAt(0))).toContain('h-row-comfortable');
   });
 
   it('runs a row action on a press and on Enter', async () => {
     const onRowAction = vi.fn();
     const user = userEvent.setup();
     render(<Pages onRowAction={onRowAction} />);
-    await user.click(within(dataRows()[0] as HTMLElement).getByRole('rowheader'));
+    await user.click(within(rowAt(0)).getByRole('rowheader'));
     await user.keyboard('{ArrowDown}{Enter}');
     expect(onRowAction.mock.calls).toEqual([['refunds'], ['payouts']]);
   });
@@ -153,7 +160,7 @@ describe('Table', () => {
 
     it('gives each row a checkbox named by the row and a select all box', () => {
       render(<Pages selectable />);
-      expect(box(dataRows()[0] as HTMLElement)).toBeDefined();
+      expect(box(rowAt(0))).toBeDefined();
       expect(screen.getByRole('checkbox', { name: 'Select all' })).toBeDefined();
     });
 
@@ -161,8 +168,8 @@ describe('Table', () => {
       const onSelectionChange = vi.fn();
       const user = userEvent.setup();
       render(<Pages selectable onSelectionChange={onSelectionChange} />);
-      await user.click(box(dataRows()[1] as HTMLElement));
-      expect(dataRows()[1]?.getAttribute('aria-selected')).toBe('true');
+      await user.click(box(rowAt(1)));
+      expect(rowAt(1).getAttribute('aria-selected')).toBe('true');
       expect(onSelectionChange.mock.calls.at(-1)).toEqual([['payouts']]);
       expect(screen.getByRole('status').textContent).toBe('1 selected');
     });
@@ -184,11 +191,11 @@ describe('Table', () => {
 
     it('starts from a default selection and follows a held one', () => {
       render(<Pages selectable defaultSelected={['refunds']} />);
-      expect(dataRows()[0]?.getAttribute('aria-selected')).toBe('true');
+      expect(rowAt(0).getAttribute('aria-selected')).toBe('true');
       cleanup();
       render(<Pages selectable selected={['keys']} onSelectionChange={() => undefined} />);
-      expect(dataRows()[2]?.getAttribute('aria-selected')).toBe('true');
-      expect(dataRows()[0]?.getAttribute('aria-selected')).toBe('false');
+      expect(rowAt(2).getAttribute('aria-selected')).toBe('true');
+      expect(rowAt(0).getAttribute('aria-selected')).toBe('false');
     });
 
     it('selects with Space on a focused row', async () => {
@@ -196,7 +203,7 @@ describe('Table', () => {
       const user = userEvent.setup();
       render(<Pages selectable onSelectionChange={onSelectionChange} />);
       await user.tab();
-      await user.keyboard('{ArrowDown}{ArrowDown}{Space}');
+      await user.keyboard('{ArrowDown}[Space]');
       expect(onSelectionChange.mock.calls.at(-1)).toEqual([['payouts']]);
     });
   });
@@ -214,8 +221,9 @@ describe('Table', () => {
           onRowAction={onRowAction}
         />,
       );
-      const row = dataRows()[2] as HTMLElement;
-      expect(row.getAttribute('aria-disabled')).toBe('true');
+      const row = rowAt(2);
+      // The row stays readable; its checkbox is the control that is unavailable.
+      expect(within(row).getByRole('checkbox').getAttribute('aria-disabled')).toBe('true');
       expect(row.textContent).toContain('Keys pages are managed by the API');
       await user.click(within(row).getByRole('rowheader'));
       await user.click(within(row).getByRole('checkbox'));
@@ -228,13 +236,13 @@ describe('Table', () => {
       const user = userEvent.setup();
       render(<Pages disabledRows={{ payouts: 'Archived pages cannot be opened' }} />);
       await user.tab();
-      await user.keyboard('{ArrowDown}{ArrowDown}');
+      await user.keyboard('{ArrowDown}');
       expect(document.activeElement).toBe(dataRows()[1]);
     });
 
     it('paints its words in body text, never with opacity', () => {
       render(<Pages disabledRows={{ keys: 'Keys pages are managed by the API' }} />);
-      const row = dataRows()[2] as HTMLElement;
+      const row = rowAt(2);
       expect(classesOf(row).some((c) => c.includes('opacity'))).toBe(false);
       expect(classesOf(row)).toContain('text-body');
     });
@@ -247,7 +255,12 @@ describe('Table', () => {
       expect(within(grid()).getAllByRole('columnheader')).toHaveLength(3);
       expect(grid().querySelectorAll('[data-skeleton]').length).toBeGreaterThan(0);
       expect(within(grid()).getByText('Loading pages')).toBeDefined();
-      expect(within(grid()).queryAllByRole('rowheader')).toHaveLength(0);
+      // React Aria draws the loading rows in one row of its own; no page row is there.
+      expect(
+        within(grid())
+          .queryAllByRole('rowheader')
+          .map((h) => h.textContent),
+      ).toEqual(['Loading pages']);
     });
 
     it('a refresh keeps the rows and marks the grid busy', () => {

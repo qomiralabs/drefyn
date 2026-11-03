@@ -4,6 +4,7 @@ import { ListBoxItem, Text } from 'react-aria-components';
 import { markDisabled } from './field-parts.tsx';
 import { checkShape } from './icons/check.tsx';
 import { Icon } from './icons/icon.tsx';
+import { ROW } from './sheet.tsx';
 
 export interface SelectOptionProps {
   value: string;
@@ -17,7 +18,7 @@ export interface SelectOptionProps {
 // Options sit flush in the panel, so the ring is drawn inside their edge, as menu items do.
 // The chosen one shows a tick in accent ink and no wash: the tick and aria-selected carry it.
 const BASE =
-  'flex min-h-row-compact items-center gap-8 rounded-sm px-8 py-4 text-body-s outline-none transition-colors duration-fast ease-enter data-focus-visible:focus-ring-inset';
+  'flex items-center gap-8 rounded-sm px-8 py-4 text-body-s outline-none transition-colors duration-fast ease-enter data-focus-visible:focus-ring-inset';
 const LIVE = 'cursor-default text-body data-focused:bg-hover data-pressed:bg-pressed';
 const DISABLED = 'cursor-not-allowed text-disabled-text';
 
@@ -34,7 +35,7 @@ export function SelectOption({
       isDisabled={disabled}
       // A disabled option stays reachable, so React Aria leaves aria-disabled off it.
       ref={markDisabled(disabled)}
-      className={`${BASE} ${disabled ? DISABLED : LIVE}`}
+      className={`${BASE} ${ROW} ${disabled ? DISABLED : LIVE}`}
     >
       {({ isSelected }) => (
         <>

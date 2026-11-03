@@ -45,8 +45,14 @@ for (const theme of THEMES) {
       .toEqual(['Status page', 'Incidents', 'Start an incident']);
     // Grouped rows ship only if the field still names the row across the group boundary.
     await expect(page.getByRole('listbox').getByRole('group')).toHaveCount(2);
+    // Typing highlights the first match, so Enter runs the best one at once.
+    await expect
+      .poll(() => active(page))
+      .toEqual({
+        named: 'Status page',
+        highlighted: ['Status page'],
+      });
     for (const [key, want] of [
-      ['ArrowDown', 'Status page'],
       ['ArrowDown', 'Incidents'],
       ['ArrowDown', 'Start an incident'],
       ['ArrowUp', 'Incidents'],
@@ -57,7 +63,7 @@ for (const theme of THEMES) {
     }
     await page.keyboard.type('s');
     await expect.poll(() => labels(page)).toEqual([]);
-    await expect(page.getByRole('status')).toHaveText('No results for “stats”');
+    await expect(page.locator('[role="status"]')).toHaveText('No results for “stats”');
   });
 
   test(`Enter runs the highlighted row, closes and returns focus in ${theme}`, async ({
@@ -67,7 +73,6 @@ for (const theme of THEMES) {
     await openStory(page, STORY, theme);
     await openBar(page, browserName);
     await page.keyboard.type('invite');
-    await page.keyboard.press('ArrowDown');
     await expect
       .poll(() => active(page))
       .toEqual({
@@ -114,7 +119,6 @@ for (const theme of THEMES) {
     await openStory(page, 'components-command-bar--disabled', theme);
     await expect(field(page)).toBeFocused();
     await page.keyboard.type('delete');
-    await page.keyboard.press('ArrowDown');
     await expect
       .poll(() => active(page))
       .toEqual({

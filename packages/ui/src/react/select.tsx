@@ -1,15 +1,17 @@
 'use client';
-import { Children, useState, type ReactNode } from 'react';
+import { Children, useContext, useState, type ReactNode } from 'react';
 import {
   Button,
   Label,
   ListBox,
   Popover,
   Select as AriaSelect,
+  SelectStateContext,
   SelectValue,
   Text,
 } from 'react-aria-components';
 import { FieldMessage, markDisabled } from './field-parts.tsx';
+import { ROW, Sheet, usePhone } from './sheet.tsx';
 import { chevronDownShape } from './icons/chevron-down.tsx';
 import { Icon } from './icons/icon.tsx';
 import { Skeleton } from './skeleton.tsx';
@@ -58,11 +60,29 @@ function LoadingRows(): ReactNode {
     <span className="flex flex-col">
       <span className="sr-only">Loading options</span>
       {(['3/4', '1/2', '3/4'] as const).map((width, i) => (
-        <span key={i} data-skeleton="" className="flex min-h-row-compact items-center px-8">
+        <span key={i} data-skeleton="" className={`flex items-center px-8 ${ROW}`}>
           <Skeleton width={width} />
         </span>
       ))}
     </span>
+  );
+}
+
+// The sheet follows the select's own state. React Aria also renders the select's children in
+// a hidden copy to find the options, where that state is missing; nothing is drawn there.
+function SelectSheet({ title, children }: { title: string; children: ReactNode }): ReactNode {
+  const state = useContext(SelectStateContext);
+  if (state === null) return null;
+  return (
+    <Sheet
+      title={title}
+      open={state.isOpen}
+      onOpenChange={(next) => {
+        state.setOpen(next);
+      }}
+    >
+      {children}
+    </Sheet>
   );
 }
 
@@ -74,8 +94,8 @@ const markBusy =
     else el.removeAttribute('aria-busy');
   };
 
-// A React Aria select: a button that opens a listbox in a popover on the overlay surface,
-// with a hidden native select so a form posts the value. It holds the value itself, so a
+// A React Aria select: a button that opens a listbox in a popover on the overlay surface, or
+// in the bottom sheet titled by the label on a phone, with a hidden native select so a form posts the value. It holds the value itself, so a
 // disabled select can stay focusable and still refuse every change, typed letters included.
 // Validity stays with the form: an error is joined to the trigger and never blocks a submit.
 export function Select({
@@ -102,8 +122,18 @@ export function Select({
   }
   const [own, setOwn] = useState<string | null>(defaultValue ?? null);
   const [open, setOpen] = useState(defaultOpen && !disabled);
+  const phone = usePhone();
   const chosen = value ?? own;
   const invalid = error !== undefined && error.trim() !== '';
+  const list = (
+    <ListBox
+      ref={markBusy(loading)}
+      className="flex flex-col outline-none"
+      {...(loading ? { renderEmptyState: () => <LoadingRows /> } : {})}
+    >
+      {loading ? [] : children}
+    </ListBox>
+  );
   return (
     <AriaSelect
       {...REACHABLE_WHEN_DISABLED}
@@ -150,19 +180,23 @@ export function Select({
         </span>
       </Button>
       {invalid ? <FieldMessage>{error}</FieldMessage> : null}
-      <Popover
-        offset={4}
-        data-select-popover=""
-        className="z-overlay max-h-full min-w-128 overflow-auto rounded-md border border-rule-strong bg-overlay p-4 shadow-1 transition duration-base ease-enter data-entering:opacity-0 motion-safe:data-entering:-translate-y-4 motion-safe:data-[placement=top]:data-entering:translate-y-4"
-      >
-        <ListBox
-          ref={markBusy(loading)}
-          className="flex flex-col outline-none"
-          {...(loading ? { renderEmptyState: () => <LoadingRows /> } : {})}
+      {phone ? (
+        <>
+          {/* React Aria reads a select's options from a hidden copy of its children, which only
+              its Popover passes through; a sheet does not. This one never opens and renders
+              nothing on the page. */}
+          <Popover isOpen={false}>{list}</Popover>
+          <SelectSheet title={label}>{list}</SelectSheet>
+        </>
+      ) : (
+        <Popover
+          offset={4}
+          data-select-popover=""
+          className="z-overlay max-h-full min-w-128 overflow-auto rounded-md border border-rule-strong bg-overlay p-4 shadow-1 transition duration-base ease-enter data-entering:opacity-0 motion-safe:data-entering:-translate-y-4 motion-safe:data-[placement=top]:data-entering:translate-y-4"
         >
-          {loading ? [] : children}
-        </ListBox>
-      </Popover>
+          {list}
+        </Popover>
+      )}
     </AriaSelect>
   );
 }

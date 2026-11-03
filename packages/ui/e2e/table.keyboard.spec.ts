@@ -80,17 +80,19 @@ for (const theme of THEMES) {
     browserName,
   }) => {
     await openStory(page, 'components-table--selection', theme);
+    // The story starts sorted by views, most first.
     await page.keyboard.press(tabKey(browserName));
+    await expect(row(page, 'Create a payout')).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(row(page, 'Create a payout')).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
     await expect(row(page, 'Refunds')).toBeFocused();
     await page.keyboard.press('Space');
     await expect(row(page, 'Refunds')).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('[role="status"]')).toHaveText('2 selected');
     await page.keyboard.press('Space');
-    await expect(row(page, 'Create a payout')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('status')).toHaveText('2 selected');
-    await page.keyboard.press('Space');
-    await expect(row(page, 'Create a payout')).toHaveAttribute('aria-selected', 'false');
-    await expect(page.getByRole('status')).toHaveText('1 selected');
+    await expect(row(page, 'Refunds')).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('[role="status"]')).toHaveText('1 selected');
   });
 
   test(`a disabled row is reached by the arrows, reads its reason and is never selected in ${theme}`, async ({
@@ -103,7 +105,7 @@ for (const theme of THEMES) {
     await page.keyboard.press('ArrowDown');
     const locked = row(page, 'API keys');
     await expect(locked).toBeFocused();
-    await expect(locked).toHaveAttribute('aria-disabled', 'true');
+    await expect(locked.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true');
     await expect(locked).toContainText('Managed by the API reference');
     await page.keyboard.press('Space');
     await page.keyboard.press('Enter');
@@ -117,7 +119,8 @@ for (const theme of THEMES) {
     await openStory(page, 'components-table--loading', theme);
     await expect(grid(page)).toHaveAttribute('aria-busy', 'true');
     await expect(grid(page).getByRole('columnheader')).toHaveCount(3);
-    await expect(grid(page).getByRole('rowheader')).toHaveCount(0);
+    // React Aria draws the loading rows in one row of its own; no page row is there.
+    await expect(grid(page).getByRole('rowheader')).toHaveText(['Loading pages']);
   });
 }
 
