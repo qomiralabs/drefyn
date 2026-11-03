@@ -12,8 +12,9 @@ import { createCodeIssuer, type SignedIn } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import { createPasswordHasher, type PasswordHasher } from './password-hash.ts';
+import type { BreachedPasswordCheck } from './breach-check.ts';
+import { admitNewPassword } from './new-password.ts';
 import { checkNewPassword, normalizePassword } from './password-input.ts';
-import type { PasswordContext } from './password-rules.ts';
 import {
   createRateLimiter,
   type AuthLogger,
@@ -51,6 +52,8 @@ export interface PasswordAccountDeps {
   readonly metrics?: AuthMetrics;
   // One per process, shared with sign in, so one gate bounds every hash.
   readonly hasher?: PasswordHasher;
+  // The same check setPassword uses; change and reset go through the same step.
+  readonly breachedPasswords?: BreachedPasswordCheck | undefined;
   readonly random?: (bytes: number) => Uint8Array;
 }
 
@@ -119,20 +122,6 @@ interface Challenge {
   readonly consumed: boolean;
 }
 
-// The step every new password goes through, in the shape the breached check will share.
-// TODO(#138): replace with admitNewPassword so change and reset also run the breached check.
-function admitNewPassword(
-  password: string,
-  context: PasswordContext,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: AuthError }> {
-  const rules = checkNewPassword(password, context);
-  return Promise.resolve(
-    rules.length === 0
-      ? { ok: true }
-      : { ok: false, error: new AuthError('AUTH_PASSWORD_WEAK', { rules }) },
-  );
-}
-
 export function createPasswordAccount(
   config: AuthConfig,
   deps: PasswordAccountDeps,
@@ -170,6 +159,16 @@ export function createPasswordAccount(
       ? createSessions(config, { db, authDb, logger: deps.logger, passwords: hasher })
       : missing());
   const random = deps.random ?? ((n: number) => randomBytes(n));
+  // A configured list that nobody opened would check nothing while the operator thinks it does.
+  if (
+    config.passwords.enabled &&
+    config.passwords.breachedPasswordsFile !== null &&
+    deps.breachedPasswords === undefined
+  ) {
+    throw new TypeError(
+      'DREFYN_AUTH_BREACHED_PASSWORDS_FILE is set: open it with loadBreachedPasswords at startup and pass it as breachedPasswords',
+    );
+  }
   const issuer = createCodeIssuer(config, {
     store,
     logger: deps.logger,
@@ -197,12 +196,28 @@ export function createPasswordAccount(
     };
   }
 
-  // The new password as stored, or the refusal. The hash runs outside any transaction.
-  async function admitted(raw: string, email: string): Promise<string> {
-    const password = normalizePassword(raw);
-    const admission = await admitNewPassword(password, { email });
-    if (!admission.ok) throw admission.error;
-    return password;
+  // The rules alone, before anything is counted: they are free and say nothing about the
+  // breached list, so a weak password costs no attempt.
+  function ruled(password: string, email: string): void {
+    const rules = checkNewPassword(password, { email });
+    if (rules.length > 0) throw new AuthError('AUTH_PASSWORD_WEAK', { rules });
+  }
+
+  // The step every new password takes, set, changed or reset. Called only once the person
+  // has proved who they are, so the list is never an oracle for a stranger.
+  async function admitted(password: string, email: string, ids: Record<string, string>) {
+    const admission = await admitNewPassword(
+      password,
+      { email },
+      { check: deps.breachedPasswords, logger: deps.logger, metrics: deps.metrics, fields: ids },
+    );
+    if (!admission.ok) {
+      quietInfo(deps.logger, 'auth.password_account_refused', {
+        outcome: admission.error.code,
+        ...ids,
+      });
+      throw admission.error;
+    }
   }
 
   async function readChallenge(id: string | null, binding: Buffer) {
@@ -289,8 +304,9 @@ export function createPasswordAccount(
         }
         if (!challenge.live) return refused('AUTH_CHALLENGE_EXPIRED');
         const address = challenge.email_normalized;
+        const password = normalizePassword(input.newPassword);
         // Before the attempt: a refused password leaves the person all their tries.
-        const password = await admitted(input.newPassword, address);
+        ruled(password, address);
         await limiter.reserve('code_verify', [address, binding]);
         const matched = await store.auth(async (tx) => {
           // Counted before the compare, in a statement only five can ever pass.
@@ -314,6 +330,7 @@ export function createPasswordAccount(
         // An unknown address stores a code nothing can match; this is only a second lock.
         if (challenge.user_id === null) return refused('AUTH_CODE_INVALID');
         const userId = idOf('usr', challenge.user_id);
+        await admitted(password, address, userIds(userId));
         // The hash comes before the code is spent, so a full hash queue costs no code.
         const phc = await hasher.hash(password);
         const consumed = await store.auth((tx) =>
@@ -362,7 +379,8 @@ export function createPasswordAccount(
     async changePassword(b, s, input) {
       if (!config.passwords.enabled) return fail(new AuthError('AUTH_PASSWORDS_DISABLED'));
       try {
-        const password = await admitted(input.newPassword, s.email);
+        const password = normalizePassword(input.newPassword);
+        ruled(password, s.email);
         const current =
           input.currentPassword === undefined
             ? undefined
@@ -393,6 +411,7 @@ export function createPasswordAccount(
         } else if (row === undefined) {
           return refused('AUTH_NOT_FOUND', sessionIds(s));
         }
+        await admitted(password, s.email, sessionIds(s));
         const phc = await hasher.hash(password);
         const changed = await store.user(s.userId, async (tx) => {
           const live = await tx

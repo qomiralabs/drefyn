@@ -5,6 +5,7 @@ import {
   createEmailSignIn,
   createPasswordAccount,
   type AuthConfig,
+  type BreachedPasswordCheck,
   type SessionInfo,
 } from '../../src/index.ts';
 import { createTestAuthMailer, type TestAuthMailer } from '../../src/testing.ts';
@@ -18,6 +19,7 @@ import {
   passwordConfig,
   passwordFlow,
   personWithPassword,
+  phcOf,
   sessionsOf,
   signInFrom,
 } from './support/passwords.ts';
@@ -30,7 +32,11 @@ let h: Harness;
 let n = 0;
 const address = (label: string) => `${label}${String((n += 1))}@reset.example.com`;
 
-function accountFlow(config: AuthConfig, mail: TestAuthMailer = createTestAuthMailer()) {
+function accountFlow(
+  config: AuthConfig,
+  mail: TestAuthMailer = createTestAuthMailer(),
+  breachedPasswords?: BreachedPasswordCheck,
+) {
   const flow = passwordFlow(h, config, hasherAt(SMALL), { mailer: mail.mailer });
   const account = createPasswordAccount(config, {
     db: h.db,
@@ -39,6 +45,7 @@ function accountFlow(config: AuthConfig, mail: TestAuthMailer = createTestAuthMa
     mailer: mail.mailer,
     sessions: flow.sessions,
     hasher: flow.hasher,
+    ...(breachedPasswords === undefined ? {} : { breachedPasswords }),
   });
   const emailSignIn = createEmailSignIn(config, {
     db: h.db,
@@ -314,5 +321,41 @@ describeWithStack('password reset, change and removal against Postgres', () => {
     if (!set.ok) throw set.error;
     await set.value.send();
     expect(mail.notices.map((m) => m.notice.kind)).toEqual(['password_set']);
+  });
+
+  it('change and reset refuse a listed password through the same step as set', async () => {
+    const listed: BreachedPasswordCheck = { isBreached: () => Promise.resolve(true) };
+    const flow = accountFlow(passwordConfig(), createTestAuthMailer(), listed);
+    const { email, session } = await personWithPassword(h, flow, PASSWORD);
+    const before = await phcOf(h, email);
+    const changed = await flow.account.changePassword(newBrowser().context(), session, {
+      newPassword: NEW_PASSWORD,
+    });
+    expect(!changed.ok && changed.error.code).toBe('AUTH_PASSWORD_BREACHED');
+    const b = newBrowser();
+    const sent = await requestReset(flow, b, email);
+    if (sent === null) throw new Error('no reset mail');
+    const reset = await flow.account.completePasswordReset(b.context(), {
+      ...sent,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(!reset.ok && reset.error.code).toBe('AUTH_PASSWORD_BREACHED');
+    expect(await phcOf(h, email)).toBe(before);
+    expect(b.cookies.has(flow.config.cookies.session)).toBe(false);
+  });
+
+  it('a check that cannot answer lets the change through and records it', async () => {
+    const silent: BreachedPasswordCheck = { isBreached: () => Promise.resolve(null) };
+    const flow = accountFlow(passwordConfig(), createTestAuthMailer(), silent);
+    const { email, session } = await personWithPassword(h, flow, PASSWORD);
+    const before = await phcOf(h, email);
+    const changed = await flow.account.changePassword(newBrowser().context(), session, {
+      newPassword: NEW_PASSWORD,
+    });
+    if (!changed.ok) throw changed.error;
+    expect(await phcOf(h, email)).not.toBe(before);
+    expect(h.logs.map((l) => l.event)).toContain('auth.breach_check_unavailable');
+    const next = await signInFrom(flow, newBrowser(), email, NEW_PASSWORD);
+    expect(next.ok).toBe(true);
   });
 });

@@ -624,3 +624,111 @@ describe('the verify link for a reset code', () => {
     expect(codeOf(result)).toBe('AUTH_CHALLENGE_BINDING');
   });
 });
+
+describe('the breached check on change and reset', () => {
+  const listed = (answer: boolean | null) => {
+    const seen: string[] = [];
+    return {
+      seen,
+      check: {
+        isBreached: (password: string) => {
+          seen.push(password);
+          return Promise.resolve(answer);
+        },
+      },
+    };
+  };
+
+  function withCheck(answer: boolean | null, script: Script = {}) {
+    const scripted = scriptedStore(responder(script));
+    const mail = createTestAuthMailer();
+    const { logger, logs } = recordingLogger();
+    const stub = listed(answer);
+    const sessions = fakeSessions();
+    const account = createPasswordAccount(config, {
+      store: scripted.store,
+      limiter: fakeLimiter(),
+      logger,
+      mailer: mail.mailer,
+      sessions,
+      hasher: smallHasher(),
+      breachedPasswords: stub.check,
+      random: (n) => new Uint8Array(n).fill(7),
+    });
+    return { account, scripted, logs, stub, sessions };
+  }
+
+  it('refuses a listed password on change and on reset through the same step as set', async () => {
+    const change = withCheck(true);
+    const changed = await change.account.changePassword(browser(), session, {
+      newPassword: NEW_PASSWORD,
+    });
+    expect(codeOf(changed)).toBe('AUTH_PASSWORD_BREACHED');
+    expect(change.stub.seen).toEqual([NEW_PASSWORD]);
+    expect(writesTo(change.scripted.statements(), 'password_credentials')).toEqual([]);
+    const reset = withCheck(true);
+    const result = await reset.account.completePasswordReset(browser(), {
+      challenge: challengeArg,
+      code: RIGHT,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(codeOf(result)).toBe('AUTH_PASSWORD_BREACHED');
+    expect(reset.stub.seen).toEqual([NEW_PASSWORD]);
+    // The code is not spent, so the person can choose another password with it.
+    const spent = reset.scripted
+      .statements()
+      .filter((s) => on(s, 'update', 'email_challenges') && s.sql.includes('"consumed_at" ='));
+    expect(spent).toEqual([]);
+    expect(reset.sessions.startSession).not.toHaveBeenCalled();
+    expect(JSON.stringify([...change.logs, ...reset.logs])).not.toContain(NEW_PASSWORD);
+  });
+
+  it('asks the list only after the person is proved', async () => {
+    const wrongCode = withCheck(true);
+    await wrongCode.account.completePasswordReset(browser(), {
+      challenge: challengeArg,
+      code: '11111111',
+      newPassword: NEW_PASSWORD,
+    });
+    expect(wrongCode.stub.seen).toEqual([]);
+    const stale = scriptedStore(responder());
+    const stub = listed(true);
+    const account = createPasswordAccount(config, {
+      store: stale.store,
+      limiter: fakeLimiter(),
+      logger: recordingLogger().logger,
+      mailer: createTestAuthMailer().mailer,
+      sessions: fakeSessions(false),
+      hasher: smallHasher(),
+      breachedPasswords: stub.check,
+    });
+    await account.changePassword(browser(), session, { newPassword: NEW_PASSWORD });
+    expect(stub.seen).toEqual([]);
+  });
+
+  it('accepts the password when the check cannot answer, and records it', async () => {
+    const t = withCheck(null);
+    const changed = await t.account.changePassword(browser(), session, {
+      newPassword: NEW_PASSWORD,
+    });
+    expect(codeOf(changed)).toBe('ok');
+    expect(t.logs.map((l) => l.event)).toContain('auth.breach_check_unavailable');
+  });
+
+  it('refuses to start when a list is configured and none was opened', () => {
+    const listedConfig = parseAuthConfig({
+      ...validEnv(),
+      DREFYN_AUTH_BREACHED_PASSWORDS_FILE: '/var/lib/drefyn/breached.bin',
+    });
+    expect(() =>
+      createPasswordAccount(listedConfig, {
+        store: scriptedStore().store,
+        limiter: fakeLimiter(),
+        logger: recordingLogger().logger,
+        mailer: createTestAuthMailer().mailer,
+        sessions: fakeSessions(),
+        hasher: smallHasher(),
+      }),
+    ).toThrow(TypeError);
+  });
+});
