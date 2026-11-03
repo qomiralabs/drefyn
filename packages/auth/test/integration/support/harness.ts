@@ -43,8 +43,9 @@ export interface Harness {
   readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
 }
 
-// One database per file, cloned from the migrated template and dropped after the file.
-export function harness() {
+// One database per file, cloned from the migrated template and dropped after the file. The
+// pool sizes can be cut to 1 to prove a flow never holds a connection while it waits.
+export function harness(pools: { readonly app?: number; readonly auth?: number } = {}) {
   const created: string[] = [];
   const open: (Database | AuthDatabase)[] = [];
   afterAll(async () => {
@@ -59,7 +60,7 @@ export function harness() {
       parseDatabaseConfig({
         DREFYN_DATABASE_URL: urlFor('app', name),
         DREFYN_DATABASE_SSL: 'disable',
-        DREFYN_DATABASE_POOL_MAX: '10',
+        DREFYN_DATABASE_POOL_MAX: String(pools.app ?? 10),
         DREFYN_DATABASE_POOL_WAIT_MS: '10000',
       }),
     );
@@ -68,7 +69,7 @@ export function harness() {
       parseAuthDatabaseConfig({
         DREFYN_AUTH_DATABASE_URL: urlFor('auth', name),
         DREFYN_DATABASE_SSL: 'disable',
-        DREFYN_AUTH_DATABASE_POOL_MAX: '4',
+        DREFYN_AUTH_DATABASE_POOL_MAX: String(pools.auth ?? 4),
         DREFYN_DATABASE_POOL_WAIT_MS: '10000',
       }),
     );
