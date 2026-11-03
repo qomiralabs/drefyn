@@ -2,6 +2,11 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, isAbsolute, relative, sep } from 'node:path';
 import type { AST, Rule, Scope } from 'eslint';
+import {
+  allowListProblems,
+  type EgressAllowance,
+  type EgressAllowEntry,
+} from './egress-allow-entry.ts';
 import { literal, moduleReferences } from './references.ts';
 import {
   cachedWorkspace,
@@ -58,11 +63,6 @@ const REQUIRE_SAFE_EXTENSIONS = new Set([
   '.json',
 ]);
 
-interface AllowEntry {
-  path: string;
-  reason: string;
-}
-
 function isBannedModule(spec: string): boolean {
   if (spec.startsWith('node:')) return BANNED_BUILTINS.has(spec.slice('node:'.length));
   return BANNED_BUILTINS.has(spec) || spec === 'undici' || spec.startsWith('undici/');
@@ -74,20 +74,27 @@ function isEgressPackage(owner: WorkspacePackage | undefined): boolean {
   return owner?.name === '@drefyn/egress' && owner.rel === 'packages/egress';
 }
 
-function isAllowed(rel: string, allow: readonly AllowEntry[]): boolean {
-  return allow.some((entry) =>
+// 'all' for a whole file entry, otherwise the forms the matching scoped entries list.
+// A whole file entry wins over a scoped one for the same file.
+function allowanceFor(rel: string, allow: readonly EgressAllowEntry[]): 'all' | EgressAllowance[] {
+  const matches = allow.filter((entry) =>
     entry.path.endsWith('/') ? rel.startsWith(entry.path) : rel === entry.path,
   );
+  if (matches.some((entry) => entry.only === undefined)) return 'all';
+  return matches.flatMap((entry) => entry.only ?? []);
 }
 
-function readAllow(options: unknown): AllowEntry[] {
+function readAllow(options: unknown): EgressAllowEntry[] {
   // The schema has already rejected anything malformed by the time this runs.
   if (!isRecord(options) || !Array.isArray(options['allow'])) return [];
   const entries: unknown[] = options['allow'];
-  return entries.filter(
-    (entry): entry is AllowEntry =>
+  const allow = entries.filter(
+    (entry): entry is EgressAllowEntry =>
       isRecord(entry) && typeof entry['path'] === 'string' && typeof entry['reason'] === 'string',
   );
+  const problems = allowListProblems(allow);
+  if (problems.length > 0) throw new Error(`drefyn/no-raw-egress: ${problems.join('; ')}`);
+  return allow;
 }
 
 // declare emits no code, so a name declared only that way is still the global at run
@@ -213,6 +220,38 @@ function resolveRelative(file: string, spec: string): string | undefined {
 
 // createRequire(...) under any local name, or <x>.createRequire(...); both return a
 // working require.
+// import { createServer } from 'node:http' when that module allows createServer: every
+// value specifier is a named import the allowance lists. Default, namespace, side
+// effect and any other name fall through to the usual report.
+function isAllowedImport(node: unknown, allowances: readonly EgressAllowance[]): boolean {
+  if (!isRecord(node) || !isRecord(node['source']) || node['importKind'] === 'type') return false;
+  const from = node['source']['value'];
+  const allowance = allowances.find((each) => 'module' in each && each.module === from);
+  if (allowance === undefined || !('imports' in allowance)) return false;
+  const specifiers: unknown = node['specifiers'];
+  if (!Array.isArray(specifiers)) return false;
+  const values = (specifiers as unknown[]).filter(
+    (specifier) => !(isRecord(specifier) && specifier['importKind'] === 'type'),
+  );
+  const listed: readonly string[] = allowance.imports;
+  return (
+    values.length > 0 &&
+    values.every((specifier) => {
+      if (!isRecord(specifier) || specifier['type'] !== 'ImportSpecifier') return false;
+      const name = staticName(specifier['imported'], false);
+      return name !== undefined && listed.includes(name);
+    })
+  );
+}
+
+// fetch(...) with the identifier itself as the callee. Passing it, binding it to
+// another name, wrapping it or reading a member of it is not a direct call.
+function isDirectCall(identifier: unknown): boolean {
+  if (!isRecord(identifier)) return false;
+  const parent = identifier['parent'];
+  return isRecord(parent) && parent['type'] === 'CallExpression' && parent['callee'] === identifier;
+}
+
 function isCreateRequireCall(node: unknown, names: ReadonlySet<string>): boolean {
   if (!isRecord(node) || node['type'] !== 'CallExpression') return false;
   const callee = unwrap(node['callee']);
@@ -246,6 +285,35 @@ export const noRawEgress: Rule.RuleModule = {
                 path: { type: 'string', pattern: '^(?![/\\\\])(?!.*(^|/)\\.\\.(/|$)).+$' },
                 // Every entry is a security exception, so it has to say why.
                 reason: { type: 'string', pattern: '\\S' },
+                // The raw forms this file may use; every other form is still reported.
+                only: {
+                  type: 'array',
+                  minItems: 1,
+                  items: {
+                    oneOf: [
+                      {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['module', 'imports'],
+                        properties: {
+                          module: { enum: ['node:http'] },
+                          imports: {
+                            type: 'array',
+                            minItems: 1,
+                            uniqueItems: true,
+                            items: { enum: ['createServer'] },
+                          },
+                        },
+                      },
+                      {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['global'],
+                        properties: { global: { enum: ['fetch'] } },
+                      },
+                    ],
+                  },
+                },
               },
             },
           },
@@ -263,11 +331,16 @@ export const noRawEgress: Rule.RuleModule = {
     const file = context.filename;
     const root = workspaceRootFor(file, context.settings);
     let pkg = 'this file';
+    let allowances: readonly EgressAllowance[] = [];
+    const allow = readAllow(context.options[0]);
     if (root !== undefined) {
       const workspace = cachedWorkspace(root);
       const rel = relative(root, file).split(sep).join('/');
       const owner = ownerOf(workspace, file);
-      if (isEgressPackage(owner) || isAllowed(rel, readAllow(context.options[0]))) return {};
+      if (isEgressPackage(owner)) return {};
+      const allowance = allowanceFor(rel, allow);
+      if (allowance === 'all') return {};
+      allowances = allowance;
       const rootName = workspace.rootManifest['name'];
       pkg =
         owner?.name ?? owner?.rel ?? (typeof rootName === 'string' ? rootName : 'the root package');
@@ -346,8 +419,12 @@ export const noRawEgress: Rule.RuleModule = {
     const modules = moduleReferences(({ spec, loc, typeOnly }) => {
       if (!typeOnly && isBannedModule(spec)) report(loc, spec);
     });
+    const allowsFetch = allowances.some((each) => 'global' in each);
     return {
       ...modules,
+      ImportDeclaration: (node) => {
+        if (!isAllowedImport(node, allowances)) modules.ImportDeclaration?.(node);
+      },
       // globalThis.fetch, window['fetch'] and friends, unless the object is a local.
       MemberExpression: (node) => {
         const name = staticName(node.property, node.computed);
@@ -423,8 +500,9 @@ export const noRawEgress: Rule.RuleModule = {
         }
         for (const reference of references) {
           const { name } = reference.identifier;
-          if (GLOBAL_APIS.has(name) && isRuntimeReference(reference))
-            report(reference.identifier.loc, name);
+          if (!GLOBAL_APIS.has(name) || !isRuntimeReference(reference)) continue;
+          if (name === 'fetch' && allowsFetch && isDirectCall(reference.identifier)) continue;
+          report(reference.identifier.loc, name);
         }
       },
     };

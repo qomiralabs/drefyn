@@ -52,6 +52,15 @@ function lists(globals: readonly string[], more: Partial<AllowLists> = {}): Allo
 
 const SELF = '(id = app.current_user_id())';
 
+const NON_EMPTY = {
+  name: 'app.fixture_notes.non_empty',
+  command: 'all',
+  roles: ['drefyn_app'],
+  using: "(body <> ''::text)",
+  withCheck: "(body <> ''::text)",
+  reason: 'test only',
+} as const;
+
 interface BadCase {
   readonly rule: CatalogRule;
   readonly object: string;
@@ -764,6 +773,47 @@ grant select (body) on app.bad_auth_column_option to drefyn_auth with grant opti
 create policy deny on app.bad_public_global using (false);`,
     allow: lists(['bad_public_global']),
   },
+  // Insert guards are restrictive, so dropping or loosening one widens what drefyn_app may
+  // write without any permissive policy changing.
+  'an unlisted restrictive policy': {
+    rule: 'restrictive_policy',
+    object: 'app.fixture_notes',
+    mentions: ['non_empty', 'restrictive policy allow list'],
+    up: () => `create policy non_empty on app.fixture_notes as restrictive to drefyn_app
+  using (body <> '') with check (body <> '');`,
+  },
+  'a listed restrictive policy whose text differs': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_insert_origin', 'WITH CHECK'],
+    up: () => `drop policy membership_insert_origin on app.memberships;
+create policy membership_insert_origin on app.memberships as restrictive for insert to drefyn_app
+  with check (role in ('owner', 'member'));`,
+  },
+  'a listed restrictive policy that is missing': {
+    rule: 'restrictive_policy',
+    object: 'app.organizations',
+    mentions: ['organization_insert_tier', 'missing'],
+    up: () => 'drop policy organization_insert_tier on app.organizations;',
+  },
+  'a listed restrictive policy made permissive': {
+    rule: 'restrictive_policy',
+    object: 'app.organizations',
+    mentions: ['organization_insert_tier', 'missing'],
+    up: () => `drop policy organization_insert_tier on app.organizations;
+create policy organization_insert_tier on app.organizations as permissive for insert to drefyn_app
+  with check ((plan_tier = app.install_tier()) and (read_only_since is null));`,
+  },
+  'app.install_tier() off the app function allow list': {
+    rule: 'app_privilege',
+    object: 'app.install_tier()',
+    mentions: ['drefyn_app', 'app function allow list'],
+    up: () => 'select 1;',
+    allow: {
+      ...FIXTURE_ALLOW_LISTS,
+      appFunctions: ALLOW_LISTS.appFunctions.filter((f) => f.name !== 'app.install_tier()'),
+    },
+  },
   'a policy to public and a role': {
     rule: 'public_policy',
     object: 'app.fixture_members',
@@ -813,15 +863,19 @@ describeWithStack('catalog check passes', () => {
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
-  // A restrictive policy can only narrow what tenant_isolation lets through.
-  it('with an extra restrictive policy on a tenant table', async () => {
+  // A restrictive policy can only narrow what tenant_isolation lets through, but dropping
+  // one can widen it, so each one is listed.
+  it('with a reviewed restrictive policy on a tenant table', async () => {
     const db = await fixture();
     await withBadMigration(
       db,
       `create policy non_empty on app.fixture_notes as restrictive to drefyn_app
   using (body <> '') with check (body <> '');`,
     );
-    const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
+    const allow = lists([], {
+      restrictivePolicies: [...ALLOW_LISTS.restrictivePolicies, NON_EMPTY],
+    });
+    const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
@@ -1039,6 +1093,7 @@ describe('catalog case list', () => {
       'auth_grant',
       'column_grant',
       'public_policy',
+      'restrictive_policy',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }
