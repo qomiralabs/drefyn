@@ -55,6 +55,8 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   no user or password. Each link is copied before the check and only the copy is
   rendered, so editing the URL after `send` or a URL subclass cannot change where it
   points.
+- An invitation needs `blockLink`, the "I did not expect this" link, as well as `link`.
+  It is a required field and passes the same link rule, refused as `blockLink`.
 - A code is exactly 8 ASCII digits.
 - Recipient, sender and reply to addresses must pass `isNormalizedEmailAddress`.
 

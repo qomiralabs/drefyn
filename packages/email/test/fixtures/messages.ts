@@ -68,6 +68,7 @@ export const FIXTURE_MESSAGES: readonly (readonly [string, MailMessage])[] = [
       organizationName: ORG,
       inviterName: PERSON,
       link: link('/invite'),
+      blockLink: link('/invite/block'),
       expiresAt: AT,
     },
   ],

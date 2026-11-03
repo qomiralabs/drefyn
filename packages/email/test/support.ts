@@ -42,12 +42,13 @@ export const signIn = (patch: Partial<{ code: string; link: URL }> = {}): MailMe
 });
 
 export const invitation = (
-  patch: Partial<{ organizationName: string; inviterName: string; link: URL }> = {},
+  patch: Partial<{ organizationName: string; inviterName: string; link: URL; blockLink: URL }> = {},
 ): MailMessage => ({
   template: 'invitation',
   organizationName: patch.organizationName ?? 'Acme',
   inviterName: patch.inviterName ?? 'Ada Lovelace',
   link: patch.link ?? link('/invite'),
+  blockLink: patch.blockLink ?? link('/invite/block'),
   expiresAt: AT,
 });
 
@@ -127,7 +128,7 @@ const at = fc
   .date({ min: new Date('2000-01-01T00:00:00Z'), max: new Date('2100-01-01T00:00:00Z') })
   .filter((d) => !Number.isNaN(d.getTime()));
 // Prefixed, so a path such as //host cannot read as another origin.
-const path = fc.webPath().map((p) => new URL(`/p${p}`, ORIGIN));
+export const path: fc.Arbitrary<URL> = fc.webPath().map((p) => new URL(`/p${p}`, ORIGIN));
 const code = fc.stringMatching(/^[0-9]{8}$/);
 const provider = fc.constantFrom(...LINK_PROVIDERS);
 
@@ -179,12 +180,13 @@ export const validMessage: fc.Arbitrary<MailMessage> = fc.oneof(
         : { template: 'sign_in_code', purpose, code: c, link: l, expiresInMinutes: minutes },
     ),
   fc
-    .tuple(safeName, safeName, path, at)
-    .map(([organizationName, inviterName, l, expiresAt]): MailMessage => ({
+    .tuple(safeName, safeName, path, path, at)
+    .map(([organizationName, inviterName, l, blockLink, expiresAt]): MailMessage => ({
       template: 'invitation',
       organizationName,
       inviterName,
       link: l,
+      blockLink,
       expiresAt,
     })),
   noticeArb.map(notice),
