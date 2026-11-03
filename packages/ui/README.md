@@ -183,6 +183,21 @@ In an app that uses Tailwind:
   for secondary ink. Apps draw no svg of their own.
 - `Mark` is the Drefyn mark on its own 100 unit grid, decorative unless given a `label`.
 
+### Choices, popovers and tabs
+
+- `Checkbox`, `RadioGroup` with `Radio`, and `Select` with `SelectOption` render native
+  inputs or a hidden native select, so a form posts them with JS off. Every choice takes
+  `value`, `defaultValue` and `onChange(value)`; a checkbox takes `checked` and
+  `onChange(checked)`. `error` shows the message and joins it to `aria-describedby`; it never
+  blocks a native submit, so the form validates.
+- A disabled checkbox, radio, option, select or tab stays focusable and reachable by the
+  arrow keys, is announced as unavailable, and is never chosen.
+- A `Select` needs at least one option; pass `loading` while they are on their way.
+- `Popover` is not modal. Focus moves into the panel; Escape, a press outside, and Tab past
+  its last control close it. Use a `Dialog` for a task with a Save button.
+- `Tabs` holds one `TabList` of `Tab`s and a `TabPanel` per tab, matched by `value`. Use
+  `activation="manual"` when a panel fetches. Tabs that change the address are links.
+
 ### Writing a component
 
 - One component per file in `src/react/`, exported from `src/react/index.ts` by name. Never
