@@ -27,6 +27,7 @@ import {
 } from './session-support.ts';
 import { createSessions, type StartedSession } from './sessions.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
+import type { EmailChange } from './email-change.ts';
 import {
   SECRET_BYTES,
   decodeSecret,
@@ -78,6 +79,9 @@ export interface IssueInput {
   readonly returnTo?: string;
   // False stores the challenge but mails nothing, so the work is the same either way.
   readonly deliver?: boolean;
+  // False stores a MAC no typed code can match, so the challenge can never be proved,
+  // whatever happens to the address later.
+  readonly provable?: boolean;
 }
 
 export interface Issued {
@@ -151,6 +155,9 @@ export function createCodeIssuer(config: AuthConfig, deps: CodeIssuerDeps): Code
       const binding = sha256(pre);
       const id = randomUUID();
       const code = String(randomInt(0, 100_000_000)).padStart(8, '0');
+      // Codes are 8 digits, so a MAC over 64 hex characters is never one a code produces.
+      const macked =
+        input.provable === false ? Buffer.from(random(SECRET_BYTES)).toString('hex') : code;
       try {
         await deps.store.auth(async (tx) => {
           // A new code replaces this browser's older ones for the purpose, and nobody else's.
@@ -167,7 +174,7 @@ export function createCodeIssuer(config: AuthConfig, deps: CodeIssuerDeps): Code
               email_normalized: to,
               purpose,
               user_id: input.userId,
-              code_hmac: config.keys.mac('code', [id, purpose, code]),
+              code_hmac: config.keys.mac('code', [id, purpose, macked]),
               browser_hash: binding,
               pending_provider: input.linking?.provider ?? null,
               pending_subject: input.linking?.subject ?? null,
@@ -236,11 +243,15 @@ export interface EmailSignInDeps {
   readonly metrics?: AuthMetrics;
   readonly invitations?: PendingInvitations;
   readonly random?: (bytes: number) => Uint8Array;
+  // Lets the link in an email change mail finish the change from the verify page.
+  readonly emailChange?: Pick<EmailChange, 'completeEmailChange'>;
 }
 
 export type LinkVerified =
   | { readonly kind: 'signed_in'; readonly signedIn: SignedIn }
-  | { readonly kind: 'stepped_up'; readonly session: SessionInfo };
+  | { readonly kind: 'stepped_up'; readonly session: SessionInfo }
+  // send mails the security notice to the old address; run it after the response.
+  | { readonly kind: 'email_changed'; readonly send: () => Promise<void> };
 
 export interface EmailSignIn {
   // One answer for every address: the same cookies and the same shape, mail or not.
@@ -259,8 +270,8 @@ export interface EmailSignIn {
     b: BrowserContext,
     input: { readonly challenge?: string; readonly code: string },
   ): Promise<Result<SignedIn, AuthError>>;
-  // The verify link carries no purpose. A step up code goes to the step up check of the
-  // session it belongs to; anything else is a sign in.
+  // The verify link carries no purpose. A step up or email change code goes to the session
+  // it belongs to; anything else is a sign in.
   verifyLinkCode(
     b: BrowserContext,
     s: SessionInfo | null,
@@ -531,6 +542,13 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           }
           const stepped = await sessions.verifyStepUpCode(b, s, input);
           return stepped.ok ? ok({ kind: 'stepped_up', session: stepped.value }) : stepped;
+        }
+        if (row?.purpose === 'email_change') {
+          // Moving an address needs the signed in session that asked; it never signs in.
+          if (s === null) return refused('AUTH_CHALLENGE_BINDING');
+          if (deps.emailChange === undefined) return fail(new AuthError('AUTH_UNAVAILABLE'));
+          const changed = await deps.emailChange.completeEmailChange(b, s, input);
+          return changed.ok ? ok({ kind: 'email_changed', send: changed.value.send }) : changed;
         }
         const signedIn = await verify(b, input);
         return signedIn.ok ? ok({ kind: 'signed_in', signedIn: signedIn.value }) : signedIn;

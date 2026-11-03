@@ -116,6 +116,13 @@ export {
   type SignedIn,
 } from './email-sign-in.ts';
 export {
+  createEmailChange,
+  type AuthNoticeMailer,
+  type AuthSecurityNotice,
+  type EmailChange,
+  type EmailChangeDeps,
+} from './email-change.ts';
+export {
   DEVICES_PER_USER,
   DEVICE_MAX_AGE_SECONDS,
   deviceHash,

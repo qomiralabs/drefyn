@@ -182,7 +182,9 @@ describeWithStack('organizations against Postgres', () => {
     expect(await stranger.sessions.resolveAccess(stranger.cookie, slug('none'))).toEqual({
       kind: 'not_member',
     });
-    expect(await stranger.sessions.resolveAccess(`${owner.cookie.slice(0, -1)}a`, s)).toEqual({
+    // A different last symbol: one that was already "a" left the cookie as it was.
+    const forged = `${owner.cookie.slice(0, -1)}${owner.cookie.endsWith('a') ? 'b' : 'a'}`;
+    expect(await stranger.sessions.resolveAccess(forged, s)).toEqual({
       kind: 'signed_out',
     });
     expect(await stranger.sessions.resolveAccess(undefined, s)).toEqual({ kind: 'signed_out' });

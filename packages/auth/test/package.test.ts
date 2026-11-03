@@ -47,8 +47,9 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter, the session files, organizations, devices, email and password sign in.
-  it('reaches the database only from the limiter, sessions, organizations, devices, email and password sign in, and no network or file anywhere', () => {
+  // the limiter, the session files, organizations, devices, email sign in, email change and
+  // password sign in.
+  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in, email change and password sign in, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -57,6 +58,7 @@ describe('package layout', () => {
       'step-up.ts': database,
       'organizations.ts': database,
       'email-sign-in.ts': database,
+      'email-change.ts': database,
       'devices.ts': database,
       'password-sign-in.ts': database,
     };
@@ -106,6 +108,7 @@ describe('the main entry', () => {
         'cookieNames',
         'createApiKeyFailureLimiter',
         'createCodeIssuer',
+        'createEmailChange',
         'createEmailSignIn',
         'createOrganizations',
         'createPasswordHasher',
