@@ -58,7 +58,11 @@ export interface ParsedPhc {
 }
 
 // Standard base64 without padding, as PHC strings use.
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64').replace(/=+$/, '');
+// Cut to the unpadded length rather than strip with a pattern: no regex on stored input.
+const b64 = (bytes: Uint8Array) =>
+  Buffer.from(bytes)
+    .toString('base64')
+    .slice(0, Math.ceil((bytes.length * 4) / 3));
 
 export function formatPhc(params: Argon2Params, salt: Uint8Array, tag: Uint8Array): string {
   return `$argon2id$v=${String(VERSION)}$m=${String(params.memoryKib)},t=${String(params.passes)},p=${String(params.parallelism)}$${b64(salt)}$${b64(tag)}`;

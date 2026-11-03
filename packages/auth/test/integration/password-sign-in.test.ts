@@ -228,7 +228,9 @@ describeWithStack('password sign in against Postgres', () => {
     expect(!right.ok && right.error.code).toBe('AUTH_RATE_LIMITED');
     expectSameWire(wireOf(right), wireOf(wrong));
     expect(await sessionsOf(h, email)).toBe('0');
-    // Then by code, from that same browser and address.
+    // Then by code, from that same browser and address. Setting the password left one email
+    // session behind.
+    const emailSessions = Number(await sessionsOf(h, email, 'email'));
     const mail = createTestAuthMailer();
     const emailFlow = {
       config,
@@ -246,7 +248,7 @@ describeWithStack('password sign in against Postgres', () => {
     if (sent === null) throw new Error('no code was mailed');
     const verified = await emailFlow.signIn.verifyEmailCode(person.context(), sent);
     expect(verified.ok).toBe(true);
-    expect(await sessionsOf(h, email, 'email')).toBe('1');
+    expect(Number(await sessionsOf(h, email, 'email'))).toBe(emailSessions + 1);
   });
 
   describe('the pre sign in binding, on the database', () => {
