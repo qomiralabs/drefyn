@@ -162,8 +162,8 @@ describeWithStack('invitations against Postgres', () => {
     const { token } = await invited(access, admin.email, 'admin');
     const accepted = await h.invitations().acceptInvitation(admin.session, token);
     if (!accepted.ok) throw accepted.error;
-    expect(accepted.value.role).toBe('admin');
-    expect(accepted.value.organizationId).toBe(org);
+    expect(accepted.value.access.role).toBe('admin');
+    expect(accepted.value.access.organizationId).toBe(org);
     expect(
       await h.sql(
         `select role || '|' || coalesce(invitation_id::text, 'none') from app.memberships

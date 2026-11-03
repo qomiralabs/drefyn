@@ -9,7 +9,7 @@ import type { AuthConfig } from './config.ts';
 import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { recordDevice } from './devices.ts';
 import type { AuthNoticeMailer } from './email-change.ts';
-import { createCodeIssuer, type PendingInvitations } from './email-sign-in.ts';
+import { createCodeIssuer, heldInvitation, type PendingInvitations } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import type { OAuthTransport } from './oauth/fetch.ts';
@@ -201,10 +201,10 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     return fail(failure);
   }
 
-  async function mayCreate(address: string): Promise<boolean> {
+  async function mayCreate(b: BrowserContext, address: string): Promise<boolean> {
     if (config.signUp === 'open') return true;
     if (config.signUp === 'closed') return false;
-    return (await deps.invitations?.hasPending(address)) ?? false;
+    return (await deps.invitations?.allowsSignUp(heldInvitation(config, b), address)) ?? false;
   }
 
   // Another way this user could step up. Email counts unless it is off: in auto mode only
@@ -359,7 +359,7 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     if (existing !== undefined) {
       return linkPending(b, provider, profile, address, idOf('usr', existing.id), returnTo);
     }
-    if (!(await mayCreate(address))) throw new Refused('AUTH_SIGNUP_CLOSED');
+    if (!(await mayCreate(b, address))) throw new Refused('AUTH_SIGNUP_CLOSED');
     const made = await createUser(provider, profile, address);
     if (made === null) {
       const raced = await store.auth((tx) =>

@@ -96,6 +96,7 @@ describe('the main entry', () => {
         'createOAuth',
         'DEVICES_PER_USER',
         'DEVICE_MAX_AGE_SECONDS',
+        'INVITE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
         'ORG_ROLES',

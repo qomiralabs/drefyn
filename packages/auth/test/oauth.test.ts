@@ -483,16 +483,20 @@ describe('signing in', () => {
     nothingWritten(t);
   });
 
-  it('lets a new address in on invite only when it has a pending invitation', async () => {
-    const hasPending = vi.fn(() => Promise.resolve(true));
+  it('lets a new address in on invite only when the browser holds its invitation', async () => {
+    const allowsSignUp = vi.fn(() => Promise.resolve(true));
     const t = setup({
       env: { DREFYN_AUTH_SIGNUP: 'invite_only' },
-      deps: { invitations: { hasPending } },
+      deps: { invitations: { allowsSignUp } },
     });
     const email = address('invited');
-    const { done } = await roundTrip(t, googleAccount(email));
+    const { done } = await roundTrip(t, googleAccount(email), {
+      edit: (_, jar) => {
+        jar.cookies.set(t.config.cookies.invite, 'held-token');
+      },
+    });
     expect(codeOf(done)).toBe('ok');
-    expect(hasPending).toHaveBeenCalledWith(email);
+    expect(allowsSignUp).toHaveBeenCalledWith('held-token', email);
     const nobody = setup({ env: { DREFYN_AUTH_SIGNUP: 'invite_only' } });
     expect(codeOf((await roundTrip(nobody, googleAccount(address('uninvited')))).done)).toBe(
       'AUTH_SIGNUP_CLOSED',
