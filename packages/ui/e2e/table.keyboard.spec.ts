@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, MOBILE, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import { expect, MOBILE, openStory, rgb, tabKey, test, THEMES, type Theme } from './fixtures.ts';
 
 const grid = (page: Page) => page.getByRole('grid', { name: 'Pages' });
 const row = (page: Page, title: string) =>
@@ -13,6 +13,15 @@ const ringOf = (el: Locator) =>
     const style = getComputedStyle(node);
     return `${style.outlineStyle} ${style.outlineWidth} ${style.outlineOffset} ${style.outlineColor}`;
   });
+// React Aria builds a table's collection first and draws its rows in a second render, and the
+// story counts as open after the first. A Tab in between focuses the empty grid, and the next
+// ArrowDown lands on the first row instead of the second. So keys wait for the rows: the
+// header row and at least one row under it, data or loading.
+async function openTable(page: Page, id: string, theme: Theme): Promise<void> {
+  await openStory(page, id, theme);
+  await expect(grid(page).getByRole('row').nth(1)).toBeVisible();
+}
+
 const titles = (page: Page) => grid(page).getByRole('rowheader').allTextContents();
 
 for (const theme of THEMES) {
@@ -22,7 +31,7 @@ for (const theme of THEMES) {
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-table--default', theme);
+    await openTable(page, 'components-table--default', theme);
     await page.keyboard.press(tabKey(browserName));
     const first = row(page, 'Refunds');
     await expect(first).toBeFocused();
@@ -36,7 +45,7 @@ for (const theme of THEMES) {
   });
 
   test(`the table exposes its name, headers, sort state and rows in ${theme}`, async ({ page }) => {
-    await openStory(page, 'components-table--default', theme);
+    await openTable(page, 'components-table--default', theme);
     await expect(grid(page)).toMatchAriaSnapshot(`
       - grid "Pages":
         - rowgroup:
@@ -65,7 +74,7 @@ for (const theme of THEMES) {
   });
 
   test(`the grid is one Tab stop in ${theme}`, async ({ page, browserName }) => {
-    await openStory(page, 'components-table--default', theme);
+    await openTable(page, 'components-table--default', theme);
     await page.keyboard.press(tabKey(browserName));
     await expect(row(page, 'Refunds')).toBeFocused();
     await page.keyboard.press('ArrowDown');
@@ -76,7 +85,7 @@ for (const theme of THEMES) {
   });
 
   test(`Enter opens the focused row in ${theme}`, async ({ page, browserName }) => {
-    await openStory(page, 'components-table--default', theme);
+    await openTable(page, 'components-table--default', theme);
     await page.keyboard.press(tabKey(browserName));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
@@ -87,7 +96,7 @@ for (const theme of THEMES) {
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-table--default', theme);
+    await openTable(page, 'components-table--default', theme);
     await page.keyboard.press(tabKey(browserName));
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowRight');
@@ -108,7 +117,7 @@ for (const theme of THEMES) {
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-table--selection', theme);
+    await openTable(page, 'components-table--selection', theme);
     // The story starts sorted by views, most first.
     await page.keyboard.press(tabKey(browserName));
     await expect(row(page, 'Create a payout')).toBeFocused();
@@ -128,7 +137,7 @@ for (const theme of THEMES) {
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-table--disabled-rows', theme);
+    await openTable(page, 'components-table--disabled-rows', theme);
     await page.keyboard.press(tabKey(browserName));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
@@ -145,7 +154,7 @@ for (const theme of THEMES) {
   });
 
   test(`a loading table is busy and keeps its header in ${theme}`, async ({ page }) => {
-    await openStory(page, 'components-table--loading', theme);
+    await openTable(page, 'components-table--loading', theme);
     await expect(grid(page)).toHaveAttribute('aria-busy', 'true');
     await expect(grid(page).getByRole('columnheader')).toHaveCount(3);
     // React Aria draws the loading rows in one row of its own; no page row is there.
@@ -162,7 +171,7 @@ test.describe('on a phone', () => {
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-table--default', 'light');
+    await openTable(page, 'components-table--default', 'light');
     await page.keyboard.press(tabKey(browserName));
     await page.keyboard.press('ArrowDown');
     await expect(row(page, 'Create a payout')).toBeFocused();
