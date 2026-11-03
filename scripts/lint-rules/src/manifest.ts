@@ -203,6 +203,8 @@ export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
 export const REVIEWED_PREFIXES: readonly string[] = ['scripts/', '.github/', 'deploy/'];
 export const REVIEWED_ROOT_FILES: readonly string[] = [
   '.gitignore',
+  // Its allow lists could silence the secret scan, so every change is a security change.
+  '.gitleaks.toml',
   '.npmrc',
   '.nvmrc',
   '.prettierignore',

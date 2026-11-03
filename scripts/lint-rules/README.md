@@ -160,7 +160,7 @@ copied `fetch`, a deep import, a disable comment, a local config, a stray folder
 file name or layout trick a reviewer would not notice. They are not a sandbox. In
 short, with the tree meaning every entry in `git ls-files -s` plus the new files git
 would add, and the reviewed set meaning `scripts/`, `.github/`, `deploy/` and the root
-files `.gitignore`, `.npmrc`, `.nvmrc`, `.prettierignore`, `LICENSE`,
+files `.gitignore`, `.gitleaks.toml`, `.npmrc`, `.nvmrc`, `.prettierignore`, `LICENSE`,
 `pnpm-lock.yaml` and `pnpm-workspace.yaml`:
 
 - I1. Every tree entry outside the reviewed set has a source extension or one of
