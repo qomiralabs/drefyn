@@ -58,7 +58,7 @@ describe('package layout', () => {
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
   // change, password sign in and OAuth. The OAuth fetch file calls the platform fetch, which
   // the egress rule scopes.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in and OAuth, and no network or file anywhere', () => {
+  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, password account and OAuth, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -71,6 +71,7 @@ describe('package layout', () => {
       'email-change.ts': database,
       'devices.ts': database,
       'password-sign-in.ts': database,
+      'password-account.ts': database,
       'oauth.ts': database,
     };
     const files = sourceFiles(src);

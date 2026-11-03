@@ -9,6 +9,7 @@ import {
   recordDevice,
   userAgentFamily,
 } from '../src/index.ts';
+import { sendBoth } from '../src/devices.ts';
 import { createTestAuthMailer } from '../src/testing.ts';
 import { scriptedStore, type Responder } from './scripted-store.ts';
 import {
@@ -22,6 +23,7 @@ import {
   fakeSessions,
   on,
   recordingLogger,
+  session,
 } from './email-fixtures.ts';
 import { csrfFor, fakePasswordSessions, passwordBrowser } from './password-sign-in-fixtures.ts';
 import { smallHasher } from './password-fixtures.ts';
@@ -258,5 +260,55 @@ describe('device family', () => {
       ),
       runs,
     );
+  });
+});
+
+describe('sendBoth', () => {
+  it('runs both sends in order, or the one that exists', async () => {
+    const order: string[] = [];
+    const a = () => {
+      order.push('a');
+      return Promise.resolve();
+    };
+    const b = () => {
+      order.push('b');
+      return Promise.resolve();
+    };
+    await sendBoth(a, b)?.();
+    expect(order).toEqual(['a', 'b']);
+    expect(sendBoth(undefined, b)).toBe(b);
+    expect(sendBoth(a, undefined)).toBe(a);
+    expect(sendBoth(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe('setPassword notice', () => {
+  it('mails the password set notice after the response, and logs a failure by user id', async () => {
+    const created = new Date('2026-11-03T07:00:00.000Z');
+    const scripted = scriptedStore((s) =>
+      on(s, 'insert', 'password_credentials') ? [{ user_id: USER, created_at: created }] : [],
+    );
+    const mail = createTestAuthMailer();
+    const { logger, logs } = recordingLogger();
+    const flow = createPasswordSignIn(config, {
+      store: scripted.store,
+      logger,
+      limiter: fakeLimiter(),
+      sessions: fakePasswordSessions(),
+      hasher: smallHasher(),
+      mailer: mail.mailer,
+    });
+    const s = { ...session, email: ADDRESS };
+    const result = await flow.setPassword(s, { newPassword: 'a brand new sentence' });
+    if (!result.ok) throw result.error;
+    expect(mail.notices).toEqual([]);
+    await result.value.send();
+    expect(mail.notices).toEqual([{ to: ADDRESS, notice: { kind: 'password_set', at: created } }]);
+    const again = await flow.setPassword(s, { newPassword: 'a brand new sentence' });
+    if (!again.ok) throw again.error;
+    mail.failNext();
+    await again.value.send();
+    expect(logs.map((l) => l.event)).toContain('auth.password_notice_failed');
+    expect(JSON.stringify(logs)).not.toContain(ADDRESS);
   });
 });

@@ -7,7 +7,8 @@ import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import { PRE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
-import { recordDevice } from './devices.ts';
+import { newDeviceNotice, recordDevice } from './devices.ts';
+import type { AuthNoticeMailer } from './email-change.ts';
 import type { SignedIn } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { createPasswordHasher, type PasswordHasher } from './password-hash.ts';
@@ -50,6 +51,9 @@ export interface PasswordSignInDeps {
   // One per process, shared with sessions for step up, so one gate bounds every hash.
   readonly hasher?: PasswordHasher;
   readonly botCheck?: BotCheck;
+  // Security notices: a first password and a sign in from a new device. Without one, each
+  // notice is logged as failed.
+  readonly mailer?: Partial<AuthNoticeMailer>;
   readonly random?: (bytes: number) => Uint8Array;
 }
 
@@ -79,10 +83,11 @@ export interface PasswordSignIn {
   ): Promise<Result<SignedIn, AuthError>>;
   // A first password, after an email code or provider sign in. Changing one that is set is
   // the reset and change flow's job.
+  // send mails the password set notice and never throws; run it after the response.
   setPassword(
     s: SessionInfo,
     input: { readonly newPassword: string },
-  ): Promise<Result<void, AuthError>>;
+  ): Promise<Result<{ readonly send: () => Promise<void> }, AuthError>>;
 }
 
 const CSRF_LABEL = 'drefyn.pre_form.v1';
@@ -139,6 +144,7 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
     (db !== undefined && authDb !== undefined
       ? createSessions(config, { db, authDb, logger: deps.logger, passwords: hasher })
       : missing());
+  const mailer: Partial<AuthNoticeMailer> = deps.mailer ?? {};
   const devices = {
     store,
     logger: deps.logger,
@@ -241,10 +247,21 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
         return refused('AUTH_CREDENTIALS_INVALID', address);
       }
       const device = await recordDevice(config, devices, b, found.userId);
+      const seen = device.newDevice;
       return ok({
         session: started.session,
-        setCookies: [...started.setCookies, ...device],
+        setCookies: [...started.setCookies, ...device.setCookies],
         returnTo: safeReturnTo(input.returnTo, config.appOrigin),
+        ...(seen === null
+          ? {}
+          : {
+              send: newDeviceNotice(config, mailer, deps.logger, {
+                to: started.session.email,
+                userId: found.userId,
+                method: 'password',
+                seen,
+              }),
+            }),
       });
     }
   }
@@ -319,13 +336,24 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
             .insertInto('password_credentials')
             .values({ user_id: s.userId, phc })
             .onConflict((c) => c.column('user_id').doNothing())
-            .returning('user_id')
+            .returning(['user_id', 'created_at'])
             .executeTakeFirst(),
         );
         // Another tab set one during the hash; that one stands.
         if (made === undefined) return fail(new AuthError('AUTH_FORBIDDEN'));
-        note(deps.logger, 'auth.password_set', idFields({ userId: ['usr', s.userId] }));
-        return ok(undefined);
+        const ids = idFields({ userId: ['usr', s.userId] });
+        note(deps.logger, 'auth.password_set', ids);
+        return ok({
+          send: async () => {
+            try {
+              const send = mailer.sendSecurityNotice;
+              if (send === undefined) throw new Error('no notice mailer');
+              await send.call(mailer, s.email, { kind: 'password_set', at: made.created_at });
+            } catch {
+              quietWarn(deps.logger, 'auth.password_notice_failed', ids);
+            }
+          },
+        });
       } catch (error) {
         return fail(error);
       }

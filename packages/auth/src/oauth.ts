@@ -7,7 +7,7 @@ import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
-import { recordDevice } from './devices.ts';
+import { newDeviceNotice, recordDevice } from './devices.ts';
 import type { AuthNoticeMailer } from './email-change.ts';
 import { createCodeIssuer, type PendingInvitations } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
@@ -68,6 +68,8 @@ export type OAuthCompleted =
       readonly session: SessionInfo;
       readonly setCookies: readonly CookieSpec[];
       readonly returnTo: string;
+      // Mails the new device notice when one is owed. Never throws; run it after the response.
+      readonly send?: () => Promise<void>;
     }
   | {
       readonly kind: 'stepped_up';
@@ -255,14 +257,28 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     provider: OAuthProvider,
     userId: UserId,
     returnTo: string,
+    created = false,
   ): Promise<OAuthCompleted> {
     const started = await sessions.startSession(b, { userId, method: provider });
     const device = await recordDevice(config, devices, b, userId);
+    const seen = device.newDevice;
+    // An account made by this very sign in has no device to tell apart from this one.
+    const owed = seen !== null && !created;
     return {
       kind: 'signed_in',
       session: started.session,
-      setCookies: [...started.setCookies, ...device],
+      setCookies: [...started.setCookies, ...device.setCookies],
       returnTo,
+      ...(owed
+        ? {
+            send: newDeviceNotice(config, deps.mailer, deps.logger, {
+              to: started.session.email,
+              userId,
+              method: provider,
+              seen,
+            }),
+          }
+        : {}),
     };
   }
 
@@ -371,7 +387,7 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
       );
       return linkPending(b, provider, profile, address, idOf('usr', raced.id), returnTo);
     }
-    return signIn(b, provider, made, returnTo);
+    return signIn(b, provider, made, returnTo, true);
   }
 
   function identityNotice(
@@ -614,6 +630,14 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
         const recent = await sessions.requireRecentAuth(s);
         if (!recent.ok) throw recent.error;
         const removed = await store.user(s.userId, async (tx) => {
+          // The person's row first, as password removal does, so the two cannot both pass
+          // the check below and leave no way in.
+          await tx
+            .selectFrom('users')
+            .select('id')
+            .where('id', '=', s.userId)
+            .forNoKeyUpdate()
+            .executeTakeFirst();
           const rows = await tx
             .selectFrom('identities')
             .select(['id', 'provider', 'provider_email_normalized'])

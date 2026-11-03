@@ -21,6 +21,7 @@ import {
   quietInfo,
   quietWarn,
   type SessionInfo,
+  type SessionMethod,
   type SessionStore,
 } from './session-support.ts';
 import { stepUps, type AuthMailer } from './step-up.ts';
@@ -42,6 +43,20 @@ export type AuthSecurityNotice =
       // The provider address the identity was linked with.
       readonly account: string;
       readonly at: Date;
+    }
+  // To the account's address whenever its password is set, changed, reset or removed.
+  | {
+      readonly kind: 'password_set' | 'password_changed' | 'password_reset' | 'password_removed';
+      readonly at: Date;
+    }
+  // To the account's address on a sign in from a device it has not used in 90 days.
+  | {
+      readonly kind: 'new_device_sign_in';
+      readonly method: SessionMethod;
+      // The coarse browser and system name, never the full user agent.
+      readonly device: string;
+      readonly at: Date;
+      readonly sessionsLink: URL;
     };
 
 export interface AuthNoticeMailer {
