@@ -41,6 +41,7 @@
         ".gitmodules",
         ".gitattributes",
         ".gitignore",
+        ".gitleaks.toml",
         "LICENSE",
         "vitest.shared.ts",
         ".prettierrc.json",

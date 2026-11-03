@@ -139,6 +139,7 @@ describe('the shipped rules file', () => {
     'packages/web/src/pnpm-workspace.yaml',
     '.gitmodules',
     '.gitignore',
+    '.gitleaks.toml',
     'LICENSE',
     '.gitattributes',
     'packages/web/.gitattributes',
