@@ -113,6 +113,7 @@ describe('allow lists', () => {
     const tables = [
       'app.api_key_failures',
       'app.auth_rate_limits',
+      'app.cli_sign_in_links',
       'app.email_challenges',
       'app.identities',
       'app.oauth_states',
@@ -129,9 +130,10 @@ describe('allow lists', () => {
   });
 
   // The sign in role reaches the tables sign in needs and nothing after it.
-  it('let drefyn_auth reach the seven sign in tables, never sessions or the API limiter', () => {
+  it('let drefyn_auth reach the eight sign in tables, never sessions or the API limiter', () => {
     expect(AUTH_TABLES.map((t) => t.name).sort()).toEqual([
       'app.auth_rate_limits',
+      'app.cli_sign_in_links',
       'app.email_challenges',
       'app.identities',
       'app.known_devices',
@@ -141,9 +143,10 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('keep drefyn_app off the three auth only tables', () => {
+  it('keep drefyn_app off the four auth only tables', () => {
     expect(AUTH_ONLY_TABLES.map((t) => t.name).sort()).toEqual([
       'app.auth_rate_limits',
+      'app.cli_sign_in_links',
       'app.email_challenges',
       'app.oauth_states',
     ]);

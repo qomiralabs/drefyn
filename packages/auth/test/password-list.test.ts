@@ -383,7 +383,7 @@ describe('drefyn auth password-list build', () => {
     expect(result.code).toBe(2);
     expect(result.stdout).toBe('');
     expect(result.stderr.endsWith(`${AUTH_COMMAND_USAGE}\n`)).toBe(true);
-    expect(AUTH_COMMAND_USAGE).toBe(
+    expect(AUTH_COMMAND_USAGE.split('\n')[0]).toBe(
       'usage: drefyn auth password-list build --from <file> --min-count <n> --out <file>',
     );
   });

@@ -1,0 +1,37 @@
+import { execFile } from 'node:child_process';
+
+export interface Reply {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+// curl, because it sends the Host and forwarding headers exactly as given; fetch replaces
+// Host with the URL's own.
+export function curl(port: number, path: string, headers: readonly string[]): Promise<Reply> {
+  const args = ['--silent', '--show-error', '--http1.1', '--include', '--max-time', '10'];
+  args.push('--noproxy', '*');
+  for (const header of headers) args.push('--header', header);
+  args.push(`http://127.0.0.1:${String(port)}${path}`);
+  return new Promise((done, fail) => {
+    execFile('curl', args, { encoding: 'utf8' }, (error, stdout) => {
+      if (error !== null) {
+        fail(error);
+        return;
+      }
+      const split = stdout.indexOf('\r\n\r\n');
+      const head = split < 0 ? stdout : stdout.slice(0, split);
+      const [statusLine = '', ...lines] = head.split('\r\n');
+      const parsed: Record<string, string> = {};
+      for (const line of lines) {
+        const colon = line.indexOf(':');
+        if (colon > 0) parsed[line.slice(0, colon).toLowerCase()] = line.slice(colon + 1).trim();
+      }
+      done({
+        status: Number(statusLine.split(' ')[1]),
+        headers: parsed,
+        body: split < 0 ? '' : stdout.slice(split + 4),
+      });
+    });
+  });
+}
