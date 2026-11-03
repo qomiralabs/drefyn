@@ -1,7 +1,7 @@
 import { withAuth, withUser } from '@drefyn/db';
 import { sql } from 'kysely';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createEmailSignIn, parsePhc } from '../../src/index.ts';
+import { createEmailSignIn, parsePhc, type AuthConfig } from '../../src/index.ts';
 import { createTestAuthMailer } from '../../src/testing.ts';
 import { expectSameWire, newBrowser, requestCode, wireOf } from './support/email.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
@@ -216,13 +216,19 @@ describeWithStack('password sign in against Postgres', () => {
     const flow = passwordFlow(h, config);
     const { email } = await personWithPassword(h, passwordFlow(h, passwordConfig()), PASSWORD);
     await insideWindow(h, 900, 60);
-    // An attacker fills the bucket from several prefixes.
-    for (let i = 0; i < 12; i += 1) {
-      await signInFrom(flow, newBrowser(`2001:db8:${String(i)}::1`), email, 'guessing guess');
+    // An attacker fills the bucket from two /64 prefixes, with the real limiter.
+    for (let i = 0; i < 10; i += 1) {
+      await signInFrom(flow, newBrowser(`2001:db8:${String(i % 2)}::1`), email, 'guessing guess');
     }
-    const blocked = await signInFrom(flow, newBrowser(), email, PASSWORD);
-    expect(!blocked.ok && blocked.error.code).toBe('AUTH_RATE_LIMITED');
-    // The person, by code.
+    // The person, from their own browser and address: a right and a wrong password get the
+    // same refusal while the bucket is full.
+    const person = newBrowser('192.0.2.77');
+    const right = await signInFrom(flow, person, email, PASSWORD);
+    const wrong = await signInFrom(flow, person, email, 'not the right sentence');
+    expect(!right.ok && right.error.code).toBe('AUTH_RATE_LIMITED');
+    expectSameWire(wireOf(right), wireOf(wrong));
+    expect(await sessionsOf(h, email)).toBe('0');
+    // Then by code, from that same browser and address.
     const mail = createTestAuthMailer();
     const emailFlow = {
       config,
@@ -236,11 +242,72 @@ describeWithStack('password sign in against Postgres', () => {
         sessions: flow.sessions,
       }),
     };
-    const person = newBrowser();
     const sent = await requestCode(emailFlow, person, email);
     if (sent === null) throw new Error('no code was mailed');
     const verified = await emailFlow.signIn.verifyEmailCode(person.context(), sent);
     expect(verified.ok).toBe(true);
+    expect(await sessionsOf(h, email, 'email')).toBe('1');
+  });
+
+  describe('the pre sign in binding, on the database', () => {
+    // The person's own address bucket, so other tests' rows and window cleanup do not matter.
+    const countsOf = (config: AuthConfig, email: string) => {
+      const key = config.keys.mac('rate', ['password_fail', email]).toString('hex');
+      return h.sql(
+        `select coalesce(sum(count), 0) from app.auth_rate_limits where bucket = 'password_fail' and key_hmac = '\\x${key}';`,
+      );
+    };
+
+    it('refused posts reserve no counts, read no credential and create no session; a valid pair succeeds', async () => {
+      const flow = passwordFlow(h, passwordConfig());
+      const { email } = await personWithPassword(h, flow, PASSWORD);
+      const checks: (string | null)[] = [];
+      const watched = passwordFlow(h, flow.config, {
+        ...flow.hasher,
+        check: (phc, password) => {
+          checks.push(phc);
+          return flow.hasher.check(phc, password);
+        },
+      });
+      const holder = newBrowser();
+      const form = watched.signIn.passwordForm(holder.context());
+      holder.apply(form.setCookies);
+      const other = newBrowser();
+      other.apply(watched.signIn.passwordForm(other.context()).setCookies);
+      const otherForm = watched.signIn.passwordForm(other.context());
+      const preName = flow.config.cookies.pre;
+      const cases = [
+        ['no pre cookie', newBrowser().context(), form.csrf],
+        [
+          'a malformed cookie',
+          newBrowser().context({ cookies: new Map([[preName, 'x']]) }),
+          form.csrf,
+        ],
+        ['no field', holder.context(), ''],
+        ['a forged field', holder.context(), 'A'.repeat(43)],
+        ["another browser's field", holder.context(), otherForm.csrf],
+      ] as const;
+      const before = await countsOf(flow.config, email);
+      for (const [name, context, csrf] of cases) {
+        const result = await watched.signIn.signInWithPassword(context, {
+          email,
+          password: PASSWORD,
+          csrf,
+        });
+        expect(!result.ok && result.error.code, name).toBe('AUTH_ORIGIN_REFUSED');
+      }
+      expect(await countsOf(flow.config, email)).toBe(before);
+      expect(checks).toEqual([]);
+      expect(await sessionsOf(h, email)).toBe('0');
+      const good = await watched.signIn.signInWithPassword(holder.context(), {
+        email,
+        password: PASSWORD,
+        csrf: form.csrf,
+      });
+      expect(good.ok).toBe(true);
+      expect(Number(await countsOf(flow.config, email))).toBe(Number(before) + 1);
+      expect(await sessionsOf(h, email)).toBe('1');
+    });
   });
 
   it('setPassword refuses to replace a password, and a second tab racing the first loses cleanly', async () => {

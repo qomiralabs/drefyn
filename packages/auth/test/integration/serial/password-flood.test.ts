@@ -20,6 +20,11 @@ const FLOOD_ADDRESSES = 1_000;
 const EMAIL_P50_BUDGET_MS = 20;
 const EMAIL_P99_CEILING_MS = 500;
 const DNS_EXTRA_BUDGET_MS = 5;
+const DNS_EXTRA_P99_CEILING_MS = 250;
+// The control must move the probe at least this much, or the probe sees nothing.
+const CONTROL_RISE_MS = 10;
+// Enough pbkdf2 rounds that each job holds a pool thread for tens of milliseconds.
+const HEAVY_ITERATIONS = 200_000;
 
 const percentile = (sorted: readonly number[], p: number) =>
   sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] ?? NaN;
@@ -27,9 +32,9 @@ const sorted = (xs: readonly number[]) => [...xs].sort((a, b) => a - b);
 
 // A one iteration PBKDF2 does almost no work, so its time is the wait for a libuv thread:
 // the same pool dns.lookup queues on. Raw DNS is kept out of this package by lint.
-function poolProbe(): Promise<void> {
+function poolProbe(iterations = 1): Promise<void> {
   return new Promise((resolve, reject) => {
-    pbkdf2('probe', 'salt', 1, 32, 'sha256', (error) => {
+    pbkdf2('probe', 'salt', iterations, 32, 'sha256', (error) => {
       if (error === null) resolve();
       else reject(error);
     });
@@ -65,6 +70,18 @@ describeWithStack('email code sign in while the password endpoint is flooded', (
     });
     await h.user('flooded-person@example.com');
     const dnsQuiet = await timeDns(DNS_SAMPLES);
+
+    // Control: fill every pool thread directly. If the probe does not slow down, it is not
+    // measuring the pool and the flood numbers below mean nothing.
+    let saturating = true;
+    const hog = async () => {
+      while (saturating) await poolProbe(HEAVY_ITERATIONS);
+    };
+    const hogs = Array.from({ length: 32 }, hog);
+    const dnsControl = await timeDns(40);
+    saturating = false;
+    await Promise.all(hogs);
+    const rise = percentile(sorted(dnsControl), 50) - percentile(sorted(dnsQuiet), 50);
 
     let flooding = true;
     const outcomes = new Map<string, number>();
@@ -108,11 +125,13 @@ describeWithStack('email code sign in while the password endpoint is flooded', (
     const extra = percentile(sorted(dnsFlooded), 50) - percentile(sorted(dnsQuiet), 50);
     const extra99 = percentile(sorted(dnsFlooded), 99) - percentile(sorted(dnsQuiet), 99);
     console.info(
-      `flood from ${String(FLOOD_ADDRESSES)} addresses (${[...outcomes].map(([k, v]) => `${k} ${String(v)}`).join(', ')}): startEmailSignIn ${String(e.length)} samples, p50 ${percentile(e, 50).toFixed(2)} ms (at most ${String(EMAIL_P50_BUDGET_MS)}), p99 ${percentile(e, 99).toFixed(2)} ms (ceiling ${String(EMAIL_P99_CEILING_MS)}; target 50 on quiet hardware); thread pool wait (as dns.lookup sees it) extra p50 ${extra.toFixed(3)} ms (under ${String(DNS_EXTRA_BUDGET_MS)}), extra p99 ${extra99.toFixed(3)} ms`,
+      `flood from ${String(FLOOD_ADDRESSES)} addresses (${[...outcomes].map(([k, v]) => `${k} ${String(v)}`).join(', ')}): startEmailSignIn ${String(e.length)} samples, p50 ${percentile(e, 50).toFixed(2)} ms (at most ${String(EMAIL_P50_BUDGET_MS)}), p99 ${percentile(e, 99).toFixed(2)} ms (ceiling ${String(EMAIL_P99_CEILING_MS)}; target 50 on quiet hardware); thread pool wait (as dns.lookup sees it) extra p50 ${extra.toFixed(3)} ms (under ${String(DNS_EXTRA_BUDGET_MS)}), extra p99 ${extra99.toFixed(3)} ms (ceiling ${String(DNS_EXTRA_P99_CEILING_MS)}; target 50 on quiet hardware); control with the pool saturated raised the probe p50 by ${rise.toFixed(2)} ms (at least ${String(CONTROL_RISE_MS)})`,
     );
     expect(outcomes.get('AUTH_CREDENTIALS_INVALID') ?? 0).toBeGreaterThan(0);
     expect(percentile(e, 50)).toBeLessThanOrEqual(EMAIL_P50_BUDGET_MS);
     expect(percentile(e, 99)).toBeLessThanOrEqual(EMAIL_P99_CEILING_MS);
+    expect(rise).toBeGreaterThanOrEqual(CONTROL_RISE_MS);
     expect(extra).toBeLessThan(DNS_EXTRA_BUDGET_MS);
+    expect(extra99).toBeLessThanOrEqual(DNS_EXTRA_P99_CEILING_MS);
   });
 });
