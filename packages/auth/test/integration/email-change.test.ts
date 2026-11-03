@@ -144,9 +144,11 @@ describeWithStack('email change against Postgres', () => {
     const p = await signedIn();
     const free = address('free');
     const before = flow.mail.calls.length;
-    const takenWire = wireOf(
-      await change.startEmailChange(p.b.context(), p.session, { newEmail: owner.email }),
-    );
+    const taken = await change.startEmailChange(p.b.context(), p.session, {
+      newEmail: owner.email,
+    });
+    if (taken.ok) p.b.apply(taken.value.setCookies);
+    const takenWire = wireOf(taken);
     const q = await signedIn();
     const freeWire = wireOf(
       await change.startEmailChange(q.b.context(), q.session, { newEmail: free }),
