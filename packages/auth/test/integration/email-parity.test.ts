@@ -8,6 +8,13 @@ import {
   wireOf,
 } from './support/email.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
+import {
+  freshAddress,
+  hold,
+  inviteAddress,
+  invitationsFor,
+  invitingOrganization,
+} from './support/invite.ts';
 
 const fresh = harness();
 let h: Harness;
@@ -66,5 +73,28 @@ describeWithStack('email sign in parity against Postgres', () => {
     });
     expect(knownRun.map((w) => w.ok)).toEqual([true, true, true, false, false]);
     expect(knownRun[3]?.shape).toContain('AUTH_RATE_LIMITED');
+  });
+
+  it('in invite_only, known and unknown addresses get the same answer with and without a held invitation', async () => {
+    await h.user('member@example.com');
+    const config = configWith({ DREFYN_AUTH_SIGNUP: 'invite_only' });
+    const invitations = invitationsFor(h, config);
+    const flow = flowFor(h, config, { invitations });
+    const { access } = await invitingOrganization(h);
+    const { token } = await inviteAddress(h, invitations, access, freshAddress('held'));
+    const cookies: (string | null)[] = [null, 'not-a-token', token];
+    for (const cookie of cookies) {
+      const answers = [];
+      for (const email of ['member@example.com', 'outsider@example.com']) {
+        const b = newBrowser();
+        if (cookie === token) hold(invitations, b, token);
+        else if (cookie !== null) b.cookies.set(config.cookies.invite, cookie);
+        answers.push(wireOf(await flow.signIn.startEmailSignIn(b.context(), { email })));
+      }
+      const [known, unknown] = answers;
+      if (known === undefined || unknown === undefined) throw new Error('missing answer');
+      expect(known.ok).toBe(true);
+      expectSameWire(known, unknown);
+    }
   });
 });
