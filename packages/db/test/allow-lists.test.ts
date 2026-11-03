@@ -446,6 +446,9 @@ const ORIGIN = `(${OWNER_ARM} OR ${INVITATION_ARM})`;
 const INVITER =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
+const KEY_CREATOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
@@ -461,6 +464,13 @@ describe('restrictive policies', () => {
         withCheck,
       })),
     ).toEqual([
+      {
+        name: 'app.api_keys.api_key_insert_creator',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: KEY_CREATOR,
+      },
       {
         name: 'app.invitations.invitation_insert_inviter',
         command: 'insert',
@@ -496,6 +506,13 @@ describe('restrictive policies', () => {
   it('give the owner arm no way in for an admin or a member', () => {
     const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
     expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+  });
+
+  it('let only an owner or admin membership of the same organization create a key', () => {
+    const creator = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.api_key_insert_creator'));
+    expect(creator?.withCheck).toContain('m.organization_id = api_keys.organization_id');
+    expect(creator?.withCheck).toContain('m.id = api_keys.created_by');
+    expect(creator?.withCheck).not.toMatch(/'member'/);
   });
 
   it('let any other member in only on a live invitation of this organization with the same role', () => {

@@ -247,8 +247,16 @@ const result = await signIn.verifyEmailCode(browser, { challenge, code }); // ch
 
 - Sign in and sign up are one flow. Every address gets the same response and the same
   cookies (`__Host-drefyn_pre`, 15 minutes); the mail goes out only when `send` runs, and
-  `send` never throws. In `invite_only` (without a pending invitation) and `closed`, an
-  unknown address gets the same response and no mail.
+  `send` never throws. In `invite_only` (unless this browser holds a live invitation for
+  the address) and `closed`, an unknown address gets the same response and no mail.
+- In `invite_only` a new user is made only when the `__Host-drefyn_invite` cookie holds a
+  live invitation for exactly the proved address. `invitations` is the object
+  `createInvitations` returns; its `allowsSignUp(token, address)` sends nothing for a
+  missing or unparsable cookie and otherwise one select by invitation id in that
+  invitation's organization, as `drefyn_app`. It is asked at start for every address and
+  again at verify, so an invitation revoked or accepted in between lets nobody in. A
+  database failure there answers no and logs `auth.invitation_check_failed` with the
+  organization id only. OAuth sign up asks the same way.
 - Limits, counted before any work: `email_send` on the address and IP or /64,
   `email_send_ip`, then `email_send_device` for a browser whose device cookie is known for
   the address's user, otherwise the shared `email_send_address_ceiling`.
@@ -487,6 +495,13 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
   inviter must still hold `org.manage_members` and be able to grant the role. The membership
   insert names the invitation, and the invitation is deleted in the same transaction, so a
   second acceptance fails. Removing the inviter deletes their pending invitations.
+- `acceptInvitation` answers `{ access, setCookies }`; the cookies clear the held
+  invitation.
+- `holdInvitation(browser, token)` is what the invite page calls for a signed out person.
+  It only parses (`AUTH_INVITATION_INVALID` for a malformed token) and answers a
+  `__Host-drefyn_invite` cookie (HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 3600) for
+  sign up to read. The newcomer has to sign up in the browser that opened the link, within
+  the hour; the link itself can be opened again for the 7 days the invitation lasts.
 - `readInvitationBlock(token)` is what the block page shows on GET and only reads.
   `blockInvitation(token)` is the page's POST and the only writer of `invitation_blocks`; it
   also drops the pending invitation, and a second call is a no op that still succeeds.
@@ -496,3 +511,47 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
+
+## API keys
+
+Keys are organization actors, never users or seats. The dashboard creates them; the API
+service only verifies them, with `drefyn_app` and its own failure key.
+
+```ts
+const scopes = createScopeRegistry([{ scope: 'docs:read', permission: 'docs.read' }]);
+const keys = createApiKeys({ db, authDb, scopes, logger, mailer }); // mailer has sendSecurityNotice
+const verifier = createApiKeyVerifier(process.env, { db, logger }); // API service startup
+```
+
+- `createScopeRegistry` takes each product's closed list. A scope is `<product>:<name>` and
+  maps to one permission of that product or the organization. A scope for
+  `org.manage_members`, `org.manage_api_keys`, `org.manage_billing`, `org.manage_settings`
+  or `org.delete` fails with `AUTH_CONFIG_INVALID`, so a key can never mint a key.
+- `createApiKey(access, { name, scopes, projectScope, projectIds?, expiresAt?, idempotencyKey })`
+  needs `org.manage_api_keys`, every scope's permission (`AUTH_FORBIDDEN`) and a sign in
+  within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`). The role is read again as stored.
+  `projectScope` is `all` or `listed`; `listed` with no projects, `all` with projects, an
+  unknown scope, a past expiry or a project the organization lacks is `AUTH_INPUT_INVALID`.
+  It returns the summary, the whole key once as `secret`, and `send`, which tells every owner
+  and never throws. Only `sha256(secret)` and its last 4 characters are stored.
+- A repeated `idempotencyKey` with the same request fails with `ApiKeyReplayError`
+  (`AUTH_IDEMPOTENCY_REPLAY`), whose `existing` is the summary without the secret. The same
+  key with a different request is `AUTH_INPUT_INVALID`.
+- `verifyApiKey(authorization, ip)` reads `Authorization: Bearer drf_ak_...` only. Under the
+  key's organization, the first statement selects the key row by id with its project scope;
+  the SHA-256 compare runs in constant time (a dummy compare on a miss) with expiry by
+  database time, and any failure rolls back before a second statement. `projectIds` is
+  `'all'` only when the stored scope says so; a listed key whose projects are gone reaches
+  none. `last_used_at` is written at most once an hour.
+- Each failure is counted in `api_key_failures` by IP or /64 (60 a minute by default); past it
+  the answer is `AUTH_RATE_LIMITED` with the retry. Refusals are not logged.
+- `verifyApiRequest({ authorization, url, ip })` refuses any `drf_` key in the query string,
+  as a name or value, whatever its case or encoding, before the header is read.
+- `createApiKeyVerifier` refuses to start with `DREFYN_AUTH_DATABASE_URL`,
+  `DREFYN_AUTH_SECRET` or any other `DREFYN_AUTH_*` key but the failure limit set, or without
+  `DREFYN_API_RATE_LIMIT_KEY`.
+- `apiKeyErrorResponse(error)` is the public answer: 401 `auth.api_key_invalid`, 403
+  `auth.api_key_scope`, 429 `auth.rate_limited` with `Retry-After`, 503 `auth.unavailable`.
+  `checkApiKeyScope(actor, scope, projectId?)` gives `AUTH_API_KEY_SCOPE`.
+- `.gitleaks.toml` adds the `drefyn-api-key` rule on top of the defaults; CI proves it on a
+  generated key with `packages/auth/test/gitleaks-fixture.ts`.

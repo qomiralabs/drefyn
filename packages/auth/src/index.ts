@@ -20,6 +20,7 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  INVITE_MAX_AGE_SECONDS,
   PRE_MAX_AGE_SECONDS,
   cookieNames,
   serializeCookie,
@@ -47,6 +48,36 @@ export {
 } from './sessions.ts';
 export { type AccessContext, type AccessResult } from './access.ts';
 export {
+  ApiKeyReplayError,
+  createApiKeys,
+  type ApiKeyStore,
+  type ApiKeySummary,
+  type ApiKeys,
+  type ApiKeysDeps,
+  type CreateApiKeyInput,
+  type CreatedApiKey,
+  type ProjectScope,
+} from './api-keys.ts';
+export {
+  apiKeyErrorResponse,
+  checkApiKeyScope,
+  createApiKeyVerifier,
+  type ApiErrorResponse,
+  type ApiKeyActor,
+  type ApiKeyVerifier,
+  type ApiKeyVerifierDeps,
+  type ApiKeyVerifierStore,
+  type ApiRequest,
+} from './api-key-verifier.ts';
+export {
+  MANAGEMENT_PERMISSIONS,
+  SCOPE_PATTERN,
+  createScopeRegistry,
+  type Scope,
+  type ScopeDefinition,
+  type ScopeRegistry,
+} from './scopes.ts';
+export {
   createOrganizations,
   type InitialTier,
   type OrganizationStore,
@@ -56,6 +87,7 @@ export {
 } from './organizations.ts';
 export {
   createInvitations,
+  type AcceptedInvitation,
   type AuthInvitationMailer,
   type DefaultProjectRole,
   type InvitationBlockView,

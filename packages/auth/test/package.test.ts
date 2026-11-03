@@ -57,10 +57,10 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in and OAuth. The OAuth fetch file calls the platform fetch, which
-  // the egress rule scopes. Files are read only by the breached list lookup and its build
-  // command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in and OAuth, files only from the breached list, and no network anywhere', () => {
+  // change, password sign in, OAuth and API keys. The OAuth fetch file calls the platform
+  // fetch, which the egress rule scopes. Files are read only by the breached list lookup and
+  // its build command, and the build command is the only writer.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -75,6 +75,8 @@ describe('package layout', () => {
       'devices.ts': database,
       'password-sign-in.ts': database,
       'oauth.ts': database,
+      'api-keys.ts': database,
+      'api-key-verifier.ts': database,
       'breached-file.ts': files,
       'password-list.ts': files,
     };
@@ -97,6 +99,7 @@ describe('the main entry', () => {
       [
         'ARGON2_FLOOR',
         'AUTH_CONFIG_KEYS',
+        'ApiKeyReplayError',
         'AuthError',
         'BREACHED_RECORD_BYTES',
         'BREACH_CHECK_TIMEOUT_MS',
@@ -105,9 +108,17 @@ describe('the main entry', () => {
         'breachedDigest',
         'buildPasswordList',
         'openBreachedPasswordFile',
+        'MANAGEMENT_PERMISSIONS',
+        'SCOPE_PATTERN',
+        'apiKeyErrorResponse',
+        'checkApiKeyScope',
+        'createApiKeyVerifier',
+        'createApiKeys',
+        'createScopeRegistry',
         'createOAuth',
         'DEVICES_PER_USER',
         'DEVICE_MAX_AGE_SECONDS',
+        'INVITE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
         'ORG_ROLES',
