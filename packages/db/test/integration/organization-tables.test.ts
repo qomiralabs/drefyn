@@ -198,6 +198,17 @@ describeWithStack('organization tables', () => {
       for (const table of TABLES) expect(counts[table], table).toEqual([ORG_A]);
     });
 
+    it('reads the people who belong to it and no one else, through granted columns only', async () => {
+      const app = await as('app');
+      const seen = await within(app, { org: ORG_A }, async () => ({
+        users: (await app.query<{ id: string; email: string }>('select id, email from app.users'))
+          .rows,
+        hidden: await sqlState(app.query('select email_normalized from app.users')),
+      }));
+      expect(seen.users).toEqual([{ id: USER_A, email: 'a@example.com' }]);
+      expect(seen.hidden).toBe('42501');
+    });
+
     it('a slug is one namespace across organizations', async () => {
       const app = await as('app');
       const third = '01a14984-4476-77ce-9335-1280000001c1';

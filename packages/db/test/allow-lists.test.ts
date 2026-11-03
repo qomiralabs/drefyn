@@ -424,6 +424,17 @@ describe('organization entries', () => {
     });
     expect(byName.has('app.projects.member_read')).toBe(false);
   });
+
+  it('let organization work read only the users who are its members', () => {
+    const byName = new Map(USER_POLICIES.map((p) => [p.name, p]));
+    expect(byName.get('app.users.member_read')).toMatchObject({
+      command: 'select',
+      roles: ['drefyn_app'],
+      using:
+        '(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.user_id = users.id) AND (m.organization_id = app.current_org()))))',
+      withCheck: null,
+    });
+  });
 });
 
 // pg_get_expr text, read back from Postgres with search_path = pg_catalog.
