@@ -238,6 +238,10 @@ with `is_local` false) in any tracked file.
 drefyn migrate up | down [n] | status [--migrations-dir <dir>]
 ```
 
+The `drefyn` binary is in `@drefyn/cli`; this package exports the command as `runMigrate`
+(and its usage line as `MIGRATE_USAGE`) from `@drefyn/db/command`, so the main entry stays
+context bound only.
+
 Connects with `DREFYN_MIGRATION_DATABASE_URL` and refuses any role other than `drefyn_owner`,
 and any role that is a superuser or has `BYPASSRLS`. Every command then checks that `vector` is
 installed in schema `extensions` at 0.8.2 or later, before it takes any lock. `up` and `down`

@@ -25,6 +25,8 @@
 /packages/egress/          @Divine572
 # Migrations set grants, policies and row level security, so every change is a security change.
 /packages/db/migrations/   @Divine572
+# The drefyn binary runs migrations as the owner and prints sign in links.
+/packages/cli/             @Divine572
 /vitest.shared.ts          @Divine572
 /.prettierrc.json          @Divine572
 /.prettierignore           @Divine572

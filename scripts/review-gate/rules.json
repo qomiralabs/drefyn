@@ -17,6 +17,7 @@
         "packages/egress/",
         "packages/flags/",
         "packages/address/",
+        "packages/cli/",
         "packages/db/migrations/",
         ".husky/",
         ".githooks/"

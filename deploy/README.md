@@ -154,6 +154,53 @@ bash scripts/selfhost.sh restart
 server or its log. The superuser's password is only used during the first start, because
 the superuser has no TCP login, so changing it in `deploy/.env` later has no effect.
 
+## Breached passwords
+
+Drefyn always refuses passwords that its built in rules catch: one character repeated,
+runs like `abcdef` or `qwerty`, short units repeated, and the person's address, the
+organization's name and "drefyn". It ships no list of breached passwords. To also refuse
+every password in the Pwned Passwords set, build a list once and point Drefyn at it. Nothing
+is called over the network when a password is checked.
+
+First download the set in SHA-1 mode (the default) with Have I Been Pwned's own downloader
+(BSD 3 Clause). The data is under CC BY 4.0. The output is one large file of `HASH:count`
+lines.
+
+```sh
+dotnet tool install --global haveibeenpwned-downloader
+haveibeenpwned-downloader pwnedpasswords
+```
+
+Then build the list. `--min-count` leaves out passwords seen fewer times than that; 1 keeps
+everything, and higher values make a smaller file.
+
+```sh
+drefyn auth password-list build --from pwnedpasswords.txt --min-count 1 \
+  --out /var/lib/drefyn/breached-passwords.bin
+```
+
+It prints one line with the lines read, the records written and the lines dropped. It exits 2
+on a bad line and names the line number, and 5 when a file cannot be read or written. If it
+says the hashes must be in ascending order, sort the input first and build again:
+
+```sh
+LC_ALL=C sort -o pwnedpasswords.sorted.txt pwnedpasswords.txt
+```
+
+The list is written to a temporary file next to `--out` and renamed into place, so an existing
+list is never half replaced. A build that was killed may leave a `<out>.tmp-<8 hex>` file,
+which is safe to delete.
+
+Last, set `DREFYN_AUTH_BREACHED_PASSWORDS_FILE` to the absolute path of the list, and restart.
+Startup logs `auth.breached_list_loaded` with the record count. A file that is missing,
+unreadable, empty or not whole 20 byte records stops startup with `AUTH_CONFIG_INVALID`.
+Without the key, startup logs `auth.breached_list_absent` once and the built in rules still
+apply.
+
+The list is checked only when a password is chosen, never at sign in. A check that does not
+answer within one second lets the password through and logs and counts
+`auth.breach_check_unavailable`. A rebuilt list takes effect on the next restart.
+
 ## Managed Postgres
 
 On a managed database, run the same file once as the master user, with

@@ -30,9 +30,10 @@ function specifiers(file: string): string[] {
 }
 
 describe('package layout', () => {
-  it('has a server entry and a pure permissions entry, and marks the second as pure', () => {
+  it('has a server entry, the operator command entry and a pure permissions entry, and marks the last as pure', () => {
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
+      './command': './src/command.ts',
       './permissions': './src/permissions.ts',
       './package.json': './package.json',
     });
@@ -57,9 +58,11 @@ describe('package layout', () => {
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
   // change, password sign in, OAuth and API keys. The OAuth fetch file calls the platform
-  // fetch, which the egress rule scopes.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, OAuth and API keys, and no network or file anywhere', () => {
+  // fetch, which the egress rule scopes. Files are read only by the breached list lookup and
+  // its build command, and the build command is the only writer.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
+    const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
       'sessions.ts': database,
@@ -74,10 +77,12 @@ describe('package layout', () => {
       'oauth.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
+      'breached-file.ts': files,
+      'password-list.ts': files,
     };
-    const files = sourceFiles(src);
-    expect(files).toContain('oauth/fetch.ts');
-    for (const file of files) {
+    const sources = sourceFiles(src);
+    expect(sources).toContain('oauth/fetch.ts');
+    for (const file of sources) {
       for (const spec of specifiers(join(src, file))) {
         if (allowed[file]?.test(spec) === true) continue;
         expect(spec, `${file} imports ${spec}`).not.toMatch(
@@ -96,6 +101,13 @@ describe('the main entry', () => {
         'AUTH_CONFIG_KEYS',
         'ApiKeyReplayError',
         'AuthError',
+        'BREACHED_RECORD_BYTES',
+        'BREACH_CHECK_TIMEOUT_MS',
+        'PasswordListError',
+        'loadBreachedPasswords',
+        'breachedDigest',
+        'buildPasswordList',
+        'openBreachedPasswordFile',
         'MANAGEMENT_PERMISSIONS',
         'SCOPE_PATTERN',
         'apiKeyErrorResponse',
