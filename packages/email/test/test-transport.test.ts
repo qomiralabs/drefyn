@@ -58,7 +58,10 @@ describe('createTestTransport', () => {
     expect(transport.sent[1]?.links.map(String)).toEqual([link('/settings/sessions').href]);
 
     await transport.deliver(envelope(), await mail(invitation()), never);
-    expect(transport.sent[2]?.links.map(String)).toEqual([link('/invite').href]);
+    expect(transport.sent[2]?.links.map(String)).toEqual([
+      link('/invite').href,
+      link('/invite/block').href,
+    ]);
     expect(transport.sent).toHaveLength(3);
   });
 
