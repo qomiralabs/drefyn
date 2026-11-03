@@ -26,13 +26,23 @@ import {
 import { stepUps, type AuthMailer } from './step-up.ts';
 import { decodeSecret, parseChallengeId, parseCode } from './tokens.ts';
 
-// The notice the old address gets. The app maps it onto the mail package's notice.
-export interface AuthSecurityNotice {
-  readonly kind: 'email_changed';
-  readonly newAddress: string;
-  // Database time of the change.
-  readonly at: Date;
-}
+// Security notices auth sends. The app maps each onto the mail package's notice.
+export type AuthSecurityNotice =
+  // To the old address.
+  | {
+      readonly kind: 'email_changed';
+      readonly newAddress: string;
+      // Database time of the change.
+      readonly at: Date;
+    }
+  // To the account's address, on every provider link and unlink.
+  | {
+      readonly kind: 'identity_linked' | 'identity_unlinked';
+      readonly provider: 'github' | 'google';
+      // The provider address the identity was linked with.
+      readonly account: string;
+      readonly at: Date;
+    };
 
 export interface AuthNoticeMailer {
   sendSecurityNotice(to: string, notice: AuthSecurityNotice): Promise<void>;

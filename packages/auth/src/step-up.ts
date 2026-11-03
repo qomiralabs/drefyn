@@ -86,24 +86,30 @@ function address(s: SessionInfo): string {
   return normalized;
 }
 
+// Refreshes authenticated_at on the same session and records how it was proved. Only
+// for code in this package that has just proved a step up; never exported.
+export async function recordStepUp(
+  store: SessionStore,
+  s: SessionInfo,
+  method: StepUpMethod,
+): Promise<SessionInfo> {
+  const row = await store.user(s.userId, (tx) =>
+    tx
+      .updateTable('sessions')
+      .set({ authenticated_at: sql<Date>`now()`, step_up_method: method })
+      .where('id', '=', s.sessionId)
+      .where('user_id', '=', sql<string>`app.current_user_id()`)
+      .where('expires_at', '>', sql<Date>`now()`)
+      .returning('authenticated_at')
+      .executeTakeFirst(),
+  );
+  if (row === undefined) throw new AuthError('AUTH_SESSION_INVALID');
+  return { ...s, authenticatedAt: row.authenticated_at, stepUpMethod: method };
+}
+
 export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
   const { store, limiter } = deps;
-
-  // Refreshes authenticated_at on the same session and records how it was proved.
-  async function mark(s: SessionInfo, method: StepUpMethod): Promise<SessionInfo> {
-    const row = await store.user(s.userId, (tx) =>
-      tx
-        .updateTable('sessions')
-        .set({ authenticated_at: sql<Date>`now()`, step_up_method: method })
-        .where('id', '=', s.sessionId)
-        .where('user_id', '=', sql<string>`app.current_user_id()`)
-        .where('expires_at', '>', sql<Date>`now()`)
-        .returning('authenticated_at')
-        .executeTakeFirst(),
-    );
-    if (row === undefined) throw new AuthError('AUTH_SESSION_INVALID');
-    return { ...s, authenticatedAt: row.authenticated_at, stepUpMethod: method };
-  }
+  const mark = (s: SessionInfo, method: StepUpMethod) => recordStepUp(store, s, method);
 
   return {
     async requireRecentAuth(s) {
