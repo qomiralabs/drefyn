@@ -5,6 +5,7 @@ import { tenantTableSql } from '../../src/tenant-sql.ts';
 import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
+import { superuser } from './support/stack.ts';
 import { catalogProblems, failure, rawSession } from './support/tenancy.ts';
 
 const dbs = databases();
@@ -15,6 +16,10 @@ const ORG_A = '01a14984-4476-77ce-9335-1280000001a1';
 const ORG_B = '01a14984-4476-77ce-9335-1280000001b1';
 const PROJECT_A = '01a14984-4476-77ce-9335-1280000002a1';
 const PROJECT_B = '01a14984-4476-77ce-9335-1280000002b1';
+const ORG_EMPTY = '01a14984-4476-77ce-9335-1280000001f1';
+// Never committed: every case that makes it rolls back.
+const ORG_FRESH = '01a14984-4476-77ce-9335-128000000201';
+const ORG_LATER = '01a14984-4476-77ce-9335-128000000211';
 const TABLES = ['organizations', 'organization_slugs', 'memberships', 'projects'];
 
 let db: TestDatabase;
@@ -61,6 +66,15 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
   return 'no error';
 }
 
+async function rejectedText(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    return String(error);
+  }
+  return 'no error';
+}
+
 async function committed(client: pg.Client, org: string, statements: readonly string[]) {
   await client.query('begin');
   await client.query("select set_config('drefyn.organization_id', $1, true)", [org]);
@@ -87,7 +101,7 @@ async function seed(): Promise<void> {
     [ORG_B, USER_B, 'globex', PROJECT_B],
   ] as const) {
     await committed(app, org, [
-      `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'free')`,
+      `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'self_hosted')`,
       `insert into app.organization_slugs (slug, organization_id) values ('${slug}', '${org}')`,
       `insert into app.memberships (organization_id, user_id, role) values ('${org}', '${user}', 'owner')`,
       `insert into app.projects (id, organization_id, product, slug, name)
@@ -145,7 +159,7 @@ describeWithStack('organization tables', () => {
     it.each([
       [
         'organizations',
-        `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_A}', 'x', 'free')`,
+        `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_A}', 'x', 'self_hosted')`,
       ],
       ['organization_slugs', `insert into app.organization_slugs values ('new-one', '${ORG_A}')`],
       [
@@ -189,7 +203,7 @@ describeWithStack('organization tables', () => {
       const third = '01a14984-4476-77ce-9335-1280000001c1';
       const code = await within(app, { org: third }, async () => {
         await app.query(
-          `insert into app.organizations (organization_id, name, plan_tier) values ('${third}', 'x', 'free')`,
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${third}', 'x', 'self_hosted')`,
         );
         return sqlState(
           app.query(`insert into app.organization_slugs values ('globex', '${third}')`),
@@ -213,7 +227,7 @@ describeWithStack('organization tables', () => {
         const fourth = '01a14984-4476-77ce-9335-1280000001d1';
         const code = await within(app, { org: fourth }, async () => {
           await app.query(
-            `insert into app.organizations (organization_id, name, plan_tier) values ('${fourth}', 'x', 'free')`,
+            `insert into app.organizations (organization_id, name, plan_tier) values ('${fourth}', 'x', 'self_hosted')`,
           );
           return sqlState(
             app.query('insert into app.organization_slugs values ($1, $2)', [slug, fourth]),
@@ -253,30 +267,47 @@ describeWithStack('organization tables', () => {
       expect(result.rowCount).toBe(1);
     });
 
+    // The insert policy refuses these before any constraint runs, so the constraints are
+    // proved without RLS, as the superuser.
     it('holds one membership per person and organization', async () => {
-      const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
-        sqlState(
-          app.query(
-            `insert into app.memberships (organization_id, user_id, role) values ('${ORG_A}', '${USER_A}', 'member')`,
-          ),
+      const error = await rejectedText(
+        superuser(
+          `insert into app.memberships (organization_id, user_id, role) values ('${ORG_A}', '${USER_A}', 'member');`,
+          db.name,
         ),
       );
-      expect(code).toBe('23505');
+      expect(error).toContain('memberships_organization_user_key');
     });
 
     it.each([
-      ['role', `'${USER_B}', 'superuser', null`],
-      ['default_project_role', `'${USER_B}', 'member', 'admin'`],
-    ])('refuses an unknown %s', async (_column, values) => {
-      const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
-        sqlState(
-          app.query(
-            `insert into app.memberships (organization_id, user_id, role, default_project_role) values ('${ORG_A}', ${values})`,
-          ),
+      ['role', `'${USER_B}', 'superuser', null`, 'memberships_role_check'],
+      [
+        'default_project_role',
+        `'${USER_B}', 'member', 'admin'`,
+        'memberships_default_project_role_check',
+      ],
+    ])('refuses an unknown %s', async (_column, values, constraint) => {
+      const error = await rejectedText(
+        superuser(
+          `insert into app.memberships (organization_id, user_id, role, default_project_role) values ('${ORG_A}', ${values});`,
+          db.name,
         ),
       );
+      expect(error).toContain(constraint);
+    });
+
+    it('refuses an unknown default project role for drefyn_app too', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_FRESH }, async () => {
+        await app.query(
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
+        );
+        return sqlState(
+          app.query(
+            `insert into app.memberships (organization_id, user_id, role, default_project_role) values ('${ORG_FRESH}', '${USER_B}', 'owner', 'admin')`,
+          ),
+        );
+      });
       expect(code).toBe('23514');
     });
 
@@ -301,7 +332,190 @@ describeWithStack('organization tables', () => {
           ),
         ),
       );
-      expect(code).toBe('23503');
+      // No organization row means no owner arm, so the policy refuses before the key does.
+      expect(code).toBe('42501');
+      const error = await rejectedText(
+        superuser(
+          `insert into app.memberships (organization_id, user_id, role) values ('${ghost}', '${USER_A}', 'owner');`,
+          db.name,
+        ),
+      );
+      expect(error).toContain('memberships_organization_id_fkey');
+    });
+  });
+
+  describe('who may insert a membership, a tier or a read only state', () => {
+    beforeAll(async () => {
+      const app = await as('app');
+      await committed(app, ORG_EMPTY, [
+        `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_EMPTY}', 'Empty', 'self_hosted')`,
+      ]);
+    });
+
+    it.each(['owner', 'admin', 'member'])(
+      'refuses a %s into an organization that already has a member',
+      async (role) => {
+        const app = await as('app');
+        const code = await within(app, { org: ORG_A }, () =>
+          sqlState(
+            app.query(
+              'insert into app.memberships (organization_id, user_id, role) values ($1, $2, $3)',
+              [ORG_A, USER_B, role],
+            ),
+          ),
+        );
+        expect(code).toBe('42501');
+      },
+    );
+
+    it.each(['owner', 'admin', 'member'])(
+      'refuses a %s into an organization made in an earlier transaction with no member',
+      async (role) => {
+        const app = await as('app');
+        const code = await within(app, { org: ORG_EMPTY }, () =>
+          sqlState(
+            app.query(
+              'insert into app.memberships (organization_id, user_id, role) values ($1, $2, $3)',
+              [ORG_EMPTY, USER_B, role],
+            ),
+          ),
+        );
+        expect(code).toBe('42501');
+      },
+    );
+
+    it.each(['admin', 'member'])(
+      'refuses a %s as the first member of an organization made in this transaction',
+      async (role) => {
+        const app = await as('app');
+        const code = await within(app, { org: ORG_FRESH }, async () => {
+          await app.query(
+            `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
+          );
+          return sqlState(
+            app.query(
+              'insert into app.memberships (organization_id, user_id, role) values ($1, $2, $3)',
+              [ORG_FRESH, USER_B, role],
+            ),
+          );
+        });
+        expect(code).toBe('42501');
+      },
+    );
+
+    it('refuses a second owner in the transaction that made the organization', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_FRESH }, async () => {
+        await app.query(
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
+        );
+        await app.query(
+          `insert into app.memberships (organization_id, user_id, role) values ('${ORG_FRESH}', '${USER_A}', 'owner')`,
+        );
+        return sqlState(
+          app.query(
+            `insert into app.memberships (organization_id, user_id, role) values ('${ORG_FRESH}', '${USER_B}', 'owner')`,
+          ),
+        );
+      });
+      expect(code).toBe('42501');
+    });
+
+    it.each(['free', 'starter', 'growth', 'scale', 'enterprise'])(
+      'refuses an organization at %s, which is not the install tier',
+      async (tier) => {
+        const app = await as('app');
+        const code = await within(app, { org: ORG_FRESH }, () =>
+          sqlState(
+            app.query(
+              'insert into app.organizations (organization_id, name, plan_tier) values ($1, $2, $3)',
+              [ORG_FRESH, 'x', tier],
+            ),
+          ),
+        );
+        expect(code).toBe('42501');
+      },
+    );
+
+    it('refuses an organization that starts read only', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_FRESH }, () =>
+        sqlState(
+          app.query(
+            `insert into app.organizations (organization_id, name, plan_tier, read_only_since)
+             values ('${ORG_FRESH}', 'x', app.install_tier(), now())`,
+          ),
+        ),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('takes self_hosted as the install tier, which drefyn_app reads but cannot replace', async () => {
+      const app = await as('app');
+      const tier = await within(app, { org: ORG_FRESH }, async () => {
+        const inserted = await app.query(
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
+        );
+        expect(inserted.rowCount).toBe(1);
+        return (await app.query<{ tier: string }>('select app.install_tier() as tier')).rows;
+      });
+      expect(tier).toEqual([{ tier: 'self_hosted' }]);
+      const code = await within(app, { org: ORG_FRESH }, () =>
+        sqlState(
+          app.query(
+            "create or replace function app.install_tier() returns text language sql stable parallel safe as $$ select 'enterprise'::text $$",
+          ),
+        ),
+      );
+      expect(code).toBe('42501');
+    });
+
+    // Both policies read memberships and organizations, whose own select policies read
+    // memberships again; a cycle would fail here with infinite recursion.
+    it('makes an owner with returning, and the owner then reads it under a user context', async () => {
+      const app = await as('app');
+      await app.query('begin');
+      await app.query("select set_config('drefyn.organization_id', $1, true)", [ORG_LATER]);
+      await app.query(
+        `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_LATER}', 'Fresh', 'self_hosted')`,
+      );
+      await app.query(`insert into app.organization_slugs values ('fresh', '${ORG_LATER}')`);
+      const made = await app.query<{ role: string }>(
+        `insert into app.memberships (organization_id, user_id, role) values ('${ORG_LATER}', '${USER_B}', 'owner') returning role`,
+      );
+      await app.query('commit');
+      expect(made.rows).toEqual([{ role: 'owner' }]);
+      const seen = await within(app, { user: USER_B }, async () => ({
+        orgs: (
+          await app.query<{ slug: string; role: string }>(
+            `select sl.slug, m.role from app.memberships m
+               join app.organizations o using (organization_id)
+               join app.organization_slugs sl using (organization_id)
+              order by sl.slug`,
+          )
+        ).rows,
+      }));
+      expect(seen.orgs).toEqual([
+        { slug: 'fresh', role: 'owner' },
+        { slug: 'globex', role: 'owner' },
+      ]);
+    });
+
+    // The tables here hold a few rows, so the planner is told to avoid a sequential scan;
+    // what this asks is whether an index serves each probe at all.
+    it('plans an index scan for each subquery of the membership policy', async () => {
+      const app = await as('app');
+      const plan = await within(app, { org: ORG_A }, async () => {
+        await app.query('set local enable_seqscan = off');
+        const result = await app.query<{ 'QUERY PLAN': string }>(
+          `explain (costs off) insert into app.memberships (organization_id, user_id, role)
+             values ('${ORG_A}', '${USER_B}', 'owner') returning id`,
+        );
+        return result.rows.map((r) => r['QUERY PLAN']).join('\n');
+      });
+      expect(plan).not.toContain('Seq Scan');
+      expect(plan).toMatch(/Index Scan (using|on) memberships_\w+/);
+      expect(plan).toContain('Index Scan using organizations_pkey on organizations o');
     });
   });
 
