@@ -10,8 +10,15 @@ const SKELETON = '[aria-hidden="true"][class~="bg-skeleton-fill"]';
 // Main as the person sees it: React's boundary comments and templates are left out, since
 // they say how the skeleton arrived, not what it is.
 async function mainMarkup(page: Page): Promise<string> {
-  const html = await main(page).innerHTML();
-  return html.replace(/<!--[^]*?-->/g, '').replace(/<template[^>]*><\/template>/g, '');
+  return main(page).evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement;
+    const walker = document.createTreeWalker(copy, NodeFilter.SHOW_COMMENT);
+    const comments: Node[] = [];
+    while (walker.nextNode() !== null) comments.push(walker.currentNode);
+    for (const node of comments) node.parentNode?.removeChild(node);
+    for (const template of copy.querySelectorAll('template')) template.remove();
+    return copy.innerHTML;
+  });
 }
 
 function watchErrors(page: Page): string[] {
