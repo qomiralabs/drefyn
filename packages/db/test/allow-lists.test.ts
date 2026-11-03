@@ -424,11 +424,27 @@ describe('organization entries', () => {
     });
     expect(byName.has('app.projects.member_read')).toBe(false);
   });
+
+  it('let organization work read only the users who are its members', () => {
+    const byName = new Map(USER_POLICIES.map((p) => [p.name, p]));
+    expect(byName.get('app.users.member_read')).toMatchObject({
+      command: 'select',
+      roles: ['drefyn_app'],
+      using:
+        '(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.user_id = users.id) AND (m.organization_id = app.current_org()))))',
+      withCheck: null,
+    });
+  });
 });
 
 // pg_get_expr text, read back from Postgres with search_path = pg_catalog.
 const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
+const INVITATION_ARM =
+  '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
+const ORIGIN = `(${OWNER_ARM} OR ${INVITATION_ARM})`;
+const INVITER =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
 const KEY_CREATOR =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
@@ -438,7 +454,7 @@ describe('restrictive policies', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
   });
 
-  it('list the three insert guards, for drefyn_app, with their exact text', () => {
+  it('list the insert and update guards, for drefyn_app, with their exact text', () => {
     expect(
       RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
         name,
@@ -456,11 +472,25 @@ describe('restrictive policies', () => {
         withCheck: KEY_CREATOR,
       },
       {
+        name: 'app.invitations.invitation_insert_inviter',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: INVITER,
+      },
+      {
+        name: 'app.invitations.invitation_update_inviter',
+        command: 'update',
+        roles: ['drefyn_app'],
+        using: 'true',
+        withCheck: INVITER,
+      },
+      {
         name: 'app.memberships.membership_insert_origin',
         command: 'insert',
         roles: ['drefyn_app'],
         using: null,
-        withCheck: OWNER_ARM,
+        withCheck: ORIGIN,
       },
       {
         name: 'app.organizations.organization_insert_tier',
@@ -483,6 +513,19 @@ describe('restrictive policies', () => {
     expect(creator?.withCheck).toContain('m.organization_id = api_keys.organization_id');
     expect(creator?.withCheck).toContain('m.id = api_keys.created_by');
     expect(creator?.withCheck).not.toMatch(/'member'/);
+  });
+
+  it('let any other member in only on a live invitation of this organization with the same role', () => {
+    const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
+    const arm = origin?.withCheck?.split(' OR ')[1] ?? '';
+    for (const part of [
+      'i.organization_id = memberships.organization_id',
+      'i.id = memberships.invitation_id',
+      'i.role = memberships.role',
+      'i.expires_at > now()',
+    ]) {
+      expect(arm, part).toContain(part);
+    }
   });
 
   it('pass with an entry that is clean', () => {

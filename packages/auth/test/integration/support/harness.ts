@@ -15,6 +15,7 @@ import { afterAll, describe, inject } from 'vitest';
 import {
   createApiKeyVerifier,
   createApiKeys,
+  createInvitations,
   createOrganizations,
   createScopeRegistry,
   createSessions,
@@ -26,6 +27,8 @@ import {
   type AuthConfig,
   type AuthLogger,
   type Env,
+  type InvitationSend,
+  type InvitationsDeps,
   type OrganizationsDeps,
   type ScopeRegistry,
   type SessionsDeps,
@@ -64,6 +67,12 @@ export interface Harness {
   // The API service's side: drefyn_app only, with its own failure key.
   verifier(extra?: Partial<ApiKeyVerifierDeps>, env?: Env): ApiKeyVerifier;
   readonly mail: TestAuthMailer;
+  invitations(
+    extra?: Partial<InvitationsDeps>,
+    config?: AuthConfig,
+  ): ReturnType<typeof createInvitations>;
+  // Every invitation mail any invitations() instance sent, in order.
+  readonly invitationMail: { to: string; invitation: InvitationSend }[];
   readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
 }
 
@@ -100,6 +109,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
     open.push(authDb);
     const config = parseAuthConfig(validEnv(randomBytes(32).toString('base64url')));
     const logs: { level: 'info' | 'warn'; event: string; fields: unknown }[] = [];
+    const invitationMail: { to: string; invitation: InvitationSend }[] = [];
     const logger: AuthLogger = {
       info(event, fields) {
         logs.push({ level: 'info', event, fields });
@@ -116,6 +126,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
       config,
       logs,
       mail,
+      invitationMail,
       sql: (text) => superuser(text, name),
       // Sign up is drefyn_auth's job, so users are made the way it makes them.
       async user(email = `p${randomBytes(4).toString('hex')}@example.com`) {
@@ -141,6 +152,19 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
         createApiKeys({ db, authDb, logger, scopes: TEST_SCOPES, mailer: mail.mailer, ...extra }),
       verifier: (extra = {}, env = { DREFYN_API_RATE_LIMIT_KEY: API_RATE_KEY }) =>
         createApiKeyVerifier(env, { db, logger, ...extra }),
+      invitations: (extra = {}, other = config) =>
+        createInvitations(other, {
+          db,
+          authDb,
+          logger,
+          mailer: {
+            sendInvitation(to, invitation) {
+              invitationMail.push({ to, invitation });
+              return Promise.resolve();
+            },
+          },
+          ...extra,
+        }),
     };
   };
 }

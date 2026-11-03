@@ -4,6 +4,8 @@ import type {
   ApiKeyProjectsTable,
   ApiKeysTable,
   ColumnType,
+  InvitationBlocksTable,
+  InvitationsTable,
   MembershipsTable,
   OrganizationsTable,
   ProjectsTable,
@@ -26,16 +28,34 @@ type UpdatableOnly<T, K extends keyof T> = {
 };
 
 // Plan, read only state, roles and everything about an API key but its use time are set at
-// creation; organization work cannot change them.
+// creation; organization work cannot change them. A resend rewrites an invitation in place but
+// never its address; a block is never edited.
 type GrantedTables<S> = Omit<
   S,
-  'organizations' | 'memberships' | 'projects' | 'api_keys' | 'api_key_projects'
+  | 'organizations'
+  | 'memberships'
+  | 'projects'
+  | 'invitations'
+  | 'invitation_blocks'
+  | 'api_keys'
+  | 'api_key_projects'
 > & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
   memberships: UpdatableOnly<MembershipsTable, 'default_project_role' | 'updated_at'>;
   projects: UpdatableOnly<ProjectsTable, 'slug' | 'name' | 'updated_at'>;
   api_keys: UpdatableOnly<ApiKeysTable, 'last_used_at'>;
   api_key_projects: UpdatableOnly<ApiKeyProjectsTable, never>;
+  invitations: UpdatableOnly<
+    InvitationsTable,
+    | 'role'
+    | 'default_project_role'
+    | 'secret_hash'
+    | 'invited_by'
+    | 'send_count'
+    | 'expires_at'
+    | 'updated_at'
+  >;
+  invitation_blocks: UpdatableOnly<InvitationBlocksTable, never>;
 };
 
 // Key hashes are organization work. A project path runs with an attacker supplied tenant, so

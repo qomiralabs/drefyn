@@ -520,3 +520,71 @@ describe('parseApiAuthConfig', () => {
     expect(JSON.stringify(parseApiAuthConfig(apiEnv()))).not.toContain(OTHER);
   });
 });
+
+describe('DREFYN_AUTH_INVITATION_BLOCK_KEY', () => {
+  const key = 'DREFYN_AUTH_INVITATION_BLOCK_KEY';
+  const raw = new Uint8Array(32).fill(11);
+  const apiEnv = (patch: Env = {}): Env => ({ DREFYN_API_RATE_LIMIT_KEY: OTHER, ...patch });
+
+  it('is required, and exactly 32 bytes of canonical base64url', () => {
+    refuses({ [key]: undefined }, key);
+    refuses({ [key]: '' }, key);
+    refuses({ [key]: base64url(new Uint8Array(31).fill(1)) }, key);
+    refuses({ [key]: base64url(new Uint8Array(33).fill(1)) }, key);
+    refuses({ [key]: `${base64url(raw)}=` }, key);
+    expect(parseAuthConfig(env()).invitationBlocks.emailMac('org', 'a@example.com')).toHaveLength(
+      32,
+    );
+  });
+
+  it('is never readable from the parsed config, however it is printed', () => {
+    const config = parseAuthConfig(env());
+    const printed = [
+      JSON.stringify(config),
+      inspect(config, { depth: 10, showHidden: true }),
+      inspect(config.invitationBlocks, { depth: 10, showHidden: true }),
+    ].join('\n');
+    expect(printed).not.toContain(base64url(raw));
+    expect(printed).not.toContain(Buffer.from(raw).toString('hex'));
+    expect(printed).not.toContain(Buffer.from(raw).toString('base64'));
+  });
+
+  it('does not follow DREFYN_AUTH_SECRET, so a rotation keeps every block', () => {
+    const before = parseAuthConfig(env());
+    const after = parseAuthConfig(
+      env({ DREFYN_AUTH_SECRET: OTHER, DREFYN_AUTH_SECRET_PREVIOUS: SECRET }),
+    );
+    const org = 'org';
+    expect(after.invitationBlocks.emailMac(org, 'a@example.com')).toEqual(
+      before.invitationBlocks.emailMac(org, 'a@example.com'),
+    );
+    const changed = parseAuthConfig(env({ [key]: base64url(new Uint8Array(32).fill(12)) }));
+    expect(changed.invitationBlocks.emailMac(org, 'a@example.com')).not.toEqual(
+      before.invitationBlocks.emailMac(org, 'a@example.com'),
+    );
+  });
+
+  it('keeps the address HMAC and the link tag on separate subkeys', () => {
+    const { invitationBlocks } = parseAuthConfig(env());
+    const parts = {
+      organizationId: 'org',
+      invitationId: 'inv',
+      emailHmac: invitationBlocks.emailMac('org', 'a@example.com'),
+      expiresAt: 1_800_000_000,
+    };
+    const tag = invitationBlocks.linkTag(parts);
+    expect(tag).toHaveLength(32);
+    expect(tag.equals(parts.emailHmac)).toBe(false);
+    expect(invitationBlocks.verifyLinkTag(parts, tag)).toBe(true);
+    expect(invitationBlocks.verifyLinkTag({ ...parts, expiresAt: 1_800_000_001 }, tag)).toBe(false);
+    expect(invitationBlocks.verifyLinkTag(parts, Buffer.alloc(31))).toBe(false);
+  });
+
+  it('is refused on the API service, which never handles invitations', () => {
+    expectAuthError(
+      () => parseApiAuthConfig(apiEnv({ [key]: base64url(raw) })),
+      'AUTH_CONFIG_INVALID',
+      key,
+    );
+  });
+});

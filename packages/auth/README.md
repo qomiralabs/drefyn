@@ -3,8 +3,8 @@
 Identity, sessions, API keys, organizations and seats for Docs, Studio and Status. So far it
 holds config parsing, key derivation, credential formats, input validators, the built in
 password rules, log redaction, the permission model, the rate limiters, database sessions
-with step up, and organizations. Only the limiters, the session files and organizations reach
-the database, and only through `@drefyn/db`; nothing here touches the network or the file
+with step up, organizations, and invitations with seats. Only the limiters, the session files,
+organizations and invitations reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
 system.
 
 ## Entry points
@@ -32,7 +32,9 @@ const api = parseApiAuthConfig(process.env); // API service
   only for `http://localhost` or `http://127.0.0.1`, and the cookie names then drop the
   `__Host-` prefix. `DREFYN_AUTH_SECRET` is at least 32 bytes in canonical unpadded
   base64url. `DREFYN_AUTH_SECRET_PREVIOUS` follows the same rule and must differ from the
-  current secret. OAuth client id and secret come in pairs. Idle days may not exceed
+  current secret. `DREFYN_AUTH_INVITATION_BLOCK_KEY` is required and exactly 32 bytes in the
+  same encoding; the installer generates it and it is never rotated, because changing it lifts
+  every invitation block. OAuth client id and secret come in pairs. Idle days may not exceed
   absolute days. Proxy hops must be 0 for a loopback origin. `DREFYN_CLIENT_IP_HEADER`
   is `cloudfront-viewer-address` or unset, and needs hops of 1 or more. While passwords
   are on, `UV_THREADPOOL_SIZE` must be set above 4 and the hash concurrency must be under
@@ -61,6 +63,11 @@ const api = parseApiAuthConfig(process.env); // API service
   during a rotation, and computes both so timing does not say which one matched. Rate
   keys have no verify: after a rotation their windows start fresh. Key material lives in
   closures, so serialising the result shows only `{ "rotating": ... }`.
+- `config.invitationBlocks` holds two HKDF-SHA256 subkeys of `DREFYN_AUTH_INVITATION_BLOCK_KEY`,
+  apart from `DREFYN_AUTH_SECRET` so a rotation of that secret keeps every block:
+  `emailMac(organizationId, address)` is the stored form of a blocked address, and
+  `linkTag(parts)` and `verifyLinkTag(parts, tag)` sign the block link. Neither key can be
+  read back from the config.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
@@ -406,8 +413,8 @@ const orgs = createOrganizations(config, { db, authDb, logger, initialTier: 'sel
   create with `AUTH_UNAVAILABLE` over `DB_RLS_VIOLATION` and logs
   `auth.organization_create_failed` with ids only.
 - A plain insert can only make the first owner, in the transaction that made the
-  organization. Any other member needs a source the database can check, such as an
-  accepted invitation once invitations land.
+  organization. Any other member needs a live invitation of the same organization and role,
+  named by `memberships.invitation_id`, which the database checks.
 - `createOrganization(session, { name, slug })` checks the name and slug, counts `org_create`
   (3 a day per person), then writes the organization, its slug and the owner membership in
   one organization transaction. `AUTH_INPUT_INVALID` for a name with `://`, `www.` or a
@@ -417,6 +424,47 @@ const orgs = createOrganizations(config, { db, authDb, logger, initialTier: 'sel
   Logs carry public ids only (`auth.organization_created` at info, when the logger has it).
 - `listMyOrganizations(session)` reads under the person's own context: only organizations
   they belong to, with slug, role, tier and read only state.
+
+## Invitations and seats
+
+```ts
+const invitations = createInvitations(config, { db, authDb, logger, mailer });
+```
+
+- `invite(access, { email, role, defaultProjectRole })` needs `org.manage_members` and
+  `canAssign(role)`, so an admin never invites an owner (`AUTH_FORBIDDEN`). It counts
+  `invite_send` (organization), `invite_send_user` (inviter) and `invite_recipient` (address,
+  across organizations) before the work, then in one organization transaction locks the
+  organization row, rechecks the inviter's stored role, refuses an address that already
+  belongs to a member (`AUTH_ALREADY_MEMBER`), counts seats and asks
+  `checkLimit(tier, 'org.seats', used + 1)` with the tier as stored now (`AUTH_SEAT_LIMIT`),
+  then writes the invitation for 7 days. A resend to the same address replaces the secret,
+  role, inviter and expiry in place and never needs a second seat.
+- When the address asked not to get invitations from the organization, the result is
+  `{ kind: 'blocked' }`: no row, no seat, no mail, and the admin can be told so plainly.
+  Otherwise it is `{ kind: 'sent', invitation, send }`; `send` mails
+  `AuthInvitationMailer.sendInvitation(to, InvitationSend)` after the response and never
+  throws.
+- The mail carries `<origin>/invite#<token>` and `<origin>/invite/block#<block token>`. Both
+  tokens sit only in the fragment, so they never reach a request line or an access log, and
+  every function takes them as plain strings, never a URL. The block link lasts 30 days.
+- Names reach the mailer as stored text; escaping happens once, where the mail is rendered.
+  An inviter display name that reads as a link, or none at all, becomes "A team member";
+  the inviter's address is never sent.
+- `acceptInvitation(session, token)` sends one statement, by invitation id within the token's
+  organization, and compares the secret in process; a wrong secret, a missing row or an
+  expired invitation stops there (`AUTH_INVITATION_INVALID`). Then the session's address must
+  equal the invited one after normalisation (`AUTH_INVITATION_EMAIL_MISMATCH`), and the
+  inviter must still hold `org.manage_members` and be able to grant the role. The membership
+  insert names the invitation, and the invitation is deleted in the same transaction, so a
+  second acceptance fails. Removing the inviter deletes their pending invitations.
+- `readInvitationBlock(token)` is what the block page shows on GET and only reads.
+  `blockInvitation(token)` is the page's POST and the only writer of `invitation_blocks`; it
+  also drops the pending invitation, and a second call is a no op that still succeeds.
+- `seatUsage(access)` is memberships plus unexpired invitations of the organization, with the
+  plan's limit. `countSeats(holders)` is the same count as a pure function, for tests. After a
+  downgrade nobody is removed; new invitations are refused until the count fits.
+
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
 

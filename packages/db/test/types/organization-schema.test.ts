@@ -61,6 +61,23 @@ async function compileOnly(): Promise<void> {
     await tx.updateTable('memberships').set({ role: 'owner' }).execute();
     // @ts-expect-error nor a project's read only state
     await tx.updateTable('projects').set({ read_only_since: null }).execute();
+    await tx
+      .updateTable('invitations')
+      .set({ role: 'admin', send_count: 2, expires_at: new Date() })
+      .execute();
+    // @ts-expect-error an invitation never moves to another address
+    await tx.updateTable('invitations').set({ email_normalized: 'x' }).execute();
+    // @ts-expect-error nor to another organization
+    await tx.updateTable('invitations').set({ organization_id: 'x' }).execute();
+    await tx
+      .insertInto('invitation_blocks')
+      .values({ organization_id: 'x', email_hmac: Buffer.alloc(32) })
+      .execute();
+    const hmac = Buffer.alloc(32);
+    // @ts-expect-error a block is never edited
+    await tx.updateTable('invitation_blocks').set({ email_hmac: hmac }).execute();
+    // @ts-expect-error nor is a membership moved to another invitation
+    await tx.updateTable('memberships').set({ invitation_id: null }).execute();
   });
 }
 

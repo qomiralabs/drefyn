@@ -55,10 +55,10 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter, the session files, organizations, devices, email sign in, email change,
-  // password sign in, OAuth and API keys. The OAuth fetch file calls the platform fetch, which
-  // the egress rule scopes.
-  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in, email change, password sign in, OAuth and API keys, and no network or file anywhere', () => {
+  // the limiter, the session files, organizations, invitations, devices, email sign in, email
+  // change, password sign in, OAuth and API keys. The OAuth fetch file calls the platform
+  // fetch, which the egress rule scopes.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, OAuth and API keys, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -66,6 +66,7 @@ describe('package layout', () => {
       'session-support.ts': database,
       'step-up.ts': database,
       'organizations.ts': database,
+      'invitations.ts': database,
       'email-sign-in.ts': database,
       'email-change.ts': database,
       'devices.ts': database,
@@ -128,10 +129,12 @@ describe('the main entry', () => {
         'checkNewPassword',
         'constantTimeEqual',
         'cookieNames',
+        'countSeats',
         'createApiKeyFailureLimiter',
         'createCodeIssuer',
         'createEmailChange',
         'createEmailSignIn',
+        'createInvitations',
         'createOrganizations',
         'createPasswordHasher',
         'createPasswordSignIn',
