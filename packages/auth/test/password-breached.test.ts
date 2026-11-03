@@ -6,12 +6,13 @@ import {
   AuthError,
   breachedDigest,
   createPasswordSignIn,
-  type AuthLogger,
+  loadBreachedPasswords,
   type AuthMetricName,
   type BreachedPasswordCheck,
   type SessionInfo,
 } from '../src/index.ts';
-import { on } from './email-fixtures.ts';
+import { admitNewPassword } from '../src/new-password.ts';
+import { on, recordingLogger } from './email-fixtures.ts';
 import { smallHasher } from './password-fixtures.ts';
 import {
   PASSWORD,
@@ -41,19 +42,6 @@ function listing(...passwords: string[]) {
   return vi.fn<BreachedPasswordCheck['isBreached']>((password) =>
     Promise.resolve(passwords.includes(password)),
   );
-}
-
-function infoLogger() {
-  const logs: { level: string; event: string; fields: Readonly<Record<string, unknown>> }[] = [];
-  const logger: AuthLogger = {
-    warn(event, fields) {
-      logs.push({ level: 'warn', event, fields });
-    },
-    info(event, fields) {
-      logs.push({ level: 'info', event, fields });
-    },
-  };
-  return { logger, logs };
 }
 
 describe('setPassword and the breached list', () => {
@@ -150,68 +138,53 @@ describe('setPassword and the breached list', () => {
 });
 
 describe('the breached list from config', () => {
-  it('reads the file named by DREFYN_AUTH_BREACHED_PASSWORDS_FILE when no check is given', async () => {
+  it('uses the check opened at startup from DREFYN_AUTH_BREACHED_PASSWORDS_FILE', async () => {
     const path = join(dir, 'configured.bin');
-    await writeFile(path, Buffer.concat([breachedDigest(BREACHED)]));
+    await writeFile(path, breachedDigest(BREACHED));
     const withFile = configWith({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: path });
     const t = passwordDeps({ known: true, phc: null });
-    const flow = createPasswordSignIn(withFile, t.deps);
+    const breachedPasswords = await loadBreachedPasswords(withFile, t.deps.logger);
+    const flow = createPasswordSignIn(withFile, {
+      ...t.deps,
+      ...(breachedPasswords === undefined ? {} : { breachedPasswords }),
+    });
     const refused = await flow.setPassword(signedIn, { newPassword: BREACHED });
     expect(!refused.ok && refused.error.code).toBe('AUTH_PASSWORD_BREACHED');
     const accepted = await flow.setPassword(signedIn, { newPassword: FRESH });
     expect(accepted.ok).toBe(true);
   });
 
-  it('a configured file that cannot be read accepts, logged and counted, and is tried again', async () => {
-    const path = join(dir, 'arrives-later.bin');
+  it('refuses to build with a configured file but no opened check, so the file is never skipped', async () => {
+    const path = join(dir, 'never-opened.bin');
+    await writeFile(path, breachedDigest(BREACHED));
+    const withFile = configWith({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: path });
+    expect(() => createPasswordSignIn(withFile, passwordDeps().deps)).toThrow(
+      /loadBreachedPasswords/,
+    );
+  });
+
+  it('a list file removed after startup accepts, logged and counted', async () => {
+    const path = join(dir, 'removed-later.bin');
+    await writeFile(path, breachedDigest(BREACHED));
     const withFile = configWith({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: path });
     const counted: AuthMetricName[] = [];
     const t = passwordDeps(
       { known: true, phc: null },
       { metrics: { increment: (name) => counted.push(name) } },
     );
-    const flow = createPasswordSignIn(withFile, t.deps);
-    const first = await flow.setPassword(signedIn, { newPassword: BREACHED });
-    expect(first.ok).toBe(true);
+    const breachedPasswords = await loadBreachedPasswords(withFile, t.deps.logger);
+    // Truncated in place: the open handle now reads nothing where a record was.
+    await writeFile(path, '');
+    const flow = createPasswordSignIn(withFile, {
+      ...t.deps,
+      ...(breachedPasswords === undefined ? {} : { breachedPasswords }),
+    });
+    const result = await flow.setPassword(signedIn, { newPassword: BREACHED });
+    expect(result.ok).toBe(true);
     expect(counted).toEqual(['auth.breach_check_unavailable']);
     expect(t.logs.find((l) => l.event === 'auth.breach_check_unavailable')?.fields).toMatchObject({
       reason: 'error',
     });
-    await writeFile(path, breachedDigest(BREACHED));
-    const second = await flow.setPassword(signedIn, { newPassword: BREACHED });
-    expect(!second.ok && second.error.code).toBe('AUTH_PASSWORD_BREACHED');
-  });
-
-  it('with no file, tells the operator once at start how to build one', () => {
-    const { logger, logs } = infoLogger();
-    const t = passwordDeps();
-    createPasswordSignIn(config, { ...t.deps, logger });
-    expect(config.passwords.breachedPasswordsFile).toBeNull();
-    expect(logs.filter((l) => l.event === 'auth.breach_list_absent')).toEqual([
-      {
-        level: 'info',
-        event: 'auth.breach_list_absent',
-        fields: {
-          guidance:
-            'build a list with drefyn auth password-list build and set DREFYN_AUTH_BREACHED_PASSWORDS_FILE to its path',
-        },
-      },
-    ]);
-  });
-
-  it('says nothing about a list when one is configured, given, or passwords are off', async () => {
-    const path = join(dir, 'quiet.bin');
-    await writeFile(path, breachedDigest(BREACHED));
-    const cases = [
-      { c: configWith({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: path }), extra: {} },
-      { c: config, extra: { breachedPasswords: { isBreached: listing() } } },
-      { c: configWith({ DREFYN_AUTH_PASSWORDS: 'off' }), extra: {} },
-    ];
-    for (const { c, extra } of cases) {
-      const { logger, logs } = infoLogger();
-      createPasswordSignIn(c, { ...passwordDeps().deps, ...extra, logger });
-      expect(logs.filter((l) => l.event === 'auth.breach_list_absent')).toEqual([]);
-    }
   });
 
   it('with no file, the built in rules still refuse their families', async () => {
@@ -229,5 +202,55 @@ describe('the breached list from config', () => {
       expect(!result.ok && result.error.code, password).toBe('AUTH_PASSWORD_WEAK');
       expect(!result.ok && result.error.rules, password).toContain(rule);
     }
+  });
+});
+
+describe('admitNewPassword', () => {
+  const fields = { userId: 'usr_x' };
+
+  it('runs the built in rules first and never asks the list about a weak password', async () => {
+    const isBreached = listing('qwertyuiopasdfgh');
+    const { logger } = recordingLogger();
+    const result = await admitNewPassword(
+      'qwertyuiopasdfgh',
+      { email: 'person@example.com' },
+      { check: { isBreached }, logger, fields },
+    );
+    expect(!result.ok && result.error.code).toBe('AUTH_PASSWORD_WEAK');
+    expect(!result.ok && result.error.rules).toContain('keyboard_walk');
+    expect(isBreached).not.toHaveBeenCalled();
+  });
+
+  it('then refuses a listed password and admits the rest', async () => {
+    const check = { isBreached: listing(BREACHED) };
+    const { logger } = recordingLogger();
+    const refused = await admitNewPassword(BREACHED, {}, { check, logger, fields });
+    expect(!refused.ok && refused.error.code).toBe('AUTH_PASSWORD_BREACHED');
+    await expect(admitNewPassword(FRESH, {}, { check, logger, fields })).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('admits when the check has no answer, and counts it', async () => {
+    const counted: AuthMetricName[] = [];
+    const { logger, logs } = recordingLogger();
+    const result = await admitNewPassword(
+      BREACHED,
+      {},
+      {
+        check: { isBreached: () => Promise.resolve(null) },
+        logger,
+        metrics: { increment: (name) => counted.push(name) },
+        fields,
+      },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(counted).toEqual(['auth.breach_check_unavailable']);
+    expect(logs[0]?.fields).toEqual({ userId: 'usr_x', reason: 'no_answer' });
+  });
+
+  it('with no check, the rules alone decide', async () => {
+    const { logger } = recordingLogger();
+    await expect(admitNewPassword(BREACHED, {}, { logger, fields })).resolves.toEqual({ ok: true });
   });
 });

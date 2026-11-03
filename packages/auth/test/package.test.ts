@@ -30,9 +30,10 @@ function specifiers(file: string): string[] {
 }
 
 describe('package layout', () => {
-  it('has a server entry and a pure permissions entry, and marks the second as pure', () => {
+  it('has a server entry, the operator command entry and a pure permissions entry, and marks the last as pure', () => {
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
+      './command': './src/command.ts',
       './permissions': './src/permissions.ts',
       './package.json': './package.json',
     });

@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildPasswordList,
+  loadBreachedPasswords,
   openBreachedPasswordFile,
   type BreachedPasswordCheck,
 } from '../../src/index.ts';
 import { newBrowser } from './support/email.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 import {
+  loggerFor,
   passwordConfig,
   passwordFlow,
   personWithPassword,
@@ -44,11 +46,9 @@ describeWithStack('the breached password list against Postgres', () => {
     h = await fresh();
     dir = await mkdtemp(join(tmpdir(), 'drefyn-breached-int-'));
     const from = join(dir, 'pwned.txt');
-    // The shape the Pwned Passwords downloader writes, out of order on purpose.
-    await writeFile(
-      from,
-      line('some other listed sentence', 50) + line(BREACHED, 40) + line(RARE, 1),
-    );
+    // The shape the Pwned Passwords downloader writes: CRLF, upper case, ascending.
+    const entries = [line('some other listed sentence', 50), line(BREACHED, 40), line(RARE, 1)];
+    await writeFile(from, entries.sort().join(''));
     list = join(dir, 'breached.bin');
     await buildPasswordList({ from, out: list, minCount: 2 });
   });
@@ -58,7 +58,11 @@ describeWithStack('the breached password list against Postgres', () => {
   });
 
   it('a breached password is refused when set and nothing is stored', async () => {
-    const flow = passwordFlow(h, passwordConfig({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: list }));
+    const config = passwordConfig({ DREFYN_AUTH_BREACHED_PASSWORDS_FILE: list });
+    const breachedPasswords = await loadBreachedPasswords(config, loggerFor(h));
+    if (breachedPasswords === undefined) throw new Error('the list did not load');
+    expect(h.logs.some((l) => l.event === 'auth.breached_list_loaded')).toBe(true);
+    const flow = passwordFlow(h, config, undefined, { breachedPasswords });
     const { email, session } = await personWithoutPassword(flow);
     const refused = await flow.signIn.setPassword(session, { newPassword: BREACHED });
     expect(!refused.ok && refused.error.code).toBe('AUTH_PASSWORD_BREACHED');
@@ -97,6 +101,7 @@ describeWithStack('the breached password list against Postgres', () => {
   it('with DREFYN_AUTH_BREACHED_PASSWORDS_FILE unset, the built in rules still refuse their families', async () => {
     const config = passwordConfig();
     expect(config.passwords.breachedPasswordsFile).toBeNull();
+    await expect(loadBreachedPasswords(config, loggerFor(h))).resolves.toBeUndefined();
     const flow = passwordFlow(h, config);
     const { email, session } = await personWithoutPassword(flow);
     const families: [string, string][] = [
@@ -111,6 +116,6 @@ describeWithStack('the breached password list against Postgres', () => {
       expect(!result.ok && result.error.rules, password).toContain(rule);
     }
     expect(await phcOf(h, email)).toBe('-');
-    expect(h.logs.some((l) => l.event === 'auth.breach_list_absent')).toBe(true);
+    expect(h.logs.some((l) => l.event === 'auth.breached_list_absent')).toBe(true);
   });
 });

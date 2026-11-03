@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as db from '../src/index.ts';
@@ -17,14 +17,24 @@ interface Manifest {
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Manifest;
 
 describe('package shape', () => {
-  it('is @drefyn/db with one public entry point', () => {
+  it('is @drefyn/db with the context bound entry and the migrate command entry', () => {
     expect(manifest.name).toBe('@drefyn/db');
-    expect(manifest.exports).toEqual({ '.': './src/index.ts', './package.json': './package.json' });
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './command': './src/command.ts',
+      './package.json': './package.json',
+    });
   });
 
-  it('ships the drefyn migrate command', () => {
-    expect(manifest.bin).toEqual({ drefyn: './src/cli.ts' });
-    expect(readFileSync(join(root, 'src', 'cli.ts'), 'utf8')).toMatch(/^#!\/usr\/bin\/env node\n/);
+  // @drefyn/cli owns the drefyn binary; db hands it the migrate command as a function.
+  it('declares no binary and exports exactly the migrate command', async () => {
+    expect(manifest.bin).toBeUndefined();
+    expect(existsSync(join(root, 'src', 'cli.ts'))).toBe(false);
+    const command = await import('../src/command.ts');
+    expect(Object.keys(command).sort()).toEqual(['MIGRATE_USAGE', 'runMigrate']);
+    expect(command.MIGRATE_USAGE).toBe(
+      'usage: drefyn migrate up | down [n] | status [--migrations-dir <dir>]',
+    );
   });
 
   it('has the integration and type drift tasks', () => {

@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultMigrationsDir } from '../../../src/constants.ts';
 import { start, type Finished, type Running } from './process.ts';
-import { packageRoot } from './stack.ts';
+import { repoRoot } from './stack.ts';
 
-const cliPath = join(packageRoot, 'src', 'cli.ts');
+// The drefyn binary as operators run it. A path, not an import: db must not depend on cli.
+const cliPath = join(repoRoot, 'packages', 'cli', 'src', 'main.ts');
 
 export interface MigrateOptions {
   readonly url: string;

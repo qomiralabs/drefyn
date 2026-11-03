@@ -32,7 +32,7 @@ alter database $db set search_path = app, extensions;
 SQL
 DREFYN_DATABASE_SSL=disable \
   DREFYN_MIGRATION_DATABASE_URL="postgres://drefyn_owner:${owner}@127.0.0.1:${port}/${db}" \
-  node packages/db/src/cli.ts migrate up >/dev/null
+  node packages/cli/src/main.ts migrate up >/dev/null
 
 "${compose[@]}" exec -T postgres sh -c 'rm -f /tmp/bench_rl*; cat > /tmp/bench_rl.sql' \
   <packages/db/bench/rate-limit-upsert.sql

@@ -1,13 +1,13 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BREACH_CHECK_TIMEOUT_MS, askBreached } from '../src/breach-check.ts';
-import { lazyBreachedPasswordFile } from '../src/breached-file.ts';
 import {
   AuthError,
   BREACHED_RECORD_BYTES,
   breachedDigest,
+  loadBreachedPasswords,
   openBreachedPasswordFile,
   type AuthLogger,
   type AuthMetricName,
@@ -119,15 +119,67 @@ describe('openBreachedPasswordFile', () => {
     }
     await expect(openBreachedPasswordFile(join(dir, 'nowhere.bin'))).rejects.toThrow();
   });
+});
 
-  it('opens lazily, and tries again after a failure instead of keeping it', async () => {
-    const path = join(dir, 'later.bin');
-    const check = lazyBreachedPasswordFile(path);
-    const signal = new AbortController().signal;
-    await expect(check.isBreached('password', signal)).rejects.toThrow();
-    await listOf('later.bin', ['password']);
-    await expect(check.isBreached('password', signal)).resolves.toBe(true);
-    await expect(check.isBreached('something else entirely', signal)).resolves.toBe(false);
+describe('loadBreachedPasswords at startup', () => {
+  const configFor = (path: string | null) =>
+    ({ passwords: { breachedPasswordsFile: path } }) as const;
+
+  it('with no file, logs once at info where to read about building one, and gives no check', async () => {
+    const r = recorder();
+    await expect(loadBreachedPasswords(configFor(null), r.logger)).resolves.toBeUndefined();
+    expect(r.logs).toEqual([
+      {
+        level: 'info',
+        event: 'auth.breached_list_absent',
+        fields: {
+          message:
+            'no breached password list configured; the built in rules still apply; see Breached passwords in the self host guide',
+        },
+      },
+    ]);
+  });
+
+  it('with a file, opens it once, logs the record count and answers from it', async () => {
+    const r = recorder();
+    const path = await listOf('startup.bin', ['password', 'letmein please']);
+    const check = await loadBreachedPasswords(configFor(path), r.logger);
+    expect(r.logs).toEqual([
+      { level: 'info', event: 'auth.breached_list_loaded', fields: { records: 2 } },
+    ]);
+    await expect(check?.isBreached('password', new AbortController().signal)).resolves.toBe(true);
+  });
+
+  it('a file that is missing, unreadable, empty, a folder or torn fails startup naming the key and never the path', async () => {
+    const torn = join(dir, 'startup-torn.bin');
+    await writeFile(torn, Buffer.alloc(BREACHED_RECORD_BYTES + 1));
+    const empty = join(dir, 'startup-empty.bin');
+    await writeFile(empty, '');
+    const locked = join(dir, 'startup-locked.bin');
+    await writeFile(locked, Buffer.alloc(BREACHED_RECORD_BYTES));
+    await chmod(locked, 0o000);
+    const folder = join(dir, 'startup-folder.bin');
+    await mkdir(folder);
+    const missing = join(dir, 'startup-missing.bin');
+    // Root reads anything, so the unreadable case only means something for other users.
+    const cases =
+      process.getuid?.() === 0
+        ? [torn, empty, folder, missing]
+        : [torn, empty, locked, folder, missing];
+    for (const path of cases) {
+      const r = recorder();
+      const error = await loadBreachedPasswords(configFor(path), r.logger).catch((e: unknown) => e);
+      expect(error, path).toBeInstanceOf(AuthError);
+      expect(error, path).toMatchObject({
+        code: 'AUTH_CONFIG_INVALID',
+        key: 'DREFYN_AUTH_BREACHED_PASSWORDS_FILE',
+      });
+      const shown = `${String(error)} ${JSON.stringify(error)} ${String((error as Error).cause)}`;
+      expect(shown, path).not.toContain(dir);
+      expect(shown, path).not.toContain('startup-');
+      expect(r.logs, path).toEqual([]);
+    }
+    await chmod(locked, 0o644);
   });
 });
 
