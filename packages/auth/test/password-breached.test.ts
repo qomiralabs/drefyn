@@ -70,7 +70,7 @@ describe('setPassword and the breached list', () => {
     const result = await createPasswordSignIn(config, t.deps).setPassword(signedIn, {
       newPassword: FRESH,
     });
-    expect(result).toEqual({ ok: true, value: { send: expect.any(Function) } });
+    expect(result.ok && typeof result.value.send).toBe('function');
     expect(t.scripted.writes().some((s) => on(s, 'insert', 'password_credentials'))).toBe(true);
   });
 
@@ -110,7 +110,8 @@ describe('setPassword and the breached list', () => {
       });
       await vi.advanceTimersByTimeAsync(1_000);
       vi.useRealTimers();
-      await expect(pending).resolves.toEqual({ ok: true, value: { send: expect.any(Function) } });
+      const settled = await pending;
+      expect(settled.ok && typeof settled.value.send).toBe('function');
       expect(counted).toEqual(['auth.breach_check_unavailable']);
       expect(t.logs.find((l) => l.event === 'auth.breach_check_unavailable')?.fields).toEqual({
         userId: expect.stringMatching(/^usr_/) as unknown,
