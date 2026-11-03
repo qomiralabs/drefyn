@@ -11,7 +11,8 @@ const VARIANTS: { name: string; theme: Theme; mobile: boolean }[] = [
 // case presses keys until the named control has focus, then compares the page. The ring
 // is drawn the same way in every engine, so Chromium in the pinned image stands for all.
 // What the focused element is: its role attribute, or its tag when the role is native.
-type Focused = 'button' | 'a' | 'switch' | 'menuitem' | 'input' | 'option' | 'tab';
+type Focused =
+  'button' | 'a' | 'switch' | 'menuitem' | 'input' | 'option' | 'tab' | 'row' | 'columnheader';
 
 const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-button--primary', keys: ['Tab'], focused: 'button' },
@@ -53,6 +54,14 @@ const CASES: { id: string; keys: string[]; focused: Focused }[] = [
   { id: 'components-popover--default', keys: ['Tab', 'Enter', 'Tab'], focused: 'switch' },
   { id: 'components-tabs--default', keys: ['Tab'], focused: 'tab' },
   { id: 'components-tabs--disabled', keys: ['Tab', 'ArrowRight'], focused: 'tab' },
+  // The grid's one Tab stop is its first row; the ring sits inside the row's edge.
+  { id: 'components-table--default', keys: ['Tab'], focused: 'row' },
+  { id: 'components-table--selection', keys: ['Tab'], focused: 'row' },
+  {
+    id: 'components-table--default',
+    keys: ['Tab', 'ArrowRight', 'ArrowRight', 'ArrowUp'],
+    focused: 'columnheader',
+  },
   // F6 reaches the notifications, Tab the toast, Tab again Undo. Focus inside holds the timer.
   { id: 'components-toast--undo', keys: ['F6', 'Tab', 'Tab'], focused: 'button' },
 ];

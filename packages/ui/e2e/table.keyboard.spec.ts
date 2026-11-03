@@ -35,6 +35,35 @@ for (const theme of THEMES) {
     await expect(first).toBeFocused();
   });
 
+  test(`the table exposes its name, headers, sort state and rows in ${theme}`, async ({ page }) => {
+    await openStory(page, 'components-table--default', theme);
+    await expect(grid(page)).toMatchAriaSnapshot(`
+      - grid "Pages":
+        - rowgroup:
+          - row "Page Views Edited":
+            - columnheader "Page"
+            - columnheader "Views"
+            - columnheader "Edited"
+        - rowgroup:
+          - row "Refunds":
+            - rowheader "Refunds"
+            - gridcell "1,204"
+            - gridcell "2 hours ago"
+          - row "Create a payout":
+            - rowheader "Create a payout"
+            - gridcell "4,800"
+            - gridcell "Yesterday"
+          - row "API keys":
+            - rowheader "API keys"
+            - gridcell "960"
+            - gridcell "21 Oct"
+          - row "Webhooks":
+            - rowheader "Webhooks"
+            - gridcell "88"
+            - gridcell "14 Oct"
+    `);
+  });
+
   test(`the grid is one Tab stop in ${theme}`, async ({ page, browserName }) => {
     await openStory(page, 'components-table--default', theme);
     await page.keyboard.press(tabKey(browserName));

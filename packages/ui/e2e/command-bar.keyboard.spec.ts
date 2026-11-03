@@ -66,6 +66,26 @@ for (const theme of THEMES) {
     await expect(page.locator('[role="status"]')).toHaveText('No results for “stats”');
   });
 
+  test(`the bar exposes its dialog, field, groups and rows in ${theme}`, async ({ page }) => {
+    await openStory(page, 'components-command-bar--filtered', theme);
+    await expect(page.getByRole('dialog')).toMatchAriaSnapshot(`
+      - dialog "Search or run a command":
+        - combobox "Search or run a command" [expanded]: stat
+        - button "Clear search"
+        - text: In Acme
+        - listbox "Results":
+          - group "Go to":
+            - text: Go to
+            - option "Status page, status.acme.com"
+            - option "Incidents, Status"
+          - group "Actions":
+            - text: Actions
+            - option "Start an incident, Status": Start an incident, Status I
+        - status
+        - paragraph: Up Down to move Enter to run Esc to close
+    `);
+  });
+
   test(`Enter runs the highlighted row, closes and returns focus in ${theme}`, async ({
     page,
     browserName,
