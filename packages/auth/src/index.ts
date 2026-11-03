@@ -11,6 +11,7 @@ export {
   parseAuthConfig,
   type ApiAuthConfig,
   type AuthConfig,
+  type AuthRuntime,
   type EmailMode,
   type Env,
   type OAuthClient,
@@ -19,6 +20,7 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  PRE_MAX_AGE_SECONDS,
   cookieNames,
   serializeCookie,
   sessionCookieValue,
@@ -28,6 +30,7 @@ export {
 } from './cookies.ts';
 export {
   createSessions,
+  type CheckedCredential,
   type ResolvedSession,
   type SessionId,
   type SessionInfo,
@@ -38,6 +41,7 @@ export {
   type RotatedSession,
   type Sessions,
   type SessionsDeps,
+  type StartSessionInput,
   type StartedSession,
   type StepUpMethod,
 } from './sessions.ts';
@@ -175,6 +179,38 @@ export {
   type PasswordContext,
   type PasswordRule,
 } from './password-rules.ts';
+export {
+  PASSWORD_FORM_MAX_BYTES,
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MAX_CHARACTERS,
+  PASSWORD_MIN_CHARACTERS,
+  PASSWORD_RAW_MAX_BYTES,
+  checkNewPassword,
+  normalizePassword,
+  readPasswordSignInForm,
+  type PasswordSignInForm,
+  type WeakPasswordRule,
+} from './password-input.ts';
+export {
+  ARGON2_FLOOR,
+  createPasswordHasher,
+  formatPhc,
+  parsePhc,
+  type Argon2Params,
+  type ParsedPhc,
+  type PasswordCheck,
+  type PasswordHasher,
+  type PasswordHasherOptions,
+} from './password-hash.ts';
+export {
+  createPasswordSignIn,
+  type BotCheck,
+  type PasswordForm,
+  type PasswordSessions,
+  type PasswordSignIn,
+  type PasswordSignInDeps,
+  type PasswordSignInInput,
+} from './password-sign-in.ts';
 export { REDACTED, redact, redactText } from './redact.ts';
 export {
   ORG_ROLES,

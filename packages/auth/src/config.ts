@@ -16,6 +16,7 @@ import {
   type MacPart,
 } from './keys.ts';
 import { createHmac, createSecretKey, hkdfSync } from 'node:crypto';
+import { builtInArgon2 } from './password-hash.ts';
 import { SecretValue } from './secret-value.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -245,9 +246,17 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+// What startup needs to know about the runtime. Tests pass a runtime without Argon2.
+export interface AuthRuntime {
+  readonly argon2: unknown;
+}
+
 // Reads the dashboard's auth settings. Any problem throws AUTH_CONFIG_INVALID naming the
 // key and a fixed reason, never the value.
-export function parseAuthConfig(env: Env): AuthConfig {
+export function parseAuthConfig(
+  env: Env,
+  runtime: AuthRuntime = { argon2: builtInArgon2() },
+): AuthConfig {
   refuseUnknownKeys(env);
 
   const origin = parseOrigin(read(env, 'DREFYN_APP_ORIGIN'));
@@ -352,6 +361,13 @@ export function parseAuthConfig(env: Env): AuthConfig {
           'must be a whole number from 1 to 1024',
         );
   if (enabled) {
+    // A Node built against an older OpenSSL lacks it. Failing here beats a weaker hash.
+    if (typeof runtime.argon2 !== 'function') {
+      invalid(
+        'DREFYN_AUTH_PASSWORDS',
+        'needs crypto.argon2 (Node 24.7 or later on OpenSSL 3.2 or later); this runtime has none, so use the official Node 24 build or set DREFYN_AUTH_PASSWORDS=off',
+      );
+    }
     if (threadPoolSize === null || threadPoolSize <= 4) {
       invalid('UV_THREADPOOL_SIZE', 'must be set above the default of 4 while passwords are on');
     }

@@ -6,7 +6,7 @@ import { sql } from 'kysely';
 import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
-import type { BrowserContext, CookieSpec } from './cookies.ts';
+import { PRE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { deviceHash, isKnownDevice, recordDevice } from './devices.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
@@ -102,7 +102,6 @@ export interface CodeIssuerDeps {
   readonly random?: (bytes: number) => Uint8Array;
 }
 
-const PRE_MAX_AGE_SECONDS = 15 * 60;
 const MAX_ATTEMPTS = 5;
 // People type the gap the mail shows; spaces, tabs and no break spaces are dropped and
 // nothing else is.
