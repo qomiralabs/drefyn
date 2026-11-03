@@ -13,17 +13,37 @@ import {
 import type { UserId } from '@drefyn/tenancy';
 import { afterAll, describe, inject } from 'vitest';
 import {
+  createApiKeyVerifier,
+  createApiKeys,
   createOrganizations,
+  createScopeRegistry,
   createSessions,
   parseAuthConfig,
+  type ApiKeyVerifier,
+  type ApiKeyVerifierDeps,
+  type ApiKeys,
+  type ApiKeysDeps,
   type AuthConfig,
   type AuthLogger,
+  type Env,
   type OrganizationsDeps,
+  type ScopeRegistry,
   type SessionsDeps,
 } from '../../../src/index.ts';
+import { createTestAuthMailer, type TestAuthMailer } from '../../../src/testing.ts';
 import { validEnv } from '../../support.ts';
 import { cloneDatabase, dropDatabase, newName } from './global-setup.ts';
 import { superuser, urlFor } from './stack.ts';
+
+// The scopes the API key tests register, one per product read plus a project scope.
+export const TEST_SCOPES: ScopeRegistry = createScopeRegistry([
+  { scope: 'docs:read', permission: 'docs.read' },
+  { scope: 'studio:read', permission: 'studio.read' },
+  { scope: 'status:read', permission: 'status.read' },
+  { scope: 'docs:projects.create', permission: 'project.create' },
+]);
+
+export const API_RATE_KEY = randomBytes(32).toString('base64url');
 
 export function describeWithStack(name: string, body: () => void): void {
   const absent = inject('authStackAbsent');
@@ -40,6 +60,10 @@ export interface Harness {
   user(email?: string): Promise<UserId>;
   sessions(extra?: Partial<SessionsDeps>): ReturnType<typeof createSessions>;
   organizations(extra?: Partial<OrganizationsDeps>): ReturnType<typeof createOrganizations>;
+  apiKeys(extra?: Partial<ApiKeysDeps>): ApiKeys;
+  // The API service's side: drefyn_app only, with its own failure key.
+  verifier(extra?: Partial<ApiKeyVerifierDeps>, env?: Env): ApiKeyVerifier;
+  readonly mail: TestAuthMailer;
   readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
 }
 
@@ -83,12 +107,14 @@ export function harness() {
         logs.push({ level: 'warn', event, fields });
       },
     };
+    const mail = createTestAuthMailer();
     return {
       name,
       db,
       authDb,
       config,
       logs,
+      mail,
       sql: (text) => superuser(text, name),
       // Sign up is drefyn_auth's job, so users are made the way it makes them.
       async user(email = `p${randomBytes(4).toString('hex')}@example.com`) {
@@ -110,6 +136,10 @@ export function harness() {
           initialTier: 'self_hosted',
           ...extra,
         }),
+      apiKeys: (extra = {}) =>
+        createApiKeys({ db, authDb, logger, scopes: TEST_SCOPES, mailer: mail.mailer, ...extra }),
+      verifier: (extra = {}, env = { DREFYN_API_RATE_LIMIT_KEY: API_RATE_KEY }) =>
+        createApiKeyVerifier(env, { db, logger, ...extra }),
     };
   };
 }
