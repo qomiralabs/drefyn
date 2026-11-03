@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { expect, openStory, recordTransitions, tabKey, test, THEMES } from './fixtures.ts';
+import { expect, MOBILE, openStory, recordTransitions, tabKey, test, THEMES } from './fixtures.ts';
+import { expectSheet, pressScrim, sheetPanel } from './sheet.ts';
 
 const ROW = 'components-popover--in-a-row';
 const trigger = (page: Page) => page.getByRole('button', { name: 'Filters' });
@@ -155,4 +156,93 @@ test('the panel fades in and travels the enter distance', async ({ page }) => {
       { element: 'div', property: 'translate', ms: base },
     ]),
   );
+});
+
+// Below the small breakpoint the panel opens in the shared sheet, which is modal: Tab stays
+// inside, and Escape, the scrim and Close leave it.
+test.describe('on a phone', () => {
+  test.use({ viewport: MOBILE });
+
+  for (const theme of THEMES) {
+    test(`the panel opens in a titled sheet, keeps Tab inside and Escape returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, ROW, theme);
+      await openInRow(page, browserName);
+      await expectSheet(page, 'Filter pages');
+      const sheet = sheetPanel(page, 'Filter pages');
+      await expect(sheet).toBeFocused();
+      for (let i = 0; i < 4; i += 1) {
+        await page.keyboard.press(tabKey(browserName));
+        await expect
+          .poll(() => sheet.evaluate((el) => el.contains(document.activeElement)))
+          .toBe(true);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`a press on the scrim closes the sheet and returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, ROW, theme);
+      await openInRow(page, browserName);
+      await expectSheet(page, 'Filter pages');
+      await pressScrim(page);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`Close in the sheet closes it and returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, ROW, theme);
+      await openInRow(page, browserName);
+      await sheetPanel(page, 'Filter pages').getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`a select inside opens a second sheet that closes back to the panel in ${theme}`, async ({
+      page,
+    }) => {
+      await openStory(page, 'components-popover--with-select', theme);
+      await trigger(page).click();
+      await expectSheet(page, 'Filter pages');
+      const region = page.getByRole('button', { name: /Region$/ });
+      await region.click();
+      await expectSheet(page, 'Region', 'option');
+      await page.getByRole('option', { name: 'United States' }).click();
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(sheetPanel(page, 'Filter pages')).toBeVisible();
+      await expect(page.getByText(/^Region: /)).toHaveText('Region: us');
+      await expect(region).toBeFocused();
+      await region.click();
+      await expectSheet(page, 'Region');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(sheetPanel(page, 'Filter pages')).toBeVisible();
+      await expect(region).toBeFocused();
+    });
+  }
+
+  // With motion allowed the scrim fades on the duration token and the panel rises on the move
+  // token. The reduced motion project proves the same opening only fades.
+  test('the sheet fades its scrim and rises on the move token', async ({ page }) => {
+    await openStory(page, 'components-popover--default', 'light');
+    const recorded = await recordTransitions(page);
+    await trigger(page).click();
+    await expectSheet(page, 'Filter pages');
+    const started = await recorded();
+    expect(started).toEqual(
+      expect.arrayContaining([
+        { element: 'div', property: 'opacity', ms: tokens.motion.duration.base.ms },
+        { element: 'div', property: 'translate', ms: tokens.motion.duration.moveBase.ms },
+      ]),
+    );
+  });
 });

@@ -1,6 +1,17 @@
 import type { Locator, Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { docsEntry, expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import {
+  docsEntry,
+  expect,
+  MOBILE,
+  openPage,
+  openStory,
+  rgb,
+  tabKey,
+  test,
+  THEMES,
+} from './fixtures.ts';
+import { expectSheet, pressScrim } from './sheet.ts';
 
 const STORY = 'components-menu--default';
 const ROW = 'components-menu--in-a-row';
@@ -218,3 +229,60 @@ for (const theme of THEMES) {
     await expect(button).toBeFocused();
   });
 }
+
+// Below the small breakpoint the menu opens in the shared sheet, titled by its trigger.
+test.describe('on a phone', () => {
+  test.use({ viewport: MOBILE });
+
+  for (const theme of THEMES) {
+    test(`the menu opens in a titled sheet, reaches the disabled item and its reason, and Escape returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, STORY, theme);
+      await openWith(page, browserName, 'Enter');
+      await expectSheet(page, 'Payments API', 'menuitem');
+      await expect(item(page, 'Open monitor')).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      const disabled = item(page, 'Hide from audience');
+      await expect(disabled).toBeFocused();
+      await expect(disabled).toHaveAttribute('aria-disabled', 'true');
+      await expect(disabled).toHaveAccessibleDescription('Only an owner can hide a component');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menu')).toBeVisible();
+      await expect(output(page)).toHaveText('Last action: none');
+      await page.keyboard.press('ArrowUp');
+      await expect(item(page, 'Start incident')).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`a press on the scrim closes the sheet and returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, STORY, theme);
+      await openWith(page, browserName, 'Enter');
+      await expectSheet(page, 'Payments API');
+      await pressScrim(page);
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+      await expect(output(page)).toHaveText('Last action: none');
+    });
+
+    test(`Enter in the sheet runs the item and closes it in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, STORY, theme);
+      await openWith(page, browserName, 'Enter');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(output(page)).toHaveText('Last action: Start incident');
+      await expect(trigger(page)).toBeFocused();
+    });
+  }
+});

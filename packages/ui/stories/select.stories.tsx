@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import type { ReactNode } from 'react';
-import { Select, SelectOption } from '../src/react/index.ts';
+import { Button, Dialog, Select, SelectOption, TextField } from '../src/react/index.ts';
 
 const meta = {
   title: 'Components/Select',
@@ -8,7 +8,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'One choice from a short fixed list, under about fifteen options: a role, a region, a plan. For a list that needs typing to search, use a combobox. A hidden native select carries the value, so a form posts it. Keyboard: Enter, Space or the arrow keys open the list; the arrows, Home and End move; typing a letter jumps; Enter chooses and closes; Escape closes and returns focus to the trigger. On a closed trigger, typing a letter chooses the match. A disabled option stays reachable by the arrows and is announced as unavailable. A disabled select stays focusable so its reason can be read. Stories that start open do so only in their own view, so this page stays readable.',
+          'One choice from a short fixed list, under about fifteen options: a role, a region, a plan. For a list that needs typing to search, use a combobox. A hidden native select carries the value, so a form posts it. Keyboard: Enter, Space or the arrow keys open the list; the arrows, Home and End move; typing a letter jumps; Enter chooses and closes; Escape closes and returns focus to the trigger. On a closed trigger, typing a letter chooses the match. Below 640 px the list opens in a bottom sheet titled by the label, with 40 px rows; inside a dialog it opens as a second sheet over it and closes back to it. Escape, a press on the scrim and Close shut the sheet and return focus to the trigger. A disabled option stays reachable by the arrows and is announced as unavailable. A disabled select stays focusable so its reason can be read. Stories that start open do so only in their own view, so this page stays readable.',
       },
     },
   },
@@ -150,6 +150,45 @@ export const Sizes: Story = {
         <SelectOption value="billing">Billing</SelectOption>
         <SelectOption value="outage">An outage</SelectOption>
       </Select>
+    </Frame>
+  ),
+};
+
+// The invite dialog's role picker: on a phone the list opens as a second sheet over the
+// dialog and closes back to it.
+export const InADialog: Story = {
+  name: 'In a dialog',
+  render: () => (
+    <Frame>
+      <Dialog
+        trigger="Invite someone"
+        title="Invite people"
+        footer={(close) => (
+          <>
+            <Button onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={close}>
+              Send invite
+            </Button>
+          </>
+        )}
+      >
+        <TextField id="invite-email" name="email" type="email" label="Email address" />
+        <Select label="Role" name="role" defaultValue="editor">
+          <SelectOption
+            value="owner"
+            disabled
+            description="Only an owner can make someone an owner"
+          >
+            Owner
+          </SelectOption>
+          <SelectOption value="editor" description="Edits pages and publishes drafts">
+            Editor
+          </SelectOption>
+          <SelectOption value="viewer" description="Reads everything, changes nothing">
+            Viewer
+          </SelectOption>
+        </Select>
+      </Dialog>
     </Frame>
   ),
 };

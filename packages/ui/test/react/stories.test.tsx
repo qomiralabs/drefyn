@@ -67,10 +67,23 @@ const REQUIRED: Record<string, string[]> = {
   checkbox: ['Checked', 'Default', 'Disabled', 'Indeterminate', 'Invalid', 'WithDescription'],
   'radio-group': ['Default', 'Disabled', 'Horizontal', 'Invalid', 'WithDescriptions'],
   // An empty list is refused, so a select has a loading state but no empty one.
-  select: ['Chosen', 'Default', 'Disabled', 'Invalid', 'Loading', 'Open', 'Sizes'],
+  select: ['Chosen', 'Default', 'Disabled', 'InADialog', 'Invalid', 'Loading', 'Open', 'Sizes'],
   popover: ['Default', 'Failed', 'IconTrigger', 'InARow', 'Loading', 'Open', 'WithSelect'],
   // The panel holds the loading and empty states; the tabs themselves have neither.
   tabs: ['Default', 'Disabled', 'EmptyPanel', 'LoadingPanel', 'Manual', 'WithCounts'],
+  // A failed refresh keeps the rows, so it is a state of its own beside a failed first load.
+  table: [
+    'Comfortable',
+    'Default',
+    'DisabledRows',
+    'Empty',
+    'Failed',
+    'Loading',
+    'RefreshFailed',
+    'Selection',
+  ],
+  // The results are the states: recent rows, a filter, none, loading and a failed search.
+  'command-bar': ['Default', 'Disabled', 'Failed', 'Filtered', 'Loading', 'NoResults', 'Open'],
 };
 
 // Stories that show a disabled or busy control. The browser paint check opens each and
@@ -88,6 +101,8 @@ const DISABLED: Record<string, string[]> = {
   // The open list shows a disabled option.
   select: ['Disabled', 'Open'],
   tabs: ['Disabled'],
+  table: ['DisabledRows'],
+  'command-bar': ['Disabled'],
 };
 
 // Stories that show a busy button at rest. Busy keeps its variant's paint, so it is checked
