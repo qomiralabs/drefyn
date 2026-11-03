@@ -47,8 +47,9 @@ describe('package layout', () => {
   });
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
-  // the limiter, the session files, organizations, devices, email sign in and email change.
-  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in and email change, and no network or file anywhere', () => {
+  // the limiter, the session files, organizations, devices, email sign in, email change and
+  // password sign in.
+  it('reaches the database only from the limiter, sessions, organizations, devices, email sign in, email change and password sign in, and no network or file anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const allowed: Readonly<Record<string, RegExp>> = {
       'rate-limiter.ts': database,
@@ -59,6 +60,7 @@ describe('package layout', () => {
       'email-sign-in.ts': database,
       'email-change.ts': database,
       'devices.ts': database,
+      'password-sign-in.ts': database,
     };
     const files = readdirSync(src).filter((f) => f.endsWith('.ts'));
     for (const file of files) {
@@ -76,6 +78,7 @@ describe('the main entry', () => {
   it('exports exactly the public API', () => {
     expect(Object.keys(main).sort()).toEqual(
       [
+        'ARGON2_FLOOR',
         'AUTH_CONFIG_KEYS',
         'AuthError',
         'DEVICES_PER_USER',
@@ -83,8 +86,14 @@ describe('the main entry', () => {
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
         'ORG_ROLES',
+        'PASSWORD_FORM_MAX_BYTES',
+        'PASSWORD_MAX_BYTES',
+        'PASSWORD_MAX_CHARACTERS',
+        'PASSWORD_MIN_CHARACTERS',
+        'PASSWORD_RAW_MAX_BYTES',
         'PASSWORD_RULES',
         'PERMISSIONS',
+        'PRE_MAX_AGE_SECONDS',
         'PROJECT_ROLES',
         'RATE_BUCKETS',
         'REDACTED',
@@ -94,6 +103,7 @@ describe('the main entry', () => {
         'SecretValue',
         'canAssign',
         'checkCommonPassword',
+        'checkNewPassword',
         'constantTimeEqual',
         'cookieNames',
         'createApiKeyFailureLimiter',
@@ -101,6 +111,8 @@ describe('the main entry', () => {
         'createEmailChange',
         'createEmailSignIn',
         'createOrganizations',
+        'createPasswordHasher',
+        'createPasswordSignIn',
         'createRateLimiter',
         'createSessions',
         'decodeSecret',
@@ -110,10 +122,12 @@ describe('the main entry', () => {
         'formatApiKey',
         'formatChallengeId',
         'formatInvitationToken',
+        'formatPhc',
         'formatSessionToken',
         'formatVerifyFragment',
         'lengthPrefixed',
         'normalizeAddress',
+        'normalizePassword',
         'parseApiAuthConfig',
         'parseApiKey',
         'parseAuthConfig',
@@ -122,12 +136,14 @@ describe('the main entry', () => {
         'parseCode',
         'parseInvitationToken',
         'parseOrganizationName',
+        'parsePhc',
         'parseSessionToken',
         'parseSignInCodePurpose',
         'parseSlug',
         'parseVerifyFragment',
         'permissionsFor',
         'rateKeyForIp',
+        'readPasswordSignInForm',
         'recordDevice',
         'redact',
         'redactText',
