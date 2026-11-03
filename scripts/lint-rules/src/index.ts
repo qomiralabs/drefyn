@@ -4,6 +4,11 @@ import { noCrossPackageInternals } from './no-cross-package-internals.ts';
 import { noRawEgress } from './no-raw-egress.ts';
 import { noSelectAll } from './no-select-all.ts';
 
+export {
+  allowListProblems,
+  type EgressAllowance,
+  type EgressAllowEntry,
+} from './egress-allow-entry.ts';
 export { egressAllowList } from './egress-allow-list.ts';
 export { classify, noArbitraryValues, type Problem } from './no-arbitrary-values.ts';
 
