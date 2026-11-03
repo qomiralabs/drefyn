@@ -15,7 +15,13 @@ import {
   slugFromOrganizationName,
 } from './organization-rules.ts';
 import { createOrganizations, type InitialTier, type Organizations } from './organizations.ts';
-import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
+import {
+  createRateLimiter,
+  type AuthLogger,
+  type AuthMetrics,
+  type CliLinkOutcome,
+  type RateLimiter,
+} from './rate-limiter.ts';
 import { fail, idFields, ok, quietInfo, unavailable } from './session-support.ts';
 import { createSessions, type Sessions, type StartedSession } from './sessions.ts';
 import { SECRET_BYTES, formatCliLinkToken, parseCliLinkToken } from './tokens.ts';
@@ -40,6 +46,7 @@ export interface CliLinksDeps {
   readonly sessions?: Sessions;
   readonly organizations?: Organizations;
   readonly limiter?: Pick<RateLimiter, 'reserve'>;
+  readonly metrics?: AuthMetrics;
   readonly store?: CliLinkStore;
   readonly random?: (bytes: number) => Uint8Array;
 }
@@ -102,8 +109,17 @@ export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks
       initialTier: deps.initialTier,
     });
 
-  function refused(reason: 'malformed' | 'no_match' | 'rate_limited'): void {
+  function count(outcome: CliLinkOutcome): void {
+    try {
+      deps.metrics?.increment('auth.cli_link', { outcome });
+    } catch {
+      // A metric is never worth a failed sign in.
+    }
+  }
+
+  function refused(reason: Exclude<CliLinkOutcome, 'redeemed'>): void {
     quietInfo(deps.logger, 'auth.cli_link_refused', { reason });
+    count(reason);
   }
 
   // The person the address belongs to, made now when the sign up mode allows it. The
@@ -183,12 +199,23 @@ export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks
     },
 
     async redeem(b, token) {
+      let clientKey: string;
+      try {
+        clientKey = rateKeyForIp(b.ip);
+      } catch (error) {
+        refused('client_address');
+        return fail(error);
+      }
       // Counted first, so a flood of guesses costs one reservation each and nothing more.
       try {
-        await limiter.reserve('cli_link_verify', [rateKeyForIp(b.ip)]);
+        await limiter.reserve('cli_link_verify', [clientKey]);
       } catch (error) {
-        refused('rate_limited');
-        return fail(error);
+        if (error instanceof AuthError && error.code === 'AUTH_RATE_LIMITED') {
+          refused('rate_limited');
+          return fail(error);
+        }
+        refused('unavailable');
+        return fail(new AuthError('AUTH_UNAVAILABLE', { cause: error }));
       }
       const secret = parseCliLinkToken(token);
       if (secret === null) {
@@ -215,14 +242,17 @@ export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks
         }
         userId = idOf('usr', row.user_id);
       } catch (error) {
+        refused('unavailable');
         return fail(unavailable(error));
       }
       // The link stays used if this fails; the operator prints another.
       try {
         const started = await sessions().startSession(b, { userId, method: 'cli_link' });
         quietInfo(deps.logger, 'auth.cli_link_redeemed', idFields({ userId: ['usr', userId] }));
+        count('redeemed');
         return ok(started);
       } catch (error) {
+        refused('unavailable');
         return fail(unavailable(error));
       }
     },

@@ -167,12 +167,13 @@ function configKeyOf(error: DbError): string {
   return /DREFYN_[A-Z_]+/.exec(error.message)?.[0] ?? '';
 }
 
-// Lines on stderr, one JSON object each, with only the ids and reasons auth logs.
-function terminalLogger(stderr: { write(text: string): void }): AuthLogger {
+// Lines on stderr, one JSON object each, with only the ids and reasons auth logs. stdout stays
+// the link alone, so it can be piped.
+export function terminalLogger(stderr: { write(text: string): void }): AuthLogger {
   const line = (level: string) => (event: string, fields: Readonly<Record<string, unknown>>) => {
     stderr.write(`${JSON.stringify({ level, event, ...fields })}\n`);
   };
-  return { info: () => undefined, warn: line('warn') };
+  return { info: line('info'), warn: line('warn') };
 }
 
 async function withDatabases<T>(

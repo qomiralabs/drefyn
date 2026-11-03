@@ -226,6 +226,7 @@ export {
   type AuthLogger,
   type AuthMetricName,
   type AuthMetrics,
+  type CliLinkOutcome,
   type RateLimiter,
   type RateLimiterDeps,
 } from './rate-limiter.ts';

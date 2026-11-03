@@ -516,7 +516,16 @@ function fakeSocket() {
   const end = vi.fn((text: string) => {
     written.push(text);
   });
-  return { socket: { end } as unknown as Duplex, written, end };
+  const handlers = new Map<string, () => void>();
+  const destroy = vi.fn();
+  const socket = {
+    end,
+    destroy,
+    on(event: string, handler: () => void) {
+      handlers.set(event, handler);
+    },
+  } as unknown as Duplex;
+  return { socket, written, end, destroy, handlers };
 }
 
 describe('the upgrade wrapper', () => {
@@ -567,6 +576,14 @@ describe('the upgrade wrapper', () => {
       expect(written.join('')).toMatch(/^HTTP\/1\.1 500 /);
     });
     expect(warn).toHaveBeenCalledWith('dashboard.request_failed', {});
+  });
+
+  it('destroys a socket that errors, so a client reset cannot end the process', () => {
+    const { serve } = upgrades();
+    const { socket, handlers, destroy } = fakeSocket();
+    serve(request({ host: 'evil.example' }), socket, HEAD);
+    handlers.get('error')?.();
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it('warns when something else listens for upgrades, because it would skip these checks', () => {

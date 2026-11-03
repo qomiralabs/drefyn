@@ -1,9 +1,11 @@
 // The dashboard's production entry: Node's HTTP server, the client IP wrapper, then Next's
 // request handler. Run it with `node server.ts` after `next build`.
+import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import next from 'next';
 import { logInfo } from './src/server/log.ts';
-import { createWrapper, startWrapper } from './src/server/wrapper.ts';
+import { createUpgradeWrapper, createWrapper, startWrapper } from './src/server/wrapper.ts';
 
 // Refuses to start on bad wrapper settings, before Next loads anything.
 const config = startWrapper(process.env);
@@ -14,11 +16,23 @@ if (!/^[0-9]{1,5}$/.test(rawPort) || Number(rawPort) > 65_535) {
 }
 const hostname = process.env['HOSTNAME'] ?? '0.0.0.0';
 
-const app = next({ dev: false, dir: import.meta.dirname });
+// On the first routed request Next adds its own upgrade listener to the server it is given,
+// or else to the request's socket's server, which would skip the wrapper. Given this stand in
+// it adds it here, where nothing ever fires, and the real server keeps only the checked one.
+const upgradeStandIn = new EventEmitter() as unknown as Server;
+const app = next({ dev: false, dir: import.meta.dirname, httpServer: upgradeStandIn });
 await app.prepare();
 const handle = app.getRequestHandler();
 
 const server = createServer(createWrapper({ config, handle }));
+server.on(
+  'upgrade',
+  createUpgradeWrapper({
+    config,
+    upgrade: app.getUpgradeHandler(),
+    listeners: () => server.listenerCount('upgrade'),
+  }),
+);
 server.listen(Number(rawPort), hostname, () => {
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : Number(rawPort);

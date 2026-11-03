@@ -299,7 +299,9 @@ describe('the redemption counter and refusal reasons', () => {
 
   const token = formatCliLinkToken(SECRET);
   const refusedWith = (log: ReturnType<typeof logger>) =>
-    log.info.mock.calls.filter(([event]) => event === 'auth.cli_link_refused').map(([, f]) => f);
+    (log.info.mock.calls as [string, unknown][])
+      .filter(([event]) => event === 'auth.cli_link_refused')
+      .map(([, fields]) => fields);
 
   it('counts a redemption once as redeemed', async () => {
     const { subject, increment } = counted({ link: USER });

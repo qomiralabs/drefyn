@@ -229,8 +229,9 @@ with the dashboard's environment, where it runs:
 drefyn auth link --email you@example.com --create-organization "Acme"
 ```
 
-It prints one line, `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_...`, and "Valid once, for 15
-minutes." on stderr. Open it in a browser to sign in. A second open fails, and printing a new
+It prints one line on stdout, `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_...`, and on stderr its
+log events as JSON lines (ids only, never the address or the link) and "Valid once, for 15
+minutes.". Open it in a browser to sign in. A second open fails, and printing a new
 link makes the older unused one worthless. It never sends mail and writes the link nowhere but
 your terminal; treat the scrollback like a password until you have used it. The person is made
 if the address is new, unless `DREFYN_AUTH_SIGNUP=closed`, which only lets existing people in.
@@ -243,6 +244,12 @@ To sign someone out everywhere, for example after a lost laptop:
 drefyn auth revoke-sessions --email person@example.com
 drefyn auth revoke-sessions --all
 ```
+
+Both commands need both database URLs, `DREFYN_DATABASE_URL` and `DREFYN_AUTH_DATABASE_URL`:
+people are found as `drefyn_auth`, and sessions and organizations are written as `drefyn_app`.
+A missing one exits 3 naming it. The auth release flags gate the `/sign-in/cli` page, not these
+commands, because `revoke-sessions` is an incident tool; with the flags off, `link` still
+creates the person and the organization, and the link does nothing until the page is on.
 
 Each prints how many sessions it ended. Exit codes for `drefyn auth`: 0 done, 2 bad input
 (the flag is named, the value never echoed), 3 a setting is missing or invalid (the key is
@@ -266,6 +273,17 @@ client wrote. With 0 hops and forwarding headers arriving, the dashboard logs
 Hops above 0 with a loopback origin stop startup. Behind CloudFront, either count every hop or
 set `DREFYN_CLIENT_IP_HEADER=cloudfront-viewer-address`, which is read only from the trusted
 hop.
+
+Keep the dashboard's port private when hops is above 0. With one hop the wrapper trusts the
+right most `X-Forwarded-For` entry, so anyone who can reach the port directly can name any
+client address they like. Bind it to loopback (`HOSTNAME=127.0.0.1`) when the proxy runs on the
+same host, or to a private network the proxy alone can reach, and never publish it. The default
+is `0.0.0.0`, because a container needs it, so a host port mapping or firewall has to do this
+job.
+
+The wrapper takes only the origin form of a request, a path starting with one `/`. Anything
+else, such as an absolute `http://host/` target, gets 400. WebSocket upgrades pass the same
+Host and target checks as requests.
 
 Set `UV_THREADPOOL_SIZE=16` in the dashboard's environment. Node sizes that pool when it starts,
 so it cannot be set from inside the dashboard. A smaller or missing value logs
