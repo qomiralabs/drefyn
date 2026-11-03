@@ -171,7 +171,10 @@ and stack. `redactText(text)` applies the string rules alone.
 A product read permission (`docs.read`, `studio.read`, `status.read`) is granted for
 each product in `productReach`. `canAssign(actor, target)` lets owners assign any role,
 lets admins assign admin and member, and lets members assign nothing. `ORG_ROLES` and
-`PROJECT_ROLES` are frozen lists.
+`PROJECT_ROLES` are frozen lists. `canChangeRole({ role, self }, from, to)` lets owners set any
+role on anyone else, lets admins move admins and members between the two and never touch an
+owner, and lets nobody raise their own role. `canRemove({ role, self }, target)` lets owners
+remove anyone else and admins remove admins and members; nobody removes themselves.
 
 ## Errors
 
@@ -565,6 +568,32 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
+
+## Roles and removal
+
+```ts
+const roles = createRoles({ db, logger, mailer }); // mailer has sendSecurityNotice
+```
+
+- `changeRole(access, membership, role)` and `removeMember(access, membership)` lock the
+  organization row, read the target and the actor's stored role, decide with `canChangeRole`
+  or `canRemove`, then lock the target membership before writing. Lowering or removing the
+  last owner is `AUTH_LAST_OWNER`; no authority is `AUTH_FORBIDDEN`; an unknown membership is
+  `AUTH_NOT_FOUND`. The same role again is a no op.
+- Removal deletes every API key the person made, then the membership, which takes their
+  pending invitations and project roles with it. A change to member deletes every key they
+  made and all their pending invitations; owner to admin keeps keys and drops only owner
+  invitations. There is no option to keep keys.
+- Every owner gets `member_removed`, `member_keys_revoked` (a demotion that revoked keys) or
+  `owner_added` after the commit. A failed send is logged as `auth.member_notice_failed`
+  and never undoes the change. Logs carry ids and roles only.
+- The database checks the same rules against the person acting (`app.current_actor_id()`).
+  A guarded write that touches no row after the code allowed it is `AUTH_FORBIDDEN` and
+  `auth.role_guard_refused`.
+- `setProjectRole(access, membership, project, role | null)` sets or clears a member's role on
+  one project; owners and admins are project admins everywhere and take no row.
+  `projectRole(access, project)` is the role the person holds there now: `admin` for owners
+  and admins, otherwise the project row, else the default project role, else `null`.
 
 ## API keys
 

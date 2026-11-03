@@ -345,7 +345,11 @@ describeWithStack('role changes at the database', () => {
         const roles = await within(client, ORG_A, actor, async () => {
           await grant(client, MEMBER.member, PROJECT_A, 'editor');
           await grant(client, MEMBER.member, PROJECT_A, 'admin');
-          return (await client.query('select target_project_id, role from app.project_roles')).rows;
+          return (
+            await client.query<{ target_project_id: string; role: string }>(
+              'select target_project_id, role from app.project_roles',
+            )
+          ).rows;
         });
         expect(roles).toEqual([{ target_project_id: PROJECT_A, role: 'admin' }]);
       },
@@ -404,7 +408,11 @@ describeWithStack('role changes at the database', () => {
         await grant(client, MEMBER.member, PROJECT_A, 'viewer');
         await grant(client, MEMBER.member, PROJECT_A2, 'editor');
         await client.query('delete from app.projects where id = $1', [PROJECT_A]);
-        return (await client.query('select target_project_id from app.project_roles')).rows;
+        return (
+          await client.query<{ target_project_id: string }>(
+            'select target_project_id from app.project_roles',
+          )
+        ).rows;
       });
       expect(left).toEqual([{ target_project_id: PROJECT_A2 }]);
     });

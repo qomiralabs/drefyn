@@ -1,6 +1,7 @@
 import { idOf, type IdOf, type ProjectId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
-import { createRoles, createTestAuthMailer, type OrgRole } from '../src/index.ts';
+import { createRoles, type OrgRole } from '../src/index.ts';
+import { createTestAuthMailer } from '../src/testing.ts';
 import { ORG, access } from './api-key-fixtures.ts';
 import { scriptedStore, type Statement } from './scripted-store.ts';
 import { USER, capturingLogger } from './session-fixtures.ts';
@@ -16,26 +17,26 @@ const AT = new Date('2026-11-03T10:00:00.000Z');
 
 const select = (s: Statement, table: string) =>
   /^select\b/i.test(s.sql) && s.sql.includes(`from "${table}"`);
-const isOrgLock = (s: Statement) => select(s, 'organizations') && / for update$/.test(s.sql);
+const isOrgLock = (s: Statement) => select(s, 'organizations') && s.sql.endsWith(' for update');
 const isTargetRead = (s: Statement) =>
-  select(s, 'memberships') && s.sql.includes('"m"."id" = ') && !/ for update$/.test(s.sql);
+  select(s, 'memberships') && s.sql.includes('"m"."id" = ') && !s.sql.endsWith(' for update');
 const isActorRead = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('"user_id" = ') && !s.sql.includes('"m".');
 const isOwnerCount = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('count(*)') && s.sql.includes('"id" <> ');
 const isTargetLock = (s: Statement) =>
-  select(s, 'memberships') && !s.sql.includes('"m".') && / for update$/.test(s.sql);
-const isKeyDelete = (s: Statement) => /^delete from "api_keys"/.test(s.sql);
-const isInvitationDelete = (s: Statement) => /^delete from "invitations"/.test(s.sql);
+  select(s, 'memberships') && !s.sql.includes('"m".') && s.sql.endsWith(' for update');
+const isKeyDelete = (s: Statement) => s.sql.startsWith('delete from "api_keys"');
+const isInvitationDelete = (s: Statement) => s.sql.startsWith('delete from "invitations"');
 const isInvitationCount = (s: Statement) => select(s, 'invitations') && s.sql.includes('count(*)');
-const isRoleUpdate = (s: Statement) => /^update "memberships"/.test(s.sql);
-const isMemberDelete = (s: Statement) => /^delete from "memberships"/.test(s.sql);
+const isRoleUpdate = (s: Statement) => s.sql.startsWith('update "memberships"');
+const isMemberDelete = (s: Statement) => s.sql.startsWith('delete from "memberships"');
 const isOwnersRead = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('"u"."email"') && !s.sql.includes('"m"."id" = ');
 const isProjectRead = (s: Statement) => select(s, 'projects');
 const isProjectRoleRead = (s: Statement) => select(s, 'project_roles');
-const isProjectRoleUpsert = (s: Statement) => /^insert into "project_roles"/.test(s.sql);
-const isProjectRoleDelete = (s: Statement) => /^delete from "project_roles"/.test(s.sql);
+const isProjectRoleUpsert = (s: Statement) => s.sql.startsWith('insert into "project_roles"');
+const isProjectRoleDelete = (s: Statement) => s.sql.startsWith('delete from "project_roles"');
 
 interface World {
   readonly actorRole?: OrgRole | null;
@@ -46,7 +47,7 @@ interface World {
   readonly invitations?: number;
   readonly locked?: boolean;
   readonly written?: boolean;
-  readonly writeError?: unknown;
+  readonly writeError?: Error;
   readonly owners?: readonly string[];
   readonly project?: boolean;
   readonly projectRole?: string | null;
@@ -124,11 +125,15 @@ const kinds = (statements: readonly Statement[]) =>
     return s.sql;
   });
 
+// Locks end in "for update", so writes are told apart by their first word.
+const writesOf = (s: { statements(): Statement[] }) =>
+  s.statements().filter((x) => /^(insert|update|delete)\b/i.test(x.sql));
+
 const refusedPolicy = Object.assign(new Error('new row violates row-level security policy'), {
   code: '42501',
 });
 
-function failed<T>(result: { ok: true; value: T } | { ok: false; error: { code: string } }) {
+function failed(result: { ok: true } | { ok: false; error: { code: string } }) {
   if (result.ok) throw new Error('expected a refusal');
   return result.error;
 }
@@ -214,7 +219,7 @@ describe('changeRole', () => {
     const world = { ...w, actorRole: w.actorRole === undefined ? actor : w.actorRole };
     const { roles, scripted, lines } = setup(world);
     expect(failed(await roles.changeRole(access(actor), TARGET, to)).code).toBe('AUTH_FORBIDDEN');
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     expect(lines.find((l) => l.event === 'auth.role_change_refused')?.fields).toMatchObject({
       outcome: 'AUTH_FORBIDDEN',
@@ -227,7 +232,7 @@ describe('changeRole', () => {
     expect(failed(await roles.changeRole(access('admin'), TARGET, 'admin')).code).toBe(
       'AUTH_FORBIDDEN',
     );
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it('answers AUTH_LAST_OWNER to the last owner lowering themselves', async () => {
@@ -235,7 +240,7 @@ describe('changeRole', () => {
     expect(failed(await roles.changeRole(access('owner'), TARGET, 'admin')).code).toBe(
       'AUTH_LAST_OWNER',
     );
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it('answers AUTH_NOT_FOUND for a membership not in this organization', async () => {
@@ -243,7 +248,7 @@ describe('changeRole', () => {
     expect(failed(await roles.changeRole(access('owner'), TARGET, 'admin')).code).toBe(
       'AUTH_NOT_FOUND',
     );
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it.each<[string, unknown, unknown]>([
@@ -266,7 +271,7 @@ describe('changeRole', () => {
       revokedKeyIds: [],
       deletedInvitations: 0,
     });
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     expect(mail.notices).toEqual([]);
   });
 
@@ -282,7 +287,7 @@ describe('changeRole', () => {
       'AUTH_FORBIDDEN',
     );
     const guard = lines.find((l) => l.event === 'auth.role_guard_refused');
-    expect(guard?.fields).toMatchObject({ membershipId: expect.stringMatching(/^mem_/) });
+    expect(String(guard?.fields['membershipId'])).toMatch(/^mem_/);
     expect(mail.notices).toEqual([]);
   });
 
@@ -398,7 +403,7 @@ describe('removeMember', () => {
 
   it('takes no options: an extra argument cannot keep the keys', async () => {
     const { roles, scripted } = setup({ target: { role: 'member' }, keys: [KEY_1] });
-    const remove = roles.removeMember as (
+    const remove = roles.removeMember.bind(roles) as (
       ...args: unknown[]
     ) => ReturnType<typeof roles.removeMember>;
     await remove(access('owner'), TARGET, { keys: 'keep' });
@@ -412,7 +417,7 @@ describe('removeMember', () => {
   ])('refuses %s with AUTH_FORBIDDEN and writes nothing', async (_label, w, actor) => {
     const { roles, scripted } = setup({ ...w, actorRole: actor });
     expect(failed(await roles.removeMember(access(actor), TARGET)).code).toBe('AUTH_FORBIDDEN');
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it('answers AUTH_LAST_OWNER and AUTH_NOT_FOUND without writing', async () => {
@@ -420,7 +425,7 @@ describe('removeMember', () => {
     expect(failed(await last.roles.removeMember(access('owner'), TARGET)).code).toBe(
       'AUTH_LAST_OWNER',
     );
-    expect(last.scripted.writes()).toEqual([]);
+    expect(writesOf(last.scripted)).toEqual([]);
     const gone = setup({ target: null });
     expect(failed(await gone.roles.removeMember(access('owner'), TARGET)).code).toBe(
       'AUTH_NOT_FOUND',

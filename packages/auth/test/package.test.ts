@@ -60,7 +60,7 @@ describe('package layout', () => {
   // change, password sign in, password account, OAuth and API keys. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
   // breached list lookup and its build command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, password account, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
+  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, devices, email sign in, email change, password sign in, password account, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -70,6 +70,7 @@ describe('package layout', () => {
       'step-up.ts': database,
       'organizations.ts': database,
       'invitations.ts': database,
+      'roles.ts': database,
       'email-sign-in.ts': database,
       'email-change.ts': database,
       'devices.ts': database,
@@ -141,6 +142,8 @@ describe('the main entry', () => {
         'SLUG_PATTERN',
         'SecretValue',
         'canAssign',
+        'canChangeRole',
+        'canRemove',
         'checkCommonPassword',
         'checkNewPassword',
         'constantTimeEqual',
@@ -152,6 +155,7 @@ describe('the main entry', () => {
         'createEmailSignIn',
         'createInvitations',
         'createOrganizations',
+        'createRoles',
         'createPasswordAccount',
         'createPasswordHasher',
         'createPasswordSignIn',
@@ -201,7 +205,15 @@ describe('the main entry', () => {
 
   it('exports exactly the permission model from the pure entry', () => {
     expect(Object.keys(permissions).sort()).toEqual(
-      ['ORG_ROLES', 'PERMISSIONS', 'PROJECT_ROLES', 'canAssign', 'permissionsFor'].sort(),
+      [
+        'ORG_ROLES',
+        'PERMISSIONS',
+        'PROJECT_ROLES',
+        'canAssign',
+        'canChangeRole',
+        'canRemove',
+        'permissionsFor',
+      ].sort(),
     );
   });
 });
