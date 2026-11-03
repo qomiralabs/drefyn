@@ -1,6 +1,6 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { test } from './csp.ts';
-import { banner, commandBar, DESKTOP, MOBILE, ROUTES } from './fixtures.ts';
+import { banner, commandBar, DESKTOP, MOBILE } from './fixtures.ts';
 import { LEAK_PATHS, UNKNOWN_ORG_PATHS } from './leaks.ts';
 
 // Runs in the shell engine projects against the flag on server, and in flag-off against
@@ -44,10 +44,8 @@ async function headersOf(
   return res.headers();
 }
 
-// HEAD for every path, since the loading fixture's GET never finishes; GET too everywhere else.
 for (const path of PATHS) {
-  const methods: readonly Method[] = path === ROUTES.loading ? ['HEAD'] : ['HEAD', 'GET'];
-  for (const method of methods) {
+  for (const method of ['HEAD', 'GET'] as const) {
     test(`${method} ${path} sends every security header with its exact value`, async ({
       request,
     }) => {
@@ -181,10 +179,7 @@ async function openOverlays(page: Page): Promise<void> {
 }
 
 for (const path of LEAK_PATHS) {
-  test(`${path} loads with no CSP violation, overlays and drawer open`, async ({
-    page,
-    browserName,
-  }) => {
+  test(`${path} loads with no CSP violation, overlays and drawer open`, async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     if (!flagOn()) {
       const res = await page.goto(path);
@@ -192,17 +187,7 @@ for (const path of LEAK_PATHS) {
       await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
       return;
     }
-    // The loading fixture never finishes on purpose, so its load event never fires.
-    await page.goto(path, { waitUntil: 'commit' });
-    await expect(page.getByRole('banner')).toBeVisible();
-    await expect
-      .poll(() => page.evaluate(() => performance.getEntriesByType('resource').length))
-      .toBeGreaterThan(0);
-    if (path === ROUTES.loading && browserName === 'webkit') {
-      // TODO(#216): WebKit sometimes never runs the chunks while the stream is open, with
-      // or without the policy. Everything it loads is still checked.
-      return;
-    }
+    await page.goto(path);
     await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
     await openOverlays(page);
     await page.setViewportSize(MOBILE);

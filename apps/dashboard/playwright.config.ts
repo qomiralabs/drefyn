@@ -51,17 +51,17 @@ export default defineConfig({
   projects: [
     {
       name: 'shell-chromium',
-      testMatch: /(shell|states|keyboard|responsive|theme|headers)\.spec\.ts$/,
+      testMatch: /(shell|states|keyboard|responsive|theme|headers|loading)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'shell-firefox',
-      testMatch: /(keyboard|headers)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'shell-webkit',
-      testMatch: /(keyboard|headers)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     {
