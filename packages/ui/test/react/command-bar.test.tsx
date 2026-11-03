@@ -1,5 +1,8 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import { CommandBar } from '../../src/react/index.ts';
@@ -207,5 +210,17 @@ describe('CommandBar', () => {
     render(<Bar onOpenChange={onOpenChange} />);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onOpenChange.mock.calls).toEqual([[false]]);
+  });
+
+  it('hides the browser search cancel button, since it draws its own clear button', () => {
+    render(<Bar />);
+    expect(field().hasAttribute('data-command-field')).toBe(true);
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'react', 'react.css'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /\[data-command-field\]::-webkit-search-cancel-button\s*\{[^}]*display: none;/,
+    );
   });
 });

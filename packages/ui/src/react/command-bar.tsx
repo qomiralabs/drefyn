@@ -255,6 +255,7 @@ function Body({
                 pattern; React Aria leaves the role and the popup to the caller. */}
             <Input
               ref={field}
+              data-command-field=""
               role="combobox"
               aria-expanded="true"
               aria-haspopup="listbox"
