@@ -265,7 +265,19 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
 const FIRST_OWNER =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
 
+const KEY_CREATOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
+  {
+    name: 'app.api_keys.api_key_insert_creator',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: KEY_CREATOR,
+    reason:
+      'a key is created only in the name of an owner or admin membership of its organization, never ownerless',
+  },
   {
     name: 'app.memberships.membership_insert_origin',
     command: 'insert',

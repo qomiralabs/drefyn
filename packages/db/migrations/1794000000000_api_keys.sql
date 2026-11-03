@@ -19,6 +19,10 @@ create table app.api_keys (
   idempotency_key text not null check (char_length(idempotency_key) between 1 and 200),
   request_hash bytea not null check (octet_length(request_hash) = 32),
   created_at timestamptz not null default now(),
+  -- Every scope has the registered shape. No shape has a space, so joining on one is exact.
+  constraint api_keys_scope_shape check (
+    (' ' || array_to_string(scopes, ' '))
+      ~ '^( (docs|studio|status):[a-z][a-z0-9_]{0,30}(\.[a-z][a-z0-9_]{0,30})?)+$'),
   constraint api_keys_expiry_after_creation check (expires_at is null or expires_at > created_at),
   constraint api_keys_organization_id_id_key unique (organization_id, id),
   constraint api_keys_organization_idempotency_key unique (organization_id, idempotency_key),
@@ -41,6 +45,16 @@ grant update (last_used_at) on app.api_keys to drefyn_app;
 create policy tenant_isolation on app.api_keys to drefyn_app
   using (organization_id = app.current_org())
   with check (organization_id = app.current_org());
+
+-- A key always answers to someone who may manage keys: an owner or admin membership of the
+-- same organization, so organization work cannot mint an ownerless key.
+create policy api_key_insert_creator on app.api_keys
+  as restrictive for insert to drefyn_app
+  with check (
+    exists (select from app.memberships m
+             where m.organization_id = api_keys.organization_id
+               and m.id = api_keys.created_by
+               and m.role in ('owner', 'admin')));
 
 create table app.api_key_projects (
   organization_id uuid not null,
