@@ -245,7 +245,8 @@ purpose, code)`, 10 minutes, 5 attempts, single use. A new challenge replaces on
   compare. `AUTH_SIGNUP_CLOSED` comes only after a right code. Typed spaces, tabs and no
   break spaces are dropped. Without a challenge id the browser's newest open challenge is used.
 - `verifyLinkCode(browser, session | null, { challenge, code })` is for the link page: a
-  step up code goes to `verifyStepUpCode` of that session and never signs anyone in.
+  step up code goes to `verifyStepUpCode` of that session, an email change code to
+  `completeEmailChange` (when `emailChange` is wired), and neither ever signs anyone in.
 - A sign in records the browser in `known_devices` (at most 20 per user, the one seen
   longest ago goes) and sets `__Host-drefyn_device` for 400 days when it had none. The cookie
   is never an authenticator. `createCodeIssuer` is the shared issuer for every mail purpose
@@ -254,6 +255,34 @@ purpose, code)`, 10 minutes, 5 attempts, single use. A new challenge replaces on
 - Logs: `auth.email_code_refused` with the outcome code and the first 16 hex digits of the
   `code_verify` key, `auth.sign_in_mail_failed` with the purpose, `auth.device_record_failed`
   with the public user id. Never an address, code, challenge id or cookie.
+
+## Email change
+
+```ts
+const change = createEmailChange(config, { db, authDb, logger, mailer }); // mailer also has sendSecurityNotice
+const started = await change.startEmailChange(browser, session, { newEmail });
+// set started.value.setCookies, answer, then in after(): await started.value.send()
+const done = await change.completeEmailChange(browser, session, { challenge, code });
+// answer, then in after(): await done.value.send() mails the notice to the old address
+```
+
+- Both calls need a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`).
+- Start counts `email_send`, `email_send_ip` and `email_send_address_ceiling` on the new
+  address. A taken address gets the same response, cookies and statements, no mail, and a
+  stored MAC no code can match.
+- The code goes to the new address, bound to the browser (pre cookie) and to the user
+  (`user_id`): another user's session cannot complete it, and its attempt is not spent.
+- A right code runs one `withAuth` transaction: the update of `users` guarded on the user
+  id and the old address, then a delete of every open challenge of the user or for the old
+  address. A moved old address or a unique violation (a sign up won the race) answers
+  `AUTH_CODE_INVALID`, like a wrong code, and changes nothing.
+- Then every other session of the user is deleted. If that delete fails the change stands
+  and `auth.email_change_sessions_kept` is logged.
+- Only sign up and this flow write `users.email_normalized`; `test/address-writes.test.ts`
+  checks the source.
+- Logs: `auth.email_change_started`, `auth.email_change_refused` (outcome),
+  `auth.email_changed` (count of sessions ended), `auth.email_change_notice_failed`, each with
+  public user and session ids. Never an address or code.
 
 ## Organizations
 
