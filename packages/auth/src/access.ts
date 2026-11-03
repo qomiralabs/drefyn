@@ -69,6 +69,16 @@ function productReach(role: OrgRole, defaultRole: ProjectRole | null): ReadonlyS
   return defaultRole === null ? NO_PRODUCT : EVERY_PRODUCT;
 }
 
+// The permissions a membership holds as stored right now, for actions that must not trust an
+// access context built earlier in the request.
+export function storedPermissions(
+  role: unknown,
+  defaultProjectRole: unknown,
+): readonly Permission[] {
+  const stored = storedRole(role);
+  return permissionsFor(stored, productReach(stored, storedDefaultRole(defaultProjectRole)));
+}
+
 export interface AccessFacts {
   readonly organizationId: OrganizationId;
   readonly userId: UserId;

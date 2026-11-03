@@ -66,6 +66,28 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
       - name: Scan history
         run: '"$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1 .'
+      # The repository's own key formats: a key made by the code that issues them must be
+      # caught, and it is written to a scratch directory so none is ever committed.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: The drf_ak_ rule catches a generated API key
+        run: |
+          dir="$(mktemp -d)"
+          node packages/auth/test/gitleaks-fixture.ts "$dir"
+          set +e
+          "$RUNNER_TEMP/gitleaks" dir --config .gitleaks.toml --redact --no-banner \
+            --report-format json --report-path "$RUNNER_TEMP/fixture.json" --exit-code 1 "$dir"
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ] || ! grep -q '"RuleID": "drefyn-api-key"' "$RUNNER_TEMP/fixture.json"; then
+            echo "expected gitleaks to flag the generated key with drefyn-api-key, got exit $code" >&2
+            exit 1
+          fi
+          echo "gitleaks flagged the generated key with drefyn-api-key"
 
   codeql:
     name: codeql

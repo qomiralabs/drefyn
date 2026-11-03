@@ -22,6 +22,31 @@ export interface ApiKeyFailuresTable {
   count: number;
 }
 
+// app.api_key_projects
+export interface ApiKeyProjectsTable {
+  organization_id: string;
+  api_key_id: string;
+  target_project_id: string;
+  created_at: Generated<Date>;
+}
+
+// app.api_keys
+export interface ApiKeysTable {
+  id: Generated<string>;
+  organization_id: string;
+  name: string;
+  secret_hash: Buffer;
+  display_suffix: string;
+  scopes: string[];
+  project_scope: string;
+  created_by: string | null;
+  expires_at: Date | null;
+  last_used_at: Date | null;
+  idempotency_key: string;
+  request_hash: Buffer;
+  created_at: Generated<Date>;
+}
+
 // app.auth_rate_limits
 export interface AuthRateLimitsTable {
   bucket: string;
@@ -159,6 +184,8 @@ export interface UsersTable {
 // Tables in schema app, keyed by name, as the search_path finds them.
 export interface Schema {
   api_key_failures: ApiKeyFailuresTable;
+  api_key_projects: ApiKeyProjectsTable;
+  api_keys: ApiKeysTable;
   auth_rate_limits: AuthRateLimitsTable;
   email_challenges: EmailChallengesTable;
   identities: IdentitiesTable;

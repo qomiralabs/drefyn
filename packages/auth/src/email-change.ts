@@ -1,5 +1,6 @@
 import type { Result } from '@drefyn/address';
 import { DbError, withAuth, withUser, type AuthDatabase, type Database } from '@drefyn/db';
+import type { IdOf, OrganizationId } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
@@ -26,13 +27,25 @@ import {
 import { stepUps, type AuthMailer } from './step-up.ts';
 import { decodeSecret, parseChallengeId, parseCode } from './tokens.ts';
 
-// The notice the old address gets. The app maps it onto the mail package's notice.
-export interface AuthSecurityNotice {
-  readonly kind: 'email_changed';
-  readonly newAddress: string;
-  // Database time of the change.
-  readonly at: Date;
-}
+// Security notices: the old address on an email change, every owner on a new API key. The app
+// maps them onto the mail package's notices, with every value as plain text.
+export type AuthSecurityNotice =
+  | {
+      readonly kind: 'email_changed';
+      readonly newAddress: string;
+      // Database time of the change.
+      readonly at: Date;
+    }
+  | {
+      readonly kind: 'api_key_created';
+      readonly organizationId: OrganizationId;
+      readonly keyId: IdOf<'key'>;
+      readonly keyName: string;
+      // The last 4 characters, the only part of the key ever shown again.
+      readonly displaySuffix: string;
+      // Database time of the creation.
+      readonly at: Date;
+    };
 
 export interface AuthNoticeMailer {
   sendSecurityNotice(to: string, notice: AuthSecurityNotice): Promise<void>;

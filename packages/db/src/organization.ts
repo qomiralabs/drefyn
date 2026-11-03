@@ -1,6 +1,8 @@
 import type { PersonalTableName } from './allow-lists.ts';
 import type { AppUsersTable } from './identity-columns.ts';
 import type {
+  ApiKeyProjectsTable,
+  ApiKeysTable,
   ColumnType,
   MembershipsTable,
   OrganizationsTable,
@@ -23,12 +25,22 @@ type UpdatableOnly<T, K extends keyof T> = {
   [C in keyof T]: ColumnType<SelectOf<T[C]>, InsertOf<T[C]>, C extends K ? UpdateOf<T[C]> : never>;
 };
 
-// Plan, read only state and roles are set at creation; organization work cannot change them.
-type GrantedTables<S> = Omit<S, 'organizations' | 'memberships' | 'projects'> & {
+// Plan, read only state, roles and everything about an API key but its use time are set at
+// creation; organization work cannot change them.
+type GrantedTables<S> = Omit<
+  S,
+  'organizations' | 'memberships' | 'projects' | 'api_keys' | 'api_key_projects'
+> & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
   memberships: UpdatableOnly<MembershipsTable, 'default_project_role' | 'updated_at'>;
   projects: UpdatableOnly<ProjectsTable, 'slug' | 'name' | 'updated_at'>;
+  api_keys: UpdatableOnly<ApiKeysTable, 'last_used_at'>;
+  api_key_projects: UpdatableOnly<ApiKeyProjectsTable, never>;
 };
+
+// Key hashes are organization work. A project path runs with an attacker supplied tenant, so
+// it never names them.
+type ApiKeyTableName = 'api_keys' | 'api_key_projects';
 
 // The identity and limiter tables belong to a person or to sign in, never to an
 // organization. users stays, with drefyn_app's granted columns, for the members page.
@@ -41,4 +53,7 @@ export type OrganizationSchema = OrganizationView<
 // Project work: the project and organization tables, never an identity or limiter table. A
 // project path runs with an attacker supplied tenant, so it must not even name the API key
 // throttle or anyone's address.
-export type TenantSchema = GrantedTables<Omit<Schema, PersonalTableName | 'users'>>;
+export type TenantSchema = Omit<
+  GrantedTables<Omit<Schema, PersonalTableName | 'users'>>,
+  ApiKeyTableName
+>;

@@ -261,11 +261,41 @@ describe('createApiKey', () => {
     const { error, mail } = await refused(INPUT, { inserted: false, replay });
     expect(error).toBeInstanceOf(ApiKeyReplayError);
     expect(error.code).toBe('AUTH_IDEMPOTENCY_REPLAY');
-    const summary = (error as ApiKeyReplayError).key;
+    const summary = (error as ApiKeyReplayError).existing;
     expect(summary).toMatchObject({ keyId: KEY, displaySuffix: 'abcd', projectScope: 'all' });
     expect(JSON.stringify(summary)).not.toContain('drf_ak_');
     expect(Object.keys(summary)).not.toContain('secret');
     expect(mail.notices).toEqual([]);
+  });
+
+  it('replays a listed key with its projects', async () => {
+    const listed = { ...INPUT, projectScope: 'listed' as const, projectIds: [PROJECT_A] };
+    const first = await created({}, listed);
+    const requestHash = insertOf(first.scripted.statements()).parameters.filter((p) =>
+      Buffer.isBuffer(p),
+    )[1];
+    const replay = {
+      id: KEY,
+      name: 'Deploy from CI',
+      display_suffix: 'abcd',
+      scopes: ['docs:read'],
+      project_scope: 'listed',
+      created_by: null,
+      created_at: CREATED_AT,
+      expires_at: null,
+      last_used_at: null,
+      request_hash: requestHash,
+    };
+    const { error } = await refused(listed, {
+      inserted: false,
+      replay,
+      replayProjects: [PROJECT_A],
+    });
+    expect((error as ApiKeyReplayError).existing).toMatchObject({
+      projectScope: 'listed',
+      projectIds: [PROJECT_A],
+      createdBy: null,
+    });
   });
 
   it('refuses the same idempotency key with a different request', async () => {
@@ -295,7 +325,7 @@ describe('createApiKey', () => {
   it('hashes the request the same whatever the order of scopes and projects', async () => {
     const hash = async (input: CreateApiKeyInput) => {
       const { scripted } = await created({}, input);
-      return insertOf(scripted.statements()).parameters.filter(Buffer.isBuffer)[1];
+      return insertOf(scripted.statements()).parameters.filter((p) => Buffer.isBuffer(p))[1];
     };
     const listed = { ...INPUT, projectScope: 'listed' as const };
     const a = await hash({

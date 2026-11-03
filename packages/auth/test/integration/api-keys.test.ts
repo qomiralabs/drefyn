@@ -132,7 +132,7 @@ describeWithStack('API keys against Postgres', () => {
     if (again.ok) return;
     expect(again.error.code).toBe('AUTH_IDEMPOTENCY_REPLAY');
     expect(again.error).toBeInstanceOf(ApiKeyReplayError);
-    const summary = (again.error as ApiKeyReplayError).key;
+    const summary = (again.error as ApiKeyReplayError).existing;
     expect(summary).toEqual(first.value.key);
     expect(JSON.stringify(again.error)).not.toContain(first.value.secret.slice(-20));
     expect(JSON.stringify(summary)).not.toContain(first.value.secret.slice(-20));

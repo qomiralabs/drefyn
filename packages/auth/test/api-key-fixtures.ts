@@ -172,9 +172,15 @@ export function countingLimiter(): ApiKeyFailureLimiter & { readonly keys: strin
   };
 }
 
-export function verifierFor(respond: Responder, limiter: ApiKeyFailureLimiter = countingLimiter()) {
+export function verifierFor(respond: Responder, given?: ApiKeyFailureLimiter) {
+  const counting = countingLimiter();
   const scripted = scriptedStore(respond);
   const { logger, lines } = capturingLogger();
-  const verifier = createApiKeyVerifier(API_ENV, { store: scripted.store, limiter, logger });
-  return { verifier, scripted, lines, limiter };
+  const verifier = createApiKeyVerifier(API_ENV, {
+    store: scripted.store,
+    limiter: given ?? counting,
+    logger,
+  });
+  // The counting limiter's calls; empty when the test hands in its own.
+  return { verifier, scripted, lines, limiter: counting };
 }
