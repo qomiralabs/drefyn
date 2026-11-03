@@ -13,11 +13,14 @@ import {
 import type { UserId } from '@drefyn/tenancy';
 import { afterAll, describe, inject } from 'vitest';
 import {
+  createInvitations,
   createOrganizations,
   createSessions,
   parseAuthConfig,
   type AuthConfig,
   type AuthLogger,
+  type InvitationSend,
+  type InvitationsDeps,
   type OrganizationsDeps,
   type SessionsDeps,
 } from '../../../src/index.ts';
@@ -40,6 +43,12 @@ export interface Harness {
   user(email?: string): Promise<UserId>;
   sessions(extra?: Partial<SessionsDeps>): ReturnType<typeof createSessions>;
   organizations(extra?: Partial<OrganizationsDeps>): ReturnType<typeof createOrganizations>;
+  invitations(
+    extra?: Partial<InvitationsDeps>,
+    config?: AuthConfig,
+  ): ReturnType<typeof createInvitations>;
+  // Every invitation mail any invitations() instance sent, in order.
+  readonly invitationMail: { to: string; invitation: InvitationSend }[];
   readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
 }
 
@@ -76,6 +85,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
     open.push(authDb);
     const config = parseAuthConfig(validEnv(randomBytes(32).toString('base64url')));
     const logs: { level: 'info' | 'warn'; event: string; fields: unknown }[] = [];
+    const invitationMail: { to: string; invitation: InvitationSend }[] = [];
     const logger: AuthLogger = {
       info(event, fields) {
         logs.push({ level: 'info', event, fields });
@@ -90,6 +100,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
       authDb,
       config,
       logs,
+      invitationMail,
       sql: (text) => superuser(text, name),
       // Sign up is drefyn_auth's job, so users are made the way it makes them.
       async user(email = `p${randomBytes(4).toString('hex')}@example.com`) {
@@ -109,6 +120,19 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
           authDb,
           logger,
           initialTier: 'self_hosted',
+          ...extra,
+        }),
+      invitations: (extra = {}, other = config) =>
+        createInvitations(other, {
+          db,
+          authDb,
+          logger,
+          mailer: {
+            sendInvitation(to, invitation) {
+              invitationMail.push({ to, invitation });
+              return Promise.resolve();
+            },
+          },
           ...extra,
         }),
     };

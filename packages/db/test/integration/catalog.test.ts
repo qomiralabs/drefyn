@@ -796,6 +796,33 @@ create policy membership_insert_origin on app.memberships as restrictive for ins
     mentions: ['organization_insert_tier', 'missing'],
     up: () => 'drop policy organization_insert_tier on app.organizations;',
   },
+  'the membership insert guard dropped': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_insert_origin', 'missing'],
+    up: () => 'drop policy membership_insert_origin on app.memberships;',
+  },
+  'the membership insert guard back to the owner arm alone': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_insert_origin', 'WITH CHECK'],
+    up: () => `drop policy membership_insert_origin on app.memberships;
+create policy membership_insert_origin on app.memberships as restrictive for insert to drefyn_app
+  with check (role = 'owner'
+    and not exists (select from app.memberships m where m.organization_id = memberships.organization_id)
+    and exists (select from app.organizations o
+                 where o.organization_id = memberships.organization_id and o.created_at = now()));`,
+  },
+  'the invitation arm without its expiry': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_insert_origin', 'WITH CHECK'],
+    up: () => `drop policy membership_insert_origin on app.memberships;
+create policy membership_insert_origin on app.memberships as restrictive for insert to drefyn_app
+  with check (exists (select from app.invitations i
+    where i.organization_id = memberships.organization_id and i.id = memberships.invitation_id
+      and i.role = memberships.role));`,
+  },
   'a listed restrictive policy made permissive': {
     rule: 'restrictive_policy',
     object: 'app.organizations',

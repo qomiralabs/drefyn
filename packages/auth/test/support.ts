@@ -71,10 +71,14 @@ export function base64url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
+// Fixed, so two configs with different auth secrets still share it, as a rotation does.
+export const BLOCK_KEY = base64url(new Uint8Array(32).fill(11));
+
 export const validEnv = (secret: string = base64url(new Uint8Array(32).fill(7))) =>
   ({
     DREFYN_APP_ORIGIN: 'https://app.drefyn.test',
     DREFYN_AUTH_SECRET: secret,
+    DREFYN_AUTH_INVITATION_BLOCK_KEY: BLOCK_KEY,
     UV_THREADPOOL_SIZE: '16',
   }) as const;
 

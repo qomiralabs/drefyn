@@ -429,6 +429,9 @@ describe('organization entries', () => {
 // pg_get_expr text, read back from Postgres with search_path = pg_catalog.
 const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
+const INVITATION_ARM =
+  '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
+const ORIGIN = `(${OWNER_ARM} OR ${INVITATION_ARM})`;
 
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
@@ -450,7 +453,7 @@ describe('restrictive policies', () => {
         command: 'insert',
         roles: ['drefyn_app'],
         using: null,
-        withCheck: OWNER_ARM,
+        withCheck: ORIGIN,
       },
       {
         name: 'app.organizations.organization_insert_tier',
@@ -466,6 +469,19 @@ describe('restrictive policies', () => {
   it('give the owner arm no way in for an admin or a member', () => {
     const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
     expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+  });
+
+  it('let any other member in only on a live invitation of this organization with the same role', () => {
+    const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
+    const arm = origin?.withCheck?.split(' OR ')[1] ?? '';
+    for (const part of [
+      'i.organization_id = memberships.organization_id',
+      'i.id = memberships.invitation_id',
+      'i.role = memberships.role',
+      'i.expires_at > now()',
+    ]) {
+      expect(arm, part).toContain(part);
+    }
   });
 
   it('pass with an entry that is clean', () => {
