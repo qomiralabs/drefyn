@@ -278,7 +278,6 @@ describeWithStack('organization tables', () => {
       ['organizations', "plan_tier = 'enterprise'"],
       ['organizations', 'read_only_since = null'],
       ['organizations', 'organization_id = organization_id'],
-      ['memberships', "role = 'owner'"],
       ['memberships', 'user_id = user_id'],
       ['projects', 'read_only_since = null'],
     ])('refuses an update of %s set %s with permission denied', async (table, assignment) => {
@@ -296,7 +295,8 @@ describeWithStack('organization tables', () => {
       ['organization_slugs', "slug = 'acme-renamed'"],
     ])('still lets organization work update %s set %s', async (table, assignment) => {
       const app = await as('app');
-      const result = await within(app, { org: ORG_A }, () =>
+      // The owner acts: a membership changes only through the person acting.
+      const result = await within(app, { org: ORG_A, actor: USER_A }, () =>
         app.query(`update app.${table} set ${assignment}`),
       );
       expect(result.rowCount).toBe(1);

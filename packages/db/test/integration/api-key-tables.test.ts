@@ -231,16 +231,26 @@ describeWithStack('API key tables', () => {
     expect(seen).toEqual({ scope: 'listed', listed: 0 });
   });
 
+  // Made an admin, the plain member creates a key, and the owner then removes them.
   it("clear only the creator when the creator's membership goes", async () => {
     const app = await as('app');
-    const seen = await within(app, ORG_A, async () => {
-      await app.query(`delete from app.memberships where id = '${MEMBER_A}'`);
-      const row = await app.query<{ organization_id: string; created_by: string | null }>(
-        `select organization_id, created_by from app.api_keys where id = '${KEY_A}'`,
-      );
-      return row.rows[0];
-    });
-    expect(seen).toEqual({ organization_id: ORG_A, created_by: null });
+    const seen = await within(
+      app,
+      ORG_A,
+      async () => {
+        await app.query(`update app.memberships set role = 'admin' where id = '${PLAIN_A}'`);
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_C]);
+        await app.query(keyInsert(ORG_A, KEY_D, PLAIN_A));
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_A]);
+        const removed = await app.query(`delete from app.memberships where id = '${PLAIN_A}'`);
+        const row = await app.query<{ organization_id: string; created_by: string | null }>(
+          `select organization_id, created_by from app.api_keys where id = '${KEY_D}'`,
+        );
+        return { removed: removed.rowCount, row: row.rows[0] };
+      },
+      USER_A,
+    );
+    expect(seen).toEqual({ removed: 1, row: { organization_id: ORG_A, created_by: null } });
   });
 
   it('give drefyn_auth no grant on either table', async () => {
