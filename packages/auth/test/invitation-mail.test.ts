@@ -24,22 +24,13 @@ function respond(organizationName: string, displayName: string | null): Responde
     if (s.sql.startsWith('select') && s.sql.includes('"organizations"')) {
       return [{ plan_tier: 'self_hosted', name: organizationName }];
     }
-    if (
-      s.sql.startsWith('select') &&
-      s.sql.includes('"memberships"') &&
-      !s.sql.includes('"users"')
-    ) {
-      return [{ id: '01890a5d-ac96-774b-bcce-b302099a8071', role: 'owner' }];
+    if (s.sql.startsWith('select') && s.sql.includes('"display_name"')) {
+      return [
+        { id: '01890a5d-ac96-774b-bcce-b302099a8071', role: 'owner', display_name: displayName },
+      ];
     }
     if (s.sql.startsWith('insert into "invitations"')) {
       return [{ id: INV, send_count: 2, expires_at: new Date('2026-11-10T00:00:00Z') }];
-    }
-    if (
-      s.sql.startsWith('select') &&
-      s.sql.includes('"users"') &&
-      !s.sql.includes('"memberships"')
-    ) {
-      return [{ display_name: displayName }];
     }
     return [];
   };

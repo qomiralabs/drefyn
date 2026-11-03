@@ -73,11 +73,9 @@ async function compileOnly(): Promise<void> {
       .insertInto('invitation_blocks')
       .values({ organization_id: 'x', email_hmac: Buffer.alloc(32) })
       .execute();
+    const hmac = Buffer.alloc(32);
     // @ts-expect-error a block is never edited
-    await tx
-      .updateTable('invitation_blocks')
-      .set({ email_hmac: Buffer.alloc(32) })
-      .execute();
+    await tx.updateTable('invitation_blocks').set({ email_hmac: hmac }).execute();
     // @ts-expect-error nor is a membership moved to another invitation
     await tx.updateTable('memberships').set({ invitation_id: null }).execute();
   });

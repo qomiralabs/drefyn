@@ -9,10 +9,13 @@ import {
 } from './config-keys.ts';
 import { AuthError } from './errors.ts';
 import {
+  BLOCK_KEY_BYTES,
   MIN_SECRET_BYTES,
   deriveAuthKeys,
+  deriveInvitationBlockKeys,
   lengthPrefixed,
   type AuthKeys,
+  type InvitationBlockKeys,
   type MacPart,
 } from './keys.ts';
 import { createHmac, createSecretKey, hkdfSync } from 'node:crypto';
@@ -36,6 +39,7 @@ export interface OAuthClient {
 export interface AuthConfig {
   readonly appOrigin: string;
   readonly keys: AuthKeys;
+  readonly invitationBlocks: InvitationBlockKeys;
   readonly signUp: SignUpMode;
   // auto: on when the app wires a working email transport, which only the app knows.
   readonly email: EmailMode;
@@ -284,6 +288,14 @@ export function parseAuthConfig(
     );
   }
 
+  const blockKey = secretKey(env, 'DREFYN_AUTH_INVITATION_BLOCK_KEY');
+  if (blockKey?.length !== BLOCK_KEY_BYTES) {
+    invalid(
+      'DREFYN_AUTH_INVITATION_BLOCK_KEY',
+      'must be exactly 32 random bytes in unpadded base64url',
+    );
+  }
+
   const github = oauthPair(env, 'GITHUB');
   const google = oauthPair(env, 'GOOGLE');
 
@@ -384,6 +396,7 @@ export function parseAuthConfig(
   return deepFreeze({
     appOrigin: origin.origin,
     keys: deriveAuthKeys(secret, previous ?? null),
+    invitationBlocks: deriveInvitationBlockKeys(blockKey),
     signUp,
     email,
     oauth: { github, google },

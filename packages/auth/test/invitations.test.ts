@@ -21,7 +21,12 @@ import {
   type RateLimiter,
 } from '../src/index.ts';
 import { formatBlockToken, parseBlockToken } from '../src/invitation-links.ts';
-import { scriptedStore, type Responder, type Statement } from './scripted-store.ts';
+import {
+  scriptedStore,
+  type Responder,
+  type ScriptedStore,
+  type Statement,
+} from './scripted-store.ts';
 import {
   AUTHENTICATED_AT,
   SESSION,
@@ -56,20 +61,26 @@ const access = (role: OrgRole = 'admin', tier = 'self_hosted'): AccessContext =>
     authenticatedAt: AUTHENTICATED_AT,
   });
 
+// The person invited, signed in.
+const guest = () => sessionInfo({ email: ADDRESS });
+
+// Statements that change rows. The organization lock is a select, even though it says update.
+const writesOf = (scripted: ScriptedStore) =>
+  scripted.statements().filter((s) => /^(insert|update|delete)\b/.test(s.sql));
+
 const has = (s: Statement, verb: string, table: string) =>
   s.sql.startsWith(`${verb} `) && s.sql.includes(`"${table}"`);
 const isCount = (s: Statement) => s.sql.includes('count(*)');
-const isOrgLock = (s: Statement) => has(s, 'select', 'organizations') && /for update$/.test(s.sql);
+const isOrgLock = (s: Statement) =>
+  has(s, 'select', 'organizations') && s.sql.endsWith('for update');
 const isMemberByAddress = (s: Statement) =>
-  has(s, 'select', 'memberships') && s.sql.includes('"users"');
+  has(s, 'select', 'memberships') && s.sql.includes('"u"."email" = $');
 const isActor = (s: Statement) =>
-  has(s, 'select', 'memberships') && s.sql.includes('"user_id" = $') && !isMemberByAddress(s);
+  has(s, 'select', 'memberships') && s.sql.includes('"display_name"');
 const isInviter = (s: Statement) =>
   has(s, 'select', 'memberships') && !isActor(s) && !isMemberByAddress(s);
 const isBlockRead = (s: Statement) => has(s, 'select', 'invitation_blocks');
 const isUpsert = (s: Statement) => has(s, 'insert into', 'invitations');
-const isInviterName = (s: Statement) =>
-  has(s, 'select', 'users') && !s.sql.includes('"memberships"');
 const isProof = (s: Statement) =>
   has(s, 'select', 'invitations') && s.sql.includes('"secret_hash"') && !isCount(s);
 const isTier = (s: Statement) => has(s, 'select', 'organizations') && !isOrgLock(s) && !isCount(s);
@@ -113,7 +124,8 @@ function world(w: World = {}): Responder {
     if (isMemberByAddress(s)) return w.memberByAddress === true ? [{ id: NEW_MEMBERSHIP }] : [];
     if (isActor(s)) {
       const role = w.actorRole === undefined ? 'admin' : w.actorRole;
-      return role === null ? [] : [{ id: ACTOR_MEMBERSHIP, role }];
+      const displayName = w.displayName === undefined ? 'Ada Admin' : w.displayName;
+      return role === null ? [] : [{ id: ACTOR_MEMBERSHIP, role, display_name: displayName }];
     }
     if (isInviter(s)) {
       const role = w.inviterRole === undefined ? 'admin' : w.inviterRole;
@@ -121,9 +133,6 @@ function world(w: World = {}): Responder {
     }
     if (isBlockRead(s)) return w.blocked === true ? [{ id: 'b' }] : [];
     if (isUpsert(s)) return [{ id: INV, send_count: 1, expires_at: EXPIRES }];
-    if (isInviterName(s)) {
-      return [{ display_name: w.displayName === undefined ? 'Ada Admin' : w.displayName }];
-    }
     if (isProof(s)) {
       const row = w.invitation === undefined ? invitationRow() : w.invitation;
       return row === null ? [] : [row];
@@ -229,7 +238,7 @@ describe('invite', () => {
           expect(result.ok).toBe(allowed);
           if (!allowed) {
             expect(failed(result).code).toBe('AUTH_FORBIDDEN');
-            expect(scripted.writes()).toEqual([]);
+            expect(writesOf(scripted)).toEqual([]);
           }
           if (actor === 'admin' && target === 'owner') expect(result.ok).toBe(false);
         },
@@ -243,7 +252,7 @@ describe('invite', () => {
     expect(failed(await demoted.invitations.invite(access('admin'), input())).code).toBe(
       'AUTH_FORBIDDEN',
     );
-    expect(demoted.scripted.writes()).toEqual([]);
+    expect(writesOf(demoted.scripted)).toEqual([]);
     const gone = setup(world({ actorRole: null }));
     expect(failed(await gone.invitations.invite(access('admin'), input())).code).toBe(
       'AUTH_FORBIDDEN',
@@ -311,10 +320,9 @@ describe('invite', () => {
       if (isBlockRead(s)) return 'block';
       if (isCount(s)) return 'count';
       if (isUpsert(s)) return 'upsert';
-      if (isInviterName(s)) return 'name';
       return s.sql;
     });
-    expect(kinds).toEqual(['lock', 'actor', 'member', 'block', 'count', 'upsert', 'name']);
+    expect(kinds).toEqual(['lock', 'actor', 'member', 'block', 'count', 'upsert']);
     expect(scripted.events.filter((e) => e.kind === 'begin')).toEqual([
       { kind: 'begin', scope: 'organization', organizationId: ORG },
     ]);
@@ -335,7 +343,7 @@ describe('invite', () => {
   it('refuses an address that already belongs to a member, with no write', async () => {
     const { invitations, scripted } = setup(world({ memberByAddress: true }));
     expect(failed(await invitations.invite(access(), input())).code).toBe('AUTH_ALREADY_MEMBER');
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
   });
 
@@ -344,7 +352,7 @@ describe('invite', () => {
     const result = await invitations.invite(access(), input());
     if (!result.ok) throw result.error;
     expect(result.value).toEqual({ kind: 'blocked' });
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     expect(scripted.statements().some(isCount)).toBe(false);
     expect(mail.sent).toEqual([]);
     const read = scripted.statements().find(isBlockRead);
@@ -357,7 +365,7 @@ describe('invite', () => {
     expect(failed(await full.invitations.invite(access('admin', 'starter'), input())).code).toBe(
       'AUTH_SEAT_LIMIT',
     );
-    expect(full.scripted.writes()).toEqual([]);
+    expect(writesOf(full.scripted)).toEqual([]);
     const fits = setup(world({ tier: 'starter', used: seats - 1 }));
     expect((await fits.invitations.invite(access('admin', 'starter'), input())).ok).toBe(true);
   });
@@ -456,14 +464,14 @@ describe('acceptInvitation proves the token first (M5)', () => {
   it('refuses a malformed token with no statement at all', async () => {
     for (const value of ['', 'x', `${token()}x`, token().replace('.', '/')]) {
       const { invitations, scripted } = setup();
-      expect(failed(await invitations.acceptInvitation(sessionInfo(), value)).code).toBe(
+      expect(failed(await invitations.acceptInvitation(guest(), value)).code).toBe(
         'AUTH_INVITATION_INVALID',
       );
       expect(scripted.statements()).toEqual([]);
     }
     const { invitations, scripted } = setup();
     const url = new URL(`https://app.drefyn.test/invite#${token()}`) as unknown as string;
-    expect(failed(await invitations.acceptInvitation(sessionInfo(), url)).code).toBe(
+    expect(failed(await invitations.acceptInvitation(guest(), url)).code).toBe(
       'AUTH_INVITATION_INVALID',
     );
     expect(scripted.statements()).toEqual([]);
@@ -475,12 +483,12 @@ describe('acceptInvitation proves the token first (M5)', () => {
     ['an expired invitation', invitationRow({ live: false }), SECRET],
   ])('sends exactly one statement and no write for %s', async (_, row, secret) => {
     const { invitations, scripted } = setup(world({ invitation: row }));
-    expect(failed(await invitations.acceptInvitation(sessionInfo(), token(secret))).code).toBe(
+    expect(failed(await invitations.acceptInvitation(guest(), token(secret))).code).toBe(
       'AUTH_INVITATION_INVALID',
     );
     expect(scripted.statements()).toHaveLength(1);
     expect(scripted.statements()[0]?.parameters).toEqual(expect.arrayContaining([INV, ORG]));
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     expect(scripted.events[0]).toEqual({
       kind: 'begin',
       scope: 'organization',
@@ -497,7 +505,7 @@ describe('acceptInvitation proves the token first (M5)', () => {
     );
     expect(failed(result).code).toBe('AUTH_INVITATION_EMAIL_MISMATCH');
     expect(scripted.statements()).toHaveLength(1);
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it('compares the address after normalisation', async () => {
@@ -517,17 +525,17 @@ describe('acceptInvitation proves the token first (M5)', () => {
     const { invitations, scripted } = setup(
       world({ inviterRole, invitation: invitationRow({ role }) }),
     );
-    expect(failed(await invitations.acceptInvitation(sessionInfo(), token())).code).toBe(
+    expect(failed(await invitations.acceptInvitation(guest(), token())).code).toBe(
       'AUTH_INVITATION_INVALID',
     );
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it('inserts the membership from the invitation, then deletes the invitation', async () => {
     const { invitations, scripted, lines } = setup(
       world({ invitation: invitationRow({ role: 'admin', default_project_role: null }) }),
     );
-    const result = await invitations.acceptInvitation(sessionInfo(), token());
+    const result = await invitations.acceptInvitation(guest(), token());
     if (!result.ok) throw result.error;
     expect(result.value).toMatchObject({ organizationId: ORG, userId: USER, role: 'admin' });
     expect(result.value.permissions).toContain('org.manage_members');
@@ -549,7 +557,7 @@ describe('acceptInvitation proves the token first (M5)', () => {
 
   it('answers AUTH_ALREADY_MEMBER and keeps the invitation when the person already belongs', async () => {
     const { invitations, scripted } = setup(world({ memberInserted: false }));
-    expect(failed(await invitations.acceptInvitation(sessionInfo(), token())).code).toBe(
+    expect(failed(await invitations.acceptInvitation(guest(), token())).code).toBe(
       'AUTH_ALREADY_MEMBER',
     );
     expect(scripted.statements().some(isInvitationDelete)).toBe(false);
@@ -560,7 +568,7 @@ describe('acceptInvitation proves the token first (M5)', () => {
     const { invitations } = setup(() => {
       throw new Error('down');
     });
-    expect(failed(await invitations.acceptInvitation(sessionInfo(), token())).code).toBe(
+    expect(failed(await invitations.acceptInvitation(guest(), token())).code).toBe(
       'AUTH_UNAVAILABLE',
     );
   });
@@ -574,7 +582,7 @@ describe('the block link', () => {
     expect(result.value).toEqual({ organizationId: ORG, organizationName: 'Acme Widgets' });
     expect(scripted.statements().length).toBeGreaterThan(0);
     for (const s of scripted.statements()) expect(s.sql).toMatch(/^select /);
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
   });
 
   it.each([
@@ -645,7 +653,7 @@ describe('the block link', () => {
     const cases: [string, Responder, Work][] = [
       ['invite', world(), (i) => i.invite(access(), input())],
       ['invite blocked', world({ blocked: true }), (i) => i.invite(access(), input())],
-      ['accept', world(), (i) => i.acceptInvitation(sessionInfo(), token())],
+      ['accept', world(), (i) => i.acceptInvitation(guest(), token())],
       ['read block', world(), (i) => i.readInvitationBlock(blockTokenFor(config))],
       ['seats', world(), (i) => i.seatUsage(access())],
       ['block', world(), (i) => i.blockInvitation(blockTokenFor(config))],
@@ -653,7 +661,7 @@ describe('the block link', () => {
     for (const [name, respond, work] of cases) {
       const { invitations, scripted } = setup(respond);
       await work(invitations);
-      const touches = scripted.writes().some((s) => s.sql.includes('"invitation_blocks"'));
+      const touches = writesOf(scripted).some((s) => s.sql.includes('"invitation_blocks"'));
       expect(touches, name).toBe(name === 'block');
     }
     const src = join(import.meta.dirname, '..', 'src');
@@ -670,7 +678,7 @@ describe('seatUsage', () => {
       used: 3,
       limit: limitFor('starter', 'org.seats'),
     });
-    expect(scripted.writes()).toEqual([]);
+    expect(writesOf(scripted)).toEqual([]);
     for (const s of scripted.statements()) expect(s.parameters).toContain(ORG);
   });
 

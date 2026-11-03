@@ -55,6 +55,18 @@ export {
   type OrganizationsDeps,
 } from './organizations.ts';
 export {
+  createInvitations,
+  type AuthInvitationMailer,
+  type DefaultProjectRole,
+  type InvitationBlockView,
+  type InvitationSend,
+  type InvitationSummary,
+  type InvitationsDeps,
+  type Invitations,
+  type InviteOutcome,
+} from './invitations.ts';
+export { countSeats, type SeatHolder } from './seats.ts';
+export {
   RESERVED_SLUGS,
   SLUG_PATTERN,
   parseOrganizationName,
@@ -73,6 +85,8 @@ export {
   lengthPrefixed,
   sha256,
   type AuthKeys,
+  type BlockLinkParts,
+  type InvitationBlockKeys,
   type KeyPurpose,
   type MacPart,
 } from './keys.ts';

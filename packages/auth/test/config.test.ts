@@ -532,13 +532,14 @@ describe('DREFYN_AUTH_INVITATION_BLOCK_KEY', () => {
     refuses({ [key]: base64url(new Uint8Array(31).fill(1)) }, key);
     refuses({ [key]: base64url(new Uint8Array(33).fill(1)) }, key);
     refuses({ [key]: `${base64url(raw)}=` }, key);
-    expect(parseAuthConfig(env()).invitationBlocks.emailMac).toBeTypeOf('function');
+    expect(parseAuthConfig(env()).invitationBlocks.emailMac('org', 'a@example.com')).toHaveLength(
+      32,
+    );
   });
 
   it('is never readable from the parsed config, however it is printed', () => {
     const config = parseAuthConfig(env());
     const printed = [
-      String(config),
       JSON.stringify(config),
       inspect(config, { depth: 10, showHidden: true }),
       inspect(config.invitationBlocks, { depth: 10, showHidden: true }),

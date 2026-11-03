@@ -260,10 +260,11 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   ),
 ];
 
-// The first owner of an organization made in this transaction, and nobody else. Kept exact,
-// as pg_get_expr prints it.
-const FIRST_OWNER =
-  "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
+// The first owner of an organization made in this transaction, or a member the database can
+// see invited: a live invitation of this organization, named by the row, with the same role.
+// Kept exact, as pg_get_expr prints it.
+const MEMBERSHIP_ORIGIN =
+  "(((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now())))))";
 
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
   {
@@ -271,9 +272,9 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     command: 'insert',
     roles: ['drefyn_app'],
     using: null,
-    withCheck: FIRST_OWNER,
+    withCheck: MEMBERSHIP_ORIGIN,
     reason:
-      'a membership is born only as the first owner of a new organization; any other source needs its own arm',
+      'a membership is born only as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
   },
   {
     name: 'app.organizations.organization_insert_tier',
