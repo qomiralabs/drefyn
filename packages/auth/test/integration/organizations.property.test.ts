@@ -51,6 +51,7 @@ describeWithStack('cross tenant reads under a user context', () => {
   it('each person reads exactly the organizations, slugs and memberships of their own', async () => {
     const sessions = h.sessions();
     const orgs = h.organizations({ limiter: unlimited });
+    const invitations = h.invitations({ limiter: unlimited });
     await fc.assert(
       fc.asyncProperty(world, async ({ people, orgs: plan }) => {
         const persons: Person[] = [];
@@ -73,12 +74,23 @@ describeWithStack('cross tenant reads under a user context', () => {
           for (const m of org.members.filter((m) => m !== org.owner)) {
             const person = persons[m];
             if (person === undefined) throw new Error('no member');
-            // Only an invitation may add a member once the owner exists, and invitations
-            // do not exist yet, so the superuser stands in for acceptance.
-            await h.sql(
-              `insert into app.memberships (organization_id, user_id, role)
-               values ('${result.value.organizationId}', '${person.user}', 'member');`,
+            // The real path: the owner invites, the person accepts with the mailed token.
+            const email = await h.sql(`select email from app.users where id = '${person.user}';`);
+            const sent = await invitations.invite(result.value, {
+              email,
+              role: 'member',
+              defaultProjectRole: null,
+            });
+            if (!sent.ok) throw sent.error;
+            if (sent.value.kind !== 'sent') throw new Error('blocked');
+            await sent.value.send();
+            const mail = h.invitationMail.filter((x) => x.to === email).at(-1);
+            if (mail === undefined) throw new Error('no mail');
+            const accepted = await invitations.acceptInvitation(
+              person.session,
+              mail.invitation.link.hash.slice(1),
             );
+            if (!accepted.ok) throw accepted.error;
             members.add(m);
           }
           made.push({ id: result.value.organizationId, slug, members });

@@ -2,6 +2,8 @@ import type { PersonalTableName } from './allow-lists.ts';
 import type { AppUsersTable } from './identity-columns.ts';
 import type {
   ColumnType,
+  InvitationBlocksTable,
+  InvitationsTable,
   MembershipsTable,
   OrganizationsTable,
   ProjectsTable,
@@ -24,10 +26,25 @@ type UpdatableOnly<T, K extends keyof T> = {
 };
 
 // Plan, read only state and roles are set at creation; organization work cannot change them.
-type GrantedTables<S> = Omit<S, 'organizations' | 'memberships' | 'projects'> & {
+// A resend rewrites an invitation in place but never its address; a block is never edited.
+type GrantedTables<S> = Omit<
+  S,
+  'organizations' | 'memberships' | 'projects' | 'invitations' | 'invitation_blocks'
+> & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
   memberships: UpdatableOnly<MembershipsTable, 'default_project_role' | 'updated_at'>;
   projects: UpdatableOnly<ProjectsTable, 'slug' | 'name' | 'updated_at'>;
+  invitations: UpdatableOnly<
+    InvitationsTable,
+    | 'role'
+    | 'default_project_role'
+    | 'secret_hash'
+    | 'invited_by'
+    | 'send_count'
+    | 'expires_at'
+    | 'updated_at'
+  >;
+  invitation_blocks: UpdatableOnly<InvitationBlocksTable, never>;
 };
 
 // The identity and limiter tables belong to a person or to sign in, never to an

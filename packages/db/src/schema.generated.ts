@@ -59,6 +59,29 @@ export interface IdentitiesTable {
   created_at: Generated<Date>;
 }
 
+// app.invitation_blocks
+export interface InvitationBlocksTable {
+  id: Generated<string>;
+  organization_id: string;
+  email_hmac: Buffer;
+  created_at: Generated<Date>;
+}
+
+// app.invitations
+export interface InvitationsTable {
+  id: Generated<string>;
+  organization_id: string;
+  email_normalized: string;
+  role: string;
+  default_project_role: string | null;
+  secret_hash: Buffer;
+  invited_by: string;
+  send_count: Generated<number>;
+  expires_at: Date;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.known_devices
 export interface KnownDevicesTable {
   id: Generated<string>;
@@ -78,6 +101,7 @@ export interface MembershipsTable {
   default_project_role: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  invitation_id: string | null;
 }
 
 // app.oauth_states
@@ -162,6 +186,8 @@ export interface Schema {
   auth_rate_limits: AuthRateLimitsTable;
   email_challenges: EmailChallengesTable;
   identities: IdentitiesTable;
+  invitation_blocks: InvitationBlocksTable;
+  invitations: InvitationsTable;
   known_devices: KnownDevicesTable;
   memberships: MembershipsTable;
   oauth_states: OauthStatesTable;

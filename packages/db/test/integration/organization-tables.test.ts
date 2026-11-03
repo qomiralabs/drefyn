@@ -198,6 +198,17 @@ describeWithStack('organization tables', () => {
       for (const table of TABLES) expect(counts[table], table).toEqual([ORG_A]);
     });
 
+    it('reads the people who belong to it and no one else, through granted columns only', async () => {
+      const app = await as('app');
+      const seen = await within(app, { org: ORG_A }, async () => ({
+        users: (await app.query<{ id: string; email: string }>('select id, email from app.users'))
+          .rows,
+        hidden: await sqlState(app.query('select email_normalized from app.users')),
+      }));
+      expect(seen.users).toEqual([{ id: USER_A, email: 'a@example.com' }]);
+      expect(seen.hidden).toBe('42501');
+    });
+
     it('a slug is one namespace across organizations', async () => {
       const app = await as('app');
       const third = '01a14984-4476-77ce-9335-1280000001c1';
@@ -519,9 +530,277 @@ describeWithStack('organization tables', () => {
     });
   });
 
+  describe('memberships born from an invitation', () => {
+    const USER_C = '01a14984-4476-77ce-9335-1280000000c1';
+    const INV_ADMIN = '01a14984-4476-77ce-9335-1280000003a1';
+    const INV_MEMBER = '01a14984-4476-77ce-9335-1280000003b1';
+    const INV_EXPIRED = '01a14984-4476-77ce-9335-1280000003c1';
+    const INV_OTHER_ORG = '01a14984-4476-77ce-9335-1280000003d1';
+    const INV_BY_ADMIN = '01a14984-4476-77ce-9335-1280000003e1';
+    const USER_D = '01a14984-4476-77ce-9335-1280000000d1';
+    const USER_E = '01a14984-4476-77ce-9335-1280000000e1';
+    const ADMIN_D = '01a14984-4476-77ce-9335-1280000004d1';
+    const MEMBER_E = '01a14984-4476-77ce-9335-1280000004e1';
+    const inviteAs = (app: pg.Client, inviter: string, email: string, role: string) =>
+      app.query(
+        `insert into app.invitations (organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+         values ($1, $2, $3, decode(repeat('00', 32), 'hex'), $4, now() + interval '1 day')`,
+        [ORG_A, email, role, inviter],
+      );
+    const insert = (
+      app: pg.Client,
+      org: string,
+      user: string,
+      role: string,
+      invitation: string | null,
+    ) =>
+      app.query(
+        'insert into app.memberships (organization_id, user_id, role, invitation_id) values ($1, $2, $3, $4) returning id',
+        [org, user, role, invitation],
+      );
+
+    beforeAll(async () => {
+      const auth = await as('auth');
+      await auth.query(
+        `insert into app.users (id, email, email_normalized, email_verified_at)
+         values ($1, 'c@example.com', 'c@example.com', now())`,
+        [USER_C],
+      );
+      for (const [id, email] of [
+        [USER_D, 'd@example.com'],
+        [USER_E, 'e@example.com'],
+      ] as const) {
+        await auth.query(
+          `insert into app.users (id, email, email_normalized, email_verified_at)
+           values ($1, $2, $2, now())`,
+          [id, email],
+        );
+      }
+      // An admin and a member who joined earlier; their acceptance is not what is tested here.
+      await superuser(
+        `insert into app.memberships (id, organization_id, user_id, role) values
+           ('${ADMIN_D}', '${ORG_A}', '${USER_D}', 'admin'),
+           ('${MEMBER_E}', '${ORG_A}', '${USER_E}', 'member');`,
+        db.name,
+      );
+      const app = await as('app');
+      const invite = (org: string, id: string, email: string, role: string, expires: string) =>
+        `insert into app.invitations (id, organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+         values ('${id}', '${org}', '${email}', '${role}', decode(repeat('00', 32), 'hex'),
+           (select id from app.memberships where organization_id = '${org}' and role = 'owner'), ${expires})`;
+      await committed(app, ORG_A, [
+        invite(ORG_A, INV_ADMIN, 'b@example.com', 'admin', "now() + interval '7 days'"),
+        invite(ORG_A, INV_MEMBER, 'c@example.com', 'member', "now() + interval '7 days'"),
+        invite(ORG_A, INV_EXPIRED, 'x@example.com', 'member', "now() - interval '1 second'"),
+      ]);
+      await committed(app, ORG_A, [
+        `insert into app.invitations (id, organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+         values ('${INV_BY_ADMIN}', '${ORG_A}', 'w@example.com', 'member', decode(repeat('00', 32), 'hex'),
+           '${ADMIN_D}', now() + interval '7 days')`,
+      ]);
+      await committed(app, ORG_B, [
+        invite(ORG_B, INV_OTHER_ORG, 'c@example.com', 'member', "now() + interval '7 days'"),
+      ]);
+    });
+
+    it('refuses a member with no invitation', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(insert(app, ORG_A, USER_C, 'member', null)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('refuses a member on an expired invitation', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(insert(app, ORG_A, USER_C, 'member', INV_EXPIRED)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it.each([
+      ['owner', INV_MEMBER],
+      ['admin', INV_MEMBER],
+      ['member', INV_ADMIN],
+      ['owner', INV_ADMIN],
+    ])('refuses a %s on an invitation for another role', async (role, invitation) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(insert(app, ORG_A, USER_C, role, invitation)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('refuses an invitation of another organization', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(insert(app, ORG_A, USER_C, 'member', INV_OTHER_ORG)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('lets an admin invitation make an admin, then sets it free when the invitation goes', async () => {
+      const app = await as('app');
+      const after = await within(app, { org: ORG_A }, async () => {
+        const made = await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
+        expect(made.rowCount).toBe(1);
+        await app.query('delete from app.invitations where id = $1', [INV_ADMIN]);
+        return (
+          await app.query<{ role: string; invitation_id: string | null }>(
+            'select role, invitation_id from app.memberships where user_id = $1 and organization_id = $2',
+            [USER_B, ORG_A],
+          )
+        ).rows;
+      });
+      expect(after).toEqual([{ role: 'admin', invitation_id: null }]);
+    });
+
+    it('never makes two memberships from one invitation', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, async () => {
+        await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
+        return sqlState(insert(app, ORG_A, USER_C, 'admin', INV_ADMIN));
+      });
+      expect(code).toBe('23505');
+    });
+
+    it("takes an inviter's pending invitations with them when they leave", async () => {
+      const app = await as('app');
+      const left = await within(app, { org: ORG_A }, async () => {
+        const made = await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
+        const admin = made.rows[0] as { id: string };
+        await app.query(
+          `insert into app.invitations (organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+           values ($1, 'y@example.com', 'member', decode(repeat('00', 32), 'hex'), $2, now() + interval '1 day')`,
+          [ORG_A, admin.id],
+        );
+        const count = async () =>
+          (
+            await app.query<{ n: number }>(
+              "select count(*)::int as n from app.invitations where email_normalized = 'y@example.com'",
+            )
+          ).rows[0]?.n;
+        const before = await count();
+        await app.query('delete from app.memberships where id = $1', [admin.id]);
+        return { before, after: await count() };
+      });
+      expect(left).toEqual({ before: 1, after: 0 });
+    });
+
+    it('refuses an admin inviting anyone, themselves included, as owner', async () => {
+      const app = await as('app');
+      for (const email of ['d@example.com', 'new@example.com']) {
+        const code = await within(app, { org: ORG_A }, () =>
+          sqlState(inviteAs(app, ADMIN_D, email, 'owner')),
+        );
+        expect(code, email).toBe('42501');
+      }
+    });
+
+    it.each(['admin', 'member', 'owner'])('refuses a member inviting a %s', async (role) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(inviteAs(app, MEMBER_E, 'new@example.com', role)),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('refuses an invitation that names a membership of no one in this organization', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A }, () =>
+        sqlState(inviteAs(app, INV_OTHER_ORG, 'new@example.com', 'member')),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('refuses raising an invitation to owner by update, a resend included', async () => {
+      const app = await as('app');
+      const byUpdate = await within(app, { org: ORG_A }, () =>
+        sqlState(
+          app.query("update app.invitations set role = 'owner' where id = $1", [INV_BY_ADMIN]),
+        ),
+      );
+      expect(byUpdate).toBe('42501');
+      const byResend = await within(app, { org: ORG_A }, () =>
+        sqlState(
+          app.query(
+            `insert into app.invitations (organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+             values ($1, 'w@example.com', 'owner', decode(repeat('11', 32), 'hex'), $2, now() + interval '7 days')
+             on conflict (organization_id, email_normalized) do update set role = excluded.role`,
+            [ORG_A, ADMIN_D],
+          ),
+        ),
+      );
+      expect(byResend).toBe('42501');
+    });
+
+    it('lets an owner invite an owner and an admin invite an admin', async () => {
+      const app = await as('app');
+      const owner = await within(app, { org: ORG_A }, async () => {
+        const id = (
+          await app.query<{ id: string }>(
+            "select id from app.memberships where organization_id = $1 and role = 'owner'",
+            [ORG_A],
+          )
+        ).rows[0]?.id;
+        return sqlState(inviteAs(app, id ?? '', 'o@example.com', 'owner'));
+      });
+      expect(owner).toBe('no error');
+      const admin = await within(app, { org: ORG_A }, () =>
+        sqlState(inviteAs(app, ADMIN_D, 'a2@example.com', 'admin')),
+      );
+      expect(admin).toBe('no error');
+    });
+
+    it('lets organization work add a block but never lift one', async () => {
+      const app = await as('app');
+      const codes = await within(app, { org: ORG_A }, async () => {
+        const insertBlock = () =>
+          app.query(
+            `insert into app.invitation_blocks (organization_id, email_hmac)
+             values ($1, decode(repeat('11', 32), 'hex'))
+             on conflict (organization_id, email_hmac) do nothing returning id`,
+            [ORG_A],
+          );
+        const first = await insertBlock();
+        const second = await insertBlock();
+        // A refused statement aborts the transaction, so each refusal gets its own savepoint.
+        const refused = async (text: string) => {
+          await app.query('savepoint refusal');
+          const code = await sqlState(app.query(text));
+          await app.query('rollback to savepoint refusal');
+          return code;
+        };
+        return {
+          first: first.rowCount,
+          second: second.rowCount,
+          remove: await refused('delete from app.invitation_blocks'),
+          change: await refused('update app.invitation_blocks set email_hmac = email_hmac'),
+          kept: (await app.query('select count(*)::int as n from app.invitation_blocks')).rows,
+        };
+      });
+      expect(codes).toEqual({
+        first: 1,
+        second: 0,
+        remove: '42501',
+        change: '42501',
+        kept: [{ n: 1 }],
+      });
+    });
+
+    it('reaches no invitation or block of another organization', async () => {
+      const app = await as('app');
+      const seen = await within(app, { org: ORG_B }, async () => ({
+        invitations: (await app.query('select id from app.invitations')).rows,
+      }));
+      expect(seen.invitations).toEqual([{ id: INV_OTHER_ORG }]);
+    });
+  });
+
   it('gives drefyn_auth no grant on any of them', async () => {
     const auth = await as('auth');
-    for (const table of TABLES) {
+    for (const table of [...TABLES, 'invitations', 'invitation_blocks']) {
       expect(await sqlState(auth.query(`select 1 from app.${table}`)), table).toBe('42501');
     }
   });
