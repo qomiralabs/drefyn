@@ -29,7 +29,7 @@ describeWithStack('verifyApiKey timing', () => {
     verifier = h.verifier({ limiter: { reserve: () => Promise.resolve() } });
     await h.sql(`
       insert into app.organizations (organization_id, name, plan_tier)
-        select uuidv7(), 'Org ' || g, 'free' from generate_series(1, ${String(ORGS)}) g;
+        select uuidv7(), 'Org ' || g, 'self_hosted' from generate_series(1, ${String(ORGS)}) g;
       insert into app.projects (organization_id, product, slug, name)
         select o.organization_id, 'docs', 'p' || n, 'Handbook'
           from app.organizations o cross join generate_series(1, 2) n;

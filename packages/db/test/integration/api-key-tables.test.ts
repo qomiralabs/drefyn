@@ -61,7 +61,8 @@ const keyInsert = (org: string, id: string, member: string, extra = '') =>
    values ('${id}', '${org}', 'CI', decode(repeat('ab', 32), 'hex'), 'a1b2', array['docs:read'],
      'listed', '${member}', 'k-${id}', decode(repeat('cd', 32), 'hex') ${extra === '' ? '' : `, ${extra}`})`;
 
-// Two organizations, each with an owner, a docs project and one key listed on that project.
+// Two organizations, made the way creation makes them (install tier, first owner in the same
+// transaction), each with an owner, a docs project and one key listed on that project.
 async function seed(): Promise<void> {
   const auth = await as('auth');
   for (const [id, email] of [
@@ -82,7 +83,7 @@ async function seed(): Promise<void> {
     await app.query('begin');
     await app.query("select set_config('drefyn.organization_id', $1, true)", [org]);
     for (const text of [
-      `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'free')`,
+      `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'self_hosted')`,
       `insert into app.organization_slugs (slug, organization_id) values ('${slug}', '${org}')`,
       `insert into app.memberships (id, organization_id, user_id, role) values ('${member}', '${org}', '${user}', 'owner')`,
       `insert into app.projects (id, organization_id, product, slug, name)
