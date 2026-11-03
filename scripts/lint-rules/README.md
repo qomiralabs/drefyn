@@ -51,6 +51,30 @@ the owning manifest, not by the path. Other exceptions go in
 `/` covers a directory) and a `reason`. The config fails to load if either is missing.
 Every new entry needs a security review.
 
+### Scoped entries
+
+An entry can add `only`, a list of the raw forms that file may use. Everything else in
+the file is reported as usual, so the exception is exactly as wide as the need. Two
+forms exist:
+
+- `{ module: 'node:http', imports: ['createServer'] }` passes a named
+  `import { createServer } from 'node:http'` (type specifiers alongside are fine). A
+  default or namespace import, any other name, the bare `http` specifier, a side effect
+  import, a re-export, `require`, `createRequire`, dynamic `import()` and
+  `process.getBuiltinModule` are still reported.
+- `{ global: 'fetch' }` passes a direct call of the global, `fetch(url, init)`.
+  `globalThis.fetch` and every other member form, passing or aliasing `fetch`, wrapping
+  it in `as`, `fetch.call` and destructuring it from a global object are still reported,
+  and so is `WebSocket`.
+
+Other banned modules stay reported in a scoped file. An entry with `only` must name one
+source file, never a directory, and an entry under `apps/` must have `only`; the config
+fails to load otherwise, naming the entry's path. A whole file entry for the same file
+wins over a scoped one.
+
+A new egress form added to the rule must also be checked inside scoped files, with a
+fixture under `test/fixtures/egress/scoped` that proves the allowance does not cover it.
+
 ESLint reads manifests once per process. Restart an editor's ESLint server after
 changing a `package.json` or `pnpm-workspace.yaml`.
 
