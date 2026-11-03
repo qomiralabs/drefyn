@@ -223,13 +223,15 @@ interface SessionValues {
 }
 
 // One statement: lock the person's password row while it still holds the hash the sign in
-// checked, and insert the session only from that row. A reset that committed first leaves
+// checked, and insert the session only from that row. A reset, change or removal holds the
+// same row while it writes, so the two never interleave. A reset that committed first leaves
 // nothing to select; one that comes later waits on the lock, then deletes this session with
 // the rest.
 async function insertGuarded(
   tx: Transaction<UserSchema>,
   values: SessionValues,
   phc: string,
+  rehash: boolean,
   absoluteDays: number,
 ) {
   return tx
@@ -239,7 +241,9 @@ async function insertGuarded(
         .select('user_id')
         .where('user_id', '=', sql<string>`app.current_user_id()`)
         .where('phc', '=', phc)
-        .forUpdate(),
+        // A rehash writes this row next, so it needs the write lock now: two share locks
+        // that both upgrade would deadlock. A plain sign in only needs the row to stay put.
+        .$call((q) => (rehash ? q.forUpdate() : q.forShare())),
     )
     .insertInto('sessions')
     .columns([
@@ -364,7 +368,13 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
                   })
                   .returning(['id', 'authenticated_at', 'expires_at'])
                   .executeTakeFirstOrThrow()
-              : await insertGuarded(tx, values, credential.phc, absoluteDays);
+              : await insertGuarded(
+                  tx,
+                  values,
+                  credential.phc,
+                  credential.rehash !== undefined,
+                  absoluteDays,
+                );
           if (row === undefined) throw new AuthError('AUTH_CREDENTIALS_INVALID');
           if (credential?.rehash !== undefined) {
             // The row is locked by the insert above, so this always finds the hash it read.

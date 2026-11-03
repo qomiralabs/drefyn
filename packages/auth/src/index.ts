@@ -181,10 +181,23 @@ export {
 export {
   DEVICES_PER_USER,
   DEVICE_MAX_AGE_SECONDS,
+  NEW_DEVICE_AFTER_DAYS,
+  SESSIONS_PAGE_PLACEHOLDER_PATH,
   deviceHash,
+  newDeviceNotice,
   recordDevice,
   userAgentFamily,
+  type NewDevice,
+  type NewDeviceNoticeInput,
+  type RecordedDevice,
 } from './devices.ts';
+export {
+  createPasswordAccount,
+  type PasswordAccount,
+  type PasswordAccountDeps,
+  type PasswordAccountSessions,
+  type PasswordChanged,
+} from './password-account.ts';
 export { rateKeyForIp } from './client-ip.ts';
 export {
   createApiKeyFailureLimiter,
@@ -248,3 +261,18 @@ export {
   type Permission,
   type ProjectRole,
 } from './permissions.ts';
+export { BREACH_CHECK_TIMEOUT_MS, type BreachedPasswordCheck } from './breach-check.ts';
+export {
+  BREACHED_RECORD_BYTES,
+  breachedDigest,
+  loadBreachedPasswords,
+  openBreachedPasswordFile,
+  type BreachedPasswordFile,
+} from './breached-file.ts';
+export {
+  PasswordListError,
+  buildPasswordList,
+  type PasswordListBuild,
+  type PasswordListFailure,
+  type PasswordListSummary,
+} from './password-list.ts';

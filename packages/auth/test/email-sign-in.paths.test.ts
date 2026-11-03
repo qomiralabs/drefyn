@@ -372,7 +372,7 @@ describe('recordDevice', () => {
     });
     const { logger, logs } = recordingLogger();
     const cookies = await recordDevice(config, { store: scripted.store, logger }, browser(), USER);
-    expect(cookies).toEqual([]);
+    expect(cookies).toEqual({ setCookies: [], newDevice: null });
     expect(logs.map((l) => l.event)).toEqual(['auth.device_record_failed']);
     expect(JSON.stringify(logs)).not.toContain(ADDRESS);
   });
@@ -389,7 +389,7 @@ describe('recordDevice', () => {
       { ...b, cookies },
       USER,
     );
-    expect(set).toEqual([]);
+    expect(set).toEqual({ setCookies: [], newDevice: null });
     const insert = scripted.writes().find((s) => on(s, 'insert', 'known_devices'));
     expect(insert?.parameters).toContainEqual(sha256(Buffer.alloc(32, 3)));
     expect(insert?.sql).toMatch(/on conflict \("user_id", "device_hash"\) do update set/);

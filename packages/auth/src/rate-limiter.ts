@@ -12,7 +12,7 @@ import type { ApiAuthConfig, RateLimit } from './config.ts';
 import { AuthError } from './errors.ts';
 import type { AuthKeys, MacPart } from './keys.ts';
 
-export type AuthMetricName = 'auth.email_ceiling_hit';
+export type AuthMetricName = 'auth.email_ceiling_hit' | 'auth.breach_check_unavailable';
 
 export interface AuthMetrics {
   increment(name: AuthMetricName): void;

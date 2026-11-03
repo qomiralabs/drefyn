@@ -441,7 +441,7 @@ describe('setPassword', () => {
     const t = passwordDeps({ known: true, phc: null });
     const flow = createPasswordSignIn(config, t.deps);
     const result = await flow.setPassword(signedIn, { newPassword: 'a brand new sentence' });
-    expect(result).toEqual({ ok: true, value: undefined });
+    expect(result.ok && typeof result.value.send).toBe('function');
     expect(t.sessions.requireRecentAuth).toHaveBeenCalledWith(signedIn);
     expect(t.spy.calls).toEqual([{ kind: 'hash', phc: null, open: 0 }]);
     const insert = t.scripted.statements().find((s) => on(s, 'insert', 'password_credentials'));

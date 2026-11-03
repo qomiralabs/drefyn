@@ -6,6 +6,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./command": "./src/command.ts",
     "./permissions": "./src/permissions.ts",
     "./package.json": "./package.json"
   },

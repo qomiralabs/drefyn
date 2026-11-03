@@ -7,7 +7,14 @@ import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import { PRE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
-import { deviceHash, isKnownDevice, recordDevice } from './devices.ts';
+import {
+  deviceHash,
+  isKnownDevice,
+  newDeviceNotice,
+  recordDevice,
+  sendBoth,
+  type RecordedDevice,
+} from './devices.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import {
@@ -262,7 +269,10 @@ export type LinkVerified =
   | { readonly kind: 'signed_in'; readonly signedIn: SignedIn }
   | { readonly kind: 'stepped_up'; readonly session: SessionInfo }
   // send mails the security notice to the old address; run it after the response.
-  | { readonly kind: 'email_changed'; readonly send: () => Promise<void> };
+  | { readonly kind: 'email_changed'; readonly send: () => Promise<void> }
+  // A reset code: the page asks for the new password and sends it with the code to
+  // completePasswordReset. Nothing is proved or spent yet, and nobody is signed in.
+  | { readonly kind: 'choose_password' };
 
 export interface EmailSignIn {
   // One answer for every address: the same cookies and the same shape, mail or not.
@@ -372,8 +382,12 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
 
   // The user the proved address belongs to, made now when sign up allows it. The invitation
   // is asked again here, so one revoked or accepted since the code was sent lets nobody in.
-  async function userFor(b: BrowserContext, challenge: Challenge): Promise<UserId | null> {
-    if (challenge.user_id !== null) return idOf('usr', challenge.user_id);
+  async function userFor(
+    b: BrowserContext,
+    challenge: Challenge,
+  ): Promise<{ readonly userId: UserId; readonly created: boolean } | null> {
+    if (challenge.user_id !== null)
+      return { userId: idOf('usr', challenge.user_id), created: false };
     const address = challenge.email_normalized;
     const existing = await store.auth((tx) =>
       tx
@@ -382,7 +396,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         .where('email_normalized', '=', address)
         .executeTakeFirst(),
     );
-    if (existing !== undefined) return idOf('usr', existing.id);
+    if (existing !== undefined) return { userId: idOf('usr', existing.id), created: false };
     if (!(await mayCreate(b, address))) return null;
     const id = newId('usr');
     return store.auth(async (tx) => {
@@ -397,14 +411,30 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         .onConflict((c) => c.column('email_normalized').doNothing())
         .returning('id')
         .executeTakeFirst();
-      if (made !== undefined) return idOf('usr', made.id);
+      if (made !== undefined) return { userId: idOf('usr', made.id), created: true };
       // Someone signed this address up a moment ago; that row is the person.
       const row = await tx
         .selectFrom('users')
         .select('id')
         .where('email_normalized', '=', address)
         .executeTakeFirstOrThrow();
-      return idOf('usr', row.id);
+      return { userId: idOf('usr', row.id), created: false };
+    });
+  }
+
+  // The notice a sign in from a new device owes, if any.
+  function deviceSend(
+    recorded: RecordedDevice,
+    session: SessionInfo,
+    method: SessionMethod,
+  ): (() => Promise<void>) | undefined {
+    const seen = recorded.newDevice;
+    if (seen === null) return undefined;
+    return newDeviceNotice(config, deps.mailer, deps.logger, {
+      to: session.email,
+      userId: session.userId,
+      method,
+      seen,
     });
   }
 
@@ -537,22 +567,29 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           method: linked.provider,
         });
         const device = await recordDevice(config, devices, b, linked.userId);
+        const send = sendBoth(
+          linkNotice(address, linked.provider, linked.at),
+          deviceSend(device, started.session, linked.provider),
+        );
         return ok({
           session: started.session,
-          setCookies: [...started.setCookies, ...device],
+          setCookies: [...started.setCookies, ...device.setCookies],
           returnTo: challenge.return_to ?? '/',
-          send: linkNotice(address, linked.provider, linked.at),
+          ...(send === undefined ? {} : { send }),
         });
       }
       // Proved: only now may the answer say that sign up is closed.
-      const userId = await userFor(b, challenge);
-      if (userId === null) return refused('AUTH_SIGNUP_CLOSED', address, binding);
-      const started = await sessions.startSession(b, { userId, method: 'email' });
-      const device = await recordDevice(config, devices, b, userId);
+      const found = await userFor(b, challenge);
+      if (found === null) return refused('AUTH_SIGNUP_CLOSED', address, binding);
+      const started = await sessions.startSession(b, { userId: found.userId, method: 'email' });
+      const device = await recordDevice(config, devices, b, found.userId);
+      // An account made by this very sign in has no device to tell apart from this one.
+      const send = found.created ? undefined : deviceSend(device, started.session, 'email');
       return ok({
         session: started.session,
-        setCookies: [...started.setCookies, ...device],
+        setCookies: [...started.setCookies, ...device.setCookies],
         returnTo: challenge.return_to ?? '/',
+        ...(send === undefined ? {} : { send }),
       });
     } catch (error) {
       return fail(error);
@@ -609,10 +646,19 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         const row = await store.auth((tx) =>
           tx
             .selectFrom('email_challenges')
-            .select('purpose')
+            .select(['purpose', 'browser_hash'])
             .where('id', '=', id)
             .executeTakeFirst(),
         );
+        if (row?.purpose === 'password_reset') {
+          // Read only: the binding is checked here so the page never shows the password
+          // step in a browser that could not finish it.
+          const binding = bindingOf(config, b);
+          if (binding === null || !constantTimeEqual(row.browser_hash, binding)) {
+            return refused('AUTH_CHALLENGE_BINDING');
+          }
+          return ok({ kind: 'choose_password' });
+        }
         if (row?.purpose === 'step_up') {
           // A step up code belongs to a session, never to a sign in.
           if (s === null) return refused('AUTH_CHALLENGE_BINDING');

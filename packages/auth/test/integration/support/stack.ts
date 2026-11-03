@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 // The auth package keeps its own small harness: the db harness is internal to that package,
 // and both run at once under turbo, so this one uses its own database prefix and lock.
@@ -9,12 +8,8 @@ import { dirname, join, resolve } from 'node:path';
 export const repoRoot = resolve(import.meta.dirname, '..', '..', '..', '..', '..');
 const composeFile = join(repoRoot, 'deploy', 'compose.yaml');
 
-// The migrate command as shipped, found through the package rather than a relative path.
-export const migrateCli = join(
-  dirname(createRequire(import.meta.url).resolve('@drefyn/db/package.json')),
-  'src',
-  'cli.ts',
-);
+// The drefyn binary as operators run it. A path, not an import: auth must not depend on cli.
+export const migrateCli = join(repoRoot, 'packages', 'cli', 'src', 'main.ts');
 
 export interface Finished {
   readonly code: number | null;
