@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'kysely';
+import pg from 'pg';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   reserveApiKeyFailureWindows,
   reserveAuthRateWindows,
@@ -25,6 +27,55 @@ let db: TestDatabase;
 let auth: AuthDatabase;
 let app: Database;
 
+// Windows start on the database clock, so a burst can run across the end of one window and
+// be counted from 1 again in the next. The stored rows say which happened; every count must
+// still be handed out exactly once within its window.
+async function storedCounts(table: 'auth_rate_limits' | 'api_key_failures', where: string) {
+  const out = await superuser(
+    `select count from app.${table} where ${where} order by window_start;`,
+    db.name,
+  );
+  return out.trim().split('\n').map(Number);
+}
+
+const keyIs = (label: string) => `key_hmac = decode('${key(label).toString('hex')}', 'hex')`;
+
+const handedOut = (rows: readonly number[]) =>
+  rows.flatMap((n) => Array.from({ length: n }, (_, i) => i + 1)).sort((a, b) => a - b);
+
+const underLimit = (rows: readonly number[], limit: number) =>
+  rows.reduce((sum, n) => sum + Math.min(n, limit), 0);
+
+const total = (rows: readonly number[]) => rows.reduce((sum, n) => sum + n, 0);
+
+const noop = () => undefined;
+
+type Query = (...args: unknown[]) => unknown;
+
+// Stands in for the app process stalling (a GC pause, a busy event loop) right after its
+// reservation reaches the server: every later query on that connection waits for release.
+function stallAfter(table: string) {
+  const original = Reflect.get(pg.Client.prototype, 'query') as Query;
+  const gate = Promise.withResolvers<undefined>();
+  const stalled = new WeakSet<object>();
+  let chosen = false;
+  function query(this: object, ...args: unknown[]): unknown {
+    const send = () => Reflect.apply(original, this, args);
+    if (stalled.has(this)) return gate.promise.then(send);
+    if (!chosen && typeof args[0] === 'string' && args[0].includes(`insert into app.${table}`)) {
+      chosen = true;
+      stalled.add(this);
+    }
+    return send();
+  }
+  vi.spyOn(pg.Client.prototype, 'query').mockImplementation(query);
+  return {
+    release: () => {
+      gate.resolve(undefined);
+    },
+  };
+}
+
 describeWithStack('rate limit windows', () => {
   beforeAll(async () => {
     db = await dbs.fresh('migrated');
@@ -47,8 +98,14 @@ describeWithStack('rate limit windows', () => {
       ),
     );
     const seen = counts.map(([window]) => window?.count ?? 0).sort((a, b) => a - b);
-    expect(seen).toEqual(Array.from({ length: 200 }, (_, i) => i + 1));
-    expect(seen.filter((count) => count <= limit)).toHaveLength(limit);
+    const rows = await storedCounts(
+      'auth_rate_limits',
+      `bucket = 'email_send' and ${keyIs('parallel')}`,
+    );
+    expect(total(rows)).toBe(200);
+    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(seen).toEqual(handedOut(rows));
+    expect(seen.filter((count) => count <= limit)).toHaveLength(underLimit(rows, limit));
   });
 
   it('counts 200 parallel API key failures on one key exactly once each', async () => {
@@ -58,7 +115,63 @@ describeWithStack('rate limit windows', () => {
       ),
     );
     const seen = counts.map(([window]) => window?.count ?? 0).sort((a, b) => a - b);
-    expect(seen).toEqual(Array.from({ length: 200 }, (_, i) => i + 1));
+    const rows = await storedCounts('api_key_failures', keyIs('api'));
+    expect(total(rows)).toBe(200);
+    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(seen).toEqual(handedOut(rows));
+  });
+
+  // Two reservations on one key while one of them stalls. The stalled one is held until the
+  // other has settled, so if its row lock outlived the round trip, the other would time out.
+  async function stallOne(
+    table: 'auth_rate_limits' | 'api_key_failures',
+    reserve: () => Promise<readonly WindowCount[]>,
+  ) {
+    const stall = stallAfter(table);
+    const both = [reserve(), reserve()];
+    try {
+      await Promise.race(both.map((p) => p.then(noop, noop)));
+    } finally {
+      stall.release();
+    }
+    const settled = await Promise.allSettled(both);
+    expect(settled.map((s) => s.status)).toEqual(['fulfilled', 'fulfilled']);
+    return Promise.all(both);
+  }
+
+  it('never holds the row lock of a key while the app process stalls', async () => {
+    const request = { bucket: 'email_verify', keyHmac: key('stall'), windowSeconds: [600] };
+    const counts = await stallOne('auth_rate_limits', () => reserveAuthRateWindows(auth, request));
+    const rows = await storedCounts(
+      'auth_rate_limits',
+      `bucket = 'email_verify' and ${keyIs('stall')}`,
+    );
+    expect(total(rows)).toBe(2);
+    expect(counts.map(([w]) => w?.count).sort()).toEqual(handedOut(rows));
+  });
+
+  it('never holds the row lock of an API key while the app process stalls', async () => {
+    const request = { keyHmac: key('api-stall'), windowSeconds: [600] };
+    const counts = await stallOne('api_key_failures', () =>
+      reserveApiKeyFailureWindows(app, request),
+    );
+    const rows = await storedCounts('api_key_failures', keyIs('api-stall'));
+    expect(total(rows)).toBe(2);
+    expect(counts.map(([w]) => w?.count).sort()).toEqual(handedOut(rows));
+  });
+
+  it('gives up on a key whose row stays locked, after the reservation timeout', async () => {
+    const request = { bucket: 'email_verify', keyHmac: key('locked'), windowSeconds: [600] };
+    await reserveAuthRateWindows(auth, request);
+    const other = await open.auth(authUrl(db));
+    const outcome = await withAuth(auth, async (tx) => {
+      await sql`select 1 from app.auth_rate_limits where ${sql.raw(keyIs('locked'))} for update`.execute(
+        tx,
+      );
+      return reserveAuthRateWindows(other, request).catch((error: unknown) => error);
+    });
+    expect(outcome).toMatchObject({ code: 'DB_TIMEOUT' });
+    expect(total(await storedCounts('auth_rate_limits', keyIs('locked')))).toBe(1);
   });
 
   it('keeps each window and each bucket apart, and says when each window ends', async () => {
@@ -132,13 +245,13 @@ describeWithStack('rate limit windows', () => {
     it('counts 40 sequential attempts whose work throws', async () => {
       const reached = { n: 0 };
       for (let i = 0; i < 40; i += 1) await failing('sequential', reached);
-      expect(reached.n).toBe(limit);
-      const out = await superuser(
-        `select count from app.auth_rate_limits where bucket = 'password_fail'
-            and key_hmac = decode('${key('sequential').toString('hex')}', 'hex');`,
-        db.name,
+      const rows = await storedCounts(
+        'auth_rate_limits',
+        `bucket = 'password_fail' and ${keyIs('sequential')}`,
       );
-      expect(out.trim()).toBe('40');
+      expect(total(rows)).toBe(40);
+      expect(rows.length).toBeLessThanOrEqual(2);
+      expect(reached.n).toBe(underLimit(rows, limit));
     });
 
     it('lets at most the limit of 200 parallel throwing attempts reach the work', async () => {
@@ -146,8 +259,14 @@ describeWithStack('rate limit windows', () => {
       const results = await Promise.all(
         Array.from({ length: 200 }, () => failing('parallel', reached)),
       );
-      expect(reached.n).toBe(limit);
-      expect(results.filter((r) => r === 'limited')).toHaveLength(200 - limit);
+      const rows = await storedCounts(
+        'auth_rate_limits',
+        `bucket = 'password_fail' and ${keyIs('parallel')}`,
+      );
+      expect(total(rows)).toBe(200);
+      expect(rows.length).toBeLessThanOrEqual(2);
+      expect(reached.n).toBe(underLimit(rows, limit));
+      expect(results.filter((r) => r === 'limited')).toHaveLength(200 - underLimit(rows, limit));
     });
 
     it('counts API key failures before the work too', async () => {
@@ -163,7 +282,12 @@ describeWithStack('rate limit windows', () => {
           () => undefined,
         );
       }
-      expect(counts.map(([w]) => w?.count)).toEqual([1, 2, 3, 4, 5]);
+      const rows = await storedCounts('api_key_failures', keyIs('api-throw'));
+      expect(total(rows)).toBe(5);
+      expect(rows.length).toBeLessThanOrEqual(2);
+      // In order: 1 to 5, or counting from 1 again once the window ends.
+      const expected = rows.flatMap((n) => Array.from({ length: n }, (_, i) => i + 1));
+      expect(counts.map(([w]) => w?.count)).toEqual(expected);
     });
   });
 
