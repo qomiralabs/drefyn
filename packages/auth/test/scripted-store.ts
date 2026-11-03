@@ -110,6 +110,16 @@ export function scriptedStore(respond: Responder = () => []) {
         .transaction()
         .execute((tx) => work(tx as unknown as Transaction<OrganizationSchema>));
     },
+    organizationAs<T>(
+      organizationId: OrganizationId,
+      actorUserId: UserId,
+      work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
+    ): Promise<T> {
+      events.push({ kind: 'begin', scope: 'organization', organizationId, actorUserId });
+      return kysely
+        .transaction()
+        .execute((tx) => work(tx as unknown as Transaction<OrganizationSchema>));
+    },
   };
 
   return {

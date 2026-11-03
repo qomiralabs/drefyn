@@ -1,4 +1,4 @@
-import type { OrganizationRef, TenantRef, UserRef } from '@drefyn/tenancy';
+import type { OrganizationRef, TenantRef, UserId, UserRef } from '@drefyn/tenancy';
 import {
   DefaultQueryExecutor,
   DummyDriver,
@@ -380,7 +380,8 @@ function contextCheck(settings: TenantSettings): string {
   return `do $$ begin
   if current_setting('drefyn.organization_id', true) is distinct from '${settings.organizationId}'
      or current_setting('drefyn.project_id', true) is distinct from '${settings.projectId}'
-     or current_setting('drefyn.user_id', true) is distinct from '${settings.userId}' then
+     or current_setting('drefyn.user_id', true) is distinct from '${settings.userId}'
+     or current_setting('drefyn.actor_user_id', true) is distinct from '${settings.actorUserId}' then
     raise exception 'the tenant context changed inside the transaction' using errcode = '${CONTEXT_CHANGED}';
   end if;
 end $$; commit`;
@@ -453,7 +454,11 @@ async function runTransaction<DB, T>(
     // Always set, empty where the entry point has none, so nothing left on the session can
     // stand in.
     await client.query("select set_config('drefyn.project_id', $1, true)", [settings.projectId]);
-    await client.query("select set_config('drefyn.user_id', $1, true)", [settings.userId]);
+    // The actor rides with the user, so naming it costs no round trip.
+    await client.query(
+      "select set_config('drefyn.user_id', $1, true), set_config('drefyn.actor_user_id', $2, true)",
+      [settings.userId, settings.actorUserId],
+    );
     let result: T;
     try {
       result = await work(transactionOn<DB>(connection));
@@ -537,7 +542,13 @@ export async function withTenant<T>(
 // tables read as empty, so the wider scope is said out loud at the call site.
 export async function withOrganization<T>(
   db: Database,
-  org: OrganizationRef & { readonly projectId?: never; readonly userId?: never },
+  org: OrganizationRef & {
+    readonly projectId?: never;
+    readonly userId?: never;
+    // The person acting. Only restrictive policies read it; without it, guarded writes
+    // (a key, an invitation, a membership) are refused.
+    readonly actorUserId?: UserId;
+  },
   work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
   options?: TransactionOptions,
 ): Promise<T> {
@@ -654,7 +665,8 @@ async function runAlone<R>(
       `set local statement_timeout = ${String(timeoutMs)}`,
       `select set_config('drefyn.organization_id', '${settings.organizationId}', true),
               set_config('drefyn.project_id', '${settings.projectId}', true),
-              set_config('drefyn.user_id', '${settings.userId}', true)`,
+              set_config('drefyn.user_id', '${settings.userId}', true),
+              set_config('drefyn.actor_user_id', '${settings.actorUserId}', true)`,
       statement,
       'commit',
     ].join(';\n');

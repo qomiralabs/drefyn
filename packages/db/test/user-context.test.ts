@@ -324,7 +324,7 @@ describe('an API key limiter transaction', () => {
     await expect(withApiKeyLimiter(db, () => Promise.resolve('ok'))).resolves.toBe('ok');
     const sent = clients[0]?.sent ?? [];
     expect(sent[0]?.text).toBe('begin; set local statement_timeout = 2000');
-    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['']]);
+    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['', '']]);
     expect(sent[5]?.text).toBe('discard all');
   });
 
