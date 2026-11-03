@@ -1,8 +1,9 @@
 'use client';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Button, Menu as AriaMenu, MenuTrigger, Popover } from 'react-aria-components';
 import { buttonClasses, LABEL_CELL, type ButtonShape, type ButtonSize } from './button-classes.ts';
+import { Sheet, usePhone, useTriggerText } from './sheet.tsx';
 
 export interface MenuProps {
   // What the trigger shows.
@@ -14,7 +15,8 @@ export interface MenuProps {
   // Round when the trigger is a circle, such as initials; its edge, hover and open fills
   // then follow the circle.
   triggerShape?: ButtonShape;
-  // The menu's accessible name; the trigger names it when this is not set.
+  // The menu's accessible name; the trigger names it when this is not set. On a phone it
+  // also titles the sheet, before the trigger label and the trigger's own text.
   label?: string;
   onAction?: (id: string) => void;
   defaultOpen?: boolean;
@@ -26,8 +28,8 @@ export interface MenuProps {
 // state, which honours it. Items still get aria-disabled and ignore activation.
 const REACHABLE_WHEN_DISABLED = { disabledBehavior: 'selection' } as Record<string, unknown>;
 
-// A trigger styled by the button class function, a popover on the overlay surface and a
-// React Aria menu. The trigger shows the pressed fill while the menu is open.
+// A trigger styled by the button class function, a popover on the overlay surface, or the
+// bottom sheet on a phone, and a React Aria menu. The trigger shows the pressed fill while the menu is open.
 export function Menu({
   trigger,
   triggerLabel,
@@ -44,6 +46,15 @@ export function Menu({
   const [open, setOpen] = useState(defaultOpen);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
+  const phone = usePhone();
+  const [readTrigger, triggerText] = useTriggerText();
+  const setTrigger = useCallback(
+    (el: HTMLButtonElement | null) => {
+      triggerRef.current = el;
+      readTrigger(el);
+    },
+    [readTrigger],
+  );
 
   // Tab and Shift+Tab close the menu and move on from the trigger, as if it had never opened,
   // so a keyboard user keeps their place. React Aria handles Tab on the document in the
@@ -66,43 +77,59 @@ export function Menu({
       window.removeEventListener('keydown', onKeyDown, true);
     };
   }, []);
+  const list = (
+    <>
+      <AriaMenu
+        {...REACHABLE_WHEN_DISABLED}
+        // React Aria names the menu by its trigger, and an undefined prop does not override
+        // that, so a label of its own is a hidden element the menu points at instead.
+        {...(label === undefined ? {} : { 'aria-labelledby': labelId })}
+        {...(onAction === undefined
+          ? {}
+          : {
+              onAction: (key) => {
+                onAction(String(key));
+              },
+            })}
+        className="flex flex-col outline-none"
+      >
+        {children}
+      </AriaMenu>
+      {label === undefined ? null : (
+        <span id={labelId} hidden>
+          {label}
+        </span>
+      )}
+    </>
+  );
   return (
     <MenuTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
-        ref={triggerRef}
+        ref={setTrigger}
         {...(iconOnly ? { 'aria-label': triggerLabel } : {})}
         className={`${buttonClasses({ variant, size, disabled: false, iconOnly, shape: triggerShape })} aria-expanded:bg-pressed`}
       >
         <span className={LABEL_CELL}>{trigger}</span>
       </Button>
-      <Popover
-        ref={popoverRef}
-        placement="bottom start"
-        offset={4}
-        className="z-overlay min-w-128 overflow-auto rounded-md border border-rule-strong bg-overlay p-4 shadow-1"
-      >
-        <AriaMenu
-          {...REACHABLE_WHEN_DISABLED}
-          // React Aria names the menu by its trigger, and an undefined prop does not override
-          // that, so a label of its own is a hidden element the menu points at instead.
-          {...(label === undefined ? {} : { 'aria-labelledby': labelId })}
-          {...(onAction === undefined
-            ? {}
-            : {
-                onAction: (key) => {
-                  onAction(String(key));
-                },
-              })}
-          className="flex flex-col outline-none"
+      {phone ? (
+        <Sheet
+          title={label ?? triggerLabel ?? triggerText}
+          open={open}
+          onOpenChange={setOpen}
+          trigger={triggerRef}
         >
-          {children}
-        </AriaMenu>
-        {label === undefined ? null : (
-          <span id={labelId} hidden>
-            {label}
-          </span>
-        )}
-      </Popover>
+          {list}
+        </Sheet>
+      ) : (
+        <Popover
+          ref={popoverRef}
+          placement="bottom start"
+          offset={4}
+          className="z-overlay min-w-128 overflow-auto rounded-md border border-rule-strong bg-overlay p-4 shadow-1"
+        >
+          {list}
+        </Popover>
+      )}
     </MenuTrigger>
   );
 }
