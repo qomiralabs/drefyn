@@ -432,13 +432,15 @@ const OWNER_ARM =
 const INVITATION_ARM =
   '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
 const ORIGIN = `(${OWNER_ARM} OR ${INVITATION_ARM})`;
+const INVITER =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
   });
 
-  it('list the two insert guards, for drefyn_app, with their exact text', () => {
+  it('list the insert and update guards, for drefyn_app, with their exact text', () => {
     expect(
       RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
         name,
@@ -448,6 +450,20 @@ describe('restrictive policies', () => {
         withCheck,
       })),
     ).toEqual([
+      {
+        name: 'app.invitations.invitation_insert_inviter',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: INVITER,
+      },
+      {
+        name: 'app.invitations.invitation_update_inviter',
+        command: 'update',
+        roles: ['drefyn_app'],
+        using: 'true',
+        withCheck: INVITER,
+      },
       {
         name: 'app.memberships.membership_insert_origin',
         command: 'insert',

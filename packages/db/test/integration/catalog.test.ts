@@ -796,6 +796,20 @@ create policy membership_insert_origin on app.memberships as restrictive for ins
     mentions: ['organization_insert_tier', 'missing'],
     up: () => 'drop policy organization_insert_tier on app.organizations;',
   },
+  'the invitation inviter guard dropped': {
+    rule: 'restrictive_policy',
+    object: 'app.invitations',
+    mentions: ['invitation_insert_inviter', 'missing'],
+    up: () => 'drop policy invitation_insert_inviter on app.invitations;',
+  },
+  'the invitation update guard loosened to any role': {
+    rule: 'restrictive_policy',
+    object: 'app.invitations',
+    mentions: ['invitation_update_inviter', 'WITH CHECK'],
+    up: () => `drop policy invitation_update_inviter on app.invitations;
+create policy invitation_update_inviter on app.invitations as restrictive for update to drefyn_app
+  using (true) with check (true);`,
+  },
   'the membership insert guard dropped': {
     rule: 'restrictive_policy',
     object: 'app.memberships',
