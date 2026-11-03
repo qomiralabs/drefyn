@@ -57,7 +57,8 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in, password account, OAuth and API keys. The OAuth fetch file
+  // change, password sign in, password account, OAuth, API keys, the CLI link and operator
+  // revoke, and the command that opens both pools for them. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
   // breached list lookup and its build command, and the build command is the only writer.
   it('reaches the database only from the limiter, sessions, organizations, invitations, devices, email sign in, email change, password sign in, password account, OAuth and API keys, files only from the breached list, and no network anywhere', () => {
@@ -78,6 +79,9 @@ describe('package layout', () => {
       'oauth.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
+      'cli-links.ts': database,
+      'operator-sessions.ts': database,
+      'command.ts': database,
       'breached-file.ts': files,
       'password-list.ts': files,
     };
@@ -104,6 +108,7 @@ describe('the main entry', () => {
         'AuthError',
         'BREACHED_RECORD_BYTES',
         'BREACH_CHECK_TIMEOUT_MS',
+        'CLI_LINK_PATH',
         'PasswordListError',
         'loadBreachedPasswords',
         'breachedDigest',
@@ -113,6 +118,7 @@ describe('the main entry', () => {
         'SCOPE_PATTERN',
         'apiKeyErrorResponse',
         'checkApiKeyScope',
+        'checkCliLinkInput',
         'createApiKeyVerifier',
         'createApiKeys',
         'createScopeRegistry',
@@ -148,10 +154,12 @@ describe('the main entry', () => {
         'countSeats',
         'createApiKeyFailureLimiter',
         'createCodeIssuer',
+        'createCliLinks',
         'createEmailChange',
         'createEmailSignIn',
         'createInvitations',
         'createOrganizations',
+        'createOperatorSessions',
         'createPasswordAccount',
         'createPasswordHasher',
         'createPasswordSignIn',
@@ -163,6 +171,7 @@ describe('the main entry', () => {
         'encodeSecret',
         'formatApiKey',
         'formatChallengeId',
+        'formatCliLinkToken',
         'formatInvitationToken',
         'formatPhc',
         'formatSessionToken',
@@ -176,6 +185,7 @@ describe('the main entry', () => {
         'parseBearer',
         'parseChallengeId',
         'parseCode',
+        'parseCliLinkToken',
         'parseInvitationToken',
         'parseOrganizationName',
         'parsePhc',
@@ -194,6 +204,7 @@ describe('the main entry', () => {
         'serializeCookie',
         'sessionCookieValue',
         'sha256',
+        'slugFromOrganizationName',
         'userAgentFamily',
       ].sort(),
     );

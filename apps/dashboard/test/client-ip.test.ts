@@ -342,9 +342,15 @@ interface Sent {
 function request(
   headers: IncomingHttpHeaders,
   url = '/',
-  remoteAddress: string | undefined = '192.0.2.50',
+  // null stands for a socket that has already closed, which Node reports as undefined.
+  remoteAddress: string | null = '192.0.2.50',
 ) {
-  return { headers, url, method: 'GET', socket: { remoteAddress } } as unknown as IncomingMessage;
+  return {
+    headers,
+    url,
+    method: 'GET',
+    socket: { remoteAddress: remoteAddress ?? undefined },
+  } as unknown as IncomingMessage;
 }
 
 function response() {
@@ -397,12 +403,12 @@ describe('the wrapper', () => {
   it('answers 400 when the socket has no address left, and never calls Next', () => {
     const { serve, handle } = wrapper();
     const { res, sent } = response();
-    serve(request({ host: 'app.drefyn.test' }, '/', undefined), res);
+    serve(request({ host: 'app.drefyn.test' }, '/', null), res);
     expect(sent.status).toBe(400);
     expect(handle).not.toHaveBeenCalled();
   });
 
-  it('hands Next the rewritten headers', () => {
+  it('hands Next the rewritten headers', async () => {
     const { serve, handle } = wrapper(config({ DREFYN_TRUSTED_PROXY_HOPS: '1' }));
     const req = request({
       host: 'app.drefyn.test',
@@ -411,7 +417,9 @@ describe('the wrapper', () => {
     });
     const { res } = response();
     serve(req, res);
-    expect(handle).toHaveBeenCalledWith(req, res);
+    await vi.waitFor(() => {
+      expect(handle).toHaveBeenCalledWith(req, res);
+    });
     expect(req.headers['x-forwarded-for']).toBe('198.51.100.7');
     expect(req.headers['x-forwarded-host']).toBe('app.drefyn.test');
   });
@@ -419,8 +427,9 @@ describe('the wrapper', () => {
   it('with 0 hops, warns about forwarding headers at most once a minute', () => {
     let now = 0;
     const { serve, warn } = wrapper(config(), () => now);
-    const hit = () =>
+    const hit = () => {
       serve(request({ host: 'app.drefyn.test', 'x-forwarded-for': '6.6.6.6' }), response().res);
+    };
     hit();
     hit();
     now += 30_000;
@@ -440,5 +449,22 @@ describe('the wrapper', () => {
     serve(request({ host: 'app.drefyn.test' }), response().res);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('auth.client_ip_chain_invalid', { hops: 2 });
+  });
+});
+
+describe('a handler that fails', () => {
+  it('answers 500 once and logs, without throwing out of the server', async () => {
+    const warn = vi.fn();
+    const serve = createWrapper({
+      config: config(),
+      handle: () => Promise.reject(new Error('boom')),
+      warn,
+    });
+    const { res, sent } = response();
+    serve(request({ host: 'app.drefyn.test' }), res);
+    await vi.waitFor(() => {
+      expect(sent.status).toBe(500);
+    });
+    expect(warn).toHaveBeenCalledWith('dashboard.request_failed', {});
   });
 });

@@ -36,7 +36,10 @@ export async function startEcho(config: WrapperConfig): Promise<Echo> {
     warnings,
     close: () =>
       new Promise((done, fail) => {
-        server.close((error) => (error === undefined ? done() : fail(error)));
+        server.close((error) => {
+          if (error === undefined) done();
+          else fail(error);
+        });
       }),
   };
 }

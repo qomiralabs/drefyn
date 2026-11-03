@@ -88,7 +88,7 @@ describe('drefyn auth link and revoke-sessions arguments', () => {
     expect(result.code).toBe(3);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('DREFYN_APP_ORIGIN');
-    expect(result.stderr).not.toContain(validEnv()['DREFYN_AUTH_SECRET']);
+    expect(result.stderr).not.toContain(validEnv().DREFYN_AUTH_SECRET);
   });
 
   it('exits 3 naming the key when the block key is missing', async () => {

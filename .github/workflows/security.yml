@@ -74,7 +74,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: The drf_ak_ rule catches a generated API key
+      - name: The drf_ak_ and drf_cl_ rules catch a generated key and link
         run: |
           dir="$(mktemp -d)"
           node packages/auth/test/gitleaks-fixture.ts "$dir"
@@ -83,11 +83,12 @@ jobs:
             --report-format json --report-path "$RUNNER_TEMP/fixture.json" --exit-code 1 "$dir"
           code=$?
           set -e
-          if [ "$code" -ne 1 ] || ! grep -q '"RuleID": "drefyn-api-key"' "$RUNNER_TEMP/fixture.json"; then
-            echo "expected gitleaks to flag the generated key with drefyn-api-key, got exit $code" >&2
+          if [ "$code" -ne 1 ] || ! grep -q '"RuleID": "drefyn-api-key"' "$RUNNER_TEMP/fixture.json" ||
+            ! grep -q '"RuleID": "drefyn-cli-link"' "$RUNNER_TEMP/fixture.json"; then
+            echo "expected gitleaks to flag the key with drefyn-api-key and the link with drefyn-cli-link, got exit $code" >&2
             exit 1
           fi
-          echo "gitleaks flagged the generated key with drefyn-api-key"
+          echo "gitleaks flagged the key with drefyn-api-key and the link with drefyn-cli-link"
 
   codeql:
     name: codeql

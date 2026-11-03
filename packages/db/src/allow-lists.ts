@@ -82,6 +82,10 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
   },
   { name: 'app.oauth_states', reason: 'OAuth round trips exist before anyone is signed in' },
   {
+    name: 'app.cli_sign_in_links',
+    reason: 'pre sign in, operator issued, user id and hash only',
+  },
+  {
     name: 'app.auth_rate_limits',
     reason: 'sign in limits keyed by HMACs of addresses and IPs; holds no tenant data',
   },
@@ -140,6 +144,10 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
   { name: 'app.password_credentials', reason: 'password sign in reads the hash and rehashes it' },
   { name: 'app.email_challenges', reason: 'email codes are created and redeemed before sign in' },
   { name: 'app.oauth_states', reason: 'OAuth state is created and redeemed before sign in' },
+  {
+    name: 'app.cli_sign_in_links',
+    reason: 'the operator command writes links and redemption marks them used before sign in',
+  },
   { name: 'app.auth_rate_limits', reason: 'sign in limits are reserved before any work' },
   {
     name: 'app.known_devices',
@@ -153,6 +161,7 @@ const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limit
 export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
   { name: 'app.email_challenges', reason: AUTH_ONLY },
   { name: 'app.oauth_states', reason: AUTH_ONLY },
+  { name: 'app.cli_sign_in_links', reason: 'holds hashes of sign in links issued before sign in' },
   { name: 'app.auth_rate_limits', reason: AUTH_ONLY },
 ];
 
@@ -230,6 +239,10 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   selfAccess('password_credentials'),
   authAccess('email_challenges', 'codes are created and redeemed before sign in'),
   authAccess('oauth_states', 'OAuth state is created and redeemed before sign in'),
+  authAccess(
+    'cli_sign_in_links',
+    'operator links are written and redeemed before sign in; grants allow updating consumed_at only',
+  ),
   authAccess('auth_rate_limits', 'limits are reserved before sign in'),
   selfAccess('known_devices'),
   {
@@ -393,6 +406,7 @@ export type AuthTableName =
   | 'password_credentials'
   | 'email_challenges'
   | 'oauth_states'
+  | 'cli_sign_in_links'
   | 'auth_rate_limits'
   | 'known_devices';
 // The organization tables a user context reads, through the person's own memberships.

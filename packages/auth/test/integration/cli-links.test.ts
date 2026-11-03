@@ -120,7 +120,7 @@ describeWithStack('drefyn auth link and its redemption', () => {
   it('runs through the drefyn binary with no SMTP configured', async () => {
     const email = `bin-${randomBytes(3).toString('hex')}@example.com`;
     const result = await run(process.execPath, [migrateCli, 'auth', 'link', '--email', email], {
-      env: { PATH: process.env['PATH'], ...env } as NodeJS.ProcessEnv,
+      env: { PATH: process.env['PATH'], ...env },
     });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout).toMatch(LINK);
@@ -177,9 +177,8 @@ describeWithStack('drefyn auth link and its redemption', () => {
       Array.from({ length: 50 }, (_, i) => links().redeem(browser(`198.51.100.${i + 1}`), token)),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(1);
-    for (const r of results.filter((x) => !x.ok)) {
-      expect(!r.ok && r.error.code).toBe('AUTH_CLI_LINK_INVALID');
-    }
+    const codes = results.flatMap((r) => (r.ok ? [] : [r.error.code]));
+    expect(codes).toEqual(Array<string>(49).fill('AUTH_CLI_LINK_INVALID'));
     expect(await count(`app.sessions where user_id = '${user}'`)).toBe('1');
   });
 

@@ -74,6 +74,12 @@ export interface Organizations {
     input: { readonly name: string; readonly slug: string },
   ): Promise<Result<AccessContext, AuthError>>;
   listMyOrganizations(s: SessionInfo): Promise<readonly OrganizationSummary[]>;
+  // For the operator command, which has a person but no session yet. The same rules, limit
+  // and insert path as createOrganization.
+  createOrganizationFor(
+    userId: UserId,
+    input: { readonly name: string; readonly slug: string },
+  ): Promise<Result<{ readonly organizationId: OrganizationId; readonly slug: string }, AuthError>>;
 }
 
 class SlugTaken extends Error {}
@@ -100,57 +106,68 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
     });
   const nextId = deps.newOrganizationId ?? (() => newId('org'));
 
+  // The one way an organization is made. Its first owner is the acting user, so the
+  // database's insert rules see the same person in every write.
+  async function insert(
+    userId: UserId,
+    input: unknown,
+  ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
+    const name = parseOrganizationName((input as { name?: unknown } | undefined)?.name);
+    if (!name.ok) return name;
+    const slug = parseSlug((input as { slug?: unknown } | undefined)?.slug);
+    if (!slug.ok) return slug;
+    // Counted before the work and in its own transaction, so a refused or failed attempt
+    // still counts and parallel attempts cannot all pass.
+    try {
+      await limiter.reserve('org_create', [userId]);
+    } catch (error) {
+      return fail(error);
+    }
+    const organizationId = nextId();
+    const ids = { organizationId: ['org', organizationId], userId: ['usr', userId] } as const;
+    let membershipId: string;
+    try {
+      membershipId = await store.organizationAs(organizationId, userId, async (tx) => {
+        await tx
+          .insertInto('organizations')
+          .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
+          .execute();
+        // No row back means another organization holds it; the throw rolls the
+        // organization back with it.
+        const held = await tx
+          .insertInto('organization_slugs')
+          .values({ slug: slug.value, organization_id: organizationId })
+          .onConflict((oc) => oc.column('slug').doNothing())
+          .returning('slug')
+          .executeTakeFirst();
+        if (held === undefined) throw TAKEN;
+        const member = await tx
+          .insertInto('memberships')
+          .values({ organization_id: organizationId, user_id: userId, role: 'owner' })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return member.id;
+      });
+    } catch (error) {
+      if (error === TAKEN) return fail(new AuthError('AUTH_SLUG_TAKEN'));
+      quietWarn(deps.logger, 'auth.organization_create_failed', idFields(ids));
+      return fail(error);
+    }
+    quietInfo(
+      deps.logger,
+      'auth.organization_created',
+      idFields({ ...ids, membershipId: ['mem', membershipId] }),
+    );
+    return ok({ organizationId, slug: slug.value });
+  }
+
   return Object.freeze({
     async createOrganization(s, input) {
-      const name = parseOrganizationName((input as { name?: unknown } | undefined)?.name);
-      if (!name.ok) return name;
-      const slug = parseSlug((input as { slug?: unknown } | undefined)?.slug);
-      if (!slug.ok) return slug;
-      // Counted before the work and in its own transaction, so a refused or failed attempt
-      // still counts and parallel attempts cannot all pass.
-      try {
-        await limiter.reserve('org_create', [s.userId]);
-      } catch (error) {
-        return fail(error);
-      }
-      const organizationId = nextId();
-      const ids = { organizationId: ['org', organizationId], userId: ['usr', s.userId] } as const;
-      let membershipId: string;
-      try {
-        membershipId = await store.organizationAs(organizationId, s.userId, async (tx) => {
-          await tx
-            .insertInto('organizations')
-            .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
-            .execute();
-          // No row back means another organization holds it; the throw rolls the
-          // organization back with it.
-          const held = await tx
-            .insertInto('organization_slugs')
-            .values({ slug: slug.value, organization_id: organizationId })
-            .onConflict((oc) => oc.column('slug').doNothing())
-            .returning('slug')
-            .executeTakeFirst();
-          if (held === undefined) throw TAKEN;
-          const member = await tx
-            .insertInto('memberships')
-            .values({ organization_id: organizationId, user_id: s.userId, role: 'owner' })
-            .returning('id')
-            .executeTakeFirstOrThrow();
-          return member.id;
-        });
-      } catch (error) {
-        if (error === TAKEN) return fail(new AuthError('AUTH_SLUG_TAKEN'));
-        quietWarn(deps.logger, 'auth.organization_create_failed', idFields(ids));
-        return fail(error);
-      }
-      quietInfo(
-        deps.logger,
-        'auth.organization_created',
-        idFields({ ...ids, membershipId: ['mem', membershipId] }),
-      );
+      const made = await insert(s.userId, input);
+      if (!made.ok) return made;
       return ok(
         grantAccess({
-          organizationId,
+          organizationId: made.value.organizationId,
           userId: s.userId,
           sessionId: s.sessionId,
           role: 'owner',
@@ -160,6 +177,8 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
         }),
       );
     },
+
+    createOrganizationFor: insert,
 
     async listMyOrganizations(s) {
       try {

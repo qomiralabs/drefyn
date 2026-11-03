@@ -114,7 +114,8 @@ describe('CLI link redemption order', () => {
   it('counts the cli_link_verify bucket first, then refuses a malformed token with no query', async () => {
     const { links, reserved, auth } = setup();
     const result = await links.redeem(browser, 'drf_cl_not-a-secret');
-    expect(result).toEqual({ ok: false, error: expect.any(AuthError) });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toBeInstanceOf(AuthError);
     expect(!result.ok && result.error.code).toBe('AUTH_CLI_LINK_INVALID');
     expect(reserved).toEqual(['cli_link_verify']);
     expect(auth).not.toHaveBeenCalled();

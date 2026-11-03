@@ -16,7 +16,7 @@ export function curl(port: number, path: string, headers: readonly string[]): Pr
   return new Promise((done, fail) => {
     execFile('curl', args, { encoding: 'utf8' }, (error, stdout) => {
       if (error !== null) {
-        fail(error);
+        fail(new Error(`curl failed: ${error.message}`, { cause: error }));
         return;
       }
       const split = stdout.indexOf('\r\n\r\n');

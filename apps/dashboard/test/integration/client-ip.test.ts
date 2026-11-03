@@ -121,7 +121,9 @@ describe.runIf(runBuilt)('the built server behind server.ts', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     port = await new Promise<number>((done, fail) => {
-      const timer = setTimeout(() => fail(new Error(`server did not start: ${output}`)), 60_000);
+      const timer = setTimeout(() => {
+        fail(new Error(`server did not start: ${output}`));
+      }, 60_000);
       const read = (chunk: Buffer) => {
         output += chunk.toString('utf8');
         const match = /"event":"dashboard\.listening"[^}]*"port":(\d+)/.exec(output);
@@ -132,7 +134,9 @@ describe.runIf(runBuilt)('the built server behind server.ts', () => {
       };
       child.stdout?.on('data', read);
       child.stderr?.on('data', read);
-      child.on('exit', (code) => fail(new Error(`server exited ${String(code)}: ${output}`)));
+      child.on('exit', (code) => {
+        fail(new Error(`server exited ${String(code)}: ${output}`));
+      });
     });
   }, 90_000);
 

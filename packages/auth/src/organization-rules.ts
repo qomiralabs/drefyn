@@ -115,3 +115,20 @@ export function parseOrganizationName(value: unknown): Result<string, AuthError>
   }
   return ok(name);
 }
+
+const NOT_SLUG = /[^a-z0-9]+/g;
+const EDGE_HYPHENS = /^-+|-+$/g;
+const SLUG_MAX = 40;
+
+// The URL name the operator command derives from the organization name it was given, so the
+// first admin types one thing. Accents fold to their base letter, anything else becomes a
+// hyphen. Null when nothing usable is left; the slug rule still runs on the result.
+export function slugFromOrganizationName(name: string): string | null {
+  const folded = name.normalize('NFKD').replace(MARKS, '').toLowerCase();
+  const slug = folded
+    .replace(NOT_SLUG, '-')
+    .replace(EDGE_HYPHENS, '')
+    .slice(0, SLUG_MAX)
+    .replace(EDGE_HYPHENS, '');
+  return slug === '' ? null : slug;
+}

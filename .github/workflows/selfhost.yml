@@ -40,6 +40,8 @@ jobs:
         run: bash scripts/selfhost-guard-test.sh
       - name: Wrong or short passwords never report healthy
         run: bash scripts/selfhost-password-test.sh
+      - name: The installer generates the auth keys once and prints none
+        run: bash scripts/selfhost-env-test.sh
       # The same commands a self hoster runs, from a clean runner with no volume. The wait
       # matches the promise that a clean start is healthy within a minute.
       - name: Start
@@ -54,6 +56,17 @@ jobs:
         run: |
           bash scripts/selfhost.sh restart
           bash scripts/selfhost-smoke.sh
+      # Off by default, so it never starts with the stack; started here from its digest, as
+      # the non root user, and removed again before the tear down checks the project.
+      - name: Mailpit test profile is healthy from its pinned digest
+        run: |
+          mailpit=(docker compose -f deploy/compose.yaml --profile test)
+          "${mailpit[@]}" up --detach --wait --wait-timeout 60 mailpit
+          id="$("${mailpit[@]}" ps -q mailpit)"
+          docker inspect --format 'image {{.Config.Image}} user {{.Config.User}} health {{.State.Health.Status}}' "$id"
+          docker image inspect --format 'digests {{.RepoDigests}}' "$(docker inspect --format '{{.Image}}' "$id")"
+          curl -fsS --max-time 5 http://127.0.0.1:58025/readyz
+          "${mailpit[@]}" rm --stop --force mailpit
       - name: Tear down
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove
