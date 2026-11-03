@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
+import { ALLOW_LISTS, type PolicyEntry } from '../src/allow-lists.ts';
 import { checkCatalog, runCheckCatalog } from '../src/catalog-check.ts';
 import { rejected } from './support.ts';
 
@@ -52,6 +53,82 @@ describe('checkCatalog on rows it does not expect', () => {
     const error = await rejected(checkCatalog(client));
     expect(String(error)).toMatch(/catalog check/);
     expect(sent.at(-1)).toBe('rollback');
+  });
+});
+
+describe('the restrictive policy rule', () => {
+  const ISOLATION = '(organization_id = app.current_org())';
+  const GUARD: PolicyEntry = {
+    name: 'app.t.guard',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: "(body <> ''::text)",
+    reason: 'test only',
+  };
+  const policy = (over: Record<string, unknown> = {}) => ({
+    table_name: 'app.t',
+    name: 'guard',
+    cmd: 'a',
+    permissive: false,
+    roles: ['drefyn_app'],
+    qual: null,
+    with_check: GUARD.withCheck,
+    ...over,
+  });
+  const isolation = {
+    table_name: 'app.t',
+    name: 'tenant_isolation',
+    cmd: '*',
+    permissive: true,
+    roles: ['drefyn_app'],
+    qual: ISOLATION,
+    with_check: ISOLATION,
+  };
+
+  async function problemsWith(policies: Rows, entries: readonly PolicyEntry[]) {
+    const { client } = fakeClient([
+      [TABLES, [{ ...table, rls: true, forced: true }]],
+      [POLICIES, [isolation, ...policies]],
+    ]);
+    const problems = await checkCatalog(client, { ...ALLOW_LISTS, restrictivePolicies: entries });
+    return problems.filter((p) => p.rule === 'restrictive_policy');
+  }
+
+  it('passes a listed policy that matches', async () => {
+    expect(await problemsWith([policy()], [GUARD])).toEqual([]);
+  });
+
+  it('fails an unlisted restrictive policy', async () => {
+    const problems = await problemsWith([policy()], []);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({ object: 'app.t' });
+    expect(problems[0]?.message).toContain('not on the restrictive policy allow list');
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['WITH CHECK', { with_check: '(true)' }, 'WITH CHECK clause other than'],
+    ['USING', { qual: '(true)' }, 'USING clause other than'],
+    ['command', { cmd: '*' }, 'is for all, not insert'],
+    ['roles', { roles: ['drefyn_app', 'drefyn_auth'] }, 'is to drefyn_app, drefyn_auth'],
+  ])('fails a listed policy whose %s differs', async (_label, over, words) => {
+    const problems = await problemsWith([policy(over)], [GUARD]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.message).toContain('restrictive policy guard');
+    expect(problems[0]?.message).toContain(words);
+  });
+
+  it('fails a listed policy that is missing or permissive', async () => {
+    for (const rows of [[], [policy({ permissive: true })]]) {
+      const problems = await problemsWith(rows, [GUARD]);
+      expect(problems).toEqual([
+        {
+          rule: 'restrictive_policy',
+          object: 'app.t',
+          message: 'app.t is missing the restrictive policy guard on its allow list',
+        },
+      ]);
+    }
   });
 });
 

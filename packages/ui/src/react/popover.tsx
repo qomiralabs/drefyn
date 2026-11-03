@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import {
   Button as AriaButton,
@@ -9,6 +9,7 @@ import {
   Popover as AriaPopover,
 } from 'react-aria-components';
 import { buttonClasses, LABEL_CELL, type ButtonSize } from './button-classes.ts';
+import { Sheet, usePhone, useTriggerText } from './sheet.tsx';
 
 interface PopoverBase {
   // What the trigger shows.
@@ -70,7 +71,8 @@ function openedFrom(panel: HTMLElement | null, target: Node): boolean {
   return false;
 }
 
-// A trigger styled by the button class function and a non modal panel on the overlay
+// On a phone the panel is the bottom sheet instead, titled by the title or the trigger.
+// Elsewhere it is a trigger styled by the button class function and a non modal panel on the overlay
 // surface, so the rest of the page stays readable and usable while it is open. Focus moves
 // into the panel, which reads its heading. The panel renders at the end of the page, so
 // leaving it by Tab would land somewhere unrelated: Tab past the last control closes it and
@@ -92,6 +94,15 @@ export function Popover(props: PopoverProps): ReactNode {
   const open = props.open ?? own;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const phone = usePhone();
+  const [readTrigger, triggerText] = useTriggerText();
+  const setTrigger = useCallback(
+    (el: HTMLButtonElement | null) => {
+      triggerRef.current = el;
+      readTrigger(el);
+    },
+    [readTrigger],
+  );
   const change = (next: boolean) => {
     if (!held) setOwn(next);
     onOpenChange?.(next);
@@ -105,7 +116,8 @@ export function Popover(props: PopoverProps): ReactNode {
   });
 
   useEffect(() => {
-    if (!open) return;
+    // The phone sheet is modal and handles Tab and presses outside itself.
+    if (!open || phone) return;
     // React Aria handles Tab on the document; the window's capture phase runs first. Option
     // counts as Tab, since Safari moves to buttons only with it held.
     const onKeyDown = (event: KeyboardEvent) => {
@@ -139,43 +151,54 @@ export function Popover(props: PopoverProps): ReactNode {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('pointerdown', onPointerDown, true);
     };
-  }, [open]);
+  }, [open, phone]);
 
   const iconOnly = triggerLabel !== undefined;
   return (
     <DialogTrigger isOpen={open} onOpenChange={change}>
       <AriaButton
-        ref={triggerRef}
+        ref={setTrigger}
         aria-haspopup="dialog"
         {...(iconOnly ? { 'aria-label': triggerLabel } : {})}
         className={`${buttonClasses({ variant, size, disabled: false, iconOnly })} aria-expanded:bg-pressed`}
       >
         <span className={LABEL_CELL}>{trigger}</span>
       </AriaButton>
-      {/* Fades in on the duration token and travels the enter distance away from the trigger;
-          under reduced motion only the fade is left. */}
-      <AriaPopover
-        isNonModal
-        // Focus moving to the trigger is the start of its own toggle, not a reason to close;
-        // closing here would let the press open the panel again.
-        shouldCloseOnInteractOutside={(el) => triggerRef.current?.contains(el) !== true}
-        placement={placement}
-        offset={4}
-        data-popover=""
-        className="z-overlay max-w-measure rounded-md border border-rule-strong bg-overlay shadow-1 transition duration-base ease-enter data-entering:opacity-0 motion-safe:data-entering:-translate-y-4 motion-safe:data-[placement=top]:data-entering:translate-y-4"
-      >
-        <AriaDialog
-          ref={panelRef}
-          className="flex flex-col gap-12 p-16 text-body-s text-body outline-none"
+      {phone ? (
+        <Sheet
+          title={title ?? triggerLabel ?? triggerText}
+          open={open}
+          onOpenChange={change}
+          trigger={triggerRef}
         >
-          {title === undefined ? null : (
-            <Heading slot="title" className="text-body-s font-medium text-ink">
-              {title}
-            </Heading>
-          )}
-          {children}
-        </AriaDialog>
-      </AriaPopover>
+          <div className="flex flex-col gap-12 px-8 pt-4 pb-8">{children}</div>
+        </Sheet>
+      ) : (
+        <AriaPopover
+          isNonModal
+          // Focus moving to the trigger is the start of its own toggle, not a reason to close;
+          // closing here would let the press open the panel again.
+          shouldCloseOnInteractOutside={(el) => triggerRef.current?.contains(el) !== true}
+          placement={placement}
+          offset={4}
+          data-popover=""
+          // Fades in on the duration token and travels the enter distance away from the
+          // trigger; under reduced motion only the fade is left.
+          className="z-overlay max-w-measure rounded-md border border-rule-strong bg-overlay shadow-1 transition duration-base ease-enter data-entering:opacity-0 motion-safe:data-entering:-translate-y-4 motion-safe:data-[placement=top]:data-entering:translate-y-4"
+        >
+          <AriaDialog
+            ref={panelRef}
+            className="flex flex-col gap-12 p-16 text-body-s text-body outline-none"
+          >
+            {title === undefined ? null : (
+              <Heading slot="title" className="text-body-s font-medium text-ink">
+                {title}
+              </Heading>
+            )}
+            {children}
+          </AriaDialog>
+        </AriaPopover>
+      )}
     </DialogTrigger>
   );
 }

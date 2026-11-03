@@ -3,6 +3,7 @@ import { ESLint, Linter } from 'eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 import { describe, expect, it } from 'vitest';
+import { egressAllowList } from '../src/index.ts';
 import { repoRoot } from './helpers.ts';
 
 // The React and Motion rules from the repo config. Typed rules need the file in a
@@ -213,6 +214,27 @@ describe('the Motion rule', () => {
       for (const code of lookAlikes) {
         expect(await lint(path, code), `${path}: ${code}`).toEqual([]);
       }
+    }
+  });
+});
+
+describe('the egress allow list in the root and guard configs', () => {
+  const guard = new ESLint({
+    cwd: repoRoot,
+    overrideConfigFile: join(repoRoot, 'scripts/lint-rules/guard.config.js'),
+  });
+  const egressOptions = async (linter: ESLint, path: string) => {
+    const resolved = (await linter.calculateConfigForFile(join(repoRoot, path))) as {
+      rules?: Linter.RulesRecord;
+    };
+    const setting = resolved.rules?.['drefyn/no-raw-egress'];
+    return Array.isArray(setting) ? setting.slice(1) : setting;
+  };
+
+  it('passes the shared list, scoped fields included, to both', async () => {
+    for (const path of ['packages/auth/src/index.ts', 'apps/dashboard/src/shell.tsx']) {
+      expect(await egressOptions(eslint, path), path).toEqual([{ allow: egressAllowList }]);
+      expect(await egressOptions(guard, path), path).toEqual([{ allow: egressAllowList }]);
     }
   });
 });

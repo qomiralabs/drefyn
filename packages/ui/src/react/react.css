@@ -18,3 +18,10 @@
 [data-select-popover] {
   min-width: var(--trigger-width);
 }
+
+/* The command bar draws its own clear button, so the browser's search field cancel button
+   would be a second one. Tailwind has no utility for the pseudo element without brackets. */
+[data-command-field]::-webkit-search-cancel-button {
+  appearance: none;
+  display: none;
+}

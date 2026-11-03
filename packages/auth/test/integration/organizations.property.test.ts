@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { withOrganization, withUser } from '@drefyn/db';
+import { withUser } from '@drefyn/db';
 import type { OrganizationId, UserId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { beforeAll, expect, it } from 'vitest';
@@ -73,15 +73,11 @@ describeWithStack('cross tenant reads under a user context', () => {
           for (const m of org.members.filter((m) => m !== org.owner)) {
             const person = persons[m];
             if (person === undefined) throw new Error('no member');
-            await withOrganization(h.db, { organizationId: result.value.organizationId }, (tx) =>
-              tx
-                .insertInto('memberships')
-                .values({
-                  organization_id: result.value.organizationId,
-                  user_id: person.user,
-                  role: 'member',
-                })
-                .execute(),
+            // Only an invitation may add a member once the owner exists, and invitations
+            // do not exist yet, so the superuser stands in for acceptance.
+            await h.sql(
+              `insert into app.memberships (organization_id, user_id, role)
+               values ('${result.value.organizationId}', '${person.user}', 'member');`,
             );
             members.add(m);
           }

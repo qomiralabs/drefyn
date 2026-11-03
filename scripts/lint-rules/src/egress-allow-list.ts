@@ -1,7 +1,10 @@
+import type { EgressAllowEntry } from './egress-allow-entry.ts';
+
 // Each entry lets one file or directory open raw network connections. They bypass the
 // SSRF guard, so every entry needs a security review and a reason that says why the
 // destination cannot be influenced by a customer. The root ESLint config and the guard
-// config both read this list, so the two can never disagree.
+// config both read this list, so the two can never disagree. An entry with only exempts
+// just the forms it lists; every other form in that file is still reported.
 export const egressAllowList = [
   {
     path: 'scripts/review-gate/src/github.ts',
@@ -13,4 +16,4 @@ export const egressAllowList = [
     reason:
       'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',
   },
-] as const satisfies readonly { path: string; reason: string }[];
+] as const satisfies readonly EgressAllowEntry[];

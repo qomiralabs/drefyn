@@ -1,6 +1,17 @@
 import type { Page } from '@playwright/test';
 import { tokens } from '../src/index.ts';
-import { docsEntry, expect, openPage, openStory, rgb, tabKey, test, THEMES } from './fixtures.ts';
+import {
+  docsEntry,
+  expect,
+  MOBILE,
+  openPage,
+  openStory,
+  rgb,
+  tabKey,
+  test,
+  THEMES,
+} from './fixtures.ts';
+import { expectSheet, pressScrim } from './sheet.ts';
 
 // React Aria names the trigger by its value, then its label.
 const trigger = (page: Page, label = 'Region') =>
@@ -136,3 +147,98 @@ for (const theme of THEMES) {
     await expect(page.getByRole('option')).toHaveText(['Loading options']);
   });
 }
+
+// Below the small breakpoint the list opens in the shared sheet, titled by the label.
+test.describe('on a phone', () => {
+  test.use({ viewport: MOBILE });
+
+  for (const theme of THEMES) {
+    test(`the list opens in a titled sheet with comfortable rows and Escape returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, 'components-select--default', theme);
+      await page.keyboard.press(tabKey(browserName));
+      await expect(trigger(page)).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expectSheet(page, 'Region', 'option');
+      await expect(option(page, 'Europe')).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      const ap = option(page, 'Asia Pacific');
+      await expect(ap).toBeFocused();
+      await expect(ap).toHaveAttribute('aria-disabled', 'true');
+      await expect(ap).toHaveAccessibleDescription('Not on your plan');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`a press on the scrim closes the sheet and returns focus in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, 'components-select--default', theme);
+      await page.keyboard.press(tabKey(browserName));
+      await page.keyboard.press('Enter');
+      await expectSheet(page, 'Region');
+      await pressScrim(page);
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+    });
+
+    test(`a choice in the sheet closes it and shows on the trigger in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, 'components-select--default', theme);
+      await page.keyboard.press(tabKey(browserName));
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(trigger(page)).toBeFocused();
+      await expect(trigger(page)).toContainText('United States');
+    });
+
+    test(`in a dialog the sheet opens over it and closes back to it in ${theme}`, async ({
+      page,
+      browserName,
+    }) => {
+      await openStory(page, 'components-select--in-a-dialog', theme);
+      const open = page.getByRole('button', { name: 'Invite someone' });
+      await page.keyboard.press(tabKey(browserName));
+      await expect(open).toBeFocused();
+      await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Invite people' });
+      await expect(dialog).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Email address' })).toBeFocused();
+      await page.keyboard.press(tabKey(browserName));
+      const role = trigger(page, 'Role');
+      await expect(role).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expectSheet(page, 'Role', 'option');
+      // Two layers: the picker sheet over the dialog sheet.
+      await expect(page.locator('[role="dialog"]')).toHaveCount(2);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(dialog).toBeVisible();
+      await expect(role).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expectSheet(page, 'Role');
+      await pressScrim(page);
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(dialog).toBeVisible();
+      await expect(role).toBeFocused();
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('listbox')).toHaveCount(0);
+      await expect(role).toContainText('Viewer');
+      await expect(dialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(open).toBeFocused();
+    });
+  }
+});

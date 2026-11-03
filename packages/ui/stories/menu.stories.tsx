@@ -16,7 +16,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Row actions, the account menu, "more". Keyboard: Enter, Space or ArrowDown opens on the first item, ArrowUp on the last; arrows, Home and End move; typing a letter jumps; Enter runs; Escape closes and returns focus to the trigger; Tab and Shift+Tab close and move on from the trigger, as they would if the menu were closed. A disabled item stays reachable by the arrows and is announced as unavailable. Stories that start open do so only in their own view, so this page stays readable.',
+          'Row actions, the account menu, "more". Keyboard: Enter, Space or ArrowDown opens on the first item, ArrowUp on the last; arrows, Home and End move; typing a letter jumps; Enter runs; Escape closes and returns focus to the trigger; Tab and Shift+Tab close and move on from the trigger, as they would if the menu were closed. A disabled item stays reachable by the arrows, is announced as unavailable and reads its reason. Below 640 px the menu opens in a bottom sheet titled by the trigger, with 40 px rows; Escape, a press on the scrim and Close shut it and return focus to the trigger. Stories that start open do so only in their own view, so this page stays readable.',
       },
     },
   },
@@ -67,7 +67,7 @@ function Actions({ defaultOpen = false }: { defaultOpen?: boolean }) {
           <MenuItem id="incident" shortcut="I">
             Start incident
           </MenuItem>
-          <MenuItem id="hide" disabled>
+          <MenuItem id="hide" disabled reason="Only an owner can hide a component">
             Hide from audience
           </MenuItem>
           <MenuItem id="copy">Copy ID</MenuItem>

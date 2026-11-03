@@ -343,7 +343,14 @@ const orgs = createOrganizations(config, { db, authDb, logger, initialTier: 'sel
 
 - `initialTier` is `self_hosted` for the self host bootstrap and `free` for hosted signup; the
   caller sets it, never a request. Anything else fails at construction with
-  `AUTH_CONFIG_INVALID`.
+  `AUTH_CONFIG_INVALID`. The database holds the install's own tier in `app.install_tier()`
+  (`self_hosted` in this repository; the hosted build replaces it with `free`) and refuses an
+  organization at any other tier, or one that starts read only, so a mismatch fails every
+  create with `AUTH_UNAVAILABLE` over `DB_RLS_VIOLATION` and logs
+  `auth.organization_create_failed` with ids only.
+- A plain insert can only make the first owner, in the transaction that made the
+  organization. Any other member needs a source the database can check, such as an
+  accepted invitation once invitations land.
 - `createOrganization(session, { name, slug })` checks the name and slug, counts `org_create`
   (3 a day per person), then writes the organization, its slug and the owner membership in
   one organization transaction. `AUTH_INPUT_INVALID` for a name with `://`, `www.` or a
