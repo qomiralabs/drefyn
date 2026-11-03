@@ -27,12 +27,18 @@ const KEY_A = id(41);
 let db: TestDatabase;
 const sessions: pg.Client[] = [];
 
-async function app(): Promise<pg.Client> {
+// Two sessions for the whole file, reused by every case: each case rolls back, and other
+// files run beside this one, so a session per case would run the server out of slots.
+async function session(n: 0 | 1): Promise<pg.Client> {
+  const open = sessions[n];
+  if (open !== undefined) return open;
   const client = await rawSession('app', db.name);
   client.on('error', () => undefined);
-  sessions.push(client);
+  sessions[n] = client;
   return client;
 }
+
+const app = () => session(0);
 
 afterAll(async () => {
   for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
@@ -286,8 +292,8 @@ describeWithStack('role changes at the database', () => {
   // organization row first, and with the lock two demotions of the last two owners cannot
   // both pass.
   it('lets only one of two demotions of the last two owners commit when both take the lock', async () => {
-    const one = await app();
-    const two = await app();
+    const one = await session(0);
+    const two = await session(1);
     const begin = async (client: pg.Client, actor: string) => {
       await client.query('begin');
       await client.query("select set_config('drefyn.organization_id', $1, true)", [ORG_A]);
