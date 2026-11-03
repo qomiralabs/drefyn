@@ -27,7 +27,8 @@ import {
 } from './session-support.ts';
 import { createSessions, type StartedSession } from './sessions.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
-import type { EmailChange } from './email-change.ts';
+import type { AuthNoticeMailer, EmailChange } from './email-change.ts';
+import { parseOAuthProvider, type OAuthProvider } from './oauth-types.ts';
 import {
   SECRET_BYTES,
   decodeSecret,
@@ -55,6 +56,9 @@ export interface SignedIn {
   readonly session: SessionInfo;
   readonly setCookies: readonly CookieSpec[];
   readonly returnTo: string;
+  // Mails a security notice when the sign in also linked a provider. Never throws; meant
+  // to run after the response.
+  readonly send?: () => Promise<void>;
 }
 
 // Who may create an account in invite_only mode. The invitations work brings the real one;
@@ -237,7 +241,8 @@ export interface EmailSignInDeps {
   readonly authDb?: AuthDatabase;
   readonly store?: SessionStore;
   readonly logger: AuthLogger;
-  readonly mailer: AuthMailer;
+  // The notice side is needed only to finish a provider link by code.
+  readonly mailer: AuthMailer & Partial<AuthNoticeMailer>;
   readonly sessions?: EmailSessions;
   readonly limiter?: RateLimiter;
   readonly metrics?: AuthMetrics;
@@ -280,11 +285,19 @@ export interface EmailSignIn {
 }
 
 const PURPOSE = 'sign_in';
+// A link code proves the address the same way a sign in code does, then also links the
+// provider identity the OAuth callback stored on it.
+const LINK = 'link_identity';
+const SIGN_IN_PURPOSES = [PURPOSE, LINK] as const;
+type SignInPurpose = (typeof SIGN_IN_PURPOSES)[number];
 
 interface Challenge {
   readonly id: string;
   readonly email_normalized: string;
+  readonly purpose: string;
   readonly user_id: string | null;
+  readonly pending_provider: string | null;
+  readonly pending_subject: string | null;
   readonly browser_hash: Buffer;
   readonly return_to: string | null;
   readonly live: boolean;
@@ -386,6 +399,43 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
     });
   }
 
+  // Links the identity a link code carries to the user it was sent for. Null when the code
+  // is not a whole link, or the identity or the user's provider slot was taken meanwhile.
+  async function linkPending(
+    challenge: Challenge,
+  ): Promise<{ userId: UserId; provider: OAuthProvider; at: Date } | null> {
+    const provider = parseOAuthProvider(challenge.pending_provider);
+    const subject = challenge.pending_subject;
+    if (challenge.user_id === null || provider === null || subject === null) return null;
+    const userId = idOf('usr', challenge.user_id);
+    const made = await store.auth((tx) =>
+      tx
+        .insertInto('identities')
+        .values({
+          user_id: userId,
+          provider,
+          provider_subject: subject,
+          provider_email_normalized: challenge.email_normalized,
+        })
+        .onConflict((c) => c.doNothing())
+        .returning(['id', 'created_at'])
+        .executeTakeFirst(),
+    );
+    return made === undefined ? null : { userId, provider, at: made.created_at };
+  }
+
+  function linkNotice(to: string, provider: OAuthProvider, at: Date) {
+    return async () => {
+      try {
+        const send = deps.mailer.sendSecurityNotice;
+        if (send === undefined) throw new Error('no notice mailer');
+        await send.call(deps.mailer, to, { kind: 'identity_linked', provider, account: to, at });
+      } catch {
+        warn(deps.logger, 'auth.identity_notice_failed', { provider });
+      }
+    };
+  }
+
   async function verify(
     b: BrowserContext,
     input: { readonly challenge?: string; readonly code: string },
@@ -406,13 +456,16 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           .select([
             'id',
             'email_normalized',
+            'purpose',
             'user_id',
+            'pending_provider',
+            'pending_subject',
             'browser_hash',
             'return_to',
             sql<boolean>`expires_at > now() and attempts < ${MAX_ATTEMPTS}`.as('live'),
             sql<boolean>`consumed_at is not null`.as('consumed'),
           ])
-          .where('purpose', '=', PURPOSE);
+          .where('purpose', 'in', SIGN_IN_PURPOSES);
         query =
           id === null
             ? query
@@ -429,6 +482,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         return refused('AUTH_CHALLENGE_BINDING');
       }
       const address = challenge.email_normalized;
+      const purpose: SignInPurpose = challenge.purpose === LINK ? LINK : PURPOSE;
       if (!challenge.live) return refused('AUTH_CHALLENGE_EXPIRED', address, binding);
       try {
         await limiter.reserve('code_verify', [address, binding]);
@@ -444,7 +498,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           .updateTable('email_challenges')
           .set({ attempts: sql<number>`${sql.ref('attempts')} + 1` })
           .where('id', '=', challenge.id)
-          .where('purpose', '=', PURPOSE)
+          .where('purpose', '=', purpose)
           .where('browser_hash', '=', binding)
           .where('consumed_at', 'is', null)
           .where('attempts', '<', MAX_ATTEMPTS)
@@ -452,7 +506,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           .returning('code_hmac')
           .executeTakeFirst();
         if (row === undefined) return 'AUTH_CHALLENGE_EXPIRED' as const;
-        if (!config.keys.verify('code', [challenge.id, PURPOSE, code], row.code_hmac)) {
+        if (!config.keys.verify('code', [challenge.id, purpose, code], row.code_hmac)) {
           return 'AUTH_CODE_INVALID' as const;
         }
         const consumed = await tx
@@ -465,6 +519,22 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         return consumed === undefined ? ('AUTH_CODE_INVALID' as const) : ('proved' as const);
       });
       if (outcome !== 'proved') return refused(outcome, address, binding);
+      if (purpose === LINK) {
+        // The same answer as a wrong code, so it says nothing about who holds the identity.
+        const linked = await linkPending(challenge);
+        if (linked === null) return refused('AUTH_CODE_INVALID', address, binding);
+        const started = await sessions.startSession(b, {
+          userId: linked.userId,
+          method: linked.provider,
+        });
+        const device = await recordDevice(config, devices, b, linked.userId);
+        return ok({
+          session: started.session,
+          setCookies: [...started.setCookies, ...device],
+          returnTo: challenge.return_to ?? '/',
+          send: linkNotice(address, linked.provider, linked.at),
+        });
+      }
       // Proved: only now may the answer say that sign up is closed.
       const userId = await userFor(challenge);
       if (userId === null) return refused('AUTH_SIGNUP_CLOSED', address, binding);

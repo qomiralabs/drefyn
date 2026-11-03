@@ -130,6 +130,16 @@ export {
   type SignedIn,
 } from './email-sign-in.ts';
 export {
+  createOAuth,
+  type OAuth,
+  type OAuthCompleted,
+  type OAuthDeps,
+  type OAuthProvider,
+  type OAuthPurpose,
+  type OAuthSessions,
+  type OAuthTransport,
+} from './oauth.ts';
+export {
   createEmailChange,
   type AuthNoticeMailer,
   type AuthSecurityNotice,
