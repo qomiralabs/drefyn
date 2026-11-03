@@ -8,6 +8,7 @@ import { parseShellPath, shellHref } from '../../../../shell/route.ts';
 import { MainBusy } from '../../../../views/main-busy.tsx';
 import { ProjectLoading } from '../../../../views/project-loading.tsx';
 import { TryAgain } from '../../../../views/try-again.tsx';
+import { WaitsInBrowser } from '../../../../views/waits-in-browser.tsx';
 import { Answer, Calm, Evidence, Eyebrow, Head, Ranked } from '../../../../views/calm.tsx';
 
 interface Params {
@@ -28,9 +29,6 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: (await projectFrom(params)).name };
 }
 
-// Stands in for the data that never arrives, so the loading state can be seen and tested.
-const never = () => new Promise<never>(() => undefined);
-
 // The project is known before anything streams, so an unknown one is a real 404; only its
 // data waits behind the skeleton.
 export default async function ProjectHome({ params }: Params) {
@@ -40,14 +38,24 @@ export default async function ProjectHome({ params }: Params) {
     <>
       <MainBusy busy />
       <Suspense fallback={<ProjectLoading name={project.name} />}>
-        <MainBusy busy={false} />
-        <ProjectBody org={org} project={project} />
+        {project.slug === 'pending' ? (
+          // The loading state, seen and tested: same skeleton, and main stays busy.
+          <>
+            <ProjectLoading name={project.name} />
+            <WaitsInBrowser />
+          </>
+        ) : (
+          <>
+            <MainBusy busy={false} />
+            <ProjectBody org={org} project={project} />
+          </>
+        )}
       </Suspense>
     </>
   );
 }
 
-async function ProjectBody({ org, project }: { org: string; project: PlaceholderProject }) {
+function ProjectBody({ org, project }: { org: string; project: PlaceholderProject }) {
   const href = (section?: string) =>
     shellHref({
       org,
@@ -55,9 +63,6 @@ async function ProjectBody({ org, project }: { org: string; project: Placeholder
       project: project.slug,
       ...(section === undefined ? {} : { section }),
     });
-
-  // The guard above has already refused a disabled dashboard, so only a real request waits.
-  if (project.slug === 'pending') await never();
 
   if (project.slug === 'unreachable') {
     return (

@@ -51,22 +51,22 @@ export default defineConfig({
   projects: [
     {
       name: 'shell-chromium',
-      testMatch: /(shell|states|keyboard|responsive|theme)\.spec\.ts$/,
+      testMatch: /(shell|states|keyboard|responsive|theme|headers|loading)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'shell-firefox',
-      testMatch: /keyboard\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'shell-webkit',
-      testMatch: /keyboard\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     {
       name: 'flag-off',
-      testMatch: /flag-off\.spec\.ts$/,
+      testMatch: /(flag-off|headers)\.spec\.ts$/,
       use: { ...chromium, baseURL: OFF_ORIGIN },
     },
     { name: 'axe', testMatch: /axe\.spec\.ts$/, use: { ...chromium } },

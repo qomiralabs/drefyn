@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './csp.ts';
 import { DESKTOP, MOBILE, openShell, ROUTES, THEMES, useTheme } from './fixtures.ts';
 
 // Baselines are made and compared only inside the pinned Playwright image, where fonts render
