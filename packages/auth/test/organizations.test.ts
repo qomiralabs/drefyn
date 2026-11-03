@@ -1,4 +1,4 @@
-import type { AuthDatabase, Database } from '@drefyn/db';
+import { DbError, type AuthDatabase, type Database } from '@drefyn/db';
 import { PRODUCTS } from '@drefyn/entitlements';
 import { idOf, toPublicId, type OrganizationId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
@@ -195,6 +195,37 @@ describe('createOrganization', () => {
       },
     ]);
   });
+
+  // The database refuses a tier other than the install's, or an owner it did not expect.
+  it.each([
+    ['organization', isOrgInsert],
+    ['membership', isMemberInsert],
+  ])(
+    'answers AUTH_UNAVAILABLE over DB_RLS_VIOLATION when the %s insert is refused',
+    async (_label, refused) => {
+      const { orgs, scripted, lines } = setup((s) => {
+        if (refused(s)) {
+          throw new DbError('DB_RLS_VIOLATION', 'a row level security policy refused the write');
+        }
+        return happy(s);
+      });
+      const error = failed(
+        await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG }),
+      );
+      expect(error.code).toBe('AUTH_UNAVAILABLE');
+      expect(error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
+      expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+      expect(lines).toEqual([
+        {
+          level: 'warn',
+          event: 'auth.organization_create_failed',
+          fields: { organizationId: toPublicId('org', ORG), userId: toPublicId('usr', USER) },
+        },
+      ]);
+      expect(JSON.stringify(lines)).not.toContain(NAME);
+      expect(JSON.stringify(lines)).not.toContain(SLUG);
+    },
+  );
 
   it('logs the created organization by id, never by name or slug', async () => {
     const { orgs, lines } = setup();

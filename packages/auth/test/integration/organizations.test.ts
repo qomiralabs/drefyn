@@ -3,7 +3,7 @@ import { newId, withOrganization } from '@drefyn/db';
 import { TIERS } from '@drefyn/entitlements';
 import { toPublicId } from '@drefyn/tenancy';
 import { sql } from 'kysely';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CookieSpec, SessionInfo } from '../../src/index.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
@@ -131,17 +131,36 @@ describeWithStack('organizations against Postgres', () => {
     },
   );
 
-  it('writes free when built for hosted signup', async () => {
+  // The database holds the install tier, so a build that passes the wrong one fails closed.
+  it('refuses free on a self host database, keeps nothing and logs ids only', async () => {
     const { session } = await signIn();
+    const name = slug('Hosted');
+    const s = slug();
+    const before = h.logs.length;
     const result = await h
       .organizations({ initialTier: 'free' })
-      .createOrganization(session, { name: 'Hosted', slug: slug() });
-    if (!result.ok) throw result.error;
-    expect(
-      await h.sql(
-        `select plan_tier from app.organizations where organization_id = '${result.value.organizationId}';`,
-      ),
-    ).toBe('free');
+      .createOrganization(session, { name, slug: s });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('AUTH_UNAVAILABLE');
+      expect(result.error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
+    }
+    expect(await count('organizations', `name = '${name}'`)).toBe('0');
+    expect(await count('organization_slugs', `slug = '${s}'`)).toBe('0');
+    expect(await count('memberships', `user_id = '${session.userId}'`)).toBe('0');
+    const lines = h.logs.slice(before);
+    expect(lines).toEqual([
+      {
+        level: 'warn',
+        event: 'auth.organization_create_failed',
+        fields: {
+          organizationId: expect.stringMatching(/^org_/) as unknown,
+          userId: toPublicId('usr', session.userId),
+        },
+      },
+    ]);
+    expect(JSON.stringify(lines)).not.toContain(name);
+    expect(JSON.stringify(lines)).not.toContain(s);
   });
 
   it('lists only the organizations the person belongs to', async () => {
@@ -215,11 +234,18 @@ describeWithStack('organizations against Postgres', () => {
             values (app.current_org(), 'Tier', ${tier})`.execute(tx),
       );
 
-    it.each(TIERS.map((t) => [t]))('accepts %s', async (tier) => {
-      await expect(insert(tier)).resolves.toBeDefined();
+    it('accepts the install tier, self_hosted', async () => {
+      await expect(insert('self_hosted')).resolves.toBeDefined();
     });
 
-    it.each([
+    it.each(TIERS.filter((t) => t !== 'self_hosted').map((t) => [t]))(
+      'refuses %s with DB_RLS_VIOLATION',
+      async (tier) => {
+        await expect(insert(tier)).rejects.toMatchObject({ code: 'DB_RLS_VIOLATION' });
+      },
+    );
+
+    const unknown = [
       '',
       'FREE',
       'Free',
@@ -230,8 +256,58 @@ describeWithStack('organizations against Postgres', () => {
       'hosted',
       'enterprise2',
       'null',
-    ])('refuses %j with a check violation', async (tier) => {
-      await expect(insert(tier)).rejects.toMatchObject({ code: '23514' });
+    ];
+
+    it.each(unknown)('refuses %j through drefyn_app with DB_RLS_VIOLATION', async (tier) => {
+      await expect(insert(tier)).rejects.toMatchObject({ code: 'DB_RLS_VIOLATION' });
+    });
+
+    // The policy runs before the check constraint, so the constraint is proved without RLS.
+    it.each(unknown)('refuses %j with the check constraint as well', async (tier) => {
+      const id = newId('org');
+      await expect(
+        h.sql(
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${id}', 'Tier', '${tier}');`,
+        ),
+      ).rejects.toThrow(/organizations_plan_tier_check/);
+    });
+  });
+
+  // drefyn-cloud replaces the function from its own migration; the same code then writes free.
+  describe('on a hosted database, where the install tier is free', () => {
+    const installTier = (tier: string) =>
+      h.sql(`create or replace function app.install_tier() returns text
+               language sql stable parallel safe
+               as $$ select '${tier}'::text $$;`);
+
+    beforeAll(async () => {
+      await installTier('free');
+    });
+
+    afterAll(async () => {
+      await installTier('self_hosted');
+    });
+
+    it('writes free when built for hosted signup', async () => {
+      const { session } = await signIn();
+      const result = await h
+        .organizations({ initialTier: 'free' })
+        .createOrganization(session, { name: 'Hosted', slug: slug() });
+      if (!result.ok) throw result.error;
+      expect(
+        await h.sql(
+          `select plan_tier from app.organizations where organization_id = '${result.value.organizationId}';`,
+        ),
+      ).toBe('free');
+    });
+
+    it('refuses self_hosted there', async () => {
+      const { session } = await signIn();
+      const result = await h
+        .organizations({ initialTier: 'self_hosted' })
+        .createOrganization(session, { name: 'Self', slug: slug() });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
     });
   });
 });

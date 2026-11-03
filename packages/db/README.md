@@ -185,7 +185,9 @@ beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or an
 default privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and
 `published_read` unless it matches its `userPolicies` entry exactly (command, roles, `USING`
 and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alike; any policy
-to `PUBLIC`, restrictive ones included; a unique key without `organization_id` on a tenant table
+to `PUBLIC`, restrictive ones included; a restrictive policy in `app` that is not on the
+`restrictivePolicies` list, differs from its entry, or is listed but missing (a permissive one
+of the same name counts as missing); a unique key without `organization_id` on a tenant table
 unless it is on the global unique list; and on `users` and `password_credentials`, any table
 level `SELECT` or `UPDATE` and any column grant off the column grant list, so a new column is
 closed until someone grants it. Insert is per column there too, so no insert can set a column

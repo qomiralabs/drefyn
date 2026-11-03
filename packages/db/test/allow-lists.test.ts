@@ -11,6 +11,7 @@ import {
   GLOBAL_TABLES,
   PUBLISHED_TABLES,
   READER_FUNCTIONS,
+  RESTRICTIVE_POLICIES,
   SECURITY_DEFINER_FUNCTIONS,
   USER_POLICIES,
   type AllowLists,
@@ -27,6 +28,14 @@ const POLICY: PolicyEntry = {
   using: '(id = app.current_user_id())',
   withCheck: null,
   reason: 'a user reads their own row',
+};
+const GUARD: PolicyEntry = {
+  name: 'app.memberships.membership_insert_origin',
+  command: 'insert',
+  roles: ['drefyn_app'],
+  using: null,
+  withCheck: "(role = 'owner'::text)",
+  reason: 'test only',
 };
 const REASON = 'migration bookkeeping, owner only, no tenant data';
 
@@ -78,12 +87,17 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('let drefyn_app execute only the three context readers', () => {
+  it('let drefyn_app execute the three context readers and the install tier', () => {
     expect(APP_FUNCTIONS.map((f) => f.name).sort()).toEqual([
       'app.current_org()',
       'app.current_project()',
       'app.current_user_id()',
+      'app.install_tier()',
     ]);
+  });
+
+  it('keep the install tier away from the public reader', () => {
+    expect(READER_FUNCTIONS.map((f) => f.name)).not.toContain('app.install_tier()');
   });
 
   it('keep the user reader away from the public reader', () => {
@@ -252,6 +266,30 @@ describe('allow lists', () => {
       (l) => ({ ...l, userPolicies: [POLICY, { ...POLICY, reason: 'again' }] }),
     ],
     [
+      'a restrictive policy that is not table.policy',
+      (l) => ({ ...l, restrictivePolicies: [{ ...GUARD, name: 'app.memberships' }] }),
+    ],
+    [
+      'a restrictive policy for every role',
+      (l) => ({ ...l, restrictivePolicies: [{ ...GUARD, roles: ['public'] }] }),
+    ],
+    [
+      'a restrictive policy for no role',
+      (l) => ({ ...l, restrictivePolicies: [{ ...GUARD, roles: [] }] }),
+    ],
+    [
+      'a restrictive policy listed twice',
+      (l) => ({ ...l, restrictivePolicies: [GUARD, { ...GUARD, reason: 'again' }] }),
+    ],
+    [
+      'a restrictive policy with no reason',
+      (l) => ({ ...l, restrictivePolicies: [{ ...GUARD, reason: ' ' }] }),
+    ],
+    [
+      'a restrictive policy also listed as a user policy',
+      (l) => ({ ...l, userPolicies: [...l.userPolicies, { ...GUARD }] }),
+    ],
+    [
       'a column grant that is not table.column',
       (l) => ({
         ...l,
@@ -385,5 +423,52 @@ describe('organization entries', () => {
       withCheck: null,
     });
     expect(byName.has('app.projects.member_read')).toBe(false);
+  });
+});
+
+// pg_get_expr text, read back from Postgres with search_path = pg_catalog.
+const OWNER_ARM =
+  "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
+
+describe('restrictive policies', () => {
+  it('are in ALLOW_LISTS', () => {
+    expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
+  });
+
+  it('list the two insert guards, for drefyn_app, with their exact text', () => {
+    expect(
+      RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
+        name,
+        command,
+        roles,
+        using,
+        withCheck,
+      })),
+    ).toEqual([
+      {
+        name: 'app.memberships.membership_insert_origin',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: OWNER_ARM,
+      },
+      {
+        name: 'app.organizations.organization_insert_tier',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+      },
+    ]);
+    for (const entry of RESTRICTIVE_POLICIES) expect(entry.reason.trim(), entry.name).not.toBe('');
+  });
+
+  it('give the owner arm no way in for an admin or a member', () => {
+    const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
+    expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+  });
+
+  it('pass with an entry that is clean', () => {
+    expect(allowListProblems({ ...ALLOW_LISTS, restrictivePolicies: [GUARD] })).toEqual([]);
   });
 });
