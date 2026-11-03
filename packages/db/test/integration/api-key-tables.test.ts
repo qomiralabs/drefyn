@@ -1,8 +1,9 @@
 import type pg from 'pg';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { ALLOW_LISTS } from '../../src/allow-lists.ts';
+import { ALLOW_LISTS, RESTRICTIVE_POLICIES } from '../../src/allow-lists.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
+import { superuser } from './support/stack.ts';
 import { catalogProblems, failure, rawSession } from './support/tenancy.ts';
 
 const dbs = databases();
@@ -13,6 +14,10 @@ const ORG_A = '01a14984-4476-77ce-9335-1280000001a1';
 const ORG_B = '01a14984-4476-77ce-9335-1280000001b1';
 const MEMBER_A = '01a14984-4476-77ce-9335-1280000003a1';
 const MEMBER_B = '01a14984-4476-77ce-9335-1280000003b1';
+// A plain member of organization A, added the way an invitation would, outside drefyn_app.
+const PLAIN_A = '01a14984-4476-77ce-9335-1280000003c1';
+const USER_C = '01a14984-4476-77ce-9335-1280000000c1';
+const KEY_D = '01a14984-4476-77ce-9335-1280000004f1';
 const PROJECT_A = '01a14984-4476-77ce-9335-1280000002a1';
 const PROJECT_B = '01a14984-4476-77ce-9335-1280000002b1';
 const KEY_A = '01a14984-4476-77ce-9335-1280000004a1';
@@ -96,6 +101,16 @@ async function seed(): Promise<void> {
     }
     await app.query('commit');
   }
+  await auth.query(
+    `insert into app.users (id, email, email_normalized, email_verified_at)
+     values ($1, 'c@example.com', 'c@example.com', now())`,
+    [USER_C],
+  );
+  await superuser(
+    `insert into app.memberships (id, organization_id, user_id, role)
+     values ('${PLAIN_A}', '${ORG_A}', '${USER_C}', 'member');`,
+    db.name,
+  );
 }
 
 describeWithStack('API key tables', () => {
@@ -226,6 +241,66 @@ describeWithStack('API key tables', () => {
     for (const table of TABLES) {
       expect(await sqlState(auth.query(`select 1 from app.${table}`)), table).toBe('42501');
     }
+  });
+
+  it.each([
+    ['no creator', () => keyInsert(ORG_A, KEY_D, MEMBER_A).replace(`'${MEMBER_A}'`, 'null')],
+    ['a plain member as creator', () => keyInsert(ORG_A, KEY_D, PLAIN_A)],
+    ['a creator id that is no membership', () => keyInsert(ORG_A, KEY_D, KEY_A)],
+  ])('refuse a key with %s, with permission denied', async (_name, text) => {
+    const app = await as('app');
+    expect(await within(app, ORG_A, () => sqlState(app.query(text())))).toBe('42501');
+  });
+
+  it("refuse another organization's owner as creator, even through organization_id", async () => {
+    const app = await as('app');
+    // The foreign key would also refuse it; the policy answers first.
+    expect(
+      await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_B)))),
+    ).toBe('42501');
+  });
+
+  it('let an owner or an admin of the organization create a key', async () => {
+    const app = await as('app');
+    expect(
+      await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_A)))),
+    ).toBe('no error');
+    await superuser(`update app.memberships set role = 'admin' where id = '${PLAIN_A}';`, db.name);
+    try {
+      expect(
+        await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, PLAIN_A)))),
+      ).toBe('no error');
+    } finally {
+      await superuser(
+        `update app.memberships set role = 'member' where id = '${PLAIN_A}';`,
+        db.name,
+      );
+    }
+  });
+
+  it.each([['Docs read'], ['docs:Read'], ['blog:read'], ['docs:'], ['docs:read write']])(
+    'refuse the stored scope %j',
+    async (scope) => {
+      const app = await as('app');
+      const text = keyInsert(ORG_A, KEY_D, MEMBER_A).replace(
+        "array['docs:read']",
+        `array['${scope}']`,
+      );
+      expect(await within(app, ORG_A, () => sqlState(app.query(text)))).toBe('23514');
+    },
+  );
+
+  it('carry the creator guard with the exact text the allow list reviews', async () => {
+    const text = await superuser(
+      `select pg_get_expr(polwithcheck, polrelid) from pg_policy
+        where polname = 'api_key_insert_creator' and polrelid = 'app.api_keys'::regclass
+          and not polpermissive;`,
+      db.name,
+    );
+    const entry = RESTRICTIVE_POLICIES.find(
+      (p) => p.name === 'app.api_keys.api_key_insert_creator',
+    );
+    expect(text).toBe(entry?.withCheck);
   });
 
   it('pass check:catalog', async () => {

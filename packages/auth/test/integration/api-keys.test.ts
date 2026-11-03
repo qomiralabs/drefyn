@@ -154,6 +154,22 @@ describeWithStack('API keys against Postgres', () => {
     if (!result.ok) expect(result.error.code).toBe('AUTH_FORBIDDEN');
   });
 
+  it('lets an admin create a key, recorded as its creator', async () => {
+    const org = await newOrg(h);
+    const { access } = await memberOf(h, org, 'admin');
+    const result = await h.apiKeys().createApiKey(access, input());
+    if (!result.ok) throw result.error;
+    expect(
+      await h.sql(
+        `select m.role from app.api_keys k join app.memberships m on m.id = k.created_by
+          where k.id = '${result.value.key.keyId}';`,
+      ),
+    ).toBe('admin');
+    expect((await h.verifier().verifyApiKey(`Bearer ${result.value.secret}`, testIp())).ok).toBe(
+      true,
+    );
+  });
+
   it('refuses an admin demoted since the guard ran, by the role stored now', async () => {
     const org = await newOrg(h);
     const { access, session } = await memberOf(h, org, 'admin');

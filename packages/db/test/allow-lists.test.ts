@@ -430,12 +430,15 @@ describe('organization entries', () => {
 const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
 
+const KEY_CREATOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
   });
 
-  it('list the two insert guards, for drefyn_app, with their exact text', () => {
+  it('list the three insert guards, for drefyn_app, with their exact text', () => {
     expect(
       RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
         name,
@@ -445,6 +448,13 @@ describe('restrictive policies', () => {
         withCheck,
       })),
     ).toEqual([
+      {
+        name: 'app.api_keys.api_key_insert_creator',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: KEY_CREATOR,
+      },
       {
         name: 'app.memberships.membership_insert_origin',
         command: 'insert',
@@ -466,6 +476,13 @@ describe('restrictive policies', () => {
   it('give the owner arm no way in for an admin or a member', () => {
     const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
     expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+  });
+
+  it('let only an owner or admin membership of the same organization create a key', () => {
+    const creator = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.api_key_insert_creator'));
+    expect(creator?.withCheck).toContain('m.organization_id = api_keys.organization_id');
+    expect(creator?.withCheck).toContain('m.id = api_keys.created_by');
+    expect(creator?.withCheck).not.toMatch(/'member'/);
   });
 
   it('pass with an entry that is clean', () => {
