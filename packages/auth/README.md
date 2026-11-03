@@ -10,6 +10,8 @@ system.
 ## Entry points
 
 - `@drefyn/auth`: server only. Uses `node:crypto`.
+- `@drefyn/auth/command`: `runAuthCommand` and `AUTH_COMMAND_USAGE`, the `drefyn auth`
+  commands that `@drefyn/cli` dispatches to. Exit codes: 0 done, 2 bad input, 5 file system.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).
@@ -280,7 +282,18 @@ const hasher = createPasswordHasher({
 });
 // One hasher per process, given to both, so one gate bounds every hash.
 const sessions = createSessions(config, { db, authDb, logger, mailer, passwords: hasher });
-const passwords = createPasswordSignIn(config, { db, authDb, logger, sessions, hasher, botCheck });
+// Once at startup: undefined with no file, else the opened list; a bad file throws.
+const breachedPasswords = await loadBreachedPasswords(config, logger);
+const passwords = createPasswordSignIn(config, {
+  db,
+  authDb,
+  logger,
+  metrics,
+  sessions,
+  hasher,
+  botCheck,
+  breachedPasswords,
+});
 const form = passwords.passwordForm(browser); // GET: set form.setCookies, render form.csrf
 const input = readPasswordSignInForm(body); // POST: 8 KiB body, 4 KiB password, one of each field
 const result = await passwords.signInWithPassword(browser, input);
@@ -307,6 +320,22 @@ pre)`. Without both the post is `AUTH_ORIGIN_REFUSED` and nothing is counted. Th
   New ones are 15 to 128 characters and pass the common password rules, else
   `AUTH_PASSWORD_WEAK` with `rules`. `setPassword` never replaces a set password
   (`AUTH_FORBIDDEN`).
+- Every new password goes through one internal step: the rules, then the breached list
+  (`AUTH_PASSWORD_BREACHED`), asked only after the recent sign in check. Never at sign in.
+  `BreachedPasswordCheck.isBreached(password, signal)` answers true, false or null. An answer
+  of null, an error or nothing within `BREACH_CHECK_TIMEOUT_MS` (1 s) lets the password
+  through and logs and counts `auth.breach_check_unavailable` with a `reason` of `no_answer`,
+  `error` or `timeout`.
+- `loadBreachedPasswords(config, logger)` opens `DREFYN_AUTH_BREACHED_PASSWORDS_FILE` once:
+  sorted 20 byte SHA-1 records (`BREACHED_RECORD_BYTES`) of the NFKC password
+  (`breachedDigest`), searched with one positioned read per step and never read whole. It
+  logs `auth.breached_list_loaded` with the record count, or `auth.breached_list_absent`
+  with no file. A missing, unreadable, empty or torn file throws `AUTH_CONFIG_INVALID` naming
+  the key, never the path. Building the flow with the key set but no check throws.
+- `buildPasswordList({ from, out, minCount })` is the build command as a function: ascending
+  `<40 hex>:<count>` lines in, records at or above `minCount` out, written to a temp file,
+  fsynced and renamed over `out`. It throws `PasswordListError` with `kind` `input` (with a
+  `line`, never the line's text) or `files`.
 - `BotCheck` is optional. Set, it runs after the counts and before any read; a refusal, an
   error or no answer in 3 s is `AUTH_BOT_CHECK_REQUIRED`. Unset with `DREFYN_AUTH_SIGNUP=open`,
   building the flow logs `auth.signup_open_without_bot_check` once.

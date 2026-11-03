@@ -30,7 +30,7 @@ afterEach(() => {
 
 async function listOf(name: string, passwords: readonly string[]): Promise<string> {
   const path = join(dir, name);
-  const records = passwords.map(breachedDigest).sort(Buffer.compare);
+  const records = passwords.map(breachedDigest).sort((a, b) => Buffer.compare(a, b));
   await writeFile(path, Buffer.concat(records));
   return path;
 }

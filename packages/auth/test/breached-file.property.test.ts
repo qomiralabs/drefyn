@@ -32,7 +32,7 @@ const anyRecord = fc.oneof(record, crowded);
 async function fileOf(records: readonly Uint8Array[]): Promise<string> {
   serial += 1;
   const path = join(dir, `list-${String(serial)}.bin`);
-  const sorted = [...records].map((r) => Buffer.from(r)).sort(Buffer.compare);
+  const sorted = [...records].map((r) => Buffer.from(r)).sort((a, b) => Buffer.compare(a, b));
   await writeFile(path, Buffer.concat(sorted));
   return path;
 }
@@ -56,8 +56,9 @@ describe('the breached list file', () => {
       fc.asyncProperty(
         fc.array(anyRecord, { maxLength: 300 }),
         fc.array(anyRecord, { maxLength: 20 }),
-        async (records, strangers) => {
-          const file = await openBreachedPasswordFile(await fileOf(records));
+        fc.integer({ min: 1, max: 9 }),
+        async (records, strangers, blockRecords) => {
+          const file = await openBreachedPasswordFile(await fileOf(records), { blockRecords });
           try {
             expect(file.records).toBe(records.length);
             const queries = [...records, ...records.flatMap(nearMisses), ...strangers];
@@ -73,13 +74,33 @@ describe('the breached list file', () => {
     );
   });
 
+  it('answers every lookup the same with the default block size', async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.array(anyRecord, { maxLength: 3000 }), async (records) => {
+        const file = await openBreachedPasswordFile(await fileOf(records));
+        try {
+          for (const query of [
+            ...records.slice(0, 50),
+            ...records.slice(-50).flatMap(nearMisses),
+          ]) {
+            await expect(file.contains(query)).resolves.toBe(linear(records, query));
+          }
+        } finally {
+          await file.close();
+        }
+      }),
+      { numRuns: 20 },
+    );
+  });
+
   it('answers the same for parallel lookups on one handle', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.array(anyRecord, { minLength: 1, maxLength: 200 }),
         fc.array(anyRecord, { maxLength: 40 }),
-        async (records, strangers) => {
-          const file = await openBreachedPasswordFile(await fileOf(records));
+        fc.integer({ min: 1, max: 9 }),
+        async (records, strangers, blockRecords) => {
+          const file = await openBreachedPasswordFile(await fileOf(records), { blockRecords });
           try {
             const queries = [...records, ...strangers];
             const answers = await Promise.all(queries.map((q) => file.contains(q)));

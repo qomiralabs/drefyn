@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { runMigrate } from './run.ts';
+import { runDrefyn } from './index.ts';
 
-process.exitCode = await runMigrate({
+process.exitCode = await runDrefyn({
   argv: process.argv.slice(2),
   env: process.env,
   stdout: process.stdout,

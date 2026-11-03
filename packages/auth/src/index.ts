@@ -216,3 +216,18 @@ export {
   type Permission,
   type ProjectRole,
 } from './permissions.ts';
+export { BREACH_CHECK_TIMEOUT_MS, type BreachedPasswordCheck } from './breach-check.ts';
+export {
+  BREACHED_RECORD_BYTES,
+  breachedDigest,
+  loadBreachedPasswords,
+  openBreachedPasswordFile,
+  type BreachedPasswordFile,
+} from './breached-file.ts';
+export {
+  PasswordListError,
+  buildPasswordList,
+  type PasswordListBuild,
+  type PasswordListFailure,
+  type PasswordListSummary,
+} from './password-list.ts';
