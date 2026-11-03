@@ -4,11 +4,13 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 // The address on a user row is what invitations, linking and sign in trust. Sign up writes
-// it once and the proved change flow moves it; any other write in this package is a way to
-// point an account at an address nobody proved.
+// it once (by email code, or by a provider that verified it) and the proved change flow
+// moves it; any other write in this package is a way to point an account at an address
+// nobody proved.
 const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   'email-sign-in.ts': ['insert'],
   'email-change.ts': ['update'],
+  'oauth.ts': ['insert'],
 };
 
 const QUOTED_TABLE = String.raw`\(\s*(['"\x60])(?:app\.)?users(?:\s+as\s+\w+)?\1\s*\)`;

@@ -173,7 +173,11 @@ describeWithStack('OAuth sign in against Postgres and the fake providers', () =>
   it('refuses a missing state', async () => {
     const w = world();
     const email = address('nostate');
-    const { done } = await trip(w, githubAccount(email), { edit: (q) => q.delete('state') });
+    const { done } = await trip(w, githubAccount(email), {
+      edit: (q) => {
+        q.delete('state');
+      },
+    });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     await nothingFor(email);
   });
@@ -182,7 +186,9 @@ describeWithStack('OAuth sign in against Postgres and the fake providers', () =>
     const w = world();
     const email = address('cookie');
     const { done } = await trip(w, githubAccount(email), {
-      edit: (_q, jar) => jar.cookies.set(w.config.cookies.oauth, 'a'.repeat(52)),
+      edit: (_q, jar) => {
+        jar.cookies.set(w.config.cookies.oauth, 'a'.repeat(52));
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     await nothingFor(email);
@@ -365,12 +371,13 @@ describeWithStack('OAuth sign in against Postgres and the fake providers', () =>
     const s1 =
       first.done.ok && first.done.value.kind === 'signed_in' ? first.done.value.session : null;
     if (s1 === null) throw new Error('no session');
-    const refused = await trip(withEmail, githubAccount(a, { id: 70_001 }), {
-      jar: first.jar,
+    // Email is on by default, so GitHub step up is refused before the round trip.
+    const refused = await withEmail.oauth.startOAuth(first.jar.context(), {
+      provider: 'github',
       purpose: 'step_up',
       session: s1,
     });
-    expect(codeOf(refused.done)).toBe('AUTH_FORBIDDEN');
+    expect(codeOf(refused)).toBe('AUTH_FORBIDDEN');
 
     const emailOff = world({ DREFYN_AUTH_EMAIL: 'off' });
     const b = address('gh-b');

@@ -14,10 +14,10 @@ import {
   type OAuthProvider,
   type OAuthPurpose,
   type OAuthSessions,
+  type RateLimiter,
   type SessionInfo,
 } from '../src/index.ts';
 import { createTestAuthMailer } from '../src/testing.ts';
-import { fakeLimiter } from './email-fixtures.ts';
 import {
   createFakeProviders,
   oauthEnv,
@@ -36,10 +36,15 @@ export function oauthConfig(env: Readonly<Record<string, string>> = {}): AuthCon
 // A browser's cookies, kept the way a browser keeps them: Max-Age 0 removes one.
 export class Jar {
   readonly cookies = new Map<string, string>();
+  readonly ip: string;
+  readonly userAgent: string;
   constructor(
-    readonly ip = '203.0.113.7',
-    readonly userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Firefox/131.0',
-  ) {}
+    ip = '203.0.113.7',
+    userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Firefox/131.0',
+  ) {
+    this.ip = ip;
+    this.userAgent = userAgent;
+  }
   apply(specs: readonly CookieSpec[]): void {
     for (const spec of specs) {
       if (spec.maxAgeSeconds === 0) this.cookies.delete(spec.name);
@@ -79,7 +84,10 @@ export function fakeSessions(db: OAuthStore, config: AuthConfig) {
     return {
       sessionId: idOf('ses', String(row['id'])),
       userId: idOf('usr', String(row['user_id'])),
-      email: String(user?.['email_normalized'] ?? 'nobody@example.com'),
+      email:
+        typeof user?.['email_normalized'] === 'string'
+          ? user['email_normalized']
+          : 'nobody@example.com',
       authenticatedAt: new Date(),
       expiresAt: new Date(Date.now() + 86_400_000),
       method: row['method'] as SessionInfo['method'],
@@ -133,7 +141,12 @@ export function setup(
   const { logger, logs } = logRecorder();
   const mail = createTestAuthMailer();
   const s = fakeSessions(db, config);
-  const limiter = fakeLimiter();
+  // A plain mock, so tests can script refusals per bucket.
+  const reserve = vi.fn<RateLimiter['reserve']>(() => Promise.resolve());
+  const limiter: RateLimiter = {
+    keyFor: (bucket, value) => config.keys.mac('rate', [bucket, ...value]),
+    reserve,
+  };
   const deps: OAuthDeps = {
     store: db.store,
     logger,
@@ -151,7 +164,7 @@ export function setup(
     sessions: s.sessions,
     limiter,
   });
-  return { config, db, fakes, logs, mail, sessions: s, limiter, oauth, email };
+  return { config, db, fakes, logs, mail, sessions: s, reserve, oauth, email };
 }
 
 export type Setup = ReturnType<typeof setup>;

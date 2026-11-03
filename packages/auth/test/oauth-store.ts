@@ -142,6 +142,11 @@ export function oauthStore() {
         if (clash) return [];
       }
       if (table === 'oauth_states') row['live'] = true;
+      if (table === 'email_challenges') {
+        row['live'] = true;
+        row['consumed'] = false;
+        row['attempts'] = 0;
+      }
       rows.push(row);
       return [row];
     }

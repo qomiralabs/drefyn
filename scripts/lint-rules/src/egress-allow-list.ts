@@ -16,4 +16,10 @@ export const egressAllowList = [
     reason:
       'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',
   },
+  {
+    path: 'packages/auth/src/oauth/fetch.ts',
+    reason:
+      'OAuth token, user and JWKS calls to four provider hosts fixed in code; https only, no redirects, 5 s and 1 MiB caps; no customer input reaches the URL',
+    only: [{ global: 'fetch' }],
+  },
 ] as const satisfies readonly EgressAllowEntry[];

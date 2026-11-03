@@ -11,7 +11,7 @@ import { recordingLogger } from './email-fixtures.ts';
 const MIB = 1_048_576;
 const GITHUB_TOKEN = 'https://github.com/login/oauth/access_token';
 
-const ok = (body: BodyInit | null = '{}', init: ResponseInit = {}) =>
+const ok = (body: ConstructorParameters<typeof Response>[0] = '{}', init: ResponseInit = {}) =>
   new Response(body, { status: 200, headers: { 'content-type': 'application/json' }, ...init });
 
 function guarded(
@@ -133,18 +133,18 @@ describe('the size cap', () => {
     expect(logs[0]?.fields).toEqual({ provider: 'google', reason: 'size' });
   });
 
-  it('refuses a declared length over the cap without reading the body', async () => {
-    let pulled = false;
+  it('refuses a declared length over the cap and cancels the body unread', async () => {
+    let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
-      pull() {
-        pulled = true;
+      cancel() {
+        cancelled = true;
       },
     });
     const { fetch } = guarded('google', () =>
       Promise.resolve(ok(stream, { headers: { 'content-length': String(MIB + 1) } })),
     );
     expect(await refusal(fetch('https://oauth2.googleapis.com/token', {}))).toBe('size');
-    expect(pulled).toBe(false);
+    expect(cancelled).toBe(true);
   });
 });
 

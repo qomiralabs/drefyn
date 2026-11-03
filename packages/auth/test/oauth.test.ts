@@ -166,13 +166,13 @@ describe('startOAuth', () => {
 
   it('counts starts per IP and writes nothing once limited', async () => {
     const t = setup();
-    vi.mocked(t.limiter.reserve).mockRejectedValueOnce(new AuthError('AUTH_RATE_LIMITED'));
+    t.reserve.mockRejectedValueOnce(new AuthError('AUTH_RATE_LIMITED'));
     const started = await t.oauth.startOAuth(new Jar().context(), {
       provider: 'github',
       purpose: 'sign_in',
     });
     expect(codeOf(started)).toBe('AUTH_RATE_LIMITED');
-    expect(vi.mocked(t.limiter.reserve).mock.calls[0]?.[0]).toBe('oauth_start');
+    expect(t.reserve.mock.calls[0]?.[0]).toBe('oauth_start');
     expect(t.db.tables.oauth_states).toEqual([]);
   });
 
@@ -192,7 +192,11 @@ describe('the callback refuses', () => {
 
   it('a missing state', async () => {
     const t = setup();
-    const { done } = await roundTrip(t, account(), { edit: (q) => q.delete('state') });
+    const { done } = await roundTrip(t, account(), {
+      edit: (q) => {
+        q.delete('state');
+      },
+    });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     nothingWritten(t);
   });
@@ -200,7 +204,9 @@ describe('the callback refuses', () => {
   it('a state that does not match the cookie', async () => {
     const t = setup();
     const { done } = await roundTrip(t, account(), {
-      edit: (_q, jar) => jar.cookies.set(t.config.cookies.oauth, 'a'.repeat(52)),
+      edit: (_q, jar) => {
+        jar.cookies.set(t.config.cookies.oauth, 'a'.repeat(52));
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     nothingWritten(t);
@@ -209,7 +215,9 @@ describe('the callback refuses', () => {
   it('a browser with no state cookie at all', async () => {
     const t = setup();
     const { done } = await roundTrip(t, account(), {
-      edit: (_q, jar) => jar.cookies.delete(t.config.cookies.oauth),
+      edit: (_q, jar) => {
+        jar.cookies.delete(t.config.cookies.oauth);
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     nothingWritten(t);
@@ -218,12 +226,16 @@ describe('the callback refuses', () => {
   it('a state and cookie carried to another browser', async () => {
     const t = setup();
     const { done } = await roundTrip(t, account(), {
-      edit: (_q, jar) => jar.cookies.set(t.config.cookies.pre, 'b'.repeat(52)),
+      edit: (_q, jar) => {
+        jar.cookies.set(t.config.cookies.pre, 'b'.repeat(52));
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     nothingWritten(t);
     const second = await roundTrip(t, account(), {
-      edit: (_q, jar) => jar.cookies.delete(t.config.cookies.pre),
+      edit: (_q, jar) => {
+        jar.cookies.delete(t.config.cookies.pre);
+      },
     });
     expect(codeOf(second.done)).toBe('AUTH_OAUTH_STATE_INVALID');
   });
@@ -278,11 +290,12 @@ describe('the callback refuses', () => {
   it('a code minted for another PKCE challenge, as an injected code is', async () => {
     const t = setup();
     const { done } = await roundTrip(t, account(), {
-      edit: (q) =>
+      edit: (q) => {
         q.set(
           'code',
           t.fakes.mintCode(account(), `${ORIGIN}/auth/oauth/github/callback`, 'x'.repeat(43)),
-        ),
+        );
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_PROVIDER_ERROR');
     nothingWritten(t);
@@ -336,7 +349,9 @@ describe('the callback refuses', () => {
   it('when the state store is down', async () => {
     const t = setup();
     const { done } = await roundTrip(t, account(), {
-      edit: () => t.db.fail('delete', 'oauth_states'),
+      edit: () => {
+        t.db.fail('delete', 'oauth_states');
+      },
     });
     expect(codeOf(done)).toBe('AUTH_UNAVAILABLE');
     nothingWritten(t);
@@ -495,7 +510,9 @@ describe('signing in', () => {
     const t = setup();
     const account = githubAccount(address('race'));
     const { done } = await roundTrip(t, account, {
-      edit: () => identity(t, user(t, address('winner')), account),
+      edit: () => {
+        identity(t, user(t, address('winner')), account);
+      },
     });
     // The identity existed by the time of the lookup: that is just a known identity.
     expect(codeOf(done)).toBe('ok');
@@ -614,7 +631,7 @@ describe('a verified provider address that matches an existing user', () => {
     const t = setup();
     const email = address('limited');
     user(t, email);
-    vi.mocked(t.limiter.reserve).mockImplementation((bucket) =>
+    t.reserve.mockImplementation((bucket) =>
       bucket === 'email_send'
         ? Promise.reject(new AuthError('AUTH_RATE_LIMITED'))
         : Promise.resolve(),
@@ -732,28 +749,36 @@ describe('step up', () => {
     expect(writesTo(t, 'sessions').filter((s) => /^\s*update/i.test(s.sql))).toEqual([]);
   });
 
-  it('with GitHub is refused while another step up method exists', async () => {
-    // Email is on unless turned off.
-    const t = setup();
-    const email = address('gh-email');
-    const me = user(t, email);
-    const account = githubAccount(email);
-    identity(t, me, account);
-    expect(codeOf((await stepUp(t, me, account)).done)).toBe('AUTH_FORBIDDEN');
+  it('with GitHub is refused at the callback when another step up method appeared', async () => {
     const off = setup({ env: { DREFYN_AUTH_EMAIL: 'off' } });
     const withPassword = user(off, address('gh-pass'));
     const ghPass = githubAccount(address('gh-pass-account'));
     identity(off, withPassword, ghPass);
-    off.db.tables.password_credentials.push({ user_id: withPassword, phc: '$argon2id$x' });
-    expect(codeOf((await stepUp(off, withPassword, ghPass)).done)).toBe('AUTH_FORBIDDEN');
+    const first = await signedIn(off, withPassword);
+    const password = await roundTrip(off, ghPass, {
+      ...first,
+      purpose: 'step_up',
+      edit: () => {
+        off.db.tables.password_credentials.push({ user_id: withPassword, phc: '$argon2id$x' });
+      },
+    });
+    expect(codeOf(password.done)).toBe('AUTH_FORBIDDEN');
     const withGoogle = user(off, address('gh-google'));
     const ghGoogle = githubAccount(address('gh-google-account'));
     identity(off, withGoogle, ghGoogle);
-    identity(off, withGoogle, googleAccount(address('gh-google-g')));
-    expect(codeOf((await stepUp(off, withGoogle, ghGoogle)).done)).toBe('AUTH_FORBIDDEN');
+    const second = await signedIn(off, withGoogle);
+    const google = await roundTrip(off, ghGoogle, {
+      ...second,
+      purpose: 'step_up',
+      edit: () => {
+        identity(off, withGoogle, googleAccount(address('gh-google-g')));
+      },
+    });
+    expect(codeOf(google.done)).toBe('AUTH_FORBIDDEN');
+    expect(writesTo(off, 'sessions').filter((s) => /^\s*update/i.test(s.sql))).toEqual([]);
   });
 
-  it('with GitHub is refused at start already, before the round trip', async () => {
+  it('with GitHub is refused at start while email is on, before the round trip', async () => {
     const t = setup();
     const me = user(t, address('gh-early'));
     identity(t, me, githubAccount(address('gh-early-account')));
@@ -833,7 +858,9 @@ describe('linking while signed in', () => {
       jar,
       purpose: 'link',
       session,
-      edit: () => t.sessions.setRecent(false),
+      edit: () => {
+        t.sessions.setRecent(false);
+      },
     });
     expect(codeOf(done)).toBe('AUTH_RECENT_AUTH_REQUIRED');
     expect(t.db.tables.identities).toEqual([]);
@@ -972,7 +999,9 @@ describe('what refusals log', () => {
     const t = setup();
     const email = address('quiet');
     const { done, query } = await roundTrip(t, githubAccount(email), {
-      edit: (q) => q.delete('state'),
+      edit: (q) => {
+        q.delete('state');
+      },
     });
     expect(codeOf(done)).toBe('AUTH_OAUTH_STATE_INVALID');
     expect(t.logs).toContainEqual({
