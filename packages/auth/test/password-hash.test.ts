@@ -82,7 +82,10 @@ describe('PHC strings', () => {
           memory: 64,
           passes: 1,
         },
-        (error, key) => (error === null ? resolve(key) : reject(error)),
+        (error, key) => {
+          if (error === null) resolve(key);
+          else reject(error);
+        },
       );
     });
     const hasher = smallHasher();
@@ -144,7 +147,7 @@ describe('createPasswordHasher', () => {
   });
 
   it('pads a miss against cheaper stored parameters up to the current cost', async () => {
-    const sleep = vi.fn((_ms: number) => Promise.resolve());
+    const sleep = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
     let fake = 0;
     const clock = () => fake;
     // Hashes at the current parameters take 20 ms on this clock, cheaper ones 5 ms.
@@ -166,7 +169,7 @@ describe('createPasswordHasher', () => {
   });
 
   it('pays a dummy instead of padding when it has no estimate yet', async () => {
-    const sleep = vi.fn((_ms: number) => Promise.resolve());
+    const sleep = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
     const memories: number[] = [];
     const counting: Argon2Function = (algorithm, parameters, callback) => {
       memories.push(parameters.memory);

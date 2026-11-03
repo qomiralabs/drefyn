@@ -8,11 +8,15 @@ interface Held {
 }
 
 function held(label: string): Held {
-  let release = () => undefined as void;
-  let failIt = () => undefined as void;
+  let release: () => void = () => undefined;
+  let failIt: () => void = () => undefined;
   const promise = new Promise<string>((resolve, reject) => {
-    release = () => resolve(label);
-    failIt = () => reject(new Error('hash failed'));
+    release = () => {
+      resolve(label);
+    };
+    failIt = () => {
+      reject(new Error('hash failed'));
+    };
   });
   return { promise, release, fail: failIt };
 }

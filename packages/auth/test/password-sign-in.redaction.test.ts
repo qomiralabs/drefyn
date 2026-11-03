@@ -16,6 +16,9 @@ import {
 
 const SECRET_PASSWORD = 'Plum-Kestrel-Harbour-9931-quietly';
 
+// Wrapped in an array, so a value JSON cannot write still gives a string.
+const json = (value: unknown): string => JSON.stringify([value]).slice(1, -1);
+
 // Every way a value could leave: log events and fields, error messages, causes and their
 // serialised forms.
 function everything(logs: readonly unknown[], results: readonly unknown[]): string {
@@ -31,10 +34,10 @@ function everything(logs: readonly unknown[], results: readonly unknown[]): stri
       for (const inner of Object.values(value)) visit(inner, depth + 1);
       return;
     }
-    parts.push(String(value));
+    parts.push(typeof value === 'string' ? value : json(value));
   };
   for (const item of [...logs, ...results]) {
-    parts.push(JSON.stringify(item) ?? '');
+    parts.push(json(item));
     visit(item, 0);
   }
   return parts.join('\n');
@@ -124,7 +127,7 @@ describe('passwords never reach logs or errors', () => {
   it('the hasher keeps the password out of its own failures', async () => {
     const broken: Argon2Function = (_a, parameters, callback) => {
       callback(
-        new Error(`failed on ${Buffer.from(parameters.message as Buffer).toString()}`),
+        new Error(`failed on ${Buffer.from(parameters.message).toString()}`),
         Buffer.alloc(0),
       );
     };

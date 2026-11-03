@@ -7,7 +7,6 @@ import {
   passwordConfig,
   passwordFlow,
   personWithPassword,
-  signInFrom,
 } from '../support/passwords.ts';
 
 // Real parameters: the gap is about what the hash costs. Every failure kind is interleaved,
@@ -67,7 +66,7 @@ describeWithStack('password sign in timing says nothing about the address', () =
     const gaps: Record<string, number[]> = Object.fromEntries(names.map((n) => [n, []]));
     for (let i = 0; i < SAMPLES; i += 1) {
       // Rotate the order so warm caches favour none.
-      const order = names.map((_, j) => names[(i + j) % names.length] as keyof typeof kinds);
+      const order = names.map((_, j) => names[(i + j) % names.length] ?? 'unknown');
       const round: Record<string, number> = {};
       for (const n of order) round[n] = await once(kinds[n]);
       for (const n of names) {

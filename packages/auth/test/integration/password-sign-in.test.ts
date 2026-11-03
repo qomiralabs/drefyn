@@ -144,7 +144,9 @@ describeWithStack('password sign in against Postgres', () => {
       Promise.race([
         work,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('a connection is held during the hash')), 5_000),
+          setTimeout(() => {
+            reject(new Error('a connection is held during the hash'));
+          }, 5_000),
         ),
       ]);
     await within(withAuth(t.authDb, (tx) => sql`select 1`.execute(tx)));

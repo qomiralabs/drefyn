@@ -181,11 +181,15 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
     const passed = await Promise.race([
       check.verify(token, ip, 'password_sign_in'),
       new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), BOT_CHECK_TIMEOUT_MS);
+        timer = setTimeout(() => {
+          resolve(false);
+        }, BOT_CHECK_TIMEOUT_MS);
       }),
     ])
       .catch(() => false)
-      .finally(() => clearTimeout(timer));
+      .finally(() => {
+        clearTimeout(timer);
+      });
     if (!passed) throw new AuthError('AUTH_BOT_CHECK_REQUIRED');
   }
 

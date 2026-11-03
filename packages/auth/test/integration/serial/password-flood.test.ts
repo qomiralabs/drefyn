@@ -1,4 +1,4 @@
-import { lookup } from 'node:dns/promises';
+import { pbkdf2 } from 'node:crypto';
 import { beforeAll, expect, it } from 'vitest';
 import { ARGON2_FLOOR, createEmailSignIn } from '../../../src/index.ts';
 import { createTestAuthMailer } from '../../../src/testing.ts';
@@ -7,8 +7,8 @@ import { describeWithStack, harness, type Harness } from '../support/harness.ts'
 import { hasherAt, loggerFor, passwordConfig, passwordFlow } from '../support/passwords.ts';
 
 // The password endpoint flooded from 1,000 addresses at the default parameters, the hash
-// gate at its default of 4 and a 16 thread pool, while email code sign ins and DNS lookups
-// run beside it. CI checks the email median and a far ceiling, and the median DNS cost;
+// gate at its default of 4 and a 16 thread pool, while email code sign ins and thread pool probes
+// run beside it. CI checks the email median and a far ceiling, and the median thread pool wait;
 // the 50 ms email p99 target is read on quiet hardware from the printed line.
 
 const fresh = harness();
@@ -25,11 +25,22 @@ const percentile = (sorted: readonly number[], p: number) =>
   sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] ?? NaN;
 const sorted = (xs: readonly number[]) => [...xs].sort((a, b) => a - b);
 
+// A one iteration PBKDF2 does almost no work, so its time is the wait for a libuv thread:
+// the same pool dns.lookup queues on. Raw DNS is kept out of this package by lint.
+function poolProbe(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    pbkdf2('probe', 'salt', 1, 32, 'sha256', (error) => {
+      if (error === null) resolve();
+      else reject(error);
+    });
+  });
+}
+
 async function timeDns(samples: number): Promise<number[]> {
   const out: number[] = [];
   for (let i = 0; i < samples; i += 1) {
     const started = performance.now();
-    await lookup('localhost');
+    await poolProbe();
     out.push(performance.now() - started);
   }
   return out;
@@ -40,7 +51,7 @@ describeWithStack('email code sign in while the password endpoint is flooded', (
     h = await fresh();
   });
 
-  it('email start stays within budget and DNS lookups add under 5 ms at the median', async () => {
+  it('email start stays within budget and the thread pool wait dns.lookup would see adds under 5 ms at the median', async () => {
     expect(process.env['UV_THREADPOOL_SIZE']).toBe('16');
     const config = passwordConfig({ DREFYN_AUTH_SIGNUP: 'closed' });
     const passwords = passwordFlow(h, config, hasherAt(ARGON2_FLOOR, ARGON2_FLOOR));
@@ -97,7 +108,7 @@ describeWithStack('email code sign in while the password endpoint is flooded', (
     const extra = percentile(sorted(dnsFlooded), 50) - percentile(sorted(dnsQuiet), 50);
     const extra99 = percentile(sorted(dnsFlooded), 99) - percentile(sorted(dnsQuiet), 99);
     console.info(
-      `flood from ${String(FLOOD_ADDRESSES)} addresses (${[...outcomes].map(([k, v]) => `${k} ${String(v)}`).join(', ')}): startEmailSignIn ${String(e.length)} samples, p50 ${percentile(e, 50).toFixed(2)} ms (at most ${String(EMAIL_P50_BUDGET_MS)}), p99 ${percentile(e, 99).toFixed(2)} ms (ceiling ${String(EMAIL_P99_CEILING_MS)}; target 50 on quiet hardware); dns.lookup extra p50 ${extra.toFixed(3)} ms (under ${String(DNS_EXTRA_BUDGET_MS)}), extra p99 ${extra99.toFixed(3)} ms`,
+      `flood from ${String(FLOOD_ADDRESSES)} addresses (${[...outcomes].map(([k, v]) => `${k} ${String(v)}`).join(', ')}): startEmailSignIn ${String(e.length)} samples, p50 ${percentile(e, 50).toFixed(2)} ms (at most ${String(EMAIL_P50_BUDGET_MS)}), p99 ${percentile(e, 99).toFixed(2)} ms (ceiling ${String(EMAIL_P99_CEILING_MS)}; target 50 on quiet hardware); thread pool wait (as dns.lookup sees it) extra p50 ${extra.toFixed(3)} ms (under ${String(DNS_EXTRA_BUDGET_MS)}), extra p99 ${extra99.toFixed(3)} ms`,
     );
     expect(outcomes.get('AUTH_CREDENTIALS_INVALID') ?? 0).toBeGreaterThan(0);
     expect(percentile(e, 50)).toBeLessThanOrEqual(EMAIL_P50_BUDGET_MS);

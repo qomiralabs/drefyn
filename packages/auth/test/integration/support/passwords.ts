@@ -131,7 +131,13 @@ export function heldHasher(inner: PasswordHasher) {
       return inner.check(phc, password);
     },
   };
-  return { hasher, release: () => release(), inside };
+  return {
+    hasher,
+    release: () => {
+      release();
+    },
+    inside,
+  };
 }
 
 // Rate windows are aligned to the database clock. Waits until a test fits in one window of

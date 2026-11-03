@@ -83,7 +83,7 @@ describe('the pre sign in binding', () => {
     const flow = createPasswordSignIn(config, t.deps);
     const result = await flow.signInWithPassword(b, input({ csrf }));
     expect(!result.ok && result.error.code).toBe('AUTH_ORIGIN_REFUSED');
-    expect(t.limiter.reserve).not.toHaveBeenCalled();
+    expect(t.reserve).not.toHaveBeenCalled();
     expect(t.scripted.events).toEqual([]);
     expect(t.spy.calls).toEqual([]);
     expect(t.sessions.startSession).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe('signInWithPassword', () => {
       input({ csrf: csrfFor(off) }),
     );
     expect(!result.ok && result.error.code).toBe('AUTH_PASSWORDS_DISABLED');
-    expect(t.limiter.reserve).not.toHaveBeenCalled();
+    expect(t.reserve).not.toHaveBeenCalled();
     expect(t.scripted.events).toEqual([]);
     expect(flow.passwordForm(passwordBrowser(off)).csrf).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
@@ -130,10 +130,7 @@ describe('signInWithPassword', () => {
       returnTo: '/acme/docs',
     });
     if (!result.ok) throw result.error;
-    expect(vi.mocked(t.limiter.reserve).mock.calls.map((c) => c[0])).toEqual([
-      'password_fail',
-      'password_fail_ip',
-    ]);
+    expect(t.reserve.mock.calls.map((c) => c[0])).toEqual(['password_fail', 'password_fail_ip']);
     // The read is one statement in one auth transaction, committed before the hash.
     const begins = t.scripted.events.filter((e) => e.kind === 'begin');
     expect(begins[0]).toEqual({ kind: 'begin', scope: 'auth' });
@@ -210,7 +207,7 @@ describe('signInWithPassword', () => {
       if (result.ok) return;
       expect(result.error.code).toBe('AUTH_CREDENTIALS_INVALID');
       expect(result.error.message).toBe(new AuthError('AUTH_CREDENTIALS_INVALID').message);
-      expect(t.limiter.reserve).toHaveBeenCalledTimes(2);
+      expect(t.reserve).toHaveBeenCalledTimes(2);
       expect(t.scripted.statements()).toHaveLength(1);
       expect(t.spy.calls).toHaveLength(1);
       expect(t.spy.calls[0]?.kind).toBe('check');
@@ -292,7 +289,7 @@ describe('signInWithPassword', () => {
     const t = passwordDeps({ known: false });
     const flow = createPasswordSignIn(config, t.deps);
     await flow.signInWithPassword(passwordBrowser(), input({ email: 'nobody@example.com' }));
-    expect(vi.mocked(t.limiter.reserve).mock.calls).toEqual([
+    expect(t.reserve.mock.calls).toEqual([
       ['password_fail', ['nobody@example.com']],
       ['password_fail_ip', [`ip4:${IP}`]],
     ]);
@@ -311,7 +308,7 @@ describe('signInWithPassword', () => {
       input({ password: 'p'.repeat(4097) }),
     );
     expect(!huge.ok && huge.error.code).toBe('AUTH_INPUT_INVALID');
-    expect(t.limiter.reserve).not.toHaveBeenCalled();
+    expect(t.reserve).not.toHaveBeenCalled();
   });
 
   it('a database failure is AUTH_UNAVAILABLE', async () => {
@@ -351,7 +348,7 @@ describe('signInWithPassword', () => {
       // Read again and checked against what is stored now, once.
       expect(t.scripted.statements().filter((s) => on(s, 'select', 'users'))).toHaveLength(2);
       expect(t.spy.calls.map((c) => c.phc)).toEqual([stored, otherStored]);
-      expect(t.limiter.reserve).toHaveBeenCalledTimes(2);
+      expect(t.reserve).toHaveBeenCalledTimes(2);
     });
 
     it('refuses when the password was removed in between', async () => {
@@ -417,7 +414,7 @@ describe('the BotCheck seam', () => {
     expect(!result.ok && result.error.code).toBe('AUTH_BOT_CHECK_REQUIRED');
     expect(t.spy.calls).toEqual([]);
     expect(t.scripted.statements()).toEqual([]);
-    expect(t.limiter.reserve).toHaveBeenCalledTimes(2);
+    expect(t.reserve).toHaveBeenCalledTimes(2);
   });
 
   it('open sign up with no bot check logs one warning when built, and none otherwise', () => {

@@ -8,6 +8,7 @@ import {
   type BrowserContext,
   type Env,
   type PasswordHasher,
+  type PasswordSessions,
   type PasswordSignInDeps,
   type RateBucket,
   type RateLimiter,
@@ -78,12 +79,11 @@ export function passwordResponder(user: StoredUser, reread?: StoredUser): Respon
 }
 
 export const fakePasswordSessions = () => ({
-  startSession: vi.fn(
-    (_b: BrowserContext, _input: { readonly credential?: { readonly phc: string } }) =>
-      Promise.resolve({
-        session: { ...session, method: 'password' as const },
-        setCookies: [{ name: config.cookies.session, value: 'v1.x', maxAgeSeconds: 60 }],
-      }),
+  startSession: vi.fn<PasswordSessions['startSession']>(() =>
+    Promise.resolve({
+      session: { ...session, method: 'password' as const },
+      setCookies: [{ name: config.cookies.session, value: 'v1.x', maxAgeSeconds: 60 }],
+    }),
   ),
   requireRecentAuth: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
 });
@@ -139,13 +139,19 @@ export function passwordDeps(
   const scripted = scriptedStore(passwordResponder(user, reread));
   const { logger, logs } = recordingLogger();
   const sessions = fakePasswordSessions();
-  const limiter = fakeLimiter();
+  // Its own function, so tests can read the calls without pulling a method off an object.
+  const reserve = vi.fn<RateLimiter['reserve']>(() => Promise.resolve());
+  const limiter: RateLimiter = {
+    keyFor: (bucket, value) => config.keys.mac('rate', [bucket, ...value]),
+    reserve,
+  };
   const spy = spyHasher(smallHasher(), () => scripted.open);
   return {
     scripted,
     logs,
     sessions,
     limiter,
+    reserve,
     spy,
     deps: {
       store: scripted.store,

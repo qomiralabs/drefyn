@@ -165,7 +165,9 @@ export function createPasswordHasher(options: PasswordHasherOptions): PasswordHa
               memory: at.memoryKib,
               passes: at.passes,
             },
-            (error, key) => resolve(error === null ? key : null),
+            (error, key) => {
+              resolve(error === null ? key : null);
+            },
           );
         } catch {
           resolve(null);
@@ -180,21 +182,23 @@ export function createPasswordHasher(options: PasswordHasherOptions): PasswordHa
     });
   }
 
-  async function hashNormalized(password: string): Promise<string> {
+  async function fresh(password: string): Promise<ParsedPhc> {
     const salt = Buffer.from(random(SALT_BYTES));
     const tag = await derive(params, Buffer.from(password, 'utf8'), salt, TAG_BYTES);
-    return formatPhc(params, salt, tag);
+    return { params, salt, tag };
+  }
+
+  async function hashNormalized(password: string): Promise<string> {
+    const made = await fresh(password);
+    return formatPhc(made.params, made.salt, made.tag);
   }
 
   // Made once per process from a random password nobody knows, at the current parameters.
   function dummyHash(): Promise<ParsedPhc> {
-    dummy ??= hashNormalized(crypto.randomBytes(32).toString('hex')).then(
-      (phc) => parsePhc(phc, floor) as ParsedPhc,
-      (error: unknown) => {
-        dummy = null;
-        throw error;
-      },
-    );
+    dummy ??= fresh(crypto.randomBytes(32).toString('hex')).catch((error: unknown) => {
+      dummy = null;
+      throw error;
+    });
     return dummy;
   }
 
