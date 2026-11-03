@@ -81,6 +81,14 @@ create policy tenant_isolation on app.invitation_blocks to drefyn_app
   using (organization_id = app.current_org())
   with check (organization_id = app.current_org());
 
+-- Organization work sees the people who belong to it, for the members page and so an invite
+-- can tell an address already belongs to a member. Column grants still limit it to the id,
+-- address, display name and creation time.
+create policy member_read on app.users for select to drefyn_app
+  using (exists (select from app.memberships m
+                  where m.user_id = users.id
+                    and m.organization_id = app.current_org()));
+
 alter table app.memberships add column invitation_id uuid;
 
 -- One invitation makes at most one membership, even if a flow forgets to delete it.
@@ -128,6 +136,8 @@ alter table app.memberships drop constraint memberships_invitation_fkey;
 alter table app.memberships drop constraint memberships_organization_invitation_key;
 
 alter table app.memberships drop column invitation_id;
+
+drop policy member_read on app.users;
 
 drop table app.invitation_blocks;
 

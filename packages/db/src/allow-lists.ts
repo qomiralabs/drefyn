@@ -208,6 +208,16 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     withCheck: SELF,
     reason: 'the signed in person changes their display name',
   },
+  {
+    name: 'app.users.member_read',
+    command: 'select',
+    roles: ['drefyn_app'],
+    using:
+      '(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.user_id = users.id) AND (m.organization_id = app.current_org()))))',
+    withCheck: null,
+    reason:
+      'organization work reads the people who belong to it, through the granted columns only; nobody outside it',
+  },
   authAccess('identities', 'provider sign in looks up the link by provider subject'),
   selfAccess('identities'),
   selfAccess('sessions'),
