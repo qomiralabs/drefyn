@@ -10,6 +10,14 @@ const config: NextConfig = {
   // Next dev writes an AGENTS.md into the app unless told not to; nothing here wants it.
   agentRules: false,
   reactStrictMode: true,
+  // The proxy skips hashed build output so it keeps its long cache; nosniff still applies.
+  headers: () =>
+    Promise.resolve([
+      {
+        source: '/_next/static/:path*',
+        headers: [{ key: 'X-Content-Type-Options', value: 'nosniff' }],
+      },
+    ]),
 };
 
 export default config;
