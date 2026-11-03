@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { beforeAll, expect, it } from 'vitest';
 import {
   ApiKeyReplayError,
@@ -38,13 +37,13 @@ describeWithStack('API keys against Postgres', () => {
     const parts = parseApiKey(made.secret);
     if (parts === null) throw new Error('not a key');
     expect(parts.organizationId).toBe(org.organizationId);
+    // The database hashes the secret itself, so the check does not lean on the code under test.
     const row = await h.sql(
-      `select encode(secret_hash, 'hex') || '|' || display_suffix || '|' || project_scope
+      `select (secret_hash = sha256(decode('${parts.secret.toString('hex')}', 'hex')))::text
+              || '|' || display_suffix || '|' || project_scope
          from app.api_keys where id = '${parts.keyId}';`,
     );
-    expect(row).toBe(
-      `${createHash('sha256').update(parts.secret).digest('hex')}|${made.secret.slice(-4)}|all`,
-    );
+    expect(row).toBe(`true|${made.secret.slice(-4)}|all`);
     // No column holds the secret in any form the person could paste back.
     const whole = await h.sql(
       `select row_to_json(k)::text from app.api_keys k where id = '${parts.keyId}';`,

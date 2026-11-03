@@ -110,6 +110,11 @@ export function input(over: Partial<CreateApiKeyInput> = {}): CreateApiKeyInput 
   };
 }
 
-// A distinct documentation address per test, so failure windows never meet.
-export const testIp = () =>
-  `198.51.${String(randomBytes(1)[0] ?? 0)}.${String(1 + ((randomBytes(1)[0] ?? 0) % 250))}`;
+let addresses = 0;
+
+// A new documentation address per call, so failure windows of different tests never meet.
+export function testIp(): string {
+  addresses += 1;
+  if (addresses > 254) throw new Error('out of test addresses');
+  return `198.51.100.${String(addresses)}`;
+}
