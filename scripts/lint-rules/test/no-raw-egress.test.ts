@@ -417,3 +417,161 @@ describe('no-raw-egress allow list validation', () => {
     await expect(load({ allow: [] })).resolves.toBeDefined();
   });
 });
+
+describe('no-raw-egress scoped entries', () => {
+  const SERVER = { module: 'node:http', imports: ['createServer'] } as const;
+  const FETCH = { global: 'fetch' } as const;
+  const scoped = (path: string, only: readonly object[]) =>
+    makeEslint(root, {
+      [RULE]: ['error', { allow: [...allow, { path, reason: 'a scoped exception', only }] }],
+    });
+  const lintScoped = async (path: string, only: readonly object[]) =>
+    reports(await scoped(path, only).lintFiles([path])).map((r) => [r.line, r.message]);
+
+  it('passes an inbound server shaped like the dashboard one with only createServer', async () => {
+    expect(await lintScoped('apps/dashboard/server.ts', [SERVER])).toEqual([]);
+  });
+
+  it('still reports the server without the entry, so the pass comes from it', async () => {
+    const found = reports(await eslint.lintFiles(['apps/dashboard/server.ts']));
+    expect(found.map((r) => [r.line, r.message])).toEqual([
+      [2, message('node:http', 'egress-fixture')],
+    ]);
+  });
+
+  it.each([
+    ['default-import', 1, 'node:http'],
+    ['namespace-import', 1, 'node:http'],
+    ['other-named', 1, 'node:http'],
+    ['mixed-named', 1, 'node:http'],
+    ['bare-specifier', 1, 'http'],
+    ['require', 1, 'node:http'],
+    ['create-require', 2, 'node:http'],
+    ['dynamic-import', 1, 'node:http'],
+    ['builtin-module', 1, 'node:http'],
+    ['fetch-call', 3, 'fetch'],
+    ['re-export', 1, 'node:http'],
+    ['side-effect', 1, 'node:http'],
+  ])('reports %s next to an allowed createServer', async (name, line, api) => {
+    const path = `scoped/http/${name}.ts`;
+    expect(await lintScoped(path, [SERVER])).toEqual([[line, message(api, 'egress-fixture')]]);
+  });
+
+  it('passes a direct call of the global fetch with only fetch', async () => {
+    expect(await lintScoped('scoped/fetch/direct.ts', [FETCH])).toEqual([]);
+    const without = reports(await eslint.lintFiles(['scoped/fetch/direct.ts']));
+    expect(without.map((r) => r.line)).toEqual([2]);
+  });
+
+  it.each([
+    ['global-this', 'fetch'],
+    ['computed', 'fetch'],
+    ['window', 'fetch'],
+    ['self', 'fetch'],
+    ['global', 'fetch'],
+    ['chained', 'fetch'],
+    ['wrapped-object', 'fetch'],
+    ['value', 'fetch'],
+    ['alias', 'fetch'],
+    ['wrapped-callee', 'fetch'],
+    ['bound', 'fetch'],
+    ['destructure', 'fetch'],
+    ['websocket', 'WebSocket'],
+  ])('reports %s when only a direct fetch call is allowed', async (name, api) => {
+    const path = `scoped/fetch/${name}.ts`;
+    expect(await lintScoped(path, [FETCH])).toEqual([[1, message(api, 'egress-fixture')]]);
+  });
+
+  it.each([
+    ['https', 'node:https'],
+    ['net', 'node:net'],
+    ['undici', 'undici'],
+  ])('reports another banned module (%s) in a file with only', async (name, api) => {
+    const path = `scoped/banned/${name}.ts`;
+    expect(await lintScoped(path, [SERVER, FETCH])).toEqual([[1, message(api, 'egress-fixture')]]);
+  });
+
+  it('leaves type only imports alone with and without only', async () => {
+    const path = 'scoped/http/type-only.ts';
+    expect(await lintScoped(path, [SERVER])).toEqual([]);
+    expect(await lintScoped(path, [FETCH])).toEqual([]);
+    expect(reports(await eslint.lintFiles([path]))).toEqual([]);
+  });
+
+  it('does not let one allowance stand in for the other', async () => {
+    expect(await lintScoped('scoped/fetch/direct.ts', [SERVER])).toEqual([
+      [2, message('fetch', 'egress-fixture')],
+    ]);
+    expect(await lintScoped('apps/dashboard/server.ts', [FETCH])).toEqual([
+      [2, message('node:http', 'egress-fixture')],
+    ]);
+  });
+
+  it('keeps a whole file entry exempting everything when a scoped entry also matches', async () => {
+    const both = makeEslint(root, {
+      [RULE]: [
+        'error',
+        {
+          allow: [
+            { path: 'scoped/fetch/', reason: 'whole directory' },
+            { path: 'scoped/fetch/window.ts', reason: 'scoped', only: [FETCH] },
+          ],
+        },
+      ],
+    });
+    expect(reports(await both.lintFiles(['scoped/fetch/window.ts']))).toEqual([]);
+  });
+});
+
+describe('no-raw-egress scoped entry validation', () => {
+  const load = (entry: object) =>
+    makeEslint(root, { [RULE]: ['error', { allow: [entry] }] }).lintText('export {};', {
+      filePath: join(root, 'packages/web/src/x.ts'),
+    });
+
+  it('accepts each allowance shape', async () => {
+    await expect(
+      load({
+        path: 'apps/dashboard/server.ts',
+        reason: 'inbound server',
+        only: [{ module: 'node:http', imports: ['createServer'] }],
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      load({
+        path: 'packages/auth/src/oauth-fetch.ts',
+        reason: 'oauth',
+        only: [{ global: 'fetch' }],
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects allowances outside the two known forms when the config loads', async () => {
+    const bad = [
+      [],
+      [{ global: 'WebSocket' }],
+      [{ module: 'node:https', imports: ['createServer'] }],
+      [{ module: 'node:http', imports: ['request'] }],
+      [{ module: 'node:http', imports: [] }],
+      [{ module: 'node:http' }],
+      [{ global: 'fetch', module: 'node:http', imports: ['createServer'] }],
+      [{ global: 'fetch', extra: true }],
+      'fetch',
+    ];
+    for (const only of bad) {
+      await expect(
+        load({ path: 'packages/auth/src/a.ts', reason: 'r', only }),
+        JSON.stringify(only),
+      ).rejects.toThrow(/Key "drefyn\/no-raw-egress"/);
+    }
+  });
+
+  it('refuses a scoped directory entry and an apps entry without only, naming the path', async () => {
+    await expect(
+      load({ path: 'packages/auth/src/', reason: 'r', only: [{ global: 'fetch' }] }),
+    ).rejects.toThrow("allow list entry 'packages/auth/src/'");
+    await expect(load({ path: 'apps/dashboard/server.ts', reason: 'r' })).rejects.toThrow(
+      "allow list entry 'apps/dashboard/server.ts'",
+    );
+  });
+});
