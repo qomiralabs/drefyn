@@ -87,8 +87,9 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('let drefyn_app execute the three context readers and the install tier', () => {
+  it('let drefyn_app execute the four context readers and the install tier', () => {
     expect(APP_FUNCTIONS.map((f) => f.name).sort()).toEqual([
+      'app.current_actor_id()',
       'app.current_org()',
       'app.current_project()',
       'app.current_user_id()',
@@ -98,6 +99,10 @@ describe('allow lists', () => {
 
   it('keep the install tier away from the public reader', () => {
     expect(READER_FUNCTIONS.map((f) => f.name)).not.toContain('app.install_tier()');
+  });
+
+  it('keep the actor reader away from the public reader', () => {
+    expect(READER_FUNCTIONS.map((f) => f.name)).not.toContain('app.current_actor_id()');
   });
 
   it('keep the user reader away from the public reader', () => {
@@ -285,6 +290,22 @@ describe('allow lists', () => {
       'a restrictive policy with no reason',
       (l) => ({ ...l, restrictivePolicies: [{ ...GUARD, reason: ' ' }] }),
     ],
+    // A permissive policy keyed to the actor would OR in rows of other organizations the
+    // person belongs to; the actor only ever narrows.
+    [
+      'a user policy that reads the actor',
+      (l) => ({
+        ...l,
+        userPolicies: [{ ...POLICY, using: '(user_id = app.current_actor_id())' }],
+      }),
+    ],
+    [
+      'a user policy that checks the actor',
+      (l) => ({
+        ...l,
+        userPolicies: [{ ...POLICY, withCheck: '(user_id = app.current_actor_id())' }],
+      }),
+    ],
     [
       'a restrictive policy also listed as a user policy',
       (l) => ({ ...l, userPolicies: [...l.userPolicies, { ...GUARD }] }),
@@ -442,12 +463,12 @@ const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
 const INVITATION_ARM =
   '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
-const ORIGIN = `(${OWNER_ARM} OR ${INVITATION_ARM})`;
+const ORIGIN = `((user_id = app.current_actor_id()) AND (${OWNER_ARM} OR ${INVITATION_ARM}))`;
 const INVITER =
-  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND (m.user_id = app.current_actor_id()) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
 const KEY_CREATOR =
-  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
@@ -513,6 +534,22 @@ describe('restrictive policies', () => {
     expect(creator?.withCheck).toContain('m.organization_id = api_keys.organization_id');
     expect(creator?.withCheck).toContain('m.id = api_keys.created_by');
     expect(creator?.withCheck).not.toMatch(/'member'/);
+  });
+
+  // Creating an organization makes its creator the owner, and accepting makes the invitee
+  // the member, so in both arms the new row names the person acting and nobody else.
+  it('bind the key creator, the inviter and the new member to the acting person', () => {
+    const byName = new Map(RESTRICTIVE_POLICIES.map((p) => [p.name, p]));
+    for (const name of [
+      'app.api_keys.api_key_insert_creator',
+      'app.invitations.invitation_insert_inviter',
+      'app.invitations.invitation_update_inviter',
+    ]) {
+      expect(byName.get(name)?.withCheck, name).toContain('(m.user_id = app.current_actor_id())');
+    }
+    expect(byName.get('app.memberships.membership_insert_origin')?.withCheck).toMatch(
+      /^\(\(user_id = app\.current_actor_id\(\)\) AND \(/,
+    );
   });
 
   it('let any other member in only on a live invitation of this organization with the same role', () => {

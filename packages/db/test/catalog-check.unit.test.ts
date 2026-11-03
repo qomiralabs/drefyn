@@ -130,6 +130,70 @@ describe('the restrictive policy rule', () => {
       ]);
     }
   });
+
+  // One CI run against the migrated database must be enough to correct an entry, so the
+  // text Postgres holds is in the message.
+  it('prints the text the database holds when a clause differs', async () => {
+    const problems = await problemsWith([policy({ with_check: '(body = 1)' })], [GUARD]);
+    expect(problems[0]?.message).toContain('actual: "(body = 1)"');
+  });
+});
+
+describe('the actor rule', () => {
+  const ACTOR = '(user_id = app.current_actor_id())';
+  const ISOLATION = '(organization_id = app.current_org())';
+  const row = (over: Record<string, unknown>) => ({
+    table_name: 'app.t',
+    name: 'tenant_isolation',
+    cmd: '*',
+    permissive: true,
+    roles: ['drefyn_app'],
+    qual: ISOLATION,
+    with_check: ISOLATION,
+    ...over,
+  });
+  const GUARD: PolicyEntry = {
+    name: 'app.t.guard',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: ACTOR,
+    reason: 'test only',
+  };
+
+  async function actorProblems(policies: Rows, allow = ALLOW_LISTS) {
+    const { client } = fakeClient([
+      [TABLES, [{ ...table, rls: true, forced: true }]],
+      [POLICIES, policies],
+    ]);
+    const problems = await checkCatalog(client, allow);
+    return problems.filter((p) => p.rule === 'actor_policy');
+  }
+
+  it('passes a restrictive policy that reads the actor', async () => {
+    const guard = row({
+      name: 'guard',
+      cmd: 'a',
+      permissive: false,
+      qual: null,
+      with_check: ACTOR,
+    });
+    expect(
+      await actorProblems([row({}), guard], { ...ALLOW_LISTS, restrictivePolicies: [GUARD] }),
+    ).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['USING', { name: 'wide', cmd: 'r', qual: ACTOR, with_check: null }],
+    ['WITH CHECK', { name: 'wide', cmd: 'a', qual: null, with_check: ACTOR }],
+    ['a listed name', { name: 'self_read', cmd: 'r', qual: ACTOR, with_check: null }],
+  ])('fails a permissive policy that reads the actor in %s', async (_label, over) => {
+    const problems = await actorProblems([row({}), row(over)]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({ object: 'app.t' });
+    expect(problems[0]?.message).toContain(String(over['name']));
+    expect(problems[0]?.message).toContain('app.current_actor_id()');
+  });
 });
 
 describe('check:catalog without a database', () => {

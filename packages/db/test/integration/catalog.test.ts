@@ -855,6 +855,46 @@ create policy organization_insert_tier on app.organizations as permissive for in
       appFunctions: ALLOW_LISTS.appFunctions.filter((f) => f.name !== 'app.install_tier()'),
     },
   },
+  // Without the actor condition, organization work could name any owner as the creator.
+  'the key creator guard without the actor': {
+    rule: 'restrictive_policy',
+    object: 'app.api_keys',
+    mentions: ['api_key_insert_creator', 'WITH CHECK'],
+    up: () => `drop policy api_key_insert_creator on app.api_keys;
+create policy api_key_insert_creator on app.api_keys as restrictive for insert to drefyn_app
+  with check (exists (select from app.memberships m
+    where m.organization_id = api_keys.organization_id and m.id = api_keys.created_by
+      and m.role in ('owner', 'admin')));`,
+  },
+  'the inviter guard without the actor': {
+    rule: 'restrictive_policy',
+    object: 'app.invitations',
+    mentions: ['invitation_insert_inviter', 'WITH CHECK'],
+    up: () => `drop policy invitation_insert_inviter on app.invitations;
+create policy invitation_insert_inviter on app.invitations as restrictive for insert to drefyn_app
+  with check (exists (select from app.memberships m
+    where m.organization_id = invitations.organization_id and m.id = invitations.invited_by
+      and (m.role = 'owner' or (m.role = 'admin' and invitations.role <> 'owner'))));`,
+  },
+  // A permissive policy is OR'd, so one keyed to the actor would widen what organization
+  // work sees to whatever the person can reach.
+  'a permissive policy that reads the actor': {
+    rule: 'actor_policy',
+    object: 'app.fixture_notes',
+    mentions: ['by_actor', 'app.current_actor_id()'],
+    up: () => `create policy by_actor on app.fixture_notes for select to drefyn_app
+  using (app.current_actor_id() is not null);`,
+  },
+  'app.current_actor_id() off the app function allow list': {
+    rule: 'app_privilege',
+    object: 'app.current_actor_id()',
+    mentions: ['drefyn_app', 'app function allow list'],
+    up: () => 'select 1;',
+    allow: {
+      ...FIXTURE_ALLOW_LISTS,
+      appFunctions: ALLOW_LISTS.appFunctions.filter((f) => f.name !== 'app.current_actor_id()'),
+    },
+  },
   'a policy to public and a role': {
     rule: 'public_policy',
     object: 'app.fixture_members',

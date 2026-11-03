@@ -11,6 +11,7 @@ import { thrown } from './support.ts';
 
 const ORG = '01a14984-4476-77ce-9335-2c3c3a59aa8b';
 const PROJECT = '01a14984-4476-77ce-9335-2c3c3a59aa8c';
+const ACTOR = '01a14984-4476-77ce-9335-2c3c3a59aa8d';
 
 function code(fn: () => unknown): string {
   const error = thrown(fn);
@@ -26,6 +27,7 @@ describe('projectSettings', () => {
       organizationId: ORG,
       projectId: PROJECT,
       userId: '',
+      actorUserId: '',
     });
   });
 
@@ -34,7 +36,12 @@ describe('projectSettings', () => {
       organizationId: ORG,
       projectId: PROJECT,
     });
-    expect(projectSettings(ctx)).toEqual({ organizationId: ORG, projectId: PROJECT, userId: '' });
+    expect(projectSettings(ctx)).toEqual({
+      organizationId: ORG,
+      projectId: PROJECT,
+      userId: '',
+      actorUserId: '',
+    });
   });
 
   // A project transaction must never quietly become an organization one.
@@ -64,6 +71,8 @@ describe('projectSettings', () => {
 
   it.each<[string, unknown]>([
     ['an extra field', { organizationId: ORG, projectId: PROJECT, role: 'admin' }],
+    // Project work has no guarded write that names its actor yet.
+    ['an actor', { organizationId: ORG, projectId: PROJECT, actorUserId: ACTOR }],
     ['an extra getter', withGetter('role', 'admin', { organizationId: ORG, projectId: PROJECT })],
     [
       'a class instance',
@@ -89,7 +98,37 @@ describe('organizationSettings', () => {
       organizationId: ORG,
       projectId: '',
       userId: '',
+      actorUserId: '',
     });
+  });
+
+  // Only restrictive policies read the actor, so it never goes in drefyn.user_id, where the
+  // permissive user policies would show the person's other organizations.
+  it('carries the acting person as the actor, never as the user', () => {
+    expect(organizationSettings({ organizationId: ORG, actorUserId: ACTOR })).toEqual({
+      organizationId: ORG,
+      projectId: '',
+      userId: '',
+      actorUserId: ACTOR,
+    });
+    expect(organizationSettings({ organizationId: ORG, actorUserId: undefined })).toEqual({
+      organizationId: ORG,
+      projectId: '',
+      userId: '',
+      actorUserId: '',
+    });
+  });
+
+  it.each<[string, unknown]>([
+    ['an empty actor', { organizationId: ORG, actorUserId: '' }],
+    ['a null actor', { organizationId: ORG, actorUserId: null }],
+    ['an actor that is not a UUID', { organizationId: ORG, actorUserId: 'usr_1' }],
+    ['an upper case actor', { organizationId: ORG, actorUserId: ACTOR.toUpperCase() }],
+    ['an actor smuggling a setting', { organizationId: ORG, actorUserId: `${ACTOR}', true) --` }],
+    ['an actor from a getter', withGetter('actorUserId', ACTOR, { organizationId: ORG })],
+    ['a user id beside the actor', { organizationId: ORG, actorUserId: ACTOR, userId: ACTOR }],
+  ])('refuses %s with DB_TENANT_CONTEXT_INVALID', (_label, ctx) => {
+    expect(code(() => organizationSettings(ctx))).toBe('DB_TENANT_CONTEXT_INVALID');
   });
 
   // Organization scope has to be asked for: a TenantRef that lost its project, or one

@@ -123,8 +123,19 @@ describe('createApiKey', () => {
     const orgBegins = scripted.events.filter(
       (e) => e.kind === 'begin' && e.scope === 'organization',
     );
-    expect(orgBegins).toEqual([{ kind: 'begin', scope: 'organization', organizationId: ORG }]);
+    // The database binds created_by to this person, so the transaction must name them.
+    expect(orgBegins).toEqual([
+      { kind: 'begin', scope: 'organization', organizationId: ORG, actorUserId: USER },
+    ]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'commit' });
+  });
+
+  // A demotion or removal in flight waits for this read, so it then sees the new key and
+  // revokes it; a plain read would let the key slip past.
+  it('reads the creator membership for share', async () => {
+    const { scripted } = await created();
+    const member = scripted.statements().find(isMemberRead);
+    expect(member?.sql).toMatch(/ for share$/);
   });
 
   it('writes listed projects and the listed scope', async () => {

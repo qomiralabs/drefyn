@@ -24,6 +24,7 @@ export type Event =
       readonly kind: 'begin';
       readonly scope: 'organization';
       readonly organizationId: OrganizationId;
+      readonly actorUserId?: UserId;
     }
   | { readonly kind: 'statement'; readonly statement: Statement }
   | { readonly kind: 'commit' }

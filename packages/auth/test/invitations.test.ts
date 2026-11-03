@@ -324,7 +324,7 @@ describe('invite', () => {
     });
     expect(kinds).toEqual(['lock', 'actor', 'member', 'block', 'count', 'upsert']);
     expect(scripted.events.filter((e) => e.kind === 'begin')).toEqual([
-      { kind: 'begin', scope: 'organization', organizationId: ORG },
+      { kind: 'begin', scope: 'organization', organizationId: ORG, actorUserId: USER },
     ]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'commit' });
     for (const s of statements) expect(s.parameters, s.sql).toContain(ORG);
@@ -489,10 +489,12 @@ describe('acceptInvitation proves the token first (M5)', () => {
     expect(scripted.statements()).toHaveLength(1);
     expect(scripted.statements()[0]?.parameters).toEqual(expect.arrayContaining([INV, ORG]));
     expect(writesOf(scripted)).toEqual([]);
+    // The membership is born for the person accepting, which the database checks.
     expect(scripted.events[0]).toEqual({
       kind: 'begin',
       scope: 'organization',
       organizationId: ORG,
+      actorUserId: USER,
     });
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
   });

@@ -82,10 +82,12 @@ describe('createOrganization', () => {
     const result = await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
     expect(result.ok).toBe(true);
     expect(limiter.calls).toEqual([['org_create', [USER]]]);
+    // The first owner must be the person acting, which the database checks.
     expect(scripted.events[0]).toEqual({
       kind: 'begin',
       scope: 'organization',
       organizationId: ORG,
+      actorUserId: USER,
     });
     const statements = scripted.statements();
     expect(statements.map((s) => [isOrgInsert(s), isSlugInsert(s), isMemberInsert(s)])).toEqual([
