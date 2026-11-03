@@ -59,7 +59,7 @@ function database(found: Record<string, unknown> | null = row(), home: Organizat
     if (/^select\b/.test(s.sql) && s.sql.includes('"organizations"')) {
       return [{ plan_tier: 'self_hosted' }];
     }
-    if (/^insert into "memberships"/.test(s.sql)) return [{ id: NEW_MEMBERSHIP }];
+    if (s.sql.startsWith('insert into "memberships"')) return [{ id: NEW_MEMBERSHIP }];
     return [];
   };
 }
@@ -207,7 +207,7 @@ describe('allowsSignUp', () => {
     expect(lines).toEqual([
       {
         event: 'auth.invitation_check_failed',
-        fields: { organizationId: expect.stringMatching(/^org_/) },
+        fields: { organizationId: `org_${token().slice(0, 26)}` },
       },
     ]);
     const text = JSON.stringify(lines);

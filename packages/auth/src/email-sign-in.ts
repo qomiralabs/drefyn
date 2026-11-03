@@ -61,10 +61,16 @@ export interface SignedIn {
   readonly send?: () => Promise<void>;
 }
 
-// Who may create an account in invite_only mode. The invitations work brings the real one;
-// without it nobody new is let in.
+// Who may create an account in invite_only mode: the invitation this browser holds decides,
+// never a search by address. Without an implementation nobody new is let in.
 export interface PendingInvitations {
-  hasPending(emailNormalized: string): Promise<boolean>;
+  // True only when the token names a live invitation, in its own organization, for exactly
+  // this address.
+  allowsSignUp(token: string | null, emailNormalized: string): Promise<boolean>;
+}
+
+export function heldInvitation(config: AuthConfig, b: BrowserContext): string | null {
+  return b.cookies.get(config.cookies.invite) ?? null;
 }
 
 export interface Linking {
@@ -356,14 +362,17 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
     return fail<never>(new AuthError(code));
   }
 
-  async function mayCreate(address: string): Promise<boolean> {
+  // Depends on the request's cookie, never on whether the address has an account, so known
+  // and unknown addresses do the same work.
+  async function mayCreate(b: BrowserContext, address: string): Promise<boolean> {
     if (config.signUp === 'open') return true;
     if (config.signUp === 'closed') return false;
-    return (await deps.invitations?.hasPending(address)) ?? false;
+    return (await deps.invitations?.allowsSignUp(heldInvitation(config, b), address)) ?? false;
   }
 
-  // The user the proved address belongs to, made now when sign up allows it.
-  async function userFor(challenge: Challenge): Promise<UserId | null> {
+  // The user the proved address belongs to, made now when sign up allows it. The invitation
+  // is asked again here, so one revoked or accepted since the code was sent lets nobody in.
+  async function userFor(b: BrowserContext, challenge: Challenge): Promise<UserId | null> {
     if (challenge.user_id !== null) return idOf('usr', challenge.user_id);
     const address = challenge.email_normalized;
     const existing = await store.auth((tx) =>
@@ -374,7 +383,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         .executeTakeFirst(),
     );
     if (existing !== undefined) return idOf('usr', existing.id);
-    if (!(await mayCreate(address))) return null;
+    if (!(await mayCreate(b, address))) return null;
     const id = newId('usr');
     return store.auth(async (tx) => {
       const made = await tx
@@ -536,7 +545,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         });
       }
       // Proved: only now may the answer say that sign up is closed.
-      const userId = await userFor(challenge);
+      const userId = await userFor(b, challenge);
       if (userId === null) return refused('AUTH_SIGNUP_CLOSED', address, binding);
       const started = await sessions.startSession(b, { userId, method: 'email' });
       const device = await recordDevice(config, devices, b, userId);
@@ -575,7 +584,7 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         else await limiter.reserve('email_send_address_ceiling', [address]);
         // Asked for every address, known or not: skipping it for known ones would let the
         // lookup's time say which addresses have an account.
-        const allowed = await mayCreate(address);
+        const allowed = await mayCreate(b, address);
         const deliver = userId !== null || allowed;
         const issued = await issuer.issue(b, {
           purpose: PURPOSE,

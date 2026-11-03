@@ -13,6 +13,8 @@ import { sql, type Transaction } from 'kysely';
 import { grantAccess, storedRole, storedTier, type AccessContext } from './access.ts';
 import { normalizeAddress } from './address.ts';
 import type { AuthConfig } from './config.ts';
+import { INVITE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
+import type { PendingInvitations } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import {
   invitationBlockLink,
@@ -86,7 +88,13 @@ export interface InvitationBlockView {
   readonly organizationName: string;
 }
 
-export interface Invitations {
+export interface AcceptedInvitation {
+  readonly access: AccessContext;
+  // Clears the held invitation, which has done its job.
+  readonly setCookies: readonly CookieSpec[];
+}
+
+export interface Invitations extends PendingInvitations {
   invite(
     a: AccessContext,
     input: {
@@ -95,7 +103,13 @@ export interface Invitations {
       readonly defaultProjectRole: DefaultProjectRole | null;
     },
   ): Promise<Result<InviteOutcome, AuthError>>;
-  acceptInvitation(s: SessionInfo, token: string): Promise<Result<AccessContext, AuthError>>;
+  acceptInvitation(s: SessionInfo, token: string): Promise<Result<AcceptedInvitation, AuthError>>;
+  // What the invite page does for a signed out person: keeps the token in a short lived
+  // cookie while they sign up. Parses only; nothing is read until sign up asks.
+  holdInvitation(
+    b: BrowserContext,
+    token: string,
+  ): Result<{ readonly setCookies: readonly CookieSpec[] }, AuthError>;
   // What the block page shows. Reads only: mail scanners open every link.
   readInvitationBlock(token: string): Promise<Result<InvitationBlockView, AuthError>>;
   // The page's POST. A second call with the same token changes nothing and still succeeds.
@@ -500,8 +514,8 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
         'auth.invitation_accepted',
         idFields({ ...ids, membershipId: ['mem', accepted.membershipId] }),
       );
-      return ok(
-        grantAccess({
+      return ok({
+        access: grantAccess({
           organizationId: parsed.organizationId,
           userId: s.userId,
           sessionId: s.sessionId,
@@ -510,7 +524,40 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
           tier: accepted.tier,
           authenticatedAt: s.authenticatedAt,
         }),
-      );
+        setCookies: [{ name: config.cookies.invite, value: '', maxAgeSeconds: 0 }],
+      });
+    },
+
+    holdInvitation(_b, token) {
+      if (parseInvitationToken(token) === null) {
+        return fail(new AuthError('AUTH_INVITATION_INVALID'));
+      }
+      // The parser accepts only the canonical form, so the token is stored as given.
+      return ok({
+        setCookies: [
+          { name: config.cookies.invite, value: token, maxAgeSeconds: INVITE_MAX_AGE_SECONDS },
+        ],
+      });
+    },
+
+    async allowsSignUp(token, emailNormalized) {
+      // No statement for a missing or broken cookie, so only the request decides the work.
+      const parsed = parseInvitationToken(token);
+      if (parsed === null) return false;
+      try {
+        const invitation = await store.organization(parsed.organizationId, (tx) =>
+          proveInvitation(tx, parsed),
+        );
+        return invitation !== null && invitation.emailNormalized === emailNormalized;
+      } catch {
+        // Fails closed: the newcomer is answered like any address and nobody is let in.
+        quietWarn(
+          deps.logger,
+          'auth.invitation_check_failed',
+          idFields({ organizationId: ['org', parsed.organizationId] }),
+        );
+        return false;
+      }
     },
 
     async readInvitationBlock(token) {

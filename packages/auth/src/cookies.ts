@@ -25,6 +25,10 @@ export function cookieNames(secure: boolean): CookieNames {
 // The pre sign in cookie: long enough to fill in a form or wait for a code mail.
 export const PRE_MAX_AGE_SECONDS = 15 * 60;
 
+// Holds an opened invitation while a newcomer signs up. Short, since it carries the secret;
+// the invitation itself lasts a week and the link can be opened again.
+export const INVITE_MAX_AGE_SECONDS = 60 * 60;
+
 // Auth decides the flags, so a caller can only say which cookie, what value and how long.
 export interface CookieSpec {
   readonly name: string;
