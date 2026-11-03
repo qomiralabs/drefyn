@@ -6,7 +6,7 @@ import { start, type Finished, type Running } from './process.ts';
 import { repoRoot } from './stack.ts';
 
 // The drefyn binary as operators run it. A path, not an import: db must not depend on cli.
-const cliPath = join(repoRoot, 'packages', 'cli', 'src', 'main.ts');
+export const cliPath = join(repoRoot, 'packages', 'cli', 'src', 'main.ts');
 
 export interface MigrateOptions {
   readonly url: string;
