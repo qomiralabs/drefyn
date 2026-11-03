@@ -119,6 +119,11 @@ export const APP_FUNCTIONS: readonly AllowEntry[] = [
     reason: 'reads the transaction setting the user keyed policies need',
   },
   {
+    name: 'app.current_actor_id()',
+    reason:
+      'reads the person acting in organization work, for restrictive policies only; a permissive one fails the actor rule',
+  },
+  {
     name: 'app.install_tier()',
     reason: 'the insert guard on organizations compares the new tier with the install tier',
   },
@@ -270,19 +275,19 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   ),
 ];
 
-// An inviter's stored role bounds the role they invite: an owner any, an admin admin or member,
-// a member none.
+// The inviter is the person acting, and their stored role bounds the role they invite: an
+// owner any, an admin admin or member, a member none.
 const INVITER_GRANTS_ROLE =
-  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND (m.user_id = app.current_actor_id()) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
-// The first owner of an organization made in this transaction, or a member the database can
-// see invited: a live invitation of this organization, named by the row, with the same role.
-// Kept exact, as pg_get_expr prints it.
+// The person acting, as the first owner of an organization made in this transaction, or as a
+// member the database can see invited: a live invitation of this organization, named by the
+// row, with the same role. Kept exact, as pg_get_expr prints it.
 const MEMBERSHIP_ORIGIN =
-  "(((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now())))))";
+  "((user_id = app.current_actor_id()) AND (((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))))";
 
 const KEY_CREATOR =
-  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+  "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
   {
@@ -292,7 +297,7 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     using: null,
     withCheck: KEY_CREATOR,
     reason:
-      'a key is created only in the name of an owner or admin membership of its organization, never ownerless',
+      'a key is created only by the person acting, through their own owner or admin membership of its organization, never ownerless',
   },
   {
     name: 'app.invitations.invitation_insert_inviter',
@@ -301,7 +306,7 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     using: null,
     withCheck: INVITER_GRANTS_ROLE,
     reason:
-      'acceptance trusts the invited role, so an invitation grants only what its inviter could: an owner any role, an admin admin or member',
+      'acceptance trusts the invited role, so an invitation is sent only by the person acting and grants only what they could: an owner any role, an admin admin or member',
   },
   {
     name: 'app.invitations.invitation_update_inviter',
@@ -318,7 +323,7 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     using: null,
     withCheck: MEMBERSHIP_ORIGIN,
     reason:
-      'a membership is born only as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
+      'a membership is born only for the person acting, as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
   },
   {
     name: 'app.organizations.organization_insert_tier',

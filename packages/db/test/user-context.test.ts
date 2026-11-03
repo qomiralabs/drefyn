@@ -31,6 +31,8 @@ const ORG = organizationId('01a14984-4476-77ce-9335-2c3c3a59aa8b');
 const PRJ = projectId('01a14984-4476-77ce-9335-2c3c3a59aa8c');
 const USR = userId('01a14984-4476-77ce-9335-2c3c3a59aa8d');
 const USER: UserRef = { userId: USR };
+const USER_AND_ACTOR =
+  "select set_config('drefyn.user_id', $1, true), set_config('drefyn.actor_user_id', $2, true)";
 
 type Answer = (sql: string) => unknown;
 
@@ -201,6 +203,7 @@ describe('userSettings', () => {
       organizationId: '',
       projectId: '',
       userId: USR,
+      actorUserId: '',
     });
   });
 
@@ -212,7 +215,7 @@ describe('userSettings', () => {
 });
 
 describe('a user transaction', () => {
-  it('sets only the user, then checks all three settings in the commit', async () => {
+  it('sets only the user, then checks all four settings in the commit', async () => {
     const { db, clients } = app();
     await expect(withUser(db, USER, () => Promise.resolve('ok'))).resolves.toBe('ok');
     const sent = clients[0]?.sent ?? [];
@@ -220,12 +223,14 @@ describe('a user transaction', () => {
     expect(sent.slice(1, 4).map((q) => [/drefyn\.[a-z_]+/.exec(q.text)?.[0], q.values])).toEqual([
       ['drefyn.organization_id', ['']],
       ['drefyn.project_id', ['']],
-      ['drefyn.user_id', [USR]],
+      ['drefyn.user_id', [USR, '']],
     ]);
+    expect(sent[3]?.text).toBe(USER_AND_ACTOR);
     const check = sent[4]?.text ?? '';
     expect(check).toMatch(/drefyn\.organization_id', true\) is distinct from ''/);
     expect(check).toMatch(/drefyn\.project_id', true\) is distinct from ''/);
     expect(check).toContain(`drefyn.user_id', true) is distinct from '${USR}'`);
+    expect(check).toMatch(/drefyn\.actor_user_id', true\) is distinct from ''/);
     expect(check).toMatch(/; commit$/);
     expect(sent[5]?.text).toBe('discard all');
     expect(sent).toHaveLength(6);
@@ -260,11 +265,25 @@ describe('a user transaction', () => {
   it('tenant transactions set the user to empty', async () => {
     const { db, clients } = app();
     await withTenant(db, { organizationId: ORG, projectId: PRJ }, () => Promise.resolve(1));
-    expect(clients[0]?.sent[3]).toEqual({
-      text: "select set_config('drefyn.user_id', $1, true)",
-      values: [''],
-    });
+    expect(clients[0]?.sent[3]).toEqual({ text: USER_AND_ACTOR, values: ['', ''] });
     expect(clients[0]?.sent[4]?.text).toMatch(/drefyn\.user_id', true\) is distinct from ''/);
+  });
+
+  // The actor rides in the user statement, so naming it costs no round trip.
+  it('organization transactions set the actor, leave the user empty and check both', async () => {
+    const { db, clients } = app();
+    await withOrganization(db, { organizationId: ORG, actorUserId: USR }, () => Promise.resolve(1));
+    const sent = clients[0]?.sent ?? [];
+    expect(sent[3]).toEqual({ text: USER_AND_ACTOR, values: ['', USR] });
+    expect(sent[4]?.text).toMatch(/drefyn\.user_id', true\) is distinct from ''/);
+    expect(sent[4]?.text).toContain(`drefyn.actor_user_id', true) is distinct from '${USR}'`);
+    expect(sent).toHaveLength(6);
+  });
+
+  it('organization transactions without an actor set it empty', async () => {
+    const { db, clients } = app();
+    await withOrganization(db, { organizationId: ORG }, () => Promise.resolve(1));
+    expect(clients[0]?.sent[3]).toEqual({ text: USER_AND_ACTOR, values: ['', ''] });
   });
 });
 
@@ -274,8 +293,9 @@ describe('an auth transaction', () => {
     await expect(withAuth(db, () => Promise.resolve('ok'))).resolves.toBe('ok');
     const sent = clients[0]?.sent ?? [];
     expect(sent[0]?.text).toBe('begin; set local statement_timeout = 2000');
-    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['']]);
+    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['', '']]);
     expect(sent[4]?.text).toMatch(/drefyn\.user_id', true\) is distinct from ''/);
+    expect(sent[4]?.text).toMatch(/drefyn\.actor_user_id', true\) is distinct from ''/);
     expect(sent[5]?.text).toBe('discard all');
   });
 
@@ -304,7 +324,7 @@ describe('an API key limiter transaction', () => {
     await expect(withApiKeyLimiter(db, () => Promise.resolve('ok'))).resolves.toBe('ok');
     const sent = clients[0]?.sent ?? [];
     expect(sent[0]?.text).toBe('begin; set local statement_timeout = 2000');
-    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['']]);
+    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['', '']]);
     expect(sent[5]?.text).toBe('discard all');
   });
 

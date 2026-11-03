@@ -9,8 +9,8 @@ const dbs = databases();
 // Functions are executable by PUBLIC unless the default is revoked, and every role, the
 // reader included, is a member of PUBLIC.
 describeWithStack('EXECUTE on functions in app', () => {
-  // The user reader and the install tier are for drefyn_app alone: the reader never has a
-  // user and never inserts, and the auth role runs no function in app.
+  // The user and actor readers and the install tier are for drefyn_app alone: the reader
+  // never has a user and never inserts, and the auth role runs no function in app.
   it('lets only the app and reader roles call the context readers and the install tier', async () => {
     const db = await dbs.fresh('migrated');
     const rows = await query<{ fn: string; grantee: string }>(
@@ -22,6 +22,7 @@ describeWithStack('EXECUTE on functions in app', () => {
         order by 1, 2`,
     );
     expect(rows).toEqual([
+      { fn: 'app.current_actor_id()', grantee: 'drefyn_app' },
       { fn: 'app.current_org()', grantee: 'drefyn_app' },
       { fn: 'app.current_org()', grantee: 'drefyn_public_reader' },
       { fn: 'app.current_project()', grantee: 'drefyn_app' },

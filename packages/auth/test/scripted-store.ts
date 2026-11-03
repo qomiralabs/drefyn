@@ -24,6 +24,7 @@ export type Event =
       readonly kind: 'begin';
       readonly scope: 'organization';
       readonly organizationId: OrganizationId;
+      readonly actorUserId?: UserId;
     }
   | { readonly kind: 'statement'; readonly statement: Statement }
   | { readonly kind: 'commit' }
@@ -105,6 +106,16 @@ export function scriptedStore(respond: Responder = () => []) {
       work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
     ): Promise<T> {
       events.push({ kind: 'begin', scope: 'organization', organizationId });
+      return kysely
+        .transaction()
+        .execute((tx) => work(tx as unknown as Transaction<OrganizationSchema>));
+    },
+    organizationAs<T>(
+      organizationId: OrganizationId,
+      actorUserId: UserId,
+      work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
+    ): Promise<T> {
+      events.push({ kind: 'begin', scope: 'organization', organizationId, actorUserId });
       return kysely
         .transaction()
         .execute((tx) => work(tx as unknown as Transaction<OrganizationSchema>));

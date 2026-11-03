@@ -28,6 +28,12 @@ without one of those.
   read as empty even through raw SQL, because their policy needs both settings. An
   organization wide view of project data loops over the projects the caller may access, one
   `withTenant` each, or reads a summary table written by a job.
+  It may also carry `actorUserId`, the person acting, set as `drefyn.actor_user_id` and read by
+  `app.current_actor_id()`. Only restrictive policies read it: creating a key, sending or
+  resending an invitation and making a membership must each name the person acting, and work
+  without an actor gets none of them. It is not `drefyn.user_id`, so the user policies stay
+  off and the person's other organizations stay out of sight. The catalog check fails any
+  permissive policy that reads the actor (`actor_policy`).
 - `withPublishedReader(db, tenant, work, { timeoutMs })` needs a `TenantRef` and runs a read only
   transaction whose type holds only the tables on the published allow list. Default 2000 ms, up
   to 10000 ms.
@@ -55,7 +61,8 @@ without one of those.
   `DB_UNAVAILABLE`.
 
 A context must be a plain object with only its own keys as own data properties:
-`organizationId` and `projectId` for the tenant entry points, `userId` for `withUser`.
+`organizationId` and `projectId` for the tenant entry points (plus `actorUserId` for
+`withOrganization`), `userId` for `withUser`.
 Getters, prototype values and extra fields are refused before any SQL is sent. The entry
 points refuse each other's keys, so a user and an organization are never set in one
 transaction, where their permissive policies would combine.

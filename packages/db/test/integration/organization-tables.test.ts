@@ -38,7 +38,9 @@ afterAll(async () => {
   for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
 });
 
-type Scope = { readonly user: string } | { readonly org: string; readonly project?: string };
+type Scope =
+  | { readonly user: string }
+  | { readonly org: string; readonly project?: string; readonly actor?: string };
 
 // The statements run in one transaction under the given setting and roll back, so each
 // case starts from the seeded rows.
@@ -50,11 +52,22 @@ async function within<T>(client: pg.Client, scope: Scope, work: () => Promise<T>
     } else {
       await client.query("select set_config('drefyn.organization_id', $1, true)", [scope.org]);
       await client.query("select set_config('drefyn.project_id', $1, true)", [scope.project ?? '']);
+      await client.query("select set_config('drefyn.actor_user_id', $1, true)", [
+        scope.actor ?? '',
+      ]);
     }
     return await work();
   } finally {
     await client.query('rollback');
   }
+}
+
+async function ownerOf(client: pg.Client, org: string): Promise<string> {
+  const { rows } = await client.query<{ id: string }>(
+    "select id from app.memberships where organization_id = $1 and role = 'owner'",
+    [org],
+  );
+  return rows[0]?.id ?? '';
 }
 
 async function sqlState(promise: Promise<unknown>): Promise<string | undefined> {
@@ -75,9 +88,15 @@ async function rejectedText(promise: Promise<unknown>): Promise<string> {
   return 'no error';
 }
 
-async function committed(client: pg.Client, org: string, statements: readonly string[]) {
+async function committed(
+  client: pg.Client,
+  org: string,
+  statements: readonly string[],
+  actor = '',
+) {
   await client.query('begin');
   await client.query("select set_config('drefyn.organization_id', $1, true)", [org]);
+  await client.query("select set_config('drefyn.actor_user_id', $1, true)", [actor]);
   for (const text of statements) await client.query(text);
   await client.query('commit');
 }
@@ -100,13 +119,18 @@ async function seed(): Promise<void> {
     [ORG_A, USER_A, 'acme', PROJECT_A],
     [ORG_B, USER_B, 'globex', PROJECT_B],
   ] as const) {
-    await committed(app, org, [
-      `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'self_hosted')`,
-      `insert into app.organization_slugs (slug, organization_id) values ('${slug}', '${org}')`,
-      `insert into app.memberships (organization_id, user_id, role) values ('${org}', '${user}', 'owner')`,
-      `insert into app.projects (id, organization_id, product, slug, name)
+    await committed(
+      app,
+      org,
+      [
+        `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'self_hosted')`,
+        `insert into app.organization_slugs (slug, organization_id) values ('${slug}', '${org}')`,
+        `insert into app.memberships (organization_id, user_id, role) values ('${org}', '${user}', 'owner')`,
+        `insert into app.projects (id, organization_id, product, slug, name)
          values ('${project}', '${org}', 'docs', 'handbook', 'Handbook')`,
-    ]);
+      ],
+      user,
+    );
   }
 }
 
@@ -309,7 +333,7 @@ describeWithStack('organization tables', () => {
 
     it('refuses an unknown default project role for drefyn_app too', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_FRESH }, async () => {
+      const code = await within(app, { org: ORG_FRESH, actor: USER_B }, async () => {
         await app.query(
           `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
         );
@@ -367,7 +391,7 @@ describeWithStack('organization tables', () => {
       'refuses a %s into an organization that already has a member',
       async (role) => {
         const app = await as('app');
-        const code = await within(app, { org: ORG_A }, () =>
+        const code = await within(app, { org: ORG_A, actor: USER_B }, () =>
           sqlState(
             app.query(
               'insert into app.memberships (organization_id, user_id, role) values ($1, $2, $3)',
@@ -383,7 +407,7 @@ describeWithStack('organization tables', () => {
       'refuses a %s into an organization made in an earlier transaction with no member',
       async (role) => {
         const app = await as('app');
-        const code = await within(app, { org: ORG_EMPTY }, () =>
+        const code = await within(app, { org: ORG_EMPTY, actor: USER_B }, () =>
           sqlState(
             app.query(
               'insert into app.memberships (organization_id, user_id, role) values ($1, $2, $3)',
@@ -399,7 +423,7 @@ describeWithStack('organization tables', () => {
       'refuses a %s as the first member of an organization made in this transaction',
       async (role) => {
         const app = await as('app');
-        const code = await within(app, { org: ORG_FRESH }, async () => {
+        const code = await within(app, { org: ORG_FRESH, actor: USER_B }, async () => {
           await app.query(
             `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
           );
@@ -416,13 +440,15 @@ describeWithStack('organization tables', () => {
 
     it('refuses a second owner in the transaction that made the organization', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_FRESH }, async () => {
+      const code = await within(app, { org: ORG_FRESH, actor: USER_A }, async () => {
         await app.query(
           `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
         );
         await app.query(
           `insert into app.memberships (organization_id, user_id, role) values ('${ORG_FRESH}', '${USER_A}', 'owner')`,
         );
+        // The second owner acts too, so only the one owner rule can refuse it.
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_B]);
         return sqlState(
           app.query(
             `insert into app.memberships (organization_id, user_id, role) values ('${ORG_FRESH}', '${USER_B}', 'owner')`,
@@ -487,6 +513,7 @@ describeWithStack('organization tables', () => {
       const app = await as('app');
       await app.query('begin');
       await app.query("select set_config('drefyn.organization_id', $1, true)", [ORG_LATER]);
+      await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_B]);
       await app.query(
         `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_LATER}', 'Fresh', 'self_hosted')`,
       );
@@ -516,7 +543,7 @@ describeWithStack('organization tables', () => {
     // what this asks is whether an index serves each probe at all.
     it('plans an index scan for each subquery of the membership policy', async () => {
       const app = await as('app');
-      const plan = await within(app, { org: ORG_A }, async () => {
+      const plan = await within(app, { org: ORG_A, actor: USER_B }, async () => {
         await app.query('set local enable_seqscan = off');
         const result = await app.query<{ 'QUERY PLAN': string }>(
           `explain (costs off) insert into app.memberships (organization_id, user_id, role)
@@ -527,6 +554,58 @@ describeWithStack('organization tables', () => {
       expect(plan).not.toContain('Seq Scan');
       expect(plan).toMatch(/Index Scan (using|on) memberships_\w+/);
       expect(plan).toContain('Index Scan using organizations_pkey on organizations o');
+    });
+  });
+
+  describe('the person acting', () => {
+    // Creating an organization makes its creator the owner, never someone they name.
+    it.each<[string, string]>([
+      ['someone else', USER_A],
+      ['nobody', ''],
+    ])('refuses a first owner made for %s', async (_label, actor) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_FRESH, actor }, async () => {
+        await app.query(
+          `insert into app.organizations (organization_id, name, plan_tier) values ('${ORG_FRESH}', 'x', 'self_hosted')`,
+        );
+        return sqlState(
+          app.query(
+            `insert into app.memberships (organization_id, user_id, role) values ('${ORG_FRESH}', '${USER_B}', 'owner')`,
+          ),
+        );
+      });
+      expect(code).toBe('42501');
+    });
+
+    // The actor is not drefyn.user_id, so the user policies stay off in organization work
+    // and the person's other organizations stay out of sight.
+    it('shows organization work only its own memberships whoever acts', async () => {
+      const app = await as('app');
+      const seen = await within(app, { org: ORG_A, actor: USER_B }, async () => ({
+        orgs: (
+          await app.query<{ organization_id: string }>(
+            'select distinct organization_id from app.memberships',
+          )
+        ).rows,
+        user: (await app.query<{ id: string | null }>('select app.current_user_id() as id')).rows,
+        actor: (await app.query<{ id: string | null }>('select app.current_actor_id() as id')).rows,
+      }));
+      expect(seen).toEqual({
+        orgs: [{ organization_id: ORG_A }],
+        user: [{ id: null }],
+        actor: [{ id: USER_B }],
+      });
+    });
+
+    it('reads an empty actor as none', async () => {
+      const app = await as('app');
+      const actor = await within(
+        app,
+        { org: ORG_A, actor: '' },
+        async () =>
+          (await app.query<{ id: string | null }>('select app.current_actor_id() as id')).rows,
+      );
+      expect(actor).toEqual([{ id: null }]);
     });
   });
 
@@ -588,24 +667,37 @@ describeWithStack('organization tables', () => {
         `insert into app.invitations (id, organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
          values ('${id}', '${org}', '${email}', '${role}', decode(repeat('00', 32), 'hex'),
            (select id from app.memberships where organization_id = '${org}' and role = 'owner'), ${expires})`;
-      await committed(app, ORG_A, [
-        invite(ORG_A, INV_ADMIN, 'b@example.com', 'admin', "now() + interval '7 days'"),
-        invite(ORG_A, INV_MEMBER, 'c@example.com', 'member', "now() + interval '7 days'"),
-        invite(ORG_A, INV_EXPIRED, 'x@example.com', 'member', "now() - interval '1 second'"),
-      ]);
-      await committed(app, ORG_A, [
-        `insert into app.invitations (id, organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
+      await committed(
+        app,
+        ORG_A,
+        [
+          invite(ORG_A, INV_ADMIN, 'b@example.com', 'admin', "now() + interval '7 days'"),
+          invite(ORG_A, INV_MEMBER, 'c@example.com', 'member', "now() + interval '7 days'"),
+          invite(ORG_A, INV_EXPIRED, 'x@example.com', 'member', "now() - interval '1 second'"),
+        ],
+        USER_A,
+      );
+      await committed(
+        app,
+        ORG_A,
+        [
+          `insert into app.invitations (id, organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
          values ('${INV_BY_ADMIN}', '${ORG_A}', 'w@example.com', 'member', decode(repeat('00', 32), 'hex'),
            '${ADMIN_D}', now() + interval '7 days')`,
-      ]);
-      await committed(app, ORG_B, [
-        invite(ORG_B, INV_OTHER_ORG, 'c@example.com', 'member', "now() + interval '7 days'"),
-      ]);
+        ],
+        USER_D,
+      );
+      await committed(
+        app,
+        ORG_B,
+        [invite(ORG_B, INV_OTHER_ORG, 'c@example.com', 'member', "now() + interval '7 days'")],
+        USER_B,
+      );
     });
 
     it('refuses a member with no invitation', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_C }, () =>
         sqlState(insert(app, ORG_A, USER_C, 'member', null)),
       );
       expect(code).toBe('42501');
@@ -613,7 +705,7 @@ describeWithStack('organization tables', () => {
 
     it('refuses a member on an expired invitation', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_C }, () =>
         sqlState(insert(app, ORG_A, USER_C, 'member', INV_EXPIRED)),
       );
       expect(code).toBe('42501');
@@ -626,7 +718,7 @@ describeWithStack('organization tables', () => {
       ['owner', INV_ADMIN],
     ])('refuses a %s on an invitation for another role', async (role, invitation) => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_C }, () =>
         sqlState(insert(app, ORG_A, USER_C, role, invitation)),
       );
       expect(code).toBe('42501');
@@ -634,7 +726,7 @@ describeWithStack('organization tables', () => {
 
     it('refuses an invitation of another organization', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_C }, () =>
         sqlState(insert(app, ORG_A, USER_C, 'member', INV_OTHER_ORG)),
       );
       expect(code).toBe('42501');
@@ -642,7 +734,7 @@ describeWithStack('organization tables', () => {
 
     it('lets an admin invitation make an admin, then sets it free when the invitation goes', async () => {
       const app = await as('app');
-      const after = await within(app, { org: ORG_A }, async () => {
+      const after = await within(app, { org: ORG_A, actor: USER_B }, async () => {
         const made = await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
         expect(made.rowCount).toBe(1);
         await app.query('delete from app.invitations where id = $1', [INV_ADMIN]);
@@ -658,8 +750,9 @@ describeWithStack('organization tables', () => {
 
     it('never makes two memberships from one invitation', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, async () => {
+      const code = await within(app, { org: ORG_A, actor: USER_B }, async () => {
         await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_C]);
         return sqlState(insert(app, ORG_A, USER_C, 'admin', INV_ADMIN));
       });
       expect(code).toBe('23505');
@@ -667,7 +760,7 @@ describeWithStack('organization tables', () => {
 
     it("takes an inviter's pending invitations with them when they leave", async () => {
       const app = await as('app');
-      const left = await within(app, { org: ORG_A }, async () => {
+      const left = await within(app, { org: ORG_A, actor: USER_B }, async () => {
         const made = await insert(app, ORG_A, USER_B, 'admin', INV_ADMIN);
         const admin = made.rows[0] as { id: string };
         await app.query(
@@ -691,7 +784,7 @@ describeWithStack('organization tables', () => {
     it('refuses an admin inviting anyone, themselves included, as owner', async () => {
       const app = await as('app');
       for (const email of ['d@example.com', 'new@example.com']) {
-        const code = await within(app, { org: ORG_A }, () =>
+        const code = await within(app, { org: ORG_A, actor: USER_D }, () =>
           sqlState(inviteAs(app, ADMIN_D, email, 'owner')),
         );
         expect(code, email).toBe('42501');
@@ -700,7 +793,7 @@ describeWithStack('organization tables', () => {
 
     it.each(['admin', 'member', 'owner'])('refuses a member inviting a %s', async (role) => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_E }, () =>
         sqlState(inviteAs(app, MEMBER_E, 'new@example.com', role)),
       );
       expect(code).toBe('42501');
@@ -708,7 +801,7 @@ describeWithStack('organization tables', () => {
 
     it('refuses an invitation that names a membership of no one in this organization', async () => {
       const app = await as('app');
-      const code = await within(app, { org: ORG_A }, () =>
+      const code = await within(app, { org: ORG_A, actor: USER_A }, () =>
         sqlState(inviteAs(app, INV_OTHER_ORG, 'new@example.com', 'member')),
       );
       expect(code).toBe('42501');
@@ -716,13 +809,13 @@ describeWithStack('organization tables', () => {
 
     it('refuses raising an invitation to owner by update, a resend included', async () => {
       const app = await as('app');
-      const byUpdate = await within(app, { org: ORG_A }, () =>
+      const byUpdate = await within(app, { org: ORG_A, actor: USER_D }, () =>
         sqlState(
           app.query("update app.invitations set role = 'owner' where id = $1", [INV_BY_ADMIN]),
         ),
       );
       expect(byUpdate).toBe('42501');
-      const byResend = await within(app, { org: ORG_A }, () =>
+      const byResend = await within(app, { org: ORG_A, actor: USER_D }, () =>
         sqlState(
           app.query(
             `insert into app.invitations (organization_id, email_normalized, role, secret_hash, invited_by, expires_at)
@@ -737,7 +830,7 @@ describeWithStack('organization tables', () => {
 
     it('lets an owner invite an owner and an admin invite an admin', async () => {
       const app = await as('app');
-      const owner = await within(app, { org: ORG_A }, async () => {
+      const owner = await within(app, { org: ORG_A, actor: USER_A }, async () => {
         const id = (
           await app.query<{ id: string }>(
             "select id from app.memberships where organization_id = $1 and role = 'owner'",
@@ -747,10 +840,53 @@ describeWithStack('organization tables', () => {
         return sqlState(inviteAs(app, id ?? '', 'o@example.com', 'owner'));
       });
       expect(owner).toBe('no error');
-      const admin = await within(app, { org: ORG_A }, () =>
+      const admin = await within(app, { org: ORG_A, actor: USER_D }, () =>
         sqlState(inviteAs(app, ADMIN_D, 'a2@example.com', 'admin')),
       );
       expect(admin).toBe('no error');
+    });
+
+    // The inviter named on the row is the person acting, so organization work cannot
+    // invite in an owner's name, and work that names nobody invites nobody.
+    it.each<[string, string, string]>([
+      ['a member naming an admin', USER_E, 'member'],
+      ['a member naming an owner', USER_E, 'owner'],
+      ['an admin naming the owner', USER_D, 'owner'],
+      ['nobody', '', 'member'],
+    ])('refuses an invitation inserted by %s as inviter', async (_label, actor, role) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A, actor }, async () => {
+        const inviter = role === 'owner' ? await ownerOf(app, ORG_A) : ADMIN_D;
+        expect(inviter).not.toBe('');
+        return sqlState(inviteAs(app, inviter, 'n@example.com', 'member'));
+      });
+      expect(code).toBe('42501');
+    });
+
+    it('refuses a resend that names someone other than the person acting as inviter', async () => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_A, actor: USER_E }, () =>
+        sqlState(
+          app.query('update app.invitations set send_count = send_count + 1 where id = $1', [
+            INV_BY_ADMIN,
+          ]),
+        ),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('refuses a member made for someone other than the person acting', async () => {
+      const app = await as('app');
+      for (const actor of [USER_B, '']) {
+        const code = await within(app, { org: ORG_A, actor }, () =>
+          sqlState(insert(app, ORG_A, USER_C, 'member', INV_MEMBER)),
+        );
+        expect(code, actor).toBe('42501');
+      }
+      const own = await within(app, { org: ORG_A, actor: USER_C }, () =>
+        sqlState(insert(app, ORG_A, USER_C, 'member', INV_MEMBER)),
+      );
+      expect(own).toBe('no error');
     });
 
     it('lets organization work add a block but never lift one', async () => {

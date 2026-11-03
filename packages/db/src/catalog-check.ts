@@ -40,7 +40,8 @@ export type CatalogRule =
   | 'column_grant'
   | 'auth_only'
   | 'public_policy'
-  | 'restrictive_policy';
+  | 'restrictive_policy'
+  | 'actor_policy';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -120,6 +121,14 @@ function policyUnsafe(entry: PolicyEntry): string | undefined {
   return undefined;
 }
 
+// The actor names whoever is acting, who may belong to other organizations too. Permissive
+// policies are OR'd, so one keyed to the actor would let organization work see those; the
+// actor may only narrow.
+const ACTOR_READER = 'app.current_actor_id()';
+
+const readsActor = (using: string | null, withCheck: string | null) =>
+  (using ?? '').includes(ACTOR_READER) || (withCheck ?? '').includes(ACTOR_READER);
+
 // Problems with the allow lists themselves: an empty reason, a bad name, a duplicate entry,
 // or an entry that is unsafe whatever the catalog says.
 export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] {
@@ -153,7 +162,15 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
       label: 'user policy',
       entries: allow.userPolicies,
       shape: CONSTRAINT_NAME,
-      unsafe: (entry) => policyUnsafe(entry as PolicyEntry),
+      unsafe: (entry) => {
+        const policy = entry as PolicyEntry;
+        return (
+          policyUnsafe(policy) ??
+          (readsActor(policy.using, policy.withCheck)
+            ? `reads ${ACTOR_READER}, which only restrictive policies may`
+            : undefined)
+        );
+      },
     },
     {
       label: 'restrictive policy',
@@ -526,9 +543,17 @@ function entryMismatches(policy: Policy, entry: PolicyEntry): string[] {
   if (sortedRoles(policy.roles) !== sortedRoles(entry.roles)) {
     out.push(`is to ${sortedRoles(policy.roles)}, not ${sortedRoles(entry.roles)}`);
   }
-  if (policy.qual !== entry.using) out.push('has a USING clause other than its allow list entry');
+  // The text the database holds goes in the message, so one run against a migrated
+  // database is enough to correct an entry.
+  if (policy.qual !== entry.using) {
+    out.push(
+      `has a USING clause other than its allow list entry (actual: ${JSON.stringify(policy.qual)})`,
+    );
+  }
   if (policy.withCheck !== entry.withCheck) {
-    out.push('has a WITH CHECK clause other than its allow list entry');
+    out.push(
+      `has a WITH CHECK clause other than its allow list entry (actual: ${JSON.stringify(policy.withCheck)})`,
+    );
   }
   return out;
 }
@@ -726,6 +751,18 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     out.push(...globalPolicyProblems(table, policies.get(table) ?? [], userPolicies));
   }
   out.push(...restrictivePolicyProblems(policies, allow.restrictivePolicies));
+  // Checked apart from the allow lists, so listing such a policy cannot make it pass.
+  for (const [table, list] of policies) {
+    for (const policy of list.filter((p) => p.permissive && readsActor(p.qual, p.withCheck))) {
+      out.push(
+        problem(
+          'actor_policy',
+          table,
+          `${table} permissive policy ${policy.name} reads ${ACTOR_READER}; permissive policies are OR'd, so the actor may only appear in a restrictive one`,
+        ),
+      );
+    }
+  }
   // With no TO clause a policy applies to every role, the pools and the owner included, and
   // a restrictive one could be read as a guard it is not.
   for (const [table, list] of policies) {

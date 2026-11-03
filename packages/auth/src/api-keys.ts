@@ -239,6 +239,8 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
       user: (userId, work) => withUser(db, { userId }, work),
       auth: (work) => withAuth(authDb, work),
       organization: (organizationId, work) => withOrganization(db, { organizationId }, work),
+      organizationAs: (organizationId, actorUserId, work) =>
+        withOrganization(db, { organizationId, actorUserId }, work),
     };
   } else {
     throw new AuthError('AUTH_CONFIG_INVALID');
@@ -264,12 +266,14 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
 
       let made: Made;
       try {
-        made = await store.organization(organizationId, async (tx) => {
-          // The role as stored now: one demoted since the guard ran cannot mint a key.
+        made = await store.organizationAs(organizationId, a.userId, async (tx) => {
+          // The role as stored now: one demoted since the guard ran cannot mint a key. For
+          // share, so a demotion or removal in flight waits for this key and then revokes it.
           const member = await tx
             .selectFrom('memberships')
             .select(['id', 'role', 'default_project_role'])
             .where('user_id', '=', a.userId)
+            .forShare()
             .executeTakeFirst();
           if (member === undefined) throw FORBIDDEN();
           if (!holdsAll(storedPermissions(member.role, member.default_project_role), input.needs)) {

@@ -86,6 +86,7 @@ describe.each(runners)('a statement run alone on the %s pool', (_label, kind, ru
     expect(parts?.[2]).toMatch(/set_config\('drefyn\.organization_id', '', true\)/);
     expect(parts?.[2]).toMatch(/set_config\('drefyn\.project_id', '', true\)/);
     expect(parts?.[2]).toMatch(/set_config\('drefyn\.user_id', '', true\)/);
+    expect(parts?.[2]).toMatch(/set_config\('drefyn\.actor_user_id', '', true\)/);
     expect(parts?.[3]).toBe('insert into t default values returning 3 as count');
     expect(parts?.[4]).toBe('commit');
     expect(client?.released).toBeUndefined();

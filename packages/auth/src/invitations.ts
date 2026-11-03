@@ -8,7 +8,7 @@ import {
   type OrganizationSchema,
 } from '@drefyn/db';
 import { checkLimit, limitFor, type LimitValue } from '@drefyn/entitlements';
-import { idOf, type IdOf, type OrganizationId } from '@drefyn/tenancy';
+import { idOf, type IdOf, type OrganizationId, type UserId } from '@drefyn/tenancy';
 import { sql, type Transaction } from 'kysely';
 import { grantAccess, storedRole, storedTier, type AccessContext } from './access.ts';
 import { normalizeAddress } from './address.ts';
@@ -123,7 +123,7 @@ export interface InvitationsDeps {
   readonly logger: AuthLogger;
   readonly mailer: AuthInvitationMailer;
   readonly limiter?: RateLimiter;
-  readonly store?: Pick<OrganizationStore, 'organization'>;
+  readonly store?: Pick<OrganizationStore, 'organization' | 'organizationAs'>;
   readonly random?: (bytes: number) => Uint8Array;
   readonly now?: () => Date;
 }
@@ -222,6 +222,11 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
       organizationId: OrganizationId,
       work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
     ) => withOrganization(deps.db, { organizationId }, work),
+    organizationAs: <T>(
+      organizationId: OrganizationId,
+      actorUserId: UserId,
+      work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
+    ) => withOrganization(deps.db, { organizationId, actorUserId }, work),
   };
   const limiter =
     deps.limiter ??
@@ -296,7 +301,7 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
         inviterName: string;
       };
       try {
-        const outcome = await store.organization(a.organizationId, async (tx) => {
+        const outcome = await store.organizationAs(a.organizationId, a.userId, async (tx) => {
           // Every invite in this organization waits here, so the count below cannot race.
           const org = await tx
             .selectFrom('organizations')
@@ -444,7 +449,7 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
         tier: string;
       };
       try {
-        accepted = await store.organization(parsed.organizationId, async (tx) => {
+        accepted = await store.organizationAs(parsed.organizationId, s.userId, async (tx) => {
           const invitation = await proveInvitation(tx, parsed);
           if (invitation === null) throw new Refused('AUTH_INVITATION_INVALID');
           if (normalizeAddress(s.email) !== invitation.emailNormalized) {

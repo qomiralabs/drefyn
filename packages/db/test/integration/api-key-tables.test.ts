@@ -40,11 +40,17 @@ afterAll(async () => {
 });
 
 // Runs under one organization and rolls back, so each case starts from the seeded rows.
-async function within<T>(client: pg.Client, org: string, work: () => Promise<T>): Promise<T> {
+async function within<T>(
+  client: pg.Client,
+  org: string,
+  work: () => Promise<T>,
+  actor = '',
+): Promise<T> {
   await client.query('begin');
   try {
     await client.query("select set_config('drefyn.organization_id', $1, true)", [org]);
     await client.query("select set_config('drefyn.project_id', '', true)");
+    await client.query("select set_config('drefyn.actor_user_id', $1, true)", [actor]);
     return await work();
   } finally {
     await client.query('rollback');
@@ -87,6 +93,7 @@ async function seed(): Promise<void> {
   ] as const) {
     await app.query('begin');
     await app.query("select set_config('drefyn.organization_id', $1, true)", [org]);
+    await app.query("select set_config('drefyn.actor_user_id', $1, true)", [user]);
     for (const text of [
       `insert into app.organizations (organization_id, name, plan_tier) values ('${org}', 'Org', 'self_hosted')`,
       `insert into app.organization_slugs (slug, organization_id) values ('${slug}', '${org}')`,
@@ -199,7 +206,7 @@ describeWithStack('API key tables', () => {
     ['an expiry before creation', keyInsert(ORG_A, KEY_C, MEMBER_A, "now() - interval '1 day'")],
   ])('refuse %s', async (_name, text) => {
     const app = await as('app');
-    expect(await within(app, ORG_A, () => sqlState(app.query(text)))).toBe('23514');
+    expect(await within(app, ORG_A, () => sqlState(app.query(text)), USER_A)).toBe('23514');
   });
 
   it('hold one key per idempotency key in an organization', async () => {
@@ -208,7 +215,7 @@ describeWithStack('API key tables', () => {
       "'k-01a14984-4476-77ce-9335-1280000004d1'",
       `'k-${KEY_A}'`,
     );
-    expect(await within(app, ORG_A, () => sqlState(app.query(again)))).toBe('23505');
+    expect(await within(app, ORG_A, () => sqlState(app.query(again)), USER_A)).toBe('23505');
   });
 
   it('drop the listed row with its project and keep the key listed', async () => {
@@ -243,32 +250,60 @@ describeWithStack('API key tables', () => {
     }
   });
 
-  it.each([
-    ['no creator', () => keyInsert(ORG_A, KEY_D, MEMBER_A).replace(`'${MEMBER_A}'`, 'null')],
-    ['a plain member as creator', () => keyInsert(ORG_A, KEY_D, PLAIN_A)],
-    ['a creator id that is no membership', () => keyInsert(ORG_A, KEY_D, KEY_A)],
-  ])('refuse a key with %s, with permission denied', async (_name, text) => {
+  // Each case has the named person acting, so only the rule under test can refuse it.
+  it.each<[string, () => string, string]>([
+    [
+      'no creator',
+      () => keyInsert(ORG_A, KEY_D, MEMBER_A).replace(`'${MEMBER_A}'`, 'null'),
+      USER_A,
+    ],
+    ['a plain member as creator', () => keyInsert(ORG_A, KEY_D, PLAIN_A), USER_C],
+    ['a creator id that is no membership', () => keyInsert(ORG_A, KEY_D, KEY_A), USER_A],
+    // Organization work cannot mint a key in the owner's name for someone else.
+    ['the owner as creator while a member acts', () => keyInsert(ORG_A, KEY_D, MEMBER_A), USER_C],
+    ['the owner as creator while nobody acts', () => keyInsert(ORG_A, KEY_D, MEMBER_A), ''],
+    [
+      'the owner as creator while an owner of another organization acts',
+      () => keyInsert(ORG_A, KEY_D, MEMBER_A),
+      USER_B,
+    ],
+  ])('refuse a key with %s, with permission denied', async (_name, text, actor) => {
     const app = await as('app');
-    expect(await within(app, ORG_A, () => sqlState(app.query(text())))).toBe('42501');
+    expect(await within(app, ORG_A, () => sqlState(app.query(text())), actor)).toBe('42501');
   });
 
   it("refuse another organization's owner as creator, even through organization_id", async () => {
     const app = await as('app');
     // The foreign key would also refuse it; the policy answers first.
     expect(
-      await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_B)))),
+      await within(
+        app,
+        ORG_A,
+        () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_B))),
+        USER_B,
+      ),
     ).toBe('42501');
   });
 
   it('let an owner or an admin of the organization create a key', async () => {
     const app = await as('app');
     expect(
-      await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_A)))),
+      await within(
+        app,
+        ORG_A,
+        () => sqlState(app.query(keyInsert(ORG_A, KEY_D, MEMBER_A))),
+        USER_A,
+      ),
     ).toBe('no error');
     await superuser(`update app.memberships set role = 'admin' where id = '${PLAIN_A}';`, db.name);
     try {
       expect(
-        await within(app, ORG_A, () => sqlState(app.query(keyInsert(ORG_A, KEY_D, PLAIN_A)))),
+        await within(
+          app,
+          ORG_A,
+          () => sqlState(app.query(keyInsert(ORG_A, KEY_D, PLAIN_A))),
+          USER_C,
+        ),
       ).toBe('no error');
     } finally {
       await superuser(
@@ -286,7 +321,7 @@ describeWithStack('API key tables', () => {
         "array['docs:read']",
         `array['${scope}']`,
       );
-      expect(await within(app, ORG_A, () => sqlState(app.query(text)))).toBe('23514');
+      expect(await within(app, ORG_A, () => sqlState(app.query(text)), USER_A)).toBe('23514');
     },
   );
 

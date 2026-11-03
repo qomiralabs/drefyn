@@ -108,7 +108,7 @@ describe('the end of every transaction', () => {
     expect(sent[0]).toMatch(/^begin; set local statement_timeout = 5000$/);
     expect(sent.slice(1, 4).every((q) => q.includes('set_config'))).toBe(true);
     expect(sent[4]).toMatch(
-      /drefyn\.organization_id[\s\S]*drefyn\.project_id[\s\S]*drefyn\.user_id[\s\S]*; commit$/,
+      /drefyn\.organization_id[\s\S]*drefyn\.project_id[\s\S]*drefyn\.user_id[\s\S]*drefyn\.actor_user_id[\s\S]*; commit$/,
     );
     expect(sent[4]).toContain(ORG);
     expect(sent[4]).toContain(PRJ);

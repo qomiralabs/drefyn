@@ -1,12 +1,14 @@
 import { organizationId, projectId, userId } from '@drefyn/tenancy';
 import { DbError } from './errors.ts';
 
-// Every transaction sets all three, empty where unused, so nothing left on the session can
+// Every transaction sets all four, empty where unused, so nothing left on the session can
 // stand in for a value the entry point did not set.
 export interface TenantSettings {
   readonly organizationId: string;
   readonly projectId: string;
   readonly userId: string;
+  // The person acting in organization work. Only restrictive policies read it.
+  readonly actorUserId: string;
 }
 
 function missing(reason: string): DbError {
@@ -58,15 +60,24 @@ export function projectSettings(ctx: unknown): TenantSettings {
   const organization = organizationOf(fields);
   const project = canonical(dataValue(fields.get('projectId')), projectId);
   if (project === undefined) throw missing('has no valid projectId');
-  return { organizationId: organization, projectId: project, userId: '' };
+  return { organizationId: organization, projectId: project, userId: '', actorUserId: '' };
 }
 
 // For withOrganization. Any own projectId, even undefined, means the caller holds a project
-// context and asked for the wider scope by mistake.
+// context and asked for the wider scope by mistake. An actor, when given, must be a user id:
+// an empty or broken one would quietly mean nobody acts.
 export function organizationSettings(ctx: unknown): TenantSettings {
-  const fields = ownFields(ctx, FIELDS);
+  const fields = ownFields(ctx, [...FIELDS, 'actorUserId']);
   if (fields.has('projectId')) throw invalid('has a projectId; use withTenant for a project');
-  return { organizationId: organizationOf(fields), projectId: '', userId: '' };
+  const organization = organizationOf(fields);
+  const descriptor = fields.get('actorUserId');
+  let actor = '';
+  if (descriptor !== undefined && !('value' in descriptor && descriptor.value === undefined)) {
+    const parsed = canonical(dataValue(descriptor), userId);
+    if (parsed === undefined) throw invalid('has an actorUserId that is not a valid user id');
+    actor = parsed;
+  }
+  return { organizationId: organization, projectId: '', userId: '', actorUserId: actor };
 }
 
 // For withUser. A user belongs to many organizations, so an organization or project key here
@@ -86,14 +97,15 @@ export function userSettings(ctx: unknown): TenantSettings {
   }
   const user = canonical(dataValue(descriptor), userId);
   if (user === undefined) throw invalid('has a userId that is not a valid user id');
-  return { organizationId: '', projectId: '', userId: user };
+  return { organizationId: '', projectId: '', userId: user, actorUserId: '' };
 }
 
-// For withAuth: no tenant and no user, all three set empty.
+// For withAuth: no tenant, no user and no actor, all four set empty.
 export const AUTH_SETTINGS: TenantSettings = Object.freeze({
   organizationId: '',
   projectId: '',
   userId: '',
+  actorUserId: '',
 });
 
 // Ceilings per pool: an unbounded value would quietly turn the timeout off.

@@ -43,8 +43,15 @@ export interface OrganizationSummary {
 // The two transaction kinds organizations use. Tests hand in scripted ones.
 export interface OrganizationStore {
   user<T>(userId: UserId, work: (tx: Transaction<UserSchema>) => Promise<T>): Promise<T>;
+  // Names nobody, so the database refuses every guarded write in it.
   organization<T>(
     organizationId: OrganizationId,
+    work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
+  ): Promise<T>;
+  // Names the person acting. A key, an invitation or a membership written here must be theirs.
+  organizationAs<T>(
+    organizationId: OrganizationId,
+    actorUserId: UserId,
     work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
   ): Promise<T>;
 }
@@ -80,6 +87,8 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
   const store: OrganizationStore = deps.store ?? {
     user: (userId, work) => withUser(deps.db, { userId }, work),
     organization: (organizationId, work) => withOrganization(deps.db, { organizationId }, work),
+    organizationAs: (organizationId, actorUserId, work) =>
+      withOrganization(deps.db, { organizationId, actorUserId }, work),
   };
   const limiter =
     deps.limiter ??
@@ -108,7 +117,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
       const ids = { organizationId: ['org', organizationId], userId: ['usr', s.userId] } as const;
       let membershipId: string;
       try {
-        membershipId = await store.organization(organizationId, async (tx) => {
+        membershipId = await store.organizationAs(organizationId, s.userId, async (tx) => {
           await tx
             .insertInto('organizations')
             .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
