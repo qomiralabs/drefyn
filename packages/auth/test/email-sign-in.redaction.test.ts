@@ -1,7 +1,12 @@
+import type { AuthDatabase, Database } from '@drefyn/db';
+import { idOf } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
 import {
   AuthError,
   createEmailSignIn,
+  createInvitations,
+  formatInvitationToken,
+  parseAuthConfig,
   formatChallengeId,
   parseVerifyFragment,
   type AuthErrorCode,
@@ -18,6 +23,8 @@ import {
   fakeLimiter,
   unitDeps,
 } from './email-fixtures.ts';
+import { scriptedStore } from './scripted-store.ts';
+import { validEnv } from './support.ts';
 
 // The fields a sign in failure log may carry: what happened, and hashed keys an operator can
 // tie together. Nothing a person typed or was sent.
@@ -104,5 +111,46 @@ describe('sign in logs', () => {
     expect(!result.ok && result.error).toBeInstanceOf(AuthError);
     expect(!result.ok && result.error.message).not.toContain(ADDRESS);
     expect(JSON.stringify(t.logs)).not.toContain(ADDRESS);
+  });
+
+  it('say only the organization when the invitation check meets a database that is down', async () => {
+    const cfg = parseAuthConfig({ ...validEnv(), DREFYN_AUTH_SIGNUP: 'invite_only' });
+    const organizationId = idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070');
+    const secret = Buffer.alloc(32, 5);
+    const held = formatInvitationToken({
+      organizationId,
+      invitationId: idOf('inv', '01890a5d-ac96-774b-bcce-b302099a8072'),
+      secret,
+    });
+    const down = scriptedStore(() => {
+      throw new Error(`connection lost while checking ${ADDRESS} with ${held}`);
+    });
+    const t = unitDeps(emailResponder({ known: false }));
+    const invitations = createInvitations(cfg, {
+      db: {} as Database,
+      authDb: {} as AuthDatabase,
+      logger: t.deps.logger,
+      mailer: { sendInvitation: () => Promise.resolve() },
+      store: down.store,
+    });
+    const flow = createEmailSignIn(cfg, { ...t.deps, invitations });
+    const b = browser();
+    const cookies = new Map(b.cookies).set(cfg.cookies.invite, held);
+    const start = await flow.startEmailSignIn({ ...b, cookies }, { email: ADDRESS });
+    if (!start.ok) throw start.error;
+    await start.value.send();
+    // Answered as for any address, and no mail to a newcomer.
+    expect(t.mail.calls).toHaveLength(0);
+    const failed = t.logs.filter((l) => l.event === 'auth.invitation_check_failed');
+    expect(failed).toEqual([
+      {
+        event: 'auth.invitation_check_failed',
+        fields: { organizationId: 'org_' + held.slice(0, 26) },
+      },
+    ]);
+    const text = JSON.stringify(t.logs);
+    for (const value of [held, ADDRESS, 'person', secret.toString('hex'), held.slice(-52)]) {
+      expect(text).not.toContain(value);
+    }
   });
 });

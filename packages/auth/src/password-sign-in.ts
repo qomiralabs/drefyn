@@ -12,8 +12,15 @@ import type { AuthNoticeMailer } from './email-change.ts';
 import type { SignedIn } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { createPasswordHasher, type PasswordHasher } from './password-hash.ts';
-import { checkNewPassword, normalizePassword } from './password-input.ts';
-import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
+import type { BreachedPasswordCheck } from './breach-check.ts';
+import { admitNewPassword } from './new-password.ts';
+import { normalizePassword } from './password-input.ts';
+import {
+  createRateLimiter,
+  type AuthLogger,
+  type AuthMetrics,
+  type RateLimiter,
+} from './rate-limiter.ts';
 import { safeReturnTo } from './return-to.ts';
 import {
   fail,
@@ -54,6 +61,9 @@ export interface PasswordSignInDeps {
   // Security notices: a first password and a sign in from a new device. Without one, each
   // notice is logged as failed.
   readonly mailer?: Partial<AuthNoticeMailer>;
+  // Opened at startup by loadBreachedPasswords; hosted passes the range API check.
+  readonly breachedPasswords?: BreachedPasswordCheck | undefined;
+  readonly metrics?: AuthMetrics;
   readonly random?: (bytes: number) => Uint8Array;
 }
 
@@ -150,6 +160,17 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
     logger: deps.logger,
     ...(deps.random === undefined ? {} : { random: deps.random }),
   };
+
+  // A configured list that nobody opened would check nothing while the operator thinks it does.
+  if (
+    config.passwords.enabled &&
+    config.passwords.breachedPasswordsFile !== null &&
+    deps.breachedPasswords === undefined
+  ) {
+    throw new TypeError(
+      'DREFYN_AUTH_BREACHED_PASSWORDS_FILE is set: open it with loadBreachedPasswords at startup and pass it as breachedPasswords',
+    );
+  }
 
   // Open sign up with no bot check leaves the throttle as the only brake on stuffing; the
   // operator should know at start, once.
@@ -316,11 +337,22 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
       } catch (error) {
         return fail(error);
       }
-      const rules = checkNewPassword(password, { email: s.email });
-      if (rules.length > 0) return fail(new AuthError('AUTH_PASSWORD_WEAK', { rules }));
       try {
         const recent = await sessions.requireRecentAuth(s);
         if (!recent.ok) return recent;
+        // After the recent sign in, so a session left open is no oracle for the list.
+        const fields = idFields({ userId: ['usr', s.userId] });
+        const admitted = await admitNewPassword(
+          password,
+          { email: s.email },
+          { check: deps.breachedPasswords, logger: deps.logger, metrics: deps.metrics, fields },
+        );
+        if (!admitted.ok) {
+          if (admitted.error.code === 'AUTH_PASSWORD_BREACHED') {
+            note(deps.logger, 'auth.password_refused', { outcome: admitted.error.code, ...fields });
+          }
+          return fail(admitted.error);
+        }
         const existing = await store.user(s.userId, (tx) =>
           tx
             .selectFrom('password_credentials')

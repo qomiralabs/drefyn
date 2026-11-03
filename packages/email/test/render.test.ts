@@ -15,6 +15,7 @@ import {
   invitation,
   link,
   notice,
+  path,
   recorder,
   runs,
   signIn,
@@ -91,6 +92,160 @@ describe('link guard', () => {
       { ...signIn(), link: 'https://app.drefyn.test/verify' } as unknown as MailMessage,
       'link',
     );
+  });
+});
+
+const BLOCK_LABEL = 'I did not expect this';
+
+describe('block link guard', () => {
+  it('refuses a block link on another origin and names the field', async () => {
+    for (const href of [
+      'https://evil.test/block',
+      'https://app.drefyn.test:8443/block',
+      'https://sub.app.drefyn.test/block',
+    ]) {
+      await refused(invitation({ blockLink: new URL(href) }), 'blockLink');
+    }
+  });
+
+  it('refuses credentials, http off loopback and other schemes', async () => {
+    for (const href of [
+      'https://user:pw@app.drefyn.test/block',
+      'https://user@app.drefyn.test/block',
+      'http://app.drefyn.test/block',
+      'javascript:alert(1)',
+      'mailto:x@app.drefyn.test',
+    ]) {
+      await refused(invitation({ blockLink: new URL(href) }), 'blockLink');
+    }
+  });
+
+  it('allows http only when the configured origin is loopback', async () => {
+    const base = new URL('http://localhost:3000');
+    const mail = await rendered(
+      invitation({ link: new URL('/invite', base), blockLink: new URL('/invite/block', base) }),
+      base,
+    );
+    expect(mail.text).toContain('http://localhost:3000/invite/block');
+  });
+
+  it('refuses a missing block link or one that is not a URL object', async () => {
+    const without = {
+      template: 'invitation',
+      organizationName: 'Acme',
+      inviterName: 'Ada Lovelace',
+      link: link('/invite'),
+      expiresAt: AT,
+    };
+    await refused(without as unknown as MailMessage, 'blockLink');
+    await refused(
+      { ...invitation(), blockLink: 'https://app.drefyn.test/block' } as unknown as MailMessage,
+      'blockLink',
+    );
+  });
+
+  it('never hands a refused block link to the transport', async () => {
+    const transport = createTestTransport();
+    const { logger, metrics } = recorder();
+    const mailer = createMailer(smtpConfig(), { linkOrigin: ORIGIN, logger, metrics, transport });
+    const result = await mailer.send(
+      'person@example.com',
+      invitation({ blockLink: new URL('https://evil.test/block') }),
+      { idempotencyKey: 'invite:block' },
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'email.input_invalid', retryable: false, field: 'blockLink' },
+    });
+    expect(transport.sent).toHaveLength(0);
+  });
+
+  // Prefixed hosts, so no generated domain can equal the configured one.
+  const foreign = fc
+    .tuple(fc.domain(), fc.constantFrom('https:', 'http:'), fc.webPath())
+    .map(([host, scheme, p]) => new URL(`${scheme}//x-${host}/p${p}`));
+
+  it('refuses every block link on a foreign origin', async () => {
+    await fc.assert(
+      fc.asyncProperty(foreign, async (blockLink) => {
+        await refused(invitation({ blockLink }), 'blockLink');
+      }),
+      { ...runs, numRuns: 100 },
+    );
+  });
+
+  it('accepts every block link on the link origin and renders it', async () => {
+    await fc.assert(
+      fc.asyncProperty(path, async (blockLink) => {
+        const mail = await rendered(invitation({ blockLink }));
+        expect(mail.text.split('\n')).toContain(blockLink.href);
+      }),
+      { ...runs, numRuns: 100 },
+    );
+  });
+});
+
+describe('invitation', () => {
+  it('renders the block link after the fine print in the text part', async () => {
+    const mail = await rendered(invitation());
+    expect(mail.text).toBe(
+      [
+        'You have been invited',
+        '',
+        'Ada Lovelace invited you to join Acme on Drefyn.',
+        '',
+        'Accept the invitation:',
+        'https://app.drefyn.test/invite',
+        '',
+        'The invitation expires on 2026-10-30 14:05 UTC.',
+        '',
+        '----------------------------------------',
+        '',
+        'If you did not expect this, you can ignore this email.',
+        '',
+        `${BLOCK_LABEL}:`,
+        'https://app.drefyn.test/invite/block',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('renders the block link after the fine print in the HTML part, with its address', async () => {
+    const mail = await rendered(invitation());
+    const fineprint = mail.html.indexOf('If you did not expect this, you can ignore this email.');
+    const anchor = mail.html.indexOf(`<a href="https://app.drefyn.test/invite/block"`);
+    const label = mail.html.indexOf(`>${BLOCK_LABEL}</a>`);
+    const raw = mail.html.indexOf('>https://app.drefyn.test/invite/block</p>');
+    expect(fineprint).toBeGreaterThan(0);
+    expect(anchor).toBeGreaterThan(fineprint);
+    expect(label).toBeGreaterThan(anchor);
+    expect(raw).toBeGreaterThan(label);
+  });
+
+  const longNames = () =>
+    invitation({ organizationName: 'A'.repeat(100), inviterName: 'B'.repeat(100) });
+
+  it('keeps the HTML part under the 100 KB size budget', async () => {
+    const mail = await rendered(longNames());
+    expect(Buffer.byteLength(mail.html, 'utf8')).toBeLessThan(100 * 1024);
+  });
+
+  // Shared runners are too noisy to hold the 20 ms target, which is measured on a quiet
+  // machine. This ceiling only catches a render that got several times slower.
+  const RENDER_CI_CEILING_MS = 60;
+
+  it(`renders in a warmed median under the ${RENDER_CI_CEILING_MS} ms CI ceiling`, async () => {
+    const message = longNames();
+    for (let i = 0; i < 5; i++) await rendered(message);
+    const times: number[] = [];
+    for (let i = 0; i < 21; i++) {
+      const started = performance.now();
+      await rendered(message);
+      times.push(performance.now() - started);
+    }
+    times.sort((a, b) => a - b);
+    const median = times[10] ?? Number.POSITIVE_INFINITY;
+    expect(median, `median ${median.toFixed(2)} ms, CI ceiling`).toBeLessThan(RENDER_CI_CEILING_MS);
   });
 });
 

@@ -1,0 +1,10 @@
+# Drefyn's own credential formats, on top of the gitleaks defaults.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "drefyn-api-key"
+description = "Drefyn organization API key"
+# drf_ak_, organization id body, key id body, 52 character secret, all lowercase Crockford base32.
+regex = '''drf_ak_[0-9a-hjkmnp-tv-z]{26}_[0-9a-hjkmnp-tv-z]{26}_[0-9a-hjkmnp-tv-z]{52}'''
+keywords = ["drf_ak_"]

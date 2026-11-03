@@ -1,7 +1,11 @@
 import * as crypto from 'node:crypto';
 import type * as Crypto from 'node:crypto';
+import type { AuthDatabase, Database } from '@drefyn/db';
+import { idOf } from '@drefyn/tenancy';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
+  createInvitations,
+  formatInvitationToken,
   SIGN_IN_CODE_PURPOSES,
   createCodeIssuer,
   createEmailSignIn,
@@ -322,36 +326,67 @@ describe('start', () => {
   });
 });
 
-// A tripwire on the work start does: the same reservations, transactions and invitation
-// lookups for every address in every mode, so neither a count nor a time can tell a known
-// address from an unknown one.
+// A tripwire on the work start does: the same reservations, transactions, statements and
+// invitation checks for every address in every mode, with or without a held invitation, so
+// neither a count nor a time can tell a known address from an unknown one.
 describe('start does the same work for every address', () => {
   const modes = ['open', 'closed', 'invite_only'] as const;
+  const held = formatInvitationToken({
+    organizationId: idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070'),
+    invitationId: idOf('inv', '01890a5d-ac96-774b-bcce-b302099a8072'),
+    secret: Buffer.alloc(32, 5),
+  });
 
-  async function workFor(mode: (typeof modes)[number], known: boolean) {
+  async function workFor(mode: (typeof modes)[number], known: boolean, cookie: string | null) {
     const cfg = parseAuthConfig({ ...validEnv(), DREFYN_AUTH_SIGNUP: mode });
     const t = unitDeps(emailResponder({ known }));
-    const hasPending = vi.fn(() => Promise.resolve(false));
-    const flow = createEmailSignIn(cfg, { ...t.deps, invitations: { hasPending } });
-    const result = await flow.startEmailSignIn(browser(), { email: ADDRESS });
+    const real = createInvitations(cfg, {
+      db: {} as Database,
+      authDb: {} as AuthDatabase,
+      logger: { warn: () => undefined },
+      mailer: { sendInvitation: () => Promise.resolve() },
+      store: t.scripted.store,
+    });
+    const allowsSignUp = vi.fn((token: string | null, email: string) =>
+      real.allowsSignUp(token, email),
+    );
+    const flow = createEmailSignIn(cfg, { ...t.deps, invitations: { allowsSignUp } });
+    const b = browser();
+    const cookies = new Map(b.cookies);
+    if (cookie !== null) cookies.set(cfg.cookies.invite, cookie);
+    const result = await flow.startEmailSignIn({ ...b, cookies }, { email: ADDRESS });
     expect(result.ok).toBe(true);
     return {
       reservations: (t.limiter.reserve as Mock).mock.calls.length,
       transactions: t.scripted.events.filter((e) => e.kind === 'begin').length,
       statements: t.scripted.statements().length,
-      invitationLookups: hasPending.mock.calls.length,
+      invitationChecks: allowsSignUp.mock.calls.length,
     };
   }
 
   it('makes 3 reservations and 2 store transactions with sign up closed', async () => {
     for (const known of [true, false]) {
-      const work = await workFor('closed', known);
+      const work = await workFor('closed', known, null);
       expect(work.reservations).toBe(3);
       expect(work.transactions).toBe(2);
     }
   });
 
   it.each(modes)('counts the same for known and unknown addresses in %s mode', async (mode) => {
-    expect(await workFor(mode, true)).toEqual(await workFor(mode, false));
+    for (const cookie of [null, 'not-a-token', held]) {
+      expect(await workFor(mode, true, cookie)).toEqual(await workFor(mode, false, cookie));
+    }
+  });
+
+  it('checks a held invitation with one more transaction and one statement in invite_only', async () => {
+    for (const known of [true, false]) {
+      const without = await workFor('invite_only', known, null);
+      const unparsable = await workFor('invite_only', known, 'not-a-token');
+      const holding = await workFor('invite_only', known, held);
+      expect(unparsable).toEqual(without);
+      expect(holding.invitationChecks).toBe(1);
+      expect(holding.transactions).toBe(without.transactions + 1);
+      expect(holding.statements).toBe(without.statements + 1);
+    }
   });
 });

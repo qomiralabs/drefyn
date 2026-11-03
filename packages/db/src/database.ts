@@ -621,3 +621,106 @@ export async function withApiKeyLimiter<T>(
   );
   return runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'api_key_limiter');
 }
+
+// One statement and its commit in a single simple protocol message, so a row lock the
+// statement takes is released by the server and never waits on this process. With the
+// commit sent separately, a stalled event loop between the two holds the lock, and every
+// other request on that row queues behind it until its own timeout.
+//
+// The simple protocol takes no parameters: the caller builds the statement only from
+// values it has validated. Nothing outlives the commit (no cursor, advisory lock, prepared
+// statement or session setting), so the connection goes back without a discard.
+async function runAlone<R>(
+  state: PoolState,
+  settings: TenantSettings,
+  timeoutMs: number,
+  statement: string,
+): Promise<readonly R[]> {
+  let client: pg.PoolClient;
+  try {
+    client = await state.pool.connect();
+  } catch (error) {
+    throw unavailable(error, state.kind);
+  }
+  const events = { lost: false };
+  const onError = () => {
+    events.lost = true;
+  };
+  client.on('error', onError);
+  let doubtful = true;
+  try {
+    const text = [
+      'begin',
+      `set local statement_timeout = ${String(timeoutMs)}`,
+      `select set_config('drefyn.organization_id', '${settings.organizationId}', true),
+              set_config('drefyn.project_id', '${settings.projectId}', true),
+              set_config('drefyn.user_id', '${settings.userId}', true)`,
+      statement,
+      'commit',
+    ].join(';\n');
+    let results: unknown;
+    try {
+      results = await client.query(text);
+    } catch (error) {
+      // A failed statement leaves the explicit transaction open and aborted.
+      await client.query('rollback').then(
+        () => {
+          doubtful = false;
+        },
+        () => undefined,
+      );
+      throw error;
+    }
+    doubtful = false;
+    // Five results means the statement was one statement. More would already have committed,
+    // so this only catches a caller's mistake, which the tests of each caller would show.
+    const rows: unknown =
+      Array.isArray(results) && results.length === MESSAGE_RESULTS
+        ? Reflect.get(Object(results[STATEMENT_RESULT]), 'rows')
+        : undefined;
+    if (!Array.isArray(rows)) {
+      throw new DbError('DB_CONFIG_INVALID', 'a statement run alone must be one statement');
+    }
+    return rows as R[];
+  } catch (error) {
+    throw toDbError(error, URL_KEYS[state.kind]);
+  } finally {
+    client.removeListener('error', onError);
+    client.release(doubtful || events.lost ? true : undefined);
+  }
+}
+
+// begin, set local, set_config, the statement, commit.
+const STATEMENT_RESULT = 3;
+const MESSAGE_RESULTS = 5;
+
+// For a sign in rate limit counter: runs as drefyn_auth with every setting empty.
+export async function runAloneOnAuth<R>(
+  db: AuthDatabase,
+  statement: string,
+  options?: TransactionOptions,
+): Promise<readonly R[]> {
+  const state = stateOf('auth', db, 'runAloneOnAuth');
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    AUTH_TIMEOUT_MAX_MS,
+  );
+  return runAlone<R>(state, AUTH_SETTINGS, timeoutMs, statement);
+}
+
+// For the API key failure counter: runs as drefyn_app with every setting empty, like
+// withApiKeyLimiter.
+export async function runAloneOnApiKeyLimiter<R>(
+  db: Database,
+  statement: string,
+  options?: TransactionOptions,
+): Promise<readonly R[]> {
+  const state = stateOf('app', db, 'runAloneOnApiKeyLimiter');
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    APP_TIMEOUT_MAX_MS,
+  );
+  return runAlone<R>(state, AUTH_SETTINGS, timeoutMs, statement);
+}

@@ -112,13 +112,28 @@ describe('verify for an address with no account at send time', () => {
     }
   });
 
-  it('lets invite_only create the user when an invitation is pending', async () => {
+  it('lets invite_only create the user when the browser holds an invitation for the address', async () => {
     const cfg = withMode('invite_only');
-    const hasPending = vi.fn(() => Promise.resolve(true));
-    const { flow } = flowWith(newcomerFor(cfg), cfg, { invitations: { hasPending } });
-    const result = await flow.verifyEmailCode(browser(), { challenge: challengeArg, code: RIGHT });
+    const allowsSignUp = vi.fn(() => Promise.resolve(true));
+    const { flow } = flowWith(newcomerFor(cfg), cfg, { invitations: { allowsSignUp } });
+    const b = browser();
+    const cookies = new Map(b.cookies).set(cfg.cookies.invite, 'held-token');
+    const result = await flow.verifyEmailCode(
+      { ...b, cookies },
+      { challenge: challengeArg, code: RIGHT },
+    );
     expect(result.ok).toBe(true);
-    expect(hasPending).toHaveBeenCalledWith(ADDRESS);
+    expect(allowsSignUp).toHaveBeenCalledWith('held-token', ADDRESS);
+  });
+
+  it('asks with no token when the browser holds no invitation', async () => {
+    const cfg = withMode('invite_only');
+    const allowsSignUp = vi.fn(() => Promise.resolve(false));
+    const { flow, sessions } = flowWith(newcomerFor(cfg), cfg, { invitations: { allowsSignUp } });
+    const result = await flow.verifyEmailCode(browser(), { challenge: challengeArg, code: RIGHT });
+    expect(!result.ok && result.error.code).toBe('AUTH_SIGNUP_CLOSED');
+    expect(allowsSignUp).toHaveBeenCalledWith(null, ADDRESS);
+    expect(sessions.startSession).not.toHaveBeenCalled();
   });
 });
 

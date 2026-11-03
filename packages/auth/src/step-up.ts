@@ -86,6 +86,29 @@ function address(s: SessionInfo): string {
   return normalized;
 }
 
+// Sensitive actions call this first. Database time decides, against the row as it is now, so
+// a session revoked a moment ago fails too.
+export async function checkRecentAuth(
+  store: Pick<SessionStore, 'user'>,
+  s: { readonly userId: SessionInfo['userId']; readonly sessionId: SessionInfo['sessionId'] },
+): Promise<Result<void, AuthError>> {
+  try {
+    const row = await store.user(s.userId, (tx) =>
+      tx
+        .selectFrom('sessions')
+        .select(sql<boolean>`authenticated_at > now() - interval '15 minutes'`.as('recent'))
+        .where('id', '=', s.sessionId)
+        .where('user_id', '=', sql<string>`app.current_user_id()`)
+        .where('expires_at', '>', sql<Date>`now()`)
+        .executeTakeFirst(),
+    );
+    if (row === undefined) return fail(new AuthError('AUTH_SESSION_INVALID'));
+    return row.recent ? ok(undefined) : fail(new AuthError('AUTH_RECENT_AUTH_REQUIRED'));
+  } catch (error) {
+    return fail(error);
+  }
+}
+
 // Refreshes authenticated_at on the same session and records how it was proved. Only
 // for code in this package that has just proved a step up; never exported.
 export async function recordStepUp(
@@ -112,23 +135,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
   const mark = (s: SessionInfo, method: StepUpMethod) => recordStepUp(store, s, method);
 
   return {
-    async requireRecentAuth(s) {
-      try {
-        const row = await store.user(s.userId, (tx) =>
-          tx
-            .selectFrom('sessions')
-            .select(sql<boolean>`authenticated_at > now() - interval '15 minutes'`.as('recent'))
-            .where('id', '=', s.sessionId)
-            .where('user_id', '=', sql<string>`app.current_user_id()`)
-            .where('expires_at', '>', sql<Date>`now()`)
-            .executeTakeFirst(),
-        );
-        if (row === undefined) return fail(new AuthError('AUTH_SESSION_INVALID'));
-        return row.recent ? ok(undefined) : fail(new AuthError('AUTH_RECENT_AUTH_REQUIRED'));
-      } catch (error) {
-        return fail(error);
-      }
-    },
+    requireRecentAuth: (s) => checkRecentAuth(store, s),
 
     async stepUpWithPassword(b, s, input) {
       try {

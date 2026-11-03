@@ -10,6 +10,8 @@ system.
 ## Entry points
 
 - `@drefyn/auth`: server only. Uses `node:crypto`.
+- `@drefyn/auth/command`: `runAuthCommand` and `AUTH_COMMAND_USAGE`, the `drefyn auth`
+  commands that `@drefyn/cli` dispatches to. Exit codes: 0 done, 2 bad input, 5 file system.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).
@@ -246,8 +248,16 @@ const result = await signIn.verifyEmailCode(browser, { challenge, code }); // ch
 
 - Sign in and sign up are one flow. Every address gets the same response and the same
   cookies (`__Host-drefyn_pre`, 15 minutes); the mail goes out only when `send` runs, and
-  `send` never throws. In `invite_only` (without a pending invitation) and `closed`, an
-  unknown address gets the same response and no mail.
+  `send` never throws. In `invite_only` (unless this browser holds a live invitation for
+  the address) and `closed`, an unknown address gets the same response and no mail.
+- In `invite_only` a new user is made only when the `__Host-drefyn_invite` cookie holds a
+  live invitation for exactly the proved address. `invitations` is the object
+  `createInvitations` returns; its `allowsSignUp(token, address)` sends nothing for a
+  missing or unparsable cookie and otherwise one select by invitation id in that
+  invitation's organization, as `drefyn_app`. It is asked at start for every address and
+  again at verify, so an invitation revoked or accepted in between lets nobody in. A
+  database failure there answers no and logs `auth.invitation_check_failed` with the
+  organization id only. OAuth sign up asks the same way.
 - Limits, counted before any work: `email_send` on the address and IP or /64,
   `email_send_ip`, then `email_send_device` for a browser whose device cookie is known for
   the address's user, otherwise the shared `email_send_address_ceiling`.
@@ -281,7 +291,18 @@ const hasher = createPasswordHasher({
 });
 // One hasher per process, given to both, so one gate bounds every hash.
 const sessions = createSessions(config, { db, authDb, logger, mailer, passwords: hasher });
-const passwords = createPasswordSignIn(config, { db, authDb, logger, sessions, hasher, botCheck });
+// Once at startup: undefined with no file, else the opened list; a bad file throws.
+const breachedPasswords = await loadBreachedPasswords(config, logger);
+const passwords = createPasswordSignIn(config, {
+  db,
+  authDb,
+  logger,
+  metrics,
+  sessions,
+  hasher,
+  botCheck,
+  breachedPasswords,
+});
 const form = passwords.passwordForm(browser); // GET: set form.setCookies, render form.csrf
 const input = readPasswordSignInForm(body); // POST: 8 KiB body, 4 KiB password, one of each field
 const result = await passwords.signInWithPassword(browser, input);
@@ -309,6 +330,22 @@ pre)`. Without both the post is `AUTH_ORIGIN_REFUSED` and nothing is counted. Th
   New ones are 15 to 128 characters and pass the common password rules, else
   `AUTH_PASSWORD_WEAK` with `rules`. `setPassword` never replaces a set password
   (`AUTH_FORBIDDEN`).
+- Every new password goes through one internal step: the rules, then the breached list
+  (`AUTH_PASSWORD_BREACHED`), asked only after the recent sign in check. Never at sign in.
+  `BreachedPasswordCheck.isBreached(password, signal)` answers true, false or null. An answer
+  of null, an error or nothing within `BREACH_CHECK_TIMEOUT_MS` (1 s) lets the password
+  through and logs and counts `auth.breach_check_unavailable` with a `reason` of `no_answer`,
+  `error` or `timeout`.
+- `loadBreachedPasswords(config, logger)` opens `DREFYN_AUTH_BREACHED_PASSWORDS_FILE` once:
+  sorted 20 byte SHA-1 records (`BREACHED_RECORD_BYTES`) of the NFKC password
+  (`breachedDigest`), searched with one positioned read per step and never read whole. It
+  logs `auth.breached_list_loaded` with the record count, or `auth.breached_list_absent`
+  with no file. A missing, unreadable, empty or torn file throws `AUTH_CONFIG_INVALID` naming
+  the key, never the path. Building the flow with the key set but no check throws.
+- `buildPasswordList({ from, out, minCount })` is the build command as a function: ascending
+  `<40 hex>:<count>` lines in, records at or above `minCount` out, written to a temp file,
+  fsynced and renamed over `out`. It throws `PasswordListError` with `kind` `input` (with a
+  `line`, never the line's text) or `files`.
 - `BotCheck` is optional. Set, it runs after the counts and before any read; a refusal, an
   error or no answer in 3 s is `AUTH_BOT_CHECK_REQUIRED`. Unset with `DREFYN_AUTH_SIGNUP=open`,
   building the flow logs `auth.signup_open_without_bot_check` once.
@@ -508,6 +545,13 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
   inviter must still hold `org.manage_members` and be able to grant the role. The membership
   insert names the invitation, and the invitation is deleted in the same transaction, so a
   second acceptance fails. Removing the inviter deletes their pending invitations.
+- `acceptInvitation` answers `{ access, setCookies }`; the cookies clear the held
+  invitation.
+- `holdInvitation(browser, token)` is what the invite page calls for a signed out person.
+  It only parses (`AUTH_INVITATION_INVALID` for a malformed token) and answers a
+  `__Host-drefyn_invite` cookie (HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 3600) for
+  sign up to read. The newcomer has to sign up in the browser that opened the link, within
+  the hour; the link itself can be opened again for the 7 days the invitation lasts.
 - `readInvitationBlock(token)` is what the block page shows on GET and only reads.
   `blockInvitation(token)` is the page's POST and the only writer of `invitation_blocks`; it
   also drops the pending invitation, and a second call is a no op that still succeeds.
@@ -517,3 +561,47 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
+
+## API keys
+
+Keys are organization actors, never users or seats. The dashboard creates them; the API
+service only verifies them, with `drefyn_app` and its own failure key.
+
+```ts
+const scopes = createScopeRegistry([{ scope: 'docs:read', permission: 'docs.read' }]);
+const keys = createApiKeys({ db, authDb, scopes, logger, mailer }); // mailer has sendSecurityNotice
+const verifier = createApiKeyVerifier(process.env, { db, logger }); // API service startup
+```
+
+- `createScopeRegistry` takes each product's closed list. A scope is `<product>:<name>` and
+  maps to one permission of that product or the organization. A scope for
+  `org.manage_members`, `org.manage_api_keys`, `org.manage_billing`, `org.manage_settings`
+  or `org.delete` fails with `AUTH_CONFIG_INVALID`, so a key can never mint a key.
+- `createApiKey(access, { name, scopes, projectScope, projectIds?, expiresAt?, idempotencyKey })`
+  needs `org.manage_api_keys`, every scope's permission (`AUTH_FORBIDDEN`) and a sign in
+  within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`). The role is read again as stored.
+  `projectScope` is `all` or `listed`; `listed` with no projects, `all` with projects, an
+  unknown scope, a past expiry or a project the organization lacks is `AUTH_INPUT_INVALID`.
+  It returns the summary, the whole key once as `secret`, and `send`, which tells every owner
+  and never throws. Only `sha256(secret)` and its last 4 characters are stored.
+- A repeated `idempotencyKey` with the same request fails with `ApiKeyReplayError`
+  (`AUTH_IDEMPOTENCY_REPLAY`), whose `existing` is the summary without the secret. The same
+  key with a different request is `AUTH_INPUT_INVALID`.
+- `verifyApiKey(authorization, ip)` reads `Authorization: Bearer drf_ak_...` only. Under the
+  key's organization, the first statement selects the key row by id with its project scope;
+  the SHA-256 compare runs in constant time (a dummy compare on a miss) with expiry by
+  database time, and any failure rolls back before a second statement. `projectIds` is
+  `'all'` only when the stored scope says so; a listed key whose projects are gone reaches
+  none. `last_used_at` is written at most once an hour.
+- Each failure is counted in `api_key_failures` by IP or /64 (60 a minute by default); past it
+  the answer is `AUTH_RATE_LIMITED` with the retry. Refusals are not logged.
+- `verifyApiRequest({ authorization, url, ip })` refuses any `drf_` key in the query string,
+  as a name or value, whatever its case or encoding, before the header is read.
+- `createApiKeyVerifier` refuses to start with `DREFYN_AUTH_DATABASE_URL`,
+  `DREFYN_AUTH_SECRET` or any other `DREFYN_AUTH_*` key but the failure limit set, or without
+  `DREFYN_API_RATE_LIMIT_KEY`.
+- `apiKeyErrorResponse(error)` is the public answer: 401 `auth.api_key_invalid`, 403
+  `auth.api_key_scope`, 429 `auth.rate_limited` with `Retry-After`, 503 `auth.unavailable`.
+  `checkApiKeyScope(actor, scope, projectId?)` gives `AUTH_API_KEY_SCOPE`.
+- `.gitleaks.toml` adds the `drefyn-api-key` rule on top of the defaults; CI proves it on a
+  generated key with `packages/auth/test/gitleaks-fixture.ts`.

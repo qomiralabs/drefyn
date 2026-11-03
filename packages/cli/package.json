@@ -1,0 +1,26 @@
+{
+  "name": "@drefyn/cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "drefyn": "./src/main.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@drefyn/auth": "workspace:*",
+    "@drefyn/db": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

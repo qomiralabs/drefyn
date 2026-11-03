@@ -1,11 +1,10 @@
 import { expect, it } from 'vitest';
-import { describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
+import { cliPath, describeFailure, fixtureMigrations, migrate, migration } from './support/cli.ts';
 import { databases } from './support/databases.ts';
 import { start } from './support/process.ts';
 import { describeWithStack } from './support/presence.ts';
 import { CHECKSUMS, migrateLockRows, migrationState, query, tableExists } from './support/sql.ts';
-import { packageRoot, schemaDump, stack, urlFor } from './support/stack.ts';
-import { join } from 'node:path';
+import { schemaDump, stack, urlFor } from './support/stack.ts';
 
 const dbs = databases();
 
@@ -49,13 +48,9 @@ describeWithStack('failures exit 1', () => {
   });
 
   it('exits 1 with DB_CONFIG_INVALID from the real process when the URL is missing', async () => {
-    const result = await start(
-      process.execPath,
-      [join(packageRoot, 'src', 'cli.ts'), 'migrate', 'up'],
-      {
-        env: { PATH: process.env['PATH'] ?? '' },
-      },
-    ).done;
+    const result = await start(process.execPath, [cliPath, 'migrate', 'up'], {
+      env: { PATH: process.env['PATH'] ?? '' },
+    }).done;
     expect(result.code, describeFailure(result)).toBe(1);
     expect(result.stderr).toContain('DB_CONFIG_INVALID');
     expect(result.stderr).toContain('DREFYN_MIGRATION_DATABASE_URL');
