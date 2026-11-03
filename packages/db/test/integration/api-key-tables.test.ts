@@ -292,7 +292,9 @@ describeWithStack('API key tables', () => {
 
   it('carry the creator guard with the exact text the allow list reviews', async () => {
     const text = await superuser(
-      `select pg_get_expr(polwithcheck, polrelid) from pg_policy
+      // The catalog check prints with search_path = pg_catalog, which keeps the app. prefix.
+      `set search_path = pg_catalog;
+       select pg_get_expr(polwithcheck, polrelid) from pg_policy
         where polname = 'api_key_insert_creator' and polrelid = 'app.api_keys'::regclass
           and not polpermissive;`,
       db.name,
@@ -300,7 +302,7 @@ describeWithStack('API key tables', () => {
     const entry = RESTRICTIVE_POLICIES.find(
       (p) => p.name === 'app.api_keys.api_key_insert_creator',
     );
-    expect(text).toBe(entry?.withCheck);
+    expect(text.trim()).toBe(entry?.withCheck);
   });
 
   it('pass check:catalog', async () => {
