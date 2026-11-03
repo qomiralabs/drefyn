@@ -855,10 +855,11 @@ describeWithStack('organization tables', () => {
       ['nobody', '', 'member'],
     ])('refuses an invitation inserted by %s as inviter', async (_label, actor, role) => {
       const app = await as('app');
-      const inviter = role === 'owner' ? await ownerOf(app, ORG_A) : ADMIN_D;
-      const code = await within(app, { org: ORG_A, actor }, () =>
-        sqlState(inviteAs(app, inviter, 'n@example.com', 'member')),
-      );
+      const code = await within(app, { org: ORG_A, actor }, async () => {
+        const inviter = role === 'owner' ? await ownerOf(app, ORG_A) : ADMIN_D;
+        expect(inviter).not.toBe('');
+        return sqlState(inviteAs(app, inviter, 'n@example.com', 'member'));
+      });
       expect(code).toBe('42501');
     });
 
