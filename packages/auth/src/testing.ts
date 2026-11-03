@@ -1,4 +1,5 @@
 import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
+import type { AuthInvitationMailer, InvitationSend } from './invitations.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
 
 // The test transport behind AuthMailer. Real delivery is @drefyn/email's job; this one
@@ -18,14 +19,21 @@ export interface SentNotice {
   readonly notice: AuthSecurityNotice;
 }
 
+export interface SentInvitation {
+  readonly to: string;
+  readonly invitation: InvitationSend;
+}
+
 export interface TestAuthMailer {
-  readonly mailer: AuthMailer & AuthNoticeMailer;
+  readonly mailer: AuthMailer & AuthNoticeMailer & AuthInvitationMailer;
   // Every call, delivered or not.
   readonly calls: readonly SentCode[];
   // Only the calls that were delivered.
   readonly sent: readonly SentCode[];
   // Security notices that were delivered.
   readonly notices: readonly SentNotice[];
+  // Invitations that were delivered.
+  readonly invitations: readonly SentInvitation[];
   // The next call rejects, as an SMTP failure would.
   failNext(): void;
 }
@@ -34,6 +42,7 @@ export function createTestAuthMailer(options: { readonly delayMs?: number } = {}
   const calls: SentCode[] = [];
   const sent: SentCode[] = [];
   const notices: SentNotice[] = [];
+  const invitations: SentInvitation[] = [];
   let failures = 0;
   const delayMs = options.delayMs ?? 0;
   const deliver = async () => {
@@ -43,7 +52,7 @@ export function createTestAuthMailer(options: { readonly delayMs?: number } = {}
       throw new Error('test transport refused the message');
     }
   };
-  const mailer: AuthMailer & AuthNoticeMailer = {
+  const mailer: AuthMailer & AuthNoticeMailer & AuthInvitationMailer = {
     async sendSignInCode(to, code, link, purpose, linking) {
       const mail: SentCode = {
         to,
@@ -62,6 +71,10 @@ export function createTestAuthMailer(options: { readonly delayMs?: number } = {}
       await deliver();
       notices.push({ to, notice: { ...notice } });
     },
+    async sendInvitation(to, invitation) {
+      await deliver();
+      invitations.push({ to, invitation: { ...invitation } });
+    },
   };
   return {
     mailer,
@@ -73,6 +86,9 @@ export function createTestAuthMailer(options: { readonly delayMs?: number } = {}
     },
     get notices() {
       return [...notices];
+    },
+    get invitations() {
+      return [...invitations];
     },
     failNext() {
       failures += 1;
