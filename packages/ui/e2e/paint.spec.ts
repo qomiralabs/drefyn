@@ -31,6 +31,8 @@ interface DisabledLook {
 // input that is its label's, otherwise its own. Busy buttons are aria-disabled too, but keep
 // their variant's paint, so they are checked on their own below.
 async function disabledLooks(page: Page): Promise<DisabledLook[]> {
+  // An overlay that starts open is still fading in when the story shows; read it settled.
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
   return page.evaluate(() =>
     [...document.querySelectorAll('[aria-disabled="true"]:not([data-busy])')].map((el) => {
       const shown = el instanceof HTMLInputElement ? (el.closest('label') ?? el) : el;
