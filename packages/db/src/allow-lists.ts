@@ -45,6 +45,9 @@ export interface AllowLists {
   readonly authOnlyTables: readonly AllowEntry[];
   // Reviewed policies beyond the two standard ones, compared field by field.
   readonly userPolicies: readonly PolicyEntry[];
+  // Every restrictive policy in app, compared the same way. A guard that goes missing widens
+  // what the permissive policies let through, so a listed one that is absent fails too.
+  readonly restrictivePolicies: readonly PolicyEntry[];
   // Unique keys on tenant tables without organization_id, as app.table.index.
   readonly globalUniqueConstraints: readonly AllowEntry[];
   // Tables whose select and update grants must be per column, so a new column is never
@@ -114,6 +117,10 @@ export const APP_FUNCTIONS: readonly AllowEntry[] = [
   {
     name: 'app.current_user_id()',
     reason: 'reads the transaction setting the user keyed policies need',
+  },
+  {
+    name: 'app.install_tier()',
+    reason: 'the insert guard on organizations compares the new tier with the install tier',
   },
 ];
 
@@ -253,6 +260,32 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   ),
 ];
 
+// The first owner of an organization made in this transaction, and nobody else. Kept exact,
+// as pg_get_expr prints it.
+const FIRST_OWNER =
+  "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
+
+export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
+  {
+    name: 'app.memberships.membership_insert_origin',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: FIRST_OWNER,
+    reason:
+      'a membership is born only as the first owner of a new organization; any other source needs its own arm',
+  },
+  {
+    name: 'app.organizations.organization_insert_tier',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+    reason:
+      'a new organization starts on the install tier and writable; only billing changes either later',
+  },
+];
+
 export const GLOBAL_UNIQUE_CONSTRAINTS: readonly AllowEntry[] = [
   {
     name: 'app.organization_slugs.organization_slugs_slug_key',
@@ -294,6 +327,7 @@ export const ALLOW_LISTS: AllowLists = {
   authTables: AUTH_TABLES,
   authOnlyTables: AUTH_ONLY_TABLES,
   userPolicies: USER_POLICIES,
+  restrictivePolicies: RESTRICTIVE_POLICIES,
   globalUniqueConstraints: GLOBAL_UNIQUE_CONSTRAINTS,
   columnGrantTables: COLUMN_GRANT_TABLES,
   columnGrants: COLUMN_GRANTS,

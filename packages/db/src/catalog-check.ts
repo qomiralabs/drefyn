@@ -39,7 +39,8 @@ export type CatalogRule =
   | 'auth_grant'
   | 'column_grant'
   | 'auth_only'
-  | 'public_policy';
+  | 'public_policy'
+  | 'restrictive_policy';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -123,6 +124,7 @@ function policyUnsafe(entry: PolicyEntry): string | undefined {
 // or an entry that is unsafe whatever the catalog says.
 export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] {
   const authTables = new Set(allow.authTables.map((e) => e.name));
+  const userPolicies = new Set(allow.userPolicies.map((e) => e.name));
   const columnTables = new Set(allow.columnGrantTables.map((e) => e.name));
   const lists: readonly ListSpec[] = [
     { label: 'global table', entries: allow.globalTables, shape: TABLE_NAME },
@@ -152,6 +154,15 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
       entries: allow.userPolicies,
       shape: CONSTRAINT_NAME,
       unsafe: (entry) => policyUnsafe(entry as PolicyEntry),
+    },
+    {
+      label: 'restrictive policy',
+      entries: allow.restrictivePolicies,
+      shape: CONSTRAINT_NAME,
+      // One name is one policy, and a policy is either permissive or restrictive.
+      unsafe: (entry) =>
+        policyUnsafe(entry as PolicyEntry) ??
+        (userPolicies.has(entry.name) ? 'is also on the user policy allow list' : undefined),
     },
     {
       label: 'global unique key',
@@ -567,7 +578,7 @@ function policyProblems(
   const clause = table.projectColumn === null ? ORGANIZATION_POLICY : PROJECT_POLICY;
   const isolation = { cmd: '*', role: APP_ROLE, qual: clause, withCheck: clause };
   const reading = { cmd: 'r', role: READER_ROLE, qual: PUBLISHED_POLICY, withCheck: null };
-  // Restrictive policies can only narrow what the permissive ones let through.
+  // Restrictive policies can only narrow, so they are checked on their own list instead.
   for (const policy of policies.filter((p) => p.permissive)) {
     if (policy.name !== 'tenant_isolation' && policy.name !== 'published_read') {
       const listed = userPolicyProblem(table.name, policy, userPolicies);
@@ -605,6 +616,56 @@ function policyProblems(
   if (!policies.some((p) => p.permissive && p.name === 'tenant_isolation')) {
     out.push(
       problem('policy', table.name, `${table.name} has no tenant_isolation policy to ${APP_ROLE}`),
+    );
+  }
+  return out;
+}
+
+// Every restrictive policy in app must be listed and match, and every listed one must exist
+// as restrictive: a permissive policy of the same name would widen rather than guard.
+function restrictivePolicyProblems(
+  policies: ReadonlyMap<string, readonly Policy[]>,
+  entries: readonly PolicyEntry[],
+): CatalogProblem[] {
+  const out: CatalogProblem[] = [];
+  const listed = new Map(entries.map((e) => [e.name, e]));
+  const found = new Set<string>();
+  for (const [table, list] of policies) {
+    for (const policy of list.filter((p) => !p.permissive)) {
+      const name = `${table}.${policy.name}`;
+      found.add(name);
+      const entry = listed.get(name);
+      if (entry === undefined) {
+        out.push(
+          problem(
+            'restrictive_policy',
+            table,
+            `${table} has the restrictive policy ${policy.name}, which is not on the restrictive policy allow list`,
+          ),
+        );
+        continue;
+      }
+      const wrong = entryMismatches(policy, entry);
+      if (wrong.length > 0) {
+        out.push(
+          problem(
+            'restrictive_policy',
+            table,
+            `${table} restrictive policy ${policy.name} ${wrong.join('; ')}`,
+          ),
+        );
+      }
+    }
+  }
+  for (const entry of entries.filter((e) => !found.has(e.name))) {
+    const table = entry.name.split('.').slice(0, 2).join('.');
+    const policy = entry.name.split('.')[2] ?? entry.name;
+    out.push(
+      problem(
+        'restrictive_policy',
+        table,
+        `${table} is missing the restrictive policy ${policy} on its allow list`,
+      ),
     );
   }
   return out;
@@ -664,6 +725,7 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
   for (const table of withoutTenantColumn) {
     out.push(...globalPolicyProblems(table, policies.get(table) ?? [], userPolicies));
   }
+  out.push(...restrictivePolicyProblems(policies, allow.restrictivePolicies));
   // With no TO clause a policy applies to every role, the pools and the owner included, and
   // a restrictive one could be read as a guard it is not.
   for (const [table, list] of policies) {

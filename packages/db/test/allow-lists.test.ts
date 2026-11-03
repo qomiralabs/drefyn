@@ -436,7 +436,15 @@ describe('restrictive policies', () => {
   });
 
   it('list the two insert guards, for drefyn_app, with their exact text', () => {
-    expect(RESTRICTIVE_POLICIES.map(({ reason: _reason, ...rest }) => rest)).toEqual([
+    expect(
+      RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
+        name,
+        command,
+        roles,
+        using,
+        withCheck,
+      })),
+    ).toEqual([
       {
         name: 'app.memberships.membership_insert_origin',
         command: 'insert',
