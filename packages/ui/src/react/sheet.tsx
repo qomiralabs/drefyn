@@ -2,7 +2,6 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -60,30 +59,33 @@ export interface SheetProps {
   children: ReactNode;
 }
 
-// React Aria returns focus when a sheet closes, but a sheet stacked over a dialog closed by a
-// press sometimes left WebKit's focus on the dialog, whose own scope took it first. After
-// React Aria has had its turn, focus left on the page or on the layer that holds the trigger
-// goes to the trigger. Focus that moved on, such as into a dialog a menu item opened, stays.
-function useReturnFocus(open: boolean, trigger: RefObject<HTMLElement | null>): void {
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (open) {
-      wasOpen.current = true;
-      return;
-    }
-    if (!wasOpen.current) return;
-    wasOpen.current = false;
-    // Registered after React Aria's own restore, so it runs after it.
-    const frame = requestAnimationFrame(() => {
-      const target = trigger.current;
-      const active = document.activeElement;
-      if (target === null || !target.isConnected || active === target) return;
-      if (active === null || active === document.body || active.contains(target)) target.focus();
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [open, trigger]);
+// When a sheet is removed, focus goes back to its trigger at once. React Aria keeps a closing
+// sheet on the page while a transition finishes, then restores focus a frame after removing
+// it; in between, focus sat on the body, so an Escape pressed then reached no layer and the
+// dialog under it stayed open. This runs as the sheet's content unmounts, after React Aria's
+// modal has lifted the inert it put on the page, since that modal is an ancestor and React
+// cleans up ancestors first. A frame later it checks again, because WebKit sometimes let the
+// dialog under a stacked sheet take focus back. Each time, only focus left on the page or on
+// the layer that holds the trigger moves; focus that moved on, such as into a dialog a menu
+// item opened, stays.
+function returnFocus(trigger: RefObject<HTMLElement | null>): void {
+  const target = trigger.current;
+  const active = document.activeElement;
+  if (target === null || !target.isConnected || active === target) return;
+  if (active === null || active === document.body || active.contains(target)) target.focus();
+}
+
+function ReturnFocus({ trigger }: { trigger: RefObject<HTMLElement | null> }): ReactNode {
+  useEffect(
+    () => () => {
+      returnFocus(trigger);
+      requestAnimationFrame(() => {
+        returnFocus(trigger);
+      });
+    },
+    [trigger],
+  );
+  return null;
 }
 
 // The bottom sheet that Select, Menu and Popover open in on a phone. Each keeps its own
@@ -93,7 +95,6 @@ function useReturnFocus(open: boolean, trigger: RefObject<HTMLElement | null>): 
 // topmost layer, so those close it alone. The scrim fades on the duration token; the panel
 // rises on the move token, which reduced motion sets to zero, leaving the fade.
 export function Sheet({ title, open, onOpenChange, trigger, children }: SheetProps): ReactNode {
-  useReturnFocus(open, trigger);
   return (
     <ModalOverlay
       isOpen={open}
@@ -133,6 +134,7 @@ export function Sheet({ title, open, onOpenChange, trigger, children }: SheetPro
             </>
           )}
         </AriaDialog>
+        <ReturnFocus trigger={trigger} />
       </Modal>
     </ModalOverlay>
   );
