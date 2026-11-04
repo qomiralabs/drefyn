@@ -78,7 +78,7 @@ jobs:
           docker run --rm --ipc=host --network host \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
-            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT \
+            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
             "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}"'
       - name: Postgres log
         if: failure()

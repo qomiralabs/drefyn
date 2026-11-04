@@ -4,6 +4,10 @@
 const ABSOLUTE = /^(?:[a-z][a-z0-9+.-]*:)?[/\\]{2}/i;
 const LINK = /\b(?:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
 
+// Fixed text in the product, never built from a request. Exact, so another path or a look
+// alike host on it still fails.
+const OUR_OWN_LINKS: ReadonlySet<string> = new Set(['https://status.drefyn.com']);
+
 function onOrigin(value: string, origin: string): boolean {
   return value === origin || value.startsWith(`${origin}/`);
 }
@@ -22,5 +26,5 @@ export function locationProblem(value: string, origin: string): string | null {
 export function absoluteLinkProblems(html: string, origin: string): readonly string[] {
   return [...html.matchAll(LINK)]
     .map((match) => match[1] ?? match[2] ?? '')
-    .filter((value) => leaves(value, origin));
+    .filter((value) => leaves(value, origin) && !OUR_OWN_LINKS.has(value));
 }

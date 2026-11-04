@@ -35,6 +35,18 @@ describe('the absolute link check', () => {
     ]);
   });
 
+  it('allows our own status page link by exact value, in a link only', () => {
+    expect(absoluteLinkProblems('<a href="https://status.drefyn.com">s</a>', ORIGIN)).toEqual([]);
+    for (const link of [
+      'https://status.drefyn.com/x',
+      'https://status.drefyn.com.evil.test',
+      'http://status.drefyn.com',
+    ]) {
+      expect(absoluteLinkProblems(`<a href="${link}">s</a>`, ORIGIN)).toEqual([link]);
+    }
+    expect(locationProblem('https://status.drefyn.com', ORIGIN)).toBe('https://status.drefyn.com');
+  });
+
   it('passes relative links, own origin links, fragments and known outside hosts', () => {
     const html = `<a href="/acme">x</a><a href="#main">y</a><a href="${ORIGIN}/z">z</a>
       <a href="mailto:a@b.c">m</a><svg xmlns="http://www.w3.org/2000/svg"></svg>`;

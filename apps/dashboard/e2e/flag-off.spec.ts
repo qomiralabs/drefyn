@@ -41,7 +41,7 @@ for (const path of [...LEAK_PATHS, ...UNKNOWN_ORG_PATHS]) {
 test.describe('signed in', () => {
   test.use({ storageState: stateFile(MAYA) });
 
-  for (const path of [...paths, ...LEAK_PATHS, ...UNKNOWN_ORG_PATHS]) {
+  for (const path of new Set([...paths, ...LEAK_PATHS, ...UNKNOWN_ORG_PATHS])) {
     test(`${path} with a valid session is a 404 with no page content`, async ({
       request,
       page,
