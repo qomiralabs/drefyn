@@ -26,7 +26,6 @@ const server = (state: 'on' | 'off', port: number, origin: string) => ({
     // Named here because a container sets HOSTNAME to its own id.
     HOSTNAME: '127.0.0.1',
     PORT: String(port),
-    UV_THREADPOOL_SIZE: '16',
     DREFYN_FLAGS_SOURCE: 'file',
     DREFYN_FLAGS_FILE: flags(state),
     ...serverEnv(origin),

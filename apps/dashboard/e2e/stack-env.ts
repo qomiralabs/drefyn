@@ -31,6 +31,7 @@ export function serverEnv(origin: string): Record<string, string> {
   return {
     DREFYN_APP_ORIGIN: origin,
     DREFYN_TRUSTED_PROXY_HOPS: '0',
+    UV_THREADPOOL_SIZE: '16',
     DREFYN_AUTH_COOKIE_SECURE: 'false',
     DREFYN_AUTH_SECRET: required(file, 'DREFYN_AUTH_SECRET'),
     DREFYN_AUTH_INVITATION_BLOCK_KEY: required(file, 'DREFYN_AUTH_INVITATION_BLOCK_KEY'),
