@@ -164,14 +164,32 @@ describeWithStack('rate limit windows', () => {
     const request = { bucket: 'email_verify', keyHmac: key('locked'), windowSeconds: [600] };
     await reserveAuthRateWindows(auth, request);
     const other = await open.auth(authUrl(db));
-    const outcome = await withAuth(auth, async (tx) => {
+    const locked = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    // The lock stands in for another request, so the reservation runs beside the transaction
+    // that holds it. From inside, the nesting guard would refuse it first.
+    const holder = withAuth(auth, async (tx) => {
       await sql`select 1 from app.auth_rate_limits where ${sql.raw(keyIs('locked'))} for update`.execute(
         tx,
       );
-      return reserveAuthRateWindows(other, request).catch((error: unknown) => error);
+      locked.resolve(undefined);
+      await release.promise;
     });
+    await Promise.race([locked.promise, holder]);
+    const outcome = await reserveAuthRateWindows(other, request).catch((error: unknown) => error);
+    release.resolve(undefined);
+    await holder;
     expect(outcome).toMatchObject({ code: 'DB_TIMEOUT' });
     expect(total(await storedCounts('auth_rate_limits', keyIs('locked')))).toBe(1);
+  });
+
+  it('refuses a reservation inside a transaction and counts nothing', async () => {
+    const request = { bucket: 'email_verify', keyHmac: key('nested'), windowSeconds: [600] };
+    const outcome = await withAuth(auth, () =>
+      reserveAuthRateWindows(auth, request).catch((error: unknown) => error),
+    );
+    expect(outcome).toMatchObject({ code: 'DB_RESERVATION_NESTED' });
+    expect(total(await storedCounts('auth_rate_limits', keyIs('nested')))).toBe(0);
   });
 
   it('keeps each window and each bucket apart, and says when each window ends', async () => {

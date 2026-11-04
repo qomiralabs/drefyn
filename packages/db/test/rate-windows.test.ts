@@ -114,3 +114,128 @@ describe('the reservation statement', () => {
     expect(sent[0]).toContain('unnest(array[60]::int[])');
   });
 });
+
+const row = (windowSeconds: number) => ({
+  window_seconds: windowSeconds,
+  count: 1,
+  retry_after: 9,
+});
+
+describe('the answer to a reservation', () => {
+  const key = new Uint8Array(32).fill(0x5a);
+
+  it.each<[string, unknown[]]>([
+    ['no rows', []],
+    ['too few rows', [row(600)]],
+    ['a repeated window', [row(600), row(600)]],
+    ['an unknown window', [row(600), row(3600)]],
+    ['a window more than asked', [row(600), row(86_400), row(3600)]],
+    ['every window plus a repeat', [row(600), row(86_400), row(86_400)]],
+  ])('throws when it holds %s', async (_label, rows) => {
+    const auth = recording('auth', rows);
+    await expect(
+      reserveAuthRateWindows(auth.db as AuthDatabase, {
+        bucket: 'email_send',
+        keyHmac: key,
+        windowSeconds: [600, 86_400],
+      }),
+    ).rejects.toMatchObject({ name: 'DbError', code: 'DB_CONFIG_INVALID' });
+
+    const api = recording('app', rows);
+    await expect(
+      reserveApiKeyFailureWindows(api.db as Database, {
+        keyHmac: key,
+        windowSeconds: [600, 86_400],
+      }),
+    ).rejects.toMatchObject({ name: 'DbError', code: 'DB_CONFIG_INVALID' });
+  });
+
+  it('accepts each window once, in any order, and keeps the order asked for', async () => {
+    const { db } = recording('auth', [row(3600), row(60), row(600)]);
+    const counts = await reserveAuthRateWindows(db as AuthDatabase, {
+      bucket: 'email_send',
+      keyHmac: key,
+      windowSeconds: [60, 600, 3600],
+    });
+    expect(counts.map((c) => c.windowSeconds)).toEqual([60, 600, 3600]);
+  });
+});
+
+// A list whose reads disagree, as a Proxy or a getter can arrange: its length passes the
+// size check, then the full list is what comes out.
+function shortWhenMeasured(full: readonly number[]): readonly number[] {
+  let lengthReads = 0;
+  return new Proxy([...full], {
+    get(target, property, receiver): unknown {
+      if (property === Symbol.iterator) return () => target[Symbol.iterator]();
+      if (property === 'length' && lengthReads++ < 2) return 1;
+      return Reflect.get(target, property, receiver) as unknown;
+    },
+  });
+}
+
+// Safe for the first iterations and hostile from then on.
+function turningHostile(safeReads: number): { list: readonly number[]; reads: () => number } {
+  let reads = 0;
+  const hostile = ['1]); drop table app.users; --'] as unknown as number[];
+  const list = new Proxy([60], {
+    get(target, property, receiver): unknown {
+      if (property === Symbol.iterator) {
+        reads += 1;
+        const current = reads <= safeReads ? target : hostile;
+        return () => current[Symbol.iterator]();
+      }
+      return Reflect.get(target, property, receiver) as unknown;
+    },
+  });
+  return { list, reads: () => reads };
+}
+
+describe('values that only look right', () => {
+  const key = new Uint8Array(32).fill(0x5a);
+
+  it('refuses a bucket that is not a string, whatever it coerces to', async () => {
+    const { db, sent } = recording('auth', [row(60)]);
+    const error = await reserveAuthRateWindows(db as AuthDatabase, {
+      bucket: ['a'] as unknown as string,
+      keyHmac: key,
+      windowSeconds: [60],
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'DB_CONFIG_INVALID' });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses a windows list that changes between reads', async () => {
+    const { db, sent } = recording('auth', [row(1), row(2), row(3), row(4)]);
+    const error = await reserveAuthRateWindows(db as AuthDatabase, {
+      bucket: 'email_send',
+      keyHmac: key,
+      windowSeconds: shortWhenMeasured([1, 2, 3, 4]),
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'DB_CONFIG_INVALID' });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('reads the windows once, so what was checked is what is written', async () => {
+    const { db, sent } = recording('auth', [row(60)]);
+    const { list, reads } = turningHostile(1);
+    await reserveAuthRateWindows(db as AuthDatabase, {
+      bucket: 'email_send',
+      keyHmac: key,
+      windowSeconds: list,
+    });
+    expect(reads()).toBe(1);
+    expect(sent[0]).toContain('unnest(array[60]::int[])');
+    expect(sent[0]).not.toContain('drop table');
+  });
+
+  it('refuses the same changing list for an API key failure', async () => {
+    const { db, sent } = recording('app', [row(1), row(2), row(3), row(4)]);
+    const error = await reserveApiKeyFailureWindows(db as Database, {
+      keyHmac: key,
+      windowSeconds: shortWhenMeasured([1, 2, 3, 4]),
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'DB_CONFIG_INVALID' });
+    expect(sent).toHaveLength(0);
+  });
+});

@@ -97,6 +97,7 @@ secrets.
 | `DB_TENANT_CONTEXT_MISSING` | no valid organization, no valid project where one is required, or no user                      |
 | `DB_TENANT_CONTEXT_INVALID` | a key that belongs to another entry point, a malformed user id, or a context that is not plain |
 | `DB_TRANSACTION_INVALID`    | the work ended the transaction or changed the tenant or user                                   |
+| `DB_RESERVATION_NESTED`     | a rate window reservation ran inside `withAuth` or `withApiKeyLimiter`                         |
 | `DB_RLS_VIOLATION`          | a row level security policy refused a write                                                    |
 | `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                                            |
 | `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                                             |
@@ -149,7 +150,10 @@ and return each window's count and seconds until it ends. Each runs in a transac
 own (1 s timeout) and commits before it returns, so the count stands whatever the caller's
 work does and the row lock is held for one statement only. The key is a 32 byte HMAC made by
 the caller, so no address or IP is stored. Parallel calls on one key queue on its row, so each
-sees its own count.
+sees its own count. A reservation inside `withAuth` or `withApiKeyLimiter` throws
+`DB_RESERVATION_NESTED` before it takes a connection, since waiting for a second connection
+while holding one deadlocks a small pool. An answer that does not count each window exactly
+once throws `DB_CONFIG_INVALID`; the count may have committed, so the caller refuses the attempt.
 
 `selectAll()` on `users` or `password_credentials` fails lint (`drefyn/no-select-all`): it
 sends `select *`, which the per column grants refuse for every role.

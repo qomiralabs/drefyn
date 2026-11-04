@@ -1,7 +1,14 @@
-import type { AuthDatabase, WindowCount } from '@drefyn/db';
+import type { AuthDatabase, Database, WindowCount } from '@drefyn/db';
 import fc from 'fast-check';
 import { expect, it } from 'vitest';
-import { AuthError, createRateLimiter, deriveAuthKeys, parseAuthConfig } from '../src/index.ts';
+import {
+  AuthError,
+  createApiKeyFailureLimiter,
+  createRateLimiter,
+  deriveAuthKeys,
+  parseAuthConfig,
+  type ApiAuthConfig,
+} from '../src/index.ts';
 import { runs, validEnv } from './support.ts';
 
 const db = {} as AuthDatabase;
@@ -68,6 +75,69 @@ it('never lets more than the limit through in any window, over random sequences'
           expect(next).toBeLessThanOrEqual(count);
         }
       }
+    }),
+    runs,
+  );
+});
+
+// Any strict subset of the windows, with counts under every limit, so nothing but the missing
+// window can refuse.
+const partialAnswer = (windows: readonly number[]) =>
+  fc.record({
+    kept: fc.subarray([...windows], { maxLength: windows.length - 1 }),
+    count: fc.integer({ min: 1, max: 2 }),
+  });
+
+const answer = (kept: readonly number[], count: number) => (): Promise<readonly WindowCount[]> =>
+  Promise.resolve(kept.map((windowSeconds) => ({ windowSeconds, count, retryAfterSeconds: 9 })));
+
+const refusedAsUnavailable = async (attempt: Promise<void>) => {
+  const error = await attempt.then(
+    () => 'allowed',
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(AuthError);
+  expect((error as AuthError).code).toBe('AUTH_UNAVAILABLE');
+};
+
+it('never allows a sign in attempt on any subset of its windows', async () => {
+  const { rateLimits } = parseAuthConfig({
+    ...validEnv(),
+    DREFYN_AUTH_RATE_EMAIL_SEND: '3/10m,10/1h,20/1d',
+  });
+  const windows = rateLimits.email_send.map((l) => l.windowSeconds);
+  await fc.assert(
+    fc.asyncProperty(partialAnswer(windows), async ({ kept, count }) => {
+      const limiter = createRateLimiter({
+        db,
+        keys,
+        limits: rateLimits,
+        reserve: answer(kept, count),
+      });
+      await refusedAsUnavailable(limiter.reserve('email_send', ['a@example.com']));
+    }),
+    runs,
+  );
+});
+
+it('never allows an API key failure on any subset of its windows', async () => {
+  const limits = [
+    { count: 5, windowSeconds: 60 },
+    { count: 20, windowSeconds: 3600 },
+    { count: 50, windowSeconds: 86_400 },
+  ];
+  const config = {
+    apiKeyFail: limits,
+    failureKey: () => Buffer.alloc(32),
+  } as unknown as ApiAuthConfig;
+  await fc.assert(
+    fc.asyncProperty(partialAnswer(limits.map((l) => l.windowSeconds)), async ({ kept, count }) => {
+      const limiter = createApiKeyFailureLimiter({
+        db: {} as Database,
+        config,
+        reserve: answer(kept, count),
+      });
+      await refusedAsUnavailable(limiter.reserve('client'));
     }),
     runs,
   );
