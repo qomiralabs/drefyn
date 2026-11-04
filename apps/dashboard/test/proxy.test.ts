@@ -48,8 +48,22 @@ describe('proxy', () => {
     );
   });
 
+  it.each(['/invite/drf_secret', '/invite/block/drf_secret', '/invite/a/b'])(
+    'answers %s with a bare 404, so no page echoes the path',
+    async (path) => {
+      const response = await run(path);
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe('Not found');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    },
+  );
+
+  it.each(['/invite', '/invite/block'])('lets %s through', async (path) => {
+    expect((await run(path)).status).toBe(200);
+  });
+
   it('uses the path for the referrer policy', async () => {
-    expect((await run('/invite')).headers.get('referrer-policy')).toBe('no-referrer');
+    expect((await run('/invite')).headers.get('referrer-policy')).toBe('same-origin');
     expect((await run('/acme')).headers.get('referrer-policy')).toBe(
       'strict-origin-when-cross-origin',
     );

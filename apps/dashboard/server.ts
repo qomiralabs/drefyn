@@ -27,7 +27,15 @@ const hostname = process.env['HOSTNAME'] ?? '0.0.0.0';
 // ever fires. The dashboard has no WebSocket route, so with no listener on the real server
 // Node treats an upgrade as an ordinary request and the wrapper answers it.
 const upgradeStandIn = new EventEmitter() as unknown as Server;
-const app = next({ dev: false, dir: import.meta.dirname, httpServer: upgradeStandIn });
+// Named, because Next fetches the page after an action redirect from its own idea of this
+// server, and that defaults to port 3000.
+const app = next({
+  dev: false,
+  dir: import.meta.dirname,
+  hostname,
+  port: Number(rawPort),
+  httpServer: upgradeStandIn,
+});
 await app.prepare();
 const handle = app.getRequestHandler();
 

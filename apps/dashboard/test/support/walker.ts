@@ -41,9 +41,25 @@ const OWN_MODULES: ReadonlySet<string> = new Set(['src/server/guard', 'src/serve
 // The root layout wraps the 404 page too, so it can never hold a guard, and it reads nothing.
 const UNGUARDED: ReadonlySet<string> = new Set(['src/app/layout.tsx']);
 // Pages that hold no data. Each new one is a reviewed line here.
-const PUBLIC_PAGES: ReadonlySet<string> = new Set(['src/app/bundle-baseline/page.tsx']);
+const PUBLIC_PAGES: ReadonlySet<string> = new Set([
+  'src/app/auth-states/[screen]/[state]/page.tsx',
+  'src/app/bundle-baseline/page.tsx',
+  'src/app/invite/block/page.tsx',
+  'src/app/invite/page.tsx',
+  'src/app/sign-in/cli/page.tsx',
+  'src/app/sign-in/link/page.tsx',
+  'src/app/sign-in/page.tsx',
+  'src/app/sign-in/password/page.tsx',
+  'src/app/sign-in/reset/page.tsx',
+  'src/app/sign-in/verify/page.tsx',
+  'src/app/sign-up/page.tsx',
+]);
 // Signed out GET handlers, such as an OAuth callback. Each new one is a reviewed line too.
-const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([]);
+const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([
+  'src/app/auth/oauth/[provider]/callback/route.ts',
+  'src/app/auth/oauth/[provider]/start/route.ts',
+  'src/app/auth/pre/route.ts',
+]);
 
 // Groups and slots change no URL, so a path is judged as if they were not there.
 const routePath = (path: string) => path.replace(/\/(?:\([^/]*\)|@[^/]*)(?=\/)/g, '');

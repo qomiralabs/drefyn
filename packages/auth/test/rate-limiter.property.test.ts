@@ -142,3 +142,57 @@ it('never allows an API key failure on any subset of its windows', async () => {
     runs,
   );
 });
+
+// Good and bad values mixed, over windows that may be missing, repeated or never asked about.
+const rowValue = fc.oneof(
+  fc.integer({ min: 1, max: 12 }),
+  fc.constantFrom(null, Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY, 2 ** 53, 999),
+);
+const anyRows = fc.array(
+  fc.record({
+    windowSeconds: fc.constantFrom(600, 3600, 86_400, 60),
+    count: rowValue,
+    retryAfterSeconds: rowValue,
+  }),
+  { maxLength: 5 },
+);
+
+it('allows only when every count is within its limit, for any row list', async () => {
+  const { rateLimits } = parseAuthConfig({
+    ...validEnv(),
+    DREFYN_AUTH_RATE_EMAIL_SEND: '3/10m,10/1h,20/1d',
+  });
+  const limits = rateLimits.email_send;
+  await fc.assert(
+    fc.asyncProperty(anyRows, async (rows) => {
+      const limiter = createRateLimiter({
+        db,
+        keys,
+        limits: rateLimits,
+        reserve: () => Promise.resolve(rows as WindowCount[]),
+      });
+      const outcome = await limiter.reserve('email_send', ['a@example.com']).then(
+        () => 'allowed',
+        (e: unknown) => e,
+      );
+      if (outcome === 'allowed') {
+        expect(rows).toHaveLength(limits.length);
+        for (const { count, windowSeconds } of limits) {
+          const found = rows.filter((row) => row.windowSeconds === windowSeconds);
+          expect(found).toHaveLength(1);
+          expect(found[0]?.count).toBeGreaterThanOrEqual(1);
+          expect(found[0]?.count).toBeLessThanOrEqual(count);
+        }
+        return;
+      }
+      expect(outcome).toBeInstanceOf(AuthError);
+      const error = outcome as AuthError;
+      expect(['AUTH_RATE_LIMITED', 'AUTH_UNAVAILABLE']).toContain(error.code);
+      if (error.code === 'AUTH_RATE_LIMITED') {
+        expect(Number.isSafeInteger(error.retryAfterSeconds)).toBe(true);
+        expect(error.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+      }
+    }),
+    runs,
+  );
+});

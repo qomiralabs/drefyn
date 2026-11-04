@@ -1,6 +1,10 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { extensionDdlProblems, sessionSettingProblems } from '../src/source-check.ts';
+import {
+  extensionDdlProblems,
+  sessionSettingProblems,
+  tenantSettingProblems,
+} from '../src/source-check.ts';
 
 const SEEDS = [1, 42, 20261026];
 
@@ -55,12 +59,87 @@ fc.sample(anyText, { seed: 0, numRuns: 1 });
 // near 6 s under heavy load, so the limit leaves room for a loaded CI runner.
 const FUZZ_TIMEOUT_MS = 20_000;
 
+// Between two tokens, where nothing at all is also allowed around a dot.
+const dotGap = fc.oneof(fc.constant(''), gap);
+
+const quotedCasing = (word: string) => casing(word).map((w) => `"${w}"`);
+
+const drefynName = fc.oneof(
+  fc
+    .tuple(
+      fc.oneof(casing('drefyn'), quotedCasing('drefyn')),
+      dotGap,
+      dotGap,
+      fc.oneof(casing('user_id'), quotedCasing('user_id')),
+    )
+    .map(([schema, a, b, name]) => `${schema}${a}.${b}${name}`),
+  casing('drefyn.user_id').map((name) => `"${name}"`),
+);
+
+const setWord = ['s', 'e', 't'].join('');
+const setConfigWord = [setWord, 'config'].join('_');
+
+// The statement sits in SQL, in a tagged template, or in a JavaScript string.
+const wrapped = (statement: string) =>
+  fc.constantFrom(statement, `sql\`${statement}\``, `'${statement.replaceAll("'", "\\'")}'`);
+
+const settingProblems = (text: string) => [
+  ...sessionSettingProblems('apps/api/src/a.ts', text),
+  ...tenantSettingProblems('apps/api/src/a.ts', text),
+];
+
 describe.each(SEEDS)('source checks with seed %i', (seed) => {
+  it('refuse a SET of a drefyn setting however it is spaced, quoted or commented', () => {
+    fc.assert(
+      fc.property(
+        casing(setWord),
+        gap,
+        fc.constantFrom('', 'local', 'session', 'LOCAL', 'SESSION'),
+        gap,
+        drefynName,
+        (word, a, scope, b, name) => {
+          const statement = `${word}${a}${scope === '' ? '' : `${scope}${b}`}${name} = 'x'`;
+          return fc.sample(wrapped(statement), { seed, numRuns: 3 }).every((text) => {
+            return settingProblems(text).length > 0;
+          });
+        },
+      ),
+      { seed, numRuns: 300 },
+    );
+  });
+
+  it('refuse a set_config of a drefyn setting however it is spaced, quoted or commented', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(casing(setConfigWord), fc.constant(`"${setConfigWord}"`)),
+        dotGap,
+        dotGap,
+        casing('drefyn.user_id'),
+        (call, a, b, name) => {
+          const statement = `select ${call}${a}(${b}'${name}', 'x', true)`;
+          return settingProblems(statement).length > 0;
+        },
+      ),
+      { seed, numRuns: 300 },
+    );
+  });
+
+  it('pass a local SET of any other setting however it is spelled', () => {
+    fc.assert(
+      fc.property(gap, gap, identifier, (a, b, name) => {
+        const text = `${setWord}${a}local${b}other.${name} = 'x'`;
+        return settingProblems(text).length === 0;
+      }),
+      { seed, numRuns: 300 },
+    );
+  });
+
   it('never throw on arbitrary text', { timeout: FUZZ_TIMEOUT_MS }, () => {
     fc.assert(
       fc.property(anyText, (text) => {
         expect(Array.isArray(extensionDdlProblems('f.sql', text))).toBe(true);
         expect(Array.isArray(sessionSettingProblems('f.ts', text))).toBe(true);
+        expect(Array.isArray(tenantSettingProblems('f.ts', text))).toBe(true);
       }),
       { seed, numRuns: 400 },
     );

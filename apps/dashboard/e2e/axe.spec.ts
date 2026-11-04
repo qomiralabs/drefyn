@@ -1,6 +1,8 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { expect } from '@playwright/test';
+import { authStatePaths, SELF_HOSTED } from './auth-states.ts';
 import { MOBILE, ROUTES, TABLET, THEMES, useTheme } from './fixtures.ts';
+import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
@@ -75,3 +77,30 @@ for (const theme of THEMES) {
     });
   }
 }
+
+test.describe('signed out pages', () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  for (const [name, path] of [
+    ...authStatePaths(),
+    ['sign-in-self-hosted', SELF_HOSTED],
+    ['the real sign in page', '/sign-in'],
+    ['the real sign up page', '/sign-up'],
+    ['the real password page', '/sign-in/password'],
+    ['the real reset page', '/sign-in/reset'],
+    ['the real verify page', '/sign-in/verify'],
+  ] as const) {
+    for (const theme of THEMES) {
+      for (const width of WIDTHS) {
+        test(`${name} has no axe violations in ${theme} at ${width}`, async ({ page }) => {
+          if (width === '390') await page.setViewportSize(MOBILE);
+          await useTheme(page, theme);
+          await page.goto(path);
+          await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toBeAttached();
+          const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+          expect(violations.map((v) => v.id)).toEqual([]);
+        });
+      }
+    }
+  }
+});

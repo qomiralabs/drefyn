@@ -47,8 +47,9 @@ without one of those.
 - `createAuthDatabase(config, { logger })` opens the auth pool as `drefyn_auth`, with the same
   startup role check, and refuses any other role with `DB_ROLE_UNSAFE`.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
-  known, with every setting empty. `drefyn_auth` holds grants only on the identity tables and
-  its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+  known, with every setting empty. `drefyn_auth` holds grants on the identity tables and, for
+  the expiry cleanup, on `ctid`, `revoked_at` and delete of `api_keys`, past the 90 day limit
+  only. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
   `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
@@ -76,7 +77,11 @@ Rules for the work:
   ones it set; if the work changed them, or committed or rolled back
   itself, the call fails with `DB_TRANSACTION_INVALID` and the connection is replaced.
   `check:sources` refuses `begin`, `commit`, `rollback` and session `SET` in raw SQL, and any
-  setting of a `drefyn.` value outside this package. Savepoints are fine.
+  setting of a `drefyn.` value outside this package, however it is spaced, quoted or commented.
+  Savepoints are fine.
+- The commit check is a tripwire, not a boundary. It reads the settings once, so a switch undone
+  by a rollback to a savepoint gets past it, and `check:sources` is the guard for that case. A
+  source check cannot see a statement built at run time, so neither check stops deliberate code.
 - If a statement fails, the transaction is over. Work that catches a SQL error and returns
   still rejects with that error.
 - After every transaction the connection runs `DISCARD ALL` before it goes back to the pool,
@@ -191,7 +196,9 @@ foreign key into a tenant table without the tenant columns; and any persisted se
 beyond the bootstrap's.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
-`organization_id`, even one on the auth table list, or on a table off that list; `EXECUTE` on
+`organization_id`, even one on the auth table list, unless that exact grant is on the auth tenant
+grant list (a column to select or a table to delete from, never with grant option, and a listed
+grant that is gone fails too), or on a table off that list; `EXECUTE` on
 any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; anything
 beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or any grant option;
 default privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and

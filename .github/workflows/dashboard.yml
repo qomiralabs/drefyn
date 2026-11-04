@@ -41,6 +41,9 @@ jobs:
             axe,
             reduced-motion,
             bundle,
+            auth,
+            auth-no-js,
+            auth-hop,
             visual-1,
             visual-2,
             visual-3,
@@ -65,6 +68,8 @@ jobs:
         env:
           DREFYN_SELFHOST_WAIT_SECONDS: 90
         run: bash scripts/selfhost.sh up
+      - name: Start Mailpit
+        run: docker compose --file deploy/compose.yaml --profile test up --detach --wait mailpit
       - run: pnpm --filter @drefyn/dashboard build
       - name: Seed people and sessions
         env:
@@ -102,6 +107,11 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # The name the seed's guard expects, so it runs here and on no real stack.
+      COMPOSE_PROJECT_NAME: drefyn-dash-99-${{ github.run_id }}-${{ github.run_attempt }}
+      DREFYN_POSTGRES_PORT: '55432'
+      DREFYN_DATABASE_SSL: disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,7 +122,15 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Start the compose stack
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 90
+        run: bash scripts/selfhost.sh up
       - run: pnpm --filter @drefyn/dashboard build
+      - name: Seed people and sessions
+        env:
+          DREFYN_E2E_SEED: real-stack-e2e
+        run: pnpm --filter @drefyn/dashboard seed:e2e
       - name: wrapper and built server
         run: pnpm --filter @drefyn/dashboard test:server
       - name: wrapper p99 under 0.2 ms

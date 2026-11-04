@@ -52,7 +52,7 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
           displaySuffix: 'x7qa',
         };
       case 'owner_added':
-        return { ...facts, kind, organizationName: ORG, ownerName: PERSON };
+        return { ...facts, kind, organizationName: ORG, memberName: PERSON };
       case 'member_removed':
       case 'member_keys_revoked':
         return { at: AT, kind, organizationName: ORG, memberName: PERSON, revokedKeys: 2 };
@@ -225,7 +225,7 @@ export const PREVIEW_MESSAGES: readonly (readonly [string, MailMessage])[] = [
     'hostile.owner_added',
     {
       template: 'security_notice',
-      notice: { kind: 'owner_added', at: AT, organizationName: HOSTILE, ownerName: HOSTILE },
+      notice: { kind: 'owner_added', at: AT, organizationName: HOSTILE, memberName: HOSTILE },
     },
   ],
   [

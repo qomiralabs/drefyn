@@ -154,7 +154,7 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'api_key_revoked':
         return { ...f, kind, organizationName: a, keyName: b, displaySuffix: 'x7qa' };
       case 'owner_added':
-        return { ...f, kind, organizationName: a, ownerName: c };
+        return { ...f, kind, organizationName: a, memberName: c };
       case 'member_removed':
       case 'member_keys_revoked':
         return { ...f, kind, organizationName: a, memberName: c, revokedKeys: 3 };

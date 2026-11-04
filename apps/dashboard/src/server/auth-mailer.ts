@@ -113,7 +113,7 @@ async function noticeMail(
         kind: notice.kind,
         at: notice.at,
         organizationName: await organizationName(notice.organizationId),
-        ownerName: notice.memberName,
+        memberName: notice.memberName,
       };
     default:
       return notice;

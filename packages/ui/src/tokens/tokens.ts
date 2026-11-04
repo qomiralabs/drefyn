@@ -282,6 +282,8 @@ const layout = {
   // Calm landings: narrower than working views, so a landing reads like a page. It holds the
   // display-s answer sentence at about 50 characters a line.
   landing: 720,
+  // One column of 40 px fields on the signed out pages. The measure is too wide for it.
+  auth: 416,
   // em, not ch: 66ch set 83 characters, because ch is the width of Inter's zero, and it
   // changes with the fallback font. 35em sets about 70 characters of Inter at every size.
   measure: 35, // em

@@ -15,6 +15,8 @@ import {
   ROUTES,
   tabKey,
 } from './fixtures.ts';
+import { askForCode, uniqueAddress } from './auth-helpers.ts';
+import { SIGNED_OUT } from './people.ts';
 
 test('Tab goes skip link, top bar left to right, then the sidebar', async ({
   page,
@@ -240,4 +242,54 @@ test('the organization menu opens on Enter at its first item and Escape returns 
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test.describe('signed out pages', () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  test('sign in opens in the address, and Enter sends the code', async ({ page }) => {
+    await page.goto('/sign-in');
+    await expect(page.getByLabel('Email address')).toBeFocused();
+    await page.keyboard.type(uniqueAddress('keys'));
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/sign-in\/verify/);
+  });
+
+  test('verify opens in the code, and Enter submits it', async ({ page }) => {
+    await askForCode(page, uniqueAddress('keys'));
+    await expect(page.getByLabel('8 digit code')).toBeFocused();
+    await page.keyboard.type('00000000');
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('That code did not work.')).toBeVisible();
+  });
+
+  test('the password form completes from the keyboard', async ({ page, browserName }) => {
+    await page.goto('/sign-in/password');
+    await page.getByLabel('Email address').focus();
+    await page.keyboard.type(uniqueAddress('keys'));
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Password', { exact: true })).toBeFocused();
+    await page.keyboard.type('a wrong password of some length');
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Show password' })).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('button', { name: 'Show password' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.keyboard.press(tabKey(browserName));
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('That address and password do not match.')).toBeVisible();
+  });
+
+  test('the first Tab reaches the skip link, and it moves to main', async ({
+    page,
+    browserName,
+  }) => {
+    await page.goto('/auth-states/block/done');
+    await page.keyboard.press(tabKey(browserName));
+    expect(await focused(page)).toBe('a Skip to content');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#main')).toBeFocused();
+  });
 });

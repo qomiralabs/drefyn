@@ -173,6 +173,7 @@ describe('tokens.css', () => {
       '--dr-shell-drawer': '18rem',
       '--dr-shell-inspector': '20rem',
       '--dr-landing': '45rem',
+      '--dr-layout-auth': '26rem',
     };
     for (const [name, value] of Object.entries(expected)) {
       expect(root.declarations.get(name), name).toBe(value);

@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { MOBILE, openShell, ROUTES } from './fixtures.ts';
+import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
 // Runs in the reduced-motion project: nothing travels and fades finish within 120 ms.
@@ -48,4 +49,16 @@ test('the command bar opens without travel under reduced motion', async ({ page 
       }).length,
   );
   expect(moving).toBe(0);
+});
+
+test.describe('the signed out brand half', () => {
+  test.use({ storageState: SIGNED_OUT, viewport: { width: 1280, height: 800 } });
+
+  test('its words do not animate under reduced motion', async ({ page }) => {
+    await page.goto('/auth-states/sign-in/ready');
+    await expect(page.locator('.auth-brand-copy')).toBeVisible();
+    await expect(page.locator('.auth-brand')).toHaveAttribute('aria-hidden', 'true');
+    const words = page.locator('.auth-brand-copy');
+    expect(await words.evaluate((el) => el.getAnimations().length)).toBe(0);
+  });
 });

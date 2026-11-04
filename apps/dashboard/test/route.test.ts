@@ -114,3 +114,10 @@ describe('productHref', () => {
     expect(productHref({ org: 'northwind' }, 'status')).toBe('/northwind/status');
   });
 });
+
+describe('paths the signed out pages own', () => {
+  it.each(['sign-in', 'sign-up', 'sign-out', 'invite', 'auth'])('%s is no organization', (slug) => {
+    expect(parseShellPath(`/${slug}`)).toBeNull();
+    expect(parseShellPath(`/${slug}/docs`)).toBeNull();
+  });
+});
