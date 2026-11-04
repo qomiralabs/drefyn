@@ -11,6 +11,7 @@ import {
   hasherAt,
   heldHasher,
   insideWindow,
+  insideWindowTimeout,
   loggerFor,
   passwordConfig,
   passwordFlow,
@@ -180,76 +181,84 @@ describeWithStack('password sign in against Postgres', () => {
     expect(await sessionsOf(h, email, 'email')).toBe('0');
   });
 
-  it('200 parallel attempts against one address never let more than the limit through', async () => {
-    const config = passwordConfig({
-      DREFYN_AUTH_RATE_PASSWORD_FAIL: '10/15m',
-      DREFYN_AUTH_RATE_PASSWORD_FAIL_IP: '1000/10m',
-    });
-    const flow = passwordFlow(h, config);
-    const { email } = await personWithPassword(h, passwordFlow(h, passwordConfig()), PASSWORD);
-    await insideWindow(h, 900, 60);
-    const b = newBrowser();
-    const form = flow.signIn.passwordForm(b.context());
-    b.apply(form.setCookies);
-    const results = await Promise.all(
-      Array.from({ length: 200 }, (_, i) =>
-        flow.signIn.signInWithPassword(b.context(), {
-          email,
-          password: i % 2 === 0 ? PASSWORD : 'not the right sentence',
-          csrf: form.csrf,
-        }),
-      ),
-    );
-    const through = results.filter((r) => r.ok || r.error.code !== 'AUTH_RATE_LIMITED');
-    expect(through.length).toBeLessThanOrEqual(10);
-    expect(through.length).toBeGreaterThan(0);
-    expect(results.filter((r) => !r.ok && r.error.code === 'AUTH_RATE_LIMITED').length).toBe(
-      200 - through.length,
-    );
-  });
+  it(
+    '200 parallel attempts against one address never let more than the limit through',
+    async () => {
+      const config = passwordConfig({
+        DREFYN_AUTH_RATE_PASSWORD_FAIL: '10/15m',
+        DREFYN_AUTH_RATE_PASSWORD_FAIL_IP: '1000/10m',
+      });
+      const flow = passwordFlow(h, config);
+      const { email } = await personWithPassword(h, passwordFlow(h, passwordConfig()), PASSWORD);
+      await insideWindow(h, 900, 60);
+      const b = newBrowser();
+      const form = flow.signIn.passwordForm(b.context());
+      b.apply(form.setCookies);
+      const results = await Promise.all(
+        Array.from({ length: 200 }, (_, i) =>
+          flow.signIn.signInWithPassword(b.context(), {
+            email,
+            password: i % 2 === 0 ? PASSWORD : 'not the right sentence',
+            csrf: form.csrf,
+          }),
+        ),
+      );
+      const through = results.filter((r) => r.ok || r.error.code !== 'AUTH_RATE_LIMITED');
+      expect(through.length).toBeLessThanOrEqual(10);
+      expect(through.length).toBeGreaterThan(0);
+      expect(results.filter((r) => !r.ok && r.error.code === 'AUTH_RATE_LIMITED').length).toBe(
+        200 - through.length,
+      );
+    },
+    insideWindowTimeout(60),
+  );
 
-  it('while the password bucket for an address is full, that person still signs in by email code', async () => {
-    const config = passwordConfig({
-      DREFYN_AUTH_RATE_PASSWORD_FAIL: '10/15m',
-      DREFYN_AUTH_SIGNUP: 'closed',
-    });
-    const flow = passwordFlow(h, config);
-    const { email } = await personWithPassword(h, passwordFlow(h, passwordConfig()), PASSWORD);
-    await insideWindow(h, 900, 60);
-    // An attacker fills the bucket from two /64 prefixes, with the real limiter.
-    for (let i = 0; i < 10; i += 1) {
-      await signInFrom(flow, newBrowser(`2001:db8:${String(i % 2)}::1`), email, 'guessing guess');
-    }
-    // The person, from their own browser and address: a right and a wrong password get the
-    // same refusal while the bucket is full.
-    const person = newBrowser('192.0.2.77');
-    const right = await signInFrom(flow, person, email, PASSWORD);
-    const wrong = await signInFrom(flow, person, email, 'not the right sentence');
-    expect(!right.ok && right.error.code).toBe('AUTH_RATE_LIMITED');
-    expectSameWire(wireOf(right), wireOf(wrong));
-    expect(await sessionsOf(h, email)).toBe('0');
-    // Then by code, from that same browser and address. Setting the password left one email
-    // session behind.
-    const emailSessions = Number(await sessionsOf(h, email, 'email'));
-    const mail = createTestAuthMailer();
-    const emailFlow = {
-      config,
-      mail,
-      sessions: flow.sessions,
-      signIn: createEmailSignIn(config, {
-        db: h.db,
-        authDb: h.authDb,
-        logger: loggerFor(h),
-        mailer: mail.mailer,
+  it(
+    'while the password bucket for an address is full, that person still signs in by email code',
+    async () => {
+      const config = passwordConfig({
+        DREFYN_AUTH_RATE_PASSWORD_FAIL: '10/15m',
+        DREFYN_AUTH_SIGNUP: 'closed',
+      });
+      const flow = passwordFlow(h, config);
+      const { email } = await personWithPassword(h, passwordFlow(h, passwordConfig()), PASSWORD);
+      await insideWindow(h, 900, 60);
+      // An attacker fills the bucket from two /64 prefixes, with the real limiter.
+      for (let i = 0; i < 10; i += 1) {
+        await signInFrom(flow, newBrowser(`2001:db8:${String(i % 2)}::1`), email, 'guessing guess');
+      }
+      // The person, from their own browser and address: a right and a wrong password get the
+      // same refusal while the bucket is full.
+      const person = newBrowser('192.0.2.77');
+      const right = await signInFrom(flow, person, email, PASSWORD);
+      const wrong = await signInFrom(flow, person, email, 'not the right sentence');
+      expect(!right.ok && right.error.code).toBe('AUTH_RATE_LIMITED');
+      expectSameWire(wireOf(right), wireOf(wrong));
+      expect(await sessionsOf(h, email)).toBe('0');
+      // Then by code, from that same browser and address. Setting the password left one email
+      // session behind.
+      const emailSessions = Number(await sessionsOf(h, email, 'email'));
+      const mail = createTestAuthMailer();
+      const emailFlow = {
+        config,
+        mail,
         sessions: flow.sessions,
-      }),
-    };
-    const sent = await requestCode(emailFlow, person, email);
-    if (sent === null) throw new Error('no code was mailed');
-    const verified = await emailFlow.signIn.verifyEmailCode(person.context(), sent);
-    expect(verified.ok).toBe(true);
-    expect(Number(await sessionsOf(h, email, 'email'))).toBe(emailSessions + 1);
-  });
+        signIn: createEmailSignIn(config, {
+          db: h.db,
+          authDb: h.authDb,
+          logger: loggerFor(h),
+          mailer: mail.mailer,
+          sessions: flow.sessions,
+        }),
+      };
+      const sent = await requestCode(emailFlow, person, email);
+      if (sent === null) throw new Error('no code was mailed');
+      const verified = await emailFlow.signIn.verifyEmailCode(person.context(), sent);
+      expect(verified.ok).toBe(true);
+      expect(Number(await sessionsOf(h, email, 'email'))).toBe(emailSessions + 1);
+    },
+    insideWindowTimeout(60),
+  );
 
   describe('the pre sign in binding, on the database', () => {
     // The person's own address bucket, so other tests' rows and window cleanup do not matter.
