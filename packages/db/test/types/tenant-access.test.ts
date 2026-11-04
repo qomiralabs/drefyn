@@ -192,7 +192,7 @@ describe('tenant access types', () => {
   });
 
   it('build AuthSchema and UserSchema from their table lists only', () => {
-    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<AuthTableName>();
+    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<AuthTableName | 'api_keys'>();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName>();
     expectTypeOf<
       keyof NamedTables<FixtureSchema, 'fixture_drafts'>

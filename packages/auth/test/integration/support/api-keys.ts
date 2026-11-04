@@ -1,7 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { newId, withOrganization } from '@drefyn/db';
 import type { OrganizationId, ProjectId } from '@drefyn/tenancy';
-import type { AccessContext, CookieSpec, CreateApiKeyInput } from '../../../src/index.ts';
+import { PostgresQueryCompiler, type CompiledQuery, type KyselyPlugin } from 'kysely';
+import type {
+  AccessContext,
+  ApiKeyStore,
+  CookieSpec,
+  CreateApiKeyInput,
+} from '../../../src/index.ts';
 import type { Harness } from './harness.ts';
 
 export const browser = (ip = '203.0.113.9') => ({
@@ -95,6 +101,29 @@ export async function memberOf(
   const resolved = await sessions.resolveAccess(cookie, org.slug);
   if (resolved.kind !== 'ok') throw new Error(`member did not resolve: ${resolved.kind}`);
   return { access: resolved.access, session };
+}
+
+// Organization work over the real pool that also records each statement it sends, compiled as
+// sent. Listing needs nothing else, so any other path fails loudly.
+export function recordingStore(h: Harness) {
+  const statements: CompiledQuery[] = [];
+  const compiler = new PostgresQueryCompiler();
+  const recorder: KyselyPlugin = {
+    transformQuery(args) {
+      statements.push(compiler.compileQuery(args.node, args.queryId));
+      return args.node;
+    },
+    transformResult: (args) => Promise.resolve(args.result),
+  };
+  const unused = () => Promise.reject(new Error('listing runs as organization work only'));
+  const store: ApiKeyStore = {
+    user: unused,
+    auth: unused,
+    organizationAs: unused,
+    organization: (organizationId, work) =>
+      withOrganization(h.db, { organizationId }, (tx) => work(tx.withPlugin(recorder))),
+  };
+  return { store, statements };
 }
 
 let counter = 0;

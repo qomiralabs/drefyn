@@ -4,6 +4,7 @@ import {
   APP_FUNCTIONS,
   AUTH_ONLY_TABLES,
   AUTH_TABLES,
+  AUTH_TENANT_GRANTS,
   COLUMN_GRANT_TABLES,
   COLUMN_GRANTS,
   CROSS_PROJECT_FOREIGN_KEYS,
@@ -38,6 +39,12 @@ const GUARD: PolicyEntry = {
   reason: 'test only',
 };
 const REASON = 'migration bookkeeping, owner only, no tenant data';
+const auth = (name: string, privilege: string) => ({
+  name,
+  grantee: 'drefyn_auth',
+  privilege,
+  reason: 'test only',
+});
 
 describe('global table allow list', () => {
   it('holds both bookkeeping tables with the reviewed reason', () => {
@@ -196,6 +203,31 @@ describe('allow lists', () => {
     ]);
   });
 
+  it('let drefyn_auth reach one tenant table, to find and delete old revoked keys', () => {
+    expect(ALLOW_LISTS.authTenantGrants).toBe(AUTH_TENANT_GRANTS);
+    expect(AUTH_TENANT_GRANTS.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
+      ['app.api_keys', 'drefyn_auth', 'DELETE'],
+      ['app.api_keys.ctid', 'drefyn_auth', 'SELECT'],
+      ['app.api_keys.revoked_at', 'drefyn_auth', 'SELECT'],
+    ]);
+    for (const grant of AUTH_TENANT_GRANTS) expect(grant.reason.trim()).not.toBe('');
+  });
+
+  it('keep the API key tables off the auth table list, so nothing else opens with them', () => {
+    const names = AUTH_TABLES.map((e) => e.name);
+    expect(names).not.toContain('app.api_keys');
+    expect(names).not.toContain('app.api_key_projects');
+  });
+
+  it('bound what drefyn_auth may do to a revoked key by exact text', () => {
+    const entries = USER_POLICIES.filter((p) => p.name.startsWith('app.api_keys.'));
+    const using = "(revoked_at < (now() - '90 days'::interval))";
+    expect(entries.map((p) => [p.name, p.command, p.roles, p.using, p.withCheck])).toEqual([
+      ['app.api_keys.auth_expire', 'delete', ['drefyn_auth'], using, null],
+      ['app.api_keys.auth_expire_read', 'select', ['drefyn_auth'], using, null],
+    ]);
+  });
+
   it('let one column hold more than one reviewed grant', () => {
     const lists: AllowLists = {
       ...ALLOW_LISTS,
@@ -218,6 +250,46 @@ describe('allow lists', () => {
   });
 
   it.each<[string, (lists: AllowLists) => AllowLists]>([
+    [
+      'an auth tenant grant to another role',
+      (l) => ({
+        ...l,
+        authTenantGrants: [{ ...auth('app.api_keys.ctid', 'SELECT'), grantee: 'drefyn_app' }],
+      }),
+    ],
+    [
+      'an auth tenant grant that can write a row',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.revoked_at', 'UPDATE')] }),
+    ],
+    [
+      'an auth tenant grant to insert',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys', 'INSERT')] }),
+    ],
+    [
+      'an auth tenant select of a whole table',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys', 'SELECT')] }),
+    ],
+    [
+      'an auth tenant delete of one column',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.revoked_at', 'DELETE')] }),
+    ],
+    [
+      'an auth tenant grant with no reason',
+      (l) => ({
+        ...l,
+        authTenantGrants: [{ ...auth('app.api_keys.ctid', 'SELECT'), reason: ' ' }],
+      }),
+    ],
+    [
+      'an auth tenant grant listed twice',
+      (l) => ({
+        ...l,
+        authTenantGrants: [
+          auth('app.api_keys.ctid', 'SELECT'),
+          auth('app.api_keys.ctid', 'SELECT'),
+        ],
+      }),
+    ],
     [
       'an empty reason',
       (l) => ({ ...l, globalTables: [...l.globalTables, { name: 'app.x', reason: '' }] }),

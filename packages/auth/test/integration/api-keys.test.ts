@@ -1,13 +1,24 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { newId, withOrganization } from '@drefyn/db';
+import { idOf, type IdOf } from '@drefyn/tenancy';
 import {
   ApiKeyReplayError,
   apiKeyErrorResponse,
   parseApiKey,
   type ApiKeyVerifierStore,
+  type ApiKeyPage,
   type CreatedApiKey,
+  type ListApiKeysInput,
 } from '../../src/index.ts';
-import { addProjects, input, memberOf, newOrg, testIp, type Org } from './support/api-keys.ts';
+import {
+  addProjects,
+  input,
+  memberOf,
+  newOrg,
+  recordingStore,
+  testIp,
+  type Org,
+} from './support/api-keys.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
@@ -465,6 +476,229 @@ describeWithStack('API keys against Postgres', () => {
       expect(line?.fields).toBeDefined();
       expect(JSON.stringify(h.logs)).not.toContain('Secret project name');
       expect(JSON.stringify(h.logs)).not.toContain(org.ownerEmail);
+    });
+  });
+
+  describe('listing', () => {
+    const list = async (org: Org, query: ListApiKeysInput = {}): Promise<ApiKeyPage> => {
+      const result = await h.apiKeys().listApiKeys(org.owner, query);
+      if (!result.ok) throw result.error;
+      return result.value;
+    };
+    const namedKey = async (org: Org, name: string) => {
+      const made = await create(org);
+      await h.sql(`update app.api_keys set name = $n$${name}$n$ where id = '${made.key.keyId}';`);
+      return made;
+    };
+    const membershipOf = async (org: Org, userId: string): Promise<IdOf<'mem'>> =>
+      idOf(
+        'mem',
+        await h.sql(
+          `select id from app.memberships
+            where organization_id = '${org.organizationId}' and user_id = '${userId}';`,
+        ),
+      );
+
+    it('returns every row exactly once while keys are revoked during the walk', async () => {
+      const org = await newOrg(h);
+      const made: CreatedApiKey[] = [];
+      for (let i = 0; i < 9; i += 1) made.push(await create(org));
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: ApiKeyPage = await list(org, {
+          limit: 2,
+          ...(cursor === null ? {} : { cursor }),
+        });
+        seen.push(...page.items.map((i) => i.keyId));
+        cursor = page.nextCursor;
+        pages += 1;
+        // One key behind the walk and one ahead of it go between pages, and neither moves.
+        const behind = made[made.length - pages];
+        const ahead = made[pages - 1];
+        for (const key of [behind, ahead]) {
+          if (key === undefined) throw new Error('no key');
+          const done = await h.apiKeys().revokeApiKey(org.owner, key.key.keyId);
+          if (!done.ok) throw done.error;
+        }
+      } while (cursor !== null);
+      expect(pages).toBe(5);
+      const newestFirst = made
+        .map((m) => m.key.keyId as string)
+        .sort()
+        .reverse();
+      expect(seen).toEqual(newestFirst);
+    });
+
+    it('never shows one organization the keys, counts or creators of another', async () => {
+      const mine = await newOrg(h);
+      const theirs = await newOrg(h);
+      const ours = await create(mine);
+      const foreign = await create(theirs, { scopes: ['status:read'] });
+      const { access } = await memberOf(h, theirs, 'admin');
+      await h.apiKeys().createApiKey(access, input());
+      const page = await list(mine);
+      expect(page.items.map((i) => i.keyId)).toEqual([ours.key.keyId]);
+      expect(page).toMatchObject({ total: 1, matched: 1, live: 1, formerKeys: 0 });
+      expect(page.products).toEqual({ docs: 1, studio: 0, status: 0 });
+      expect(page.creators).toHaveLength(1);
+      expect(page.creators[0]?.keys).toBe(1);
+
+      const theirMembership = await membershipOf(theirs, theirs.owner.userId);
+      const filtered = await list(mine, { createdBy: [theirMembership] });
+      expect(filtered).toMatchObject({ items: [], matched: 0, total: 1 });
+      expect(JSON.stringify(page)).not.toContain(foreign.key.keyId);
+      expect(JSON.stringify(page)).not.toContain(theirs.ownerEmail);
+    });
+
+    it('shows no project row of another organization and keeps a revoked key its projects', async () => {
+      const org = await newOrg(h);
+      const projects = await addProjects(h, org.organizationId, 2);
+      const key = await create(org, { projectScope: 'listed', projectIds: projects });
+      const revoked = await h.apiKeys().revokeApiKey(org.owner, key.key.keyId);
+      if (!revoked.ok) throw revoked.error;
+      const page = await list(org);
+      expect(page.items[0]?.projectIds).toEqual([...projects].sort());
+      expect(page.items[0]?.state).toBe('revoked');
+    });
+
+    it.each([
+      ['%', '100% ready'],
+      ['_', 'a_b'],
+      ['\\', 'back\\slash'],
+      ["'", "it's here"],
+    ])('matches the hostile search %s literally', async (search, name) => {
+      const org = await newOrg(h);
+      const hit = await namedKey(org, name);
+      await namedKey(org, 'plain');
+      await namedKey(org, 'ab');
+      const page = await list(org, { search });
+      expect(page.items.map((i) => i.keyId)).toEqual([hit.key.keyId]);
+      expect(page.matched).toBe(1);
+    });
+
+    it('finds nothing for an injection attempt, and the table is still there', async () => {
+      const org = await newOrg(h);
+      await create(org);
+      const page = await list(org, { search: "'; drop table app.api_keys; --" });
+      expect(page.items).toEqual([]);
+      expect((await list(org)).total).toBe(1);
+    });
+
+    it('counts keys of a removed member as former, with no name, and offers them as a filter', async () => {
+      const org = await newOrg(h);
+      const { access, session } = await memberOf(h, org, 'admin');
+      const gone = await h.apiKeys().createApiKey(access, input());
+      if (!gone.ok) throw gone.error;
+      const kept = await create(org);
+      const membership = await membershipOf(org, session.userId);
+      expect((await list(org)).creators.map((c) => c.membershipId)).toContain(membership);
+      const removed = await h.roles().removeMember(org.owner, membership);
+      if (!removed.ok) throw removed.error;
+
+      const page = await list(org);
+      expect(page.formerKeys).toBe(1);
+      expect(page.live).toBe(1);
+      expect(page.creators.map((c) => c.membershipId)).not.toContain(membership);
+      const former = await list(org, { createdBy: ['former'] });
+      expect(former.items).toHaveLength(1);
+      expect(former.items[0]).toMatchObject({
+        keyId: gone.value.key.keyId,
+        state: 'revoked',
+        createdBy: null,
+        creatorName: null,
+      });
+      const both = await list(org, {
+        createdBy: ['former', await membershipOf(org, org.owner.userId)],
+      });
+      expect(both.items.map((i) => i.keyId)).toEqual([kept.key.keyId, gone.value.key.keyId]);
+    });
+
+    it('holds no user id on any key row after the account is gone', async () => {
+      const org = await newOrg(h);
+      const { access, session } = await memberOf(h, org, 'admin');
+      const made = await h.apiKeys().createApiKey(access, input());
+      if (!made.ok) throw made.error;
+      const membership = await membershipOf(org, session.userId);
+      const removed = await h.roles().removeMember(org.owner, membership);
+      if (!removed.ok) throw removed.error;
+      await h.sql(`delete from app.users where id = '${session.userId}';`);
+      const row = await h.sql(
+        `select row_to_json(k)::text from app.api_keys k where id = '${made.value.key.keyId}';`,
+      );
+      expect(row).not.toContain(session.userId);
+      expect(row).not.toContain(membership);
+      expect((await list(org)).items[0]).toMatchObject({ createdBy: null, creatorName: null });
+    });
+
+    it('reads state by database time, and revoked wins over expired', async () => {
+      const org = await newOrg(h);
+      const live = await create(org);
+      const soon = await create(org);
+      const expired = await create(org);
+      const both = await create(org);
+      await h.sql(
+        `update app.api_keys set expires_at = now() + interval '1 minute'
+          where id = '${soon.key.keyId}';
+         update app.api_keys set created_at = now() - interval '2 days',
+                expires_at = now() - interval '1 second'
+          where id in ('${expired.key.keyId}', '${both.key.keyId}');`,
+      );
+      const done = await h.apiKeys().revokeApiKey(org.owner, both.key.keyId);
+      if (!done.ok) throw done.error;
+      const page = await list(org);
+      const stateOf = (key: CreatedApiKey) =>
+        page.items.find((i) => i.keyId === key.key.keyId)?.state;
+      expect(stateOf(live)).toBe('live');
+      expect(stateOf(soon)).toBe('live');
+      expect(stateOf(expired)).toBe('expired');
+      expect(stateOf(both)).toBe('revoked');
+      expect(page.live).toBe(2);
+      expect(page.total).toBe(4);
+    });
+
+    it('sends at most four statements, each named in the recording', async () => {
+      const org = await newOrg(h);
+      const projects = await addProjects(h, org.organizationId, 1);
+      await create(org, { projectScope: 'listed', projectIds: projects });
+      await create(org);
+      const recorded = recordingStore(h);
+      const result = await h
+        .apiKeys({ store: recorded.store })
+        .listApiKeys(org.owner, { search: 'deploy', products: ['docs'], lastUsed: 'never' });
+      if (!result.ok) throw result.error;
+      expect(result.value.items).toHaveLength(2);
+      expect(result.value.items.flatMap((i) => i.projectIds)).toEqual(projects);
+      expect(recorded.statements).toHaveLength(4);
+    });
+
+    it('shows a plain member the table and each creator by name', async () => {
+      const org = await newOrg(h);
+      await h.sql(
+        `update app.users set display_name = 'Nia Reed' where id = '${org.owner.userId}';`,
+      );
+      await create(org);
+      await create(org);
+      const { access } = await memberOf(h, org, 'member');
+      const result = await h.apiKeys().listApiKeys(access, {});
+      if (!result.ok) throw result.error;
+      expect(result.value.items.map((i) => i.creatorName)).toEqual(['Nia Reed', 'Nia Reed']);
+      expect(result.value.creators).toEqual([
+        {
+          membershipId: await membershipOf(org, org.owner.userId),
+          name: 'Nia Reed',
+          keys: 2,
+        },
+      ]);
+    });
+
+    it('logs nothing on success, not even the search', async () => {
+      const org = await newOrg(h);
+      await create(org);
+      const before = h.logs.length;
+      await list(org, { search: 'deploy' });
+      expect(h.logs.slice(before)).toEqual([]);
     });
   });
 
