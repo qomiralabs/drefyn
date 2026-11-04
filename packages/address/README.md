@@ -38,8 +38,8 @@ if (isNormalizedEmailAddress(stored)) send(stored);
 and neither may depend on the other for a security rule.
 
 - `isLinkShaped(text)` is true for text a mail client could turn into a link: a scheme,
-  `www.` anywhere or a domain shape. It checks the NFKC form with every format character
-  removed, full width dots folded, lower cased and with marks removed, because clients
+  `www.` anywhere, a domain shape or a dotted quad. It checks the NFKC form with every
+  format and default ignorable character removed, full width dots folded, lower cased and with marks removed, because clients
   drop what a reader cannot see.
 - `isPlainAddress(value)` is true for a normalised address whose local part holds only
   `a-z 0-9 . _ + ' -` and no `www.`. The address rule allows `/ ? # % = &` in a local
