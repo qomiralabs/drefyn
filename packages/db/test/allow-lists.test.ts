@@ -503,6 +503,13 @@ describe('restrictive policies', () => {
         withCheck: KEY_CREATOR,
       },
       {
+        name: 'app.api_keys.api_key_update_unrevoked',
+        command: 'update',
+        roles: ['drefyn_app'],
+        using: '(revoked_at IS NULL)',
+        withCheck: 'true',
+      },
+      {
         name: 'app.invitations.invitation_insert_inviter',
         command: 'insert',
         roles: ['drefyn_app'],

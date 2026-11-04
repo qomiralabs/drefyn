@@ -246,7 +246,7 @@ describe('package entries', () => {
       'password_reset',
       'email_change',
     ]);
-    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(12);
+    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(13);
     expect(main.SECURITY_NOTICE_KINDS).toContain('member_keys_revoked');
   });
 });

@@ -325,6 +325,15 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
       'a key is created only by the person acting, through their own owner or admin membership of its organization, never ownerless',
   },
   {
+    name: 'app.api_keys.api_key_update_unrevoked',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: '(revoked_at IS NULL)',
+    withCheck: 'true',
+    reason:
+      'a revoked key is final: organization work cannot clear the revoke, move it or touch the row; the new row is unchecked so the revoke itself passes',
+  },
+  {
     name: 'app.invitations.invitation_insert_inviter',
     command: 'insert',
     roles: ['drefyn_app'],
