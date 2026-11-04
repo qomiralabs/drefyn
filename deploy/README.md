@@ -154,6 +154,181 @@ bash scripts/selfhost.sh restart
 server or its log. The superuser's password is only used during the first start, because
 the superuser has no TCP login, so changing it in `deploy/.env` later has no effect.
 
+## Auth keys
+
+The dashboard does not run in this compose file yet. These sections describe its settings and
+commands so `deploy/.env` is ready when it does.
+
+`up` also writes three dashboard keys to `deploy/.env`, each exactly 32 random bytes in
+unpadded base64url: `DREFYN_AUTH_SECRET`, `DREFYN_AUTH_INVITATION_BLOCK_KEY` and
+`DREFYN_API_RATE_LIMIT_KEY`. It never prints them. A `deploy/.env` from before a key existed
+gets that key appended by `up` or `upgrade`; one already there is never replaced. To make one
+by hand:
+
+```sh
+head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'
+```
+
+The dashboard refuses to start with `AUTH_CONFIG_INVALID`, naming the key, when
+`DREFYN_AUTH_SECRET` or `DREFYN_AUTH_INVITATION_BLOCK_KEY` is missing or the wrong length. The
+API service refuses to start when any `DREFYN_AUTH_` key is set; it gets only
+`DREFYN_API_RATE_LIMIT_KEY`.
+
+### Rotating `DREFYN_AUTH_SECRET`
+
+1. Copy the current value to `DREFYN_AUTH_SECRET_PREVIOUS`.
+2. Put a new value in `DREFYN_AUTH_SECRET` and restart the dashboard.
+3. After a day, remove `DREFYN_AUTH_SECRET_PREVIOUS` and restart again.
+
+While both are set, sign in codes and form tokens made under the old secret still verify, so
+nobody mid sign in is turned away. Rate limit windows start fresh under the new secret, which
+for one window lets each address and network try again. Sessions, device cookies, CLI links
+and invitation blocks do not depend on this secret and are not touched.
+
+### `DREFYN_AUTH_INVITATION_BLOCK_KEY` is never rotated
+
+Never rotate it with `DREFYN_AUTH_SECRET`, and never rotate it on a schedule. A block from the
+"I did not expect this" link is stored as an HMAC of the address under this key, so a new key
+lifts every block at once, and people who asked not to be invited again can be. Change it only
+if it leaked, knowing that cost: replace the value and restart. There is no previous key for
+it. Keep it in the same backups as the database, because a restored database with a lost key
+has the same effect.
+
+### Rotating `DREFYN_API_RATE_LIMIT_KEY`
+
+Put a new value in the API service's environment and restart it. The only effect is that API
+key failure windows start fresh. No key, session or block depends on it.
+
+### Rotating the OAuth client secrets
+
+Create a second client secret in the GitHub or Google console, put it in
+`DREFYN_AUTH_GITHUB_CLIENT_SECRET` or `DREFYN_AUTH_GOOGLE_CLIENT_SECRET`, restart, check that a
+provider sign in works, then delete the old secret in the console. A sign in started before
+the restart finishes with the new secret, because the secret is only used when the dashboard
+exchanges the code.
+
+### Rotating the `drefyn_auth` password
+
+The same as any other password, above:
+
+```sh
+docker compose -f deploy/compose.yaml exec postgres psql -U postgres -d drefyn -c '\password drefyn_auth'
+# then put the same password in deploy/.env and run
+bash scripts/selfhost.sh restart
+```
+
+Then restart the dashboard with the new `DREFYN_AUTH_DATABASE_URL`. Until it restarts, its
+open connections keep working and new ones fail, so sign in fails until the restart.
+
+## The first admin
+
+A fresh install needs no SMTP and no OAuth app to sign in. Run the dashboard's own command
+with the dashboard's environment, where it runs:
+
+```sh
+drefyn auth link --email you@example.com --create-organization "Acme"
+```
+
+It prints one line on stdout, `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_...`, and on stderr its
+log events as JSON lines (ids only, never the address or the link) and "Valid once, for 15
+minutes.". Open it in a browser to sign in. A second open fails, and printing a new
+link makes the older unused one worthless. It never sends mail and writes the link nowhere but
+your terminal; treat the scrollback like a password until you have used it. The person is made
+if the address is new, unless `DREFYN_AUTH_SIGNUP=closed`, which only lets existing people in.
+`--create-organization` makes an organization with that person as owner, and its URL name
+from the name: `Acme Docs` becomes `acme-docs`.
+
+To sign someone out everywhere, for example after a lost laptop:
+
+```sh
+drefyn auth revoke-sessions --email person@example.com
+drefyn auth revoke-sessions --all
+```
+
+Both commands need both database URLs, `DREFYN_DATABASE_URL` and `DREFYN_AUTH_DATABASE_URL`:
+people are found as `drefyn_auth`, and sessions and organizations are written as `drefyn_app`.
+A missing one exits 3 naming it. The auth release flags gate the `/sign-in/cli` page, not these
+commands, because `revoke-sessions` is an incident tool; with the flags off, `link` still
+creates the person and the organization, and the link does nothing until the page is on.
+
+Each prints how many sessions it ended. Exit codes for `drefyn auth`: 0 done, 2 bad input
+(the flag is named, the value never echoed), 3 a setting is missing or invalid (the key is
+named), 4 the database cannot be reached or the role is wrong, 5 a file cannot be read or
+written.
+
+## Behind a reverse proxy
+
+The dashboard runs `server.ts`, which resolves the client address from the socket before Next
+sees the request, and replaces every forwarding header a client could send: `X-Forwarded-For`,
+`Forwarded`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP` and `CloudFront-Viewer-Address`.
+`X-Forwarded-Host`, `-Proto` and `-Port` always come from `DREFYN_APP_ORIGIN`, and a request
+whose `Host` is not the origin's host gets 421. The health check is `GET /healthz` on a
+loopback host (`127.0.0.1`, `localhost` or `[::1]`), so it answers before the origin
+resolves.
+
+With nothing in front, leave `DREFYN_TRUSTED_PROXY_HOPS` at 0; the socket is the client. With
+one proxy in front, set it to 1, and the address that proxy appended wins over anything the
+client wrote. With 0 hops and forwarding headers arriving, the dashboard logs
+`auth.forwarded_header_ignored` at most once a minute: that is a proxy you have not declared.
+Hops above 0 with a loopback origin stop startup. Behind CloudFront, either count every hop or
+set `DREFYN_CLIENT_IP_HEADER=cloudfront-viewer-address`, which is read only from the trusted
+hop.
+
+Keep the dashboard's port private when hops is above 0. With one hop the wrapper trusts the
+right most `X-Forwarded-For` entry, so anyone who can reach the port directly can name any
+client address they like. Bind it to loopback (`HOSTNAME=127.0.0.1`) when the proxy runs on the
+same host, or to a private network the proxy alone can reach, and never publish it. The default
+is `0.0.0.0`, because a container needs it, so a host port mapping or firewall has to do this
+job.
+
+The wrapper takes only the origin form of a request, a path starting with one `/`. Anything
+else, such as an absolute `http://host/` target, gets 400. The dashboard has no WebSocket route,
+so an upgrade request is answered as an ordinary request, with the same checks.
+
+Set `UV_THREADPOOL_SIZE=16` in the dashboard's environment. Node sizes that pool when it starts,
+so it cannot be set from inside the dashboard. A smaller or missing value logs
+`auth.threadpool_small` once at startup, and while passwords are on the dashboard refuses to
+start with `AUTH_CONFIG_INVALID` unless it is above 4.
+
+A Caddy example with automatic TLS and one hop. Invitation and sign in links carry their
+secret after `#`, which browsers never send, but the `/invite` path is still kept out of the
+access log in case a link is pasted without its fragment:
+
+```caddyfile
+app.example.com {
+	log {
+		output file /var/log/caddy/drefyn.log
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp ^/invite.* /invite[redacted]
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+			}
+		}
+	}
+	reverse_proxy 127.0.0.1:3000 {
+		# Caddy appends the client address to X-Forwarded-For; the dashboard reads it with
+		# DREFYN_TRUSTED_PROXY_HOPS=1 and DREFYN_APP_ORIGIN=https://app.example.com.
+		header_up Host {host}
+	}
+}
+```
+
+## Mail for tests
+
+A test profile adds Mailpit (MIT), pinned by digest, for the auth flows and end to end tests.
+It never starts with `up`:
+
+```sh
+docker compose -f deploy/compose.yaml --profile test up --detach --wait mailpit
+# SMTP on 127.0.0.1:51025, the web UI and API on http://127.0.0.1:58025
+docker compose -f deploy/compose.yaml --profile test rm --stop --force mailpit
+```
+
+`DREFYN_MAILPIT_SMTP_PORT` and `DREFYN_MAILPIT_WEB_PORT` move the ports. It keeps at most 500
+messages in memory and is not for real mail.
+
 ## Breached passwords
 
 Drefyn always refuses passwords that its built in rules catch: one character repeated,

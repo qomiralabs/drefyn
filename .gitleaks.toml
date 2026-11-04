@@ -8,3 +8,10 @@ description = "Drefyn organization API key"
 # drf_ak_, organization id body, key id body, 52 character secret, all lowercase Crockford base32.
 regex = '''drf_ak_[0-9a-hjkmnp-tv-z]{26}_[0-9a-hjkmnp-tv-z]{26}_[0-9a-hjkmnp-tv-z]{52}'''
 keywords = ["drf_ak_"]
+
+[[rules]]
+id = "drefyn-cli-link"
+description = "Drefyn single use sign in link secret printed by drefyn auth link"
+# drf_cl_ and the 52 character secret; its first symbol holds four zero bits, so it is 0 or 1.
+regex = '''drf_cl_[01][0-9a-hjkmnp-tv-z]{51}'''
+keywords = ["drf_cl_"]

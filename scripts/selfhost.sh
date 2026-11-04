@@ -27,6 +27,29 @@ random_secret() {
   od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
 }
 
+# The auth keys: exactly 32 random bytes in unpadded base64url, the one spelling the
+# dashboard accepts. 43 characters, none that need quoting.
+random_key() {
+  head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'
+}
+
+# The keys the installer generates once. The invitation block key is never rotated with
+# DREFYN_AUTH_SECRET: blocks are stored as an HMAC under it, so a new one lifts them all.
+KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY'
+
+# generated_value <key>: a fresh value of the right shape for that key, checked, on stdout.
+generated_value() {
+  local value want=48
+  if [[ "$1" =~ ^($KEY_NAMES)$ ]]; then
+    value="$(random_key)"
+    want=43
+  else
+    value="$(random_secret)"
+  fi
+  if [ "${#value}" -ne "$want" ]; then return 1; fi
+  printf '%s' "$value"
+}
+
 # Called on its own line, never on the left of && or ||, so set -e stays on inside it and any
 # failure here stops the script before the guard and before compose.
 ensure_env() {
@@ -41,12 +64,11 @@ ensure_env() {
   env_tmp="$(mktemp "$deploy/.env.XXXXXX")"
   chmod 600 "$env_tmp"
   while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID)=$ ]]; then
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID|$KEY_NAMES)=$ ]]; then
       key="${BASH_REMATCH[1]}"
       # A failure inside a command substitution used as an argument would go unnoticed and
       # leave the value empty, so generate it on its own and check it.
-      value="$(random_secret)"
-      if [ "${#value}" -ne 48 ]; then
+      if ! value="$(generated_value "$key")"; then
         say <<<"selfhost: could not generate a random value for $key; nothing was written."
         exit 1
       fi
@@ -56,14 +78,15 @@ ensure_env() {
     fi
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
-    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ]; then
-    say <<<"selfhost: $example does not list the stack ID and the five passwords; nothing was written."
+    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 3 ]; then
+    say <<<"selfhost: $example does not list the stack ID, the five passwords and the three auth keys; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
   # file wins and the other uses it, rather than each starting with passwords the file lost.
   if ln "$env_tmp" "$env_file" 2>/dev/null; then
-    echo "selfhost: wrote $env_file with generated passwords and a stack ID"
+    echo "selfhost: wrote $env_file with generated passwords, auth keys and a stack ID"
   elif [ -f "$env_file" ]; then
     say <<<"selfhost: $env_file appeared while this up was generating one; using the one already there"
   else
@@ -72,18 +95,18 @@ ensure_env() {
   fi
 }
 
-# A deploy/.env written before a role existed has no password for it. Append a generated one
-# for each password the example lists and the file does not name at all; an empty value is
-# left alone, since that is a choice the first start refuses anyway. Appending keeps the mode.
+# A deploy/.env written before a role or key existed has no value for it. Append a generated
+# one for each password or auth key the example lists and the file does not name at all; an
+# empty value is left alone, since that is a choice the first start refuses anyway. A key
+# already there is never replaced. Appending keeps the mode.
 add_missing_passwords() {
   local line key value added=""
   if [ ! -f "$env_file" ] || [ ! -r "$deploy/.env.example" ]; then return; fi
   while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD)=$ ]]; then
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|$KEY_NAMES)=$ ]]; then
       key="${BASH_REMATCH[1]}"
       if grep -q "^$key=" "$env_file"; then continue; fi
-      value="$(random_secret)"
-      if [ "${#value}" -ne 48 ]; then
+      if ! value="$(generated_value "$key")"; then
         say <<<"selfhost: could not generate a random value for $key; deploy/.env was not changed."
         exit 1
       fi

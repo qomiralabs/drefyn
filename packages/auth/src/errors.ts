@@ -34,7 +34,8 @@ export type AuthErrorCode =
   | 'AUTH_PASSWORDS_DISABLED'
   | 'AUTH_BOT_CHECK_REQUIRED'
   | 'AUTH_ORIGIN_REFUSED'
-  | 'AUTH_STEP_UP_IDENTITY_MISMATCH';
+  | 'AUTH_STEP_UP_IDENTITY_MISMATCH'
+  | 'AUTH_CLI_LINK_INVALID';
 
 // Fixed text per code. Callers pass untrusted values and secrets around this class, so
 // nothing they hand in ever becomes part of a message.
@@ -72,6 +73,7 @@ const MESSAGES: Readonly<Record<AuthErrorCode, string>> = {
   AUTH_BOT_CHECK_REQUIRED: 'a bot check is required',
   AUTH_ORIGIN_REFUSED: 'request origin refused',
   AUTH_STEP_UP_IDENTITY_MISMATCH: 'step up identity does not belong to this user',
+  AUTH_CLI_LINK_INVALID: 'sign in link is not valid',
 };
 
 export interface AuthErrorDetail {

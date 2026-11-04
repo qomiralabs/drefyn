@@ -230,3 +230,16 @@ export function parseVerifyFragment(value: unknown): VerifyFragment | null {
   if (challengeId === null || code === null) return null;
   return { challengeId, code };
 }
+
+const CLI_LINK_PREFIX = 'drf_cl_';
+
+// The secret of a link drefyn auth link prints. The prefix lets the gitleaks rule match a
+// pasted link exactly.
+export function formatCliLinkToken(secret: Uint8Array): string {
+  return `${CLI_LINK_PREFIX}${encodeSecret(secret)}`;
+}
+
+export function parseCliLinkToken(value: unknown): Buffer | null {
+  if (typeof value !== 'string' || !value.startsWith(CLI_LINK_PREFIX)) return null;
+  return decodeSecret(value.slice(CLI_LINK_PREFIX.length));
+}

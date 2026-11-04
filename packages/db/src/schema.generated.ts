@@ -56,6 +56,16 @@ export interface AuthRateLimitsTable {
   count: number;
 }
 
+// app.cli_sign_in_links
+export interface CliSignInLinksTable {
+  id: Generated<string>;
+  user_id: string;
+  secret_hash: Buffer;
+  expires_at: Date;
+  consumed_at: Date | null;
+  created_at: Generated<Date>;
+}
+
 // app.email_challenges
 export interface EmailChallengesTable {
   id: Generated<string>;
@@ -221,6 +231,7 @@ export interface Schema {
   api_key_projects: ApiKeyProjectsTable;
   api_keys: ApiKeysTable;
   auth_rate_limits: AuthRateLimitsTable;
+  cli_sign_in_links: CliSignInLinksTable;
   email_challenges: EmailChallengesTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;

@@ -4,14 +4,32 @@ Identity, sessions, API keys, organizations and seats for Docs, Studio and Statu
 holds config parsing, key derivation, credential formats, input validators, the built in
 password rules, log redaction, the permission model, the rate limiters, database sessions
 with step up, organizations, and invitations with seats. Only the limiters, the session files,
-organizations and invitations reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
+organizations, invitations, CLI links, operator revoke and the command reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
 system.
 
 ## Entry points
 
 - `@drefyn/auth`: server only. Uses `node:crypto`.
 - `@drefyn/auth/command`: `runAuthCommand` and `AUTH_COMMAND_USAGE`, the `drefyn auth`
-  commands that `@drefyn/cli` dispatches to. Exit codes: 0 done, 2 bad input, 5 file system.
+  commands that `@drefyn/cli` dispatches to: `password-list build`, `link` and
+  `revoke-sessions`. Exit codes: 0 done, 2 bad input, 3 config, 4 database or role missing,
+  5 file system. `link` and `revoke-sessions` read the dashboard's own settings, open both
+  pools, and never send mail.
+
+## CLI links and operator revoke
+
+- `createCliLinks(config, deps)`: `issue({ email, organizationName? })` makes the person if
+  the sign up mode allows it, makes the organization through `createOrganizationFor` when a
+  name is given, deletes the person's unused links and stores the SHA-256 of a fresh 32 byte
+  secret for 15 minutes of database time. It returns
+  `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_<52 base32 characters>`. `redeem(browser, token)`
+  counts `cli_link_verify` on the client address first, parses strictly, then consumes the
+  row in one update keyed by the hash and starts a `cli_link` session. Every refusal is
+  `AUTH_CLI_LINK_INVALID`. It takes no mailer.
+- `createOperatorSessions(deps)`: `revokeForEmail` and `revokeAll` end sessions and forget
+  devices under each person's own user context; the auth role only finds the people.
+- `createOrganizations(...).createOrganizationFor(userId, { name, slug })` is
+  `createOrganization` for a person with no session yet: the same rules, limit and inserts.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).

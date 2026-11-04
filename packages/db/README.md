@@ -127,11 +127,12 @@ project. It must be added to the published allow list in `src/allow-lists.ts`.
 ### Identity and limiter tables
 
 `users`, `identities`, `sessions`, `password_credentials`, `email_challenges`, `oauth_states`,
-`auth_rate_limits` and `api_key_failures` carry no `organization_id`: a person exists before
+`cli_sign_in_links`, `auth_rate_limits` and `api_key_failures` carry no `organization_id`: a person exists before
 and across organizations. Each is on the global table list with a reason. `drefyn_auth`
-reaches the six sign in tables and never `sessions` or `api_key_failures`; `drefyn_app` reaches
+reaches the sign in tables on its allow list and never `sessions` or `api_key_failures`; `drefyn_app` reaches
 the person's own `users`, `identities`, `sessions` and `password_credentials` rows under
-`withUser`, holds nothing on `email_challenges`, `oauth_states` and `auth_rate_limits`, and
+`withUser`, holds nothing on `email_challenges`, `oauth_states`, `cli_sign_in_links` and
+`auth_rate_limits`, and
 writes `api_key_failures` only through `withApiKeyLimiter`.
 
 On `users` and `password_credentials` every select, insert and update is per column. The
@@ -155,8 +156,8 @@ sends `select *`, which the per column grants refuse for every role.
 
 `deleteExpired(tx, rules, { batchSize })` deletes rows a fixed time after a timestamp column,
 by database time, at most `batchSize` (5000) per rule, and returns counts by table.
-`AUTH_EXPIRY_RULES` clears ended limiter windows and challenges and OAuth states 24 hours after
-expiry; `API_KEY_EXPIRY_RULES` clears ended API key windows. `createExpiryCleanup({ rules,
+`AUTH_EXPIRY_RULES` clears ended limiter windows, and challenges, OAuth states and CLI sign in
+links 24 hours after expiry; `API_KEY_EXPIRY_RULES` clears ended API key windows. `createExpiryCleanup({ rules,
 transact, onDeleted, logger })` runs them at most once a minute per process, never twice at
 once, reports every count, and never rejects: a failure logs `db_expiry_cleanup_failed` with
 the table names and the DbError code only. A later table registers its own rule beside these.
@@ -200,7 +201,7 @@ level `SELECT` or `UPDATE` and any column grant off the column grant list, so a 
 closed until someone grants it. Insert is per column there too, so no insert can set a column
 such as `email_verified_at` that the role was not given. It refuses any grant to `drefyn_app`,
 even one column, on the auth only tables (`email_challenges`, `oauth_states`,
-`auth_rate_limits`), and checks each column grant entry names `SELECT`, `INSERT` or `UPDATE`,
+`cli_sign_in_links`, `auth_rate_limits`), and checks each column grant entry names `SELECT`, `INSERT` or `UPDATE`,
 `drefyn_app` or `drefyn_auth`, and a table on the column grant list.
 
 `check:sources` fails on migration DDL aimed at an extension or schema `extensions`, and on a

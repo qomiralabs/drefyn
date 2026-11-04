@@ -41,7 +41,10 @@ async function seedRows(): Promise<void> {
        ('01a14984-4476-77ce-9335-12800000ec01', 'ec@example.com', 'ec@example.com', now());
      insert into app.known_devices (user_id, device_hash, user_agent_family, last_seen_at) values
        ('01a14984-4476-77ce-9335-12800000ec01', decode(repeat('09', 32), 'hex'), 'Other', now() - interval '401 days'),
-       ('01a14984-4476-77ce-9335-12800000ec01', decode(repeat('0a', 32), 'hex'), 'Other', now() - interval '399 days');`,
+       ('01a14984-4476-77ce-9335-12800000ec01', decode(repeat('0a', 32), 'hex'), 'Other', now() - interval '399 days');
+     insert into app.cli_sign_in_links (user_id, secret_hash, expires_at) values
+       ('01a14984-4476-77ce-9335-12800000ec01', decode(repeat('0b', 32), 'hex'), now() - interval '25 hours'),
+       ('01a14984-4476-77ce-9335-12800000ec01', decode(repeat('0c', 32), 'hex'), now() - interval '23 hours');`,
     db.name,
   );
 }
@@ -52,7 +55,8 @@ async function remaining(): Promise<string> {
       `select (select string_agg(encode(key_hmac, 'hex'), ',') from app.auth_rate_limits) || '|' ||
               (select string_agg(encode(key_hmac, 'hex'), ',') from app.api_key_failures) || '|' ||
               (select string_agg(email_normalized, ',') from app.email_challenges) || '|' ||
-              (select string_agg(encode(state_hash, 'hex'), ',') from app.oauth_states);`,
+              (select string_agg(encode(state_hash, 'hex'), ',') from app.oauth_states) || '|' ||
+              (select string_agg(encode(secret_hash, 'hex'), ',') from app.cli_sign_in_links);`,
       db.name,
     )
   ).trim();
@@ -73,6 +77,7 @@ describeWithStack('expiry cleanup', () => {
       auth_rate_limits: 1,
       email_challenges: 1,
       oauth_states: 1,
+      cli_sign_in_links: 1,
       known_devices: 1,
     });
     expect(
@@ -82,13 +87,16 @@ describeWithStack('expiry cleanup', () => {
     ).toBe('0a'.repeat(32));
     expect(apiCounts).toEqual({ api_key_failures: 1 });
     expect(await remaining()).toBe(
-      ['02'.repeat(32), '04'.repeat(32), 'new@example.com', '08'.repeat(32)].join('|'),
+      ['02'.repeat(32), '04'.repeat(32), 'new@example.com', '08'.repeat(32), '0c'.repeat(32)].join(
+        '|',
+      ),
     );
     const again = await withAuth(auth, (tx) => deleteExpired(tx, AUTH_EXPIRY_RULES));
     expect(again).toEqual({
       auth_rate_limits: 0,
       email_challenges: 0,
       oauth_states: 0,
+      cli_sign_in_links: 0,
       known_devices: 0,
     });
   });
@@ -134,12 +142,14 @@ describeWithStack('expiry cleanup', () => {
       auth_rate_limits: 0,
       email_challenges: 0,
       oauth_states: 0,
+      cli_sign_in_links: 0,
       known_devices: 0,
     });
     expect(counted).toEqual([
       ['auth_rate_limits', 0],
       ['email_challenges', 0],
       ['oauth_states', 0],
+      ['cli_sign_in_links', 0],
       ['known_devices', 0],
     ]);
     expect(await cleanup.maybeRun()).toBeNull();
