@@ -24,8 +24,10 @@
     "seed:e2e": "node e2e/seed.ts"
   },
   "dependencies": {
+    "@drefyn/address": "workspace:*",
     "@drefyn/auth": "workspace:*",
     "@drefyn/db": "workspace:*",
+    "@drefyn/email": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
