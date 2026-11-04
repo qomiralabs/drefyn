@@ -2,12 +2,16 @@ import { ButtonLink, IconAlert, IconClock, Mark } from '@drefyn/ui/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Answer, Eyebrow, Head } from '../views/calm.tsx';
+import lockupInk from './marks/drefyn-lockup-ink.svg';
+import lockupPaper from './marks/drefyn-lockup-paper.svg';
 import githubBlack from './marks/github-black.svg';
 import githubWhite from './marks/github-white.svg';
 import googleDark from './marks/google-dark.svg';
 import googleLight from './marks/google-light.svg';
 import { PROVIDER_NAMES, type FormNotice, type Provider } from './outcomes.ts';
 import './auth.css';
+
+const pathOf = (image: unknown): string => (image as { src: string }).src;
 
 export { Answer, Head };
 
@@ -28,8 +32,14 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
           Skip to content
         </a>
         <Link className="auth-lockup" href="/sign-in" aria-label="Drefyn, sign in">
-          <Mark size="lg" />
-          <span aria-hidden="true">Drefyn</span>
+          <img className="auth-only-light" src={pathOf(lockupInk)} alt="" width="109" height="32" />
+          <img
+            className="auth-only-dark"
+            src={pathOf(lockupPaper)}
+            alt=""
+            width="109"
+            height="32"
+          />
         </Link>
       </header>
       <main
@@ -57,9 +67,7 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
             <p className="auth-brand-support">Open source, on one account and one plan.</p>
           </div>
         </div>
-      ) : (
-        <div className="auth-crop" aria-hidden="true" />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -67,8 +75,6 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
 // An unmodified official file each time. Google's holds a whole button, so the view fragment
 // shows its G and leaves the file as Google ships it.
 const G_VIEW = '#svgView(viewBox(10,10,20,20))';
-
-const pathOf = (image: unknown): string => (image as { src: string }).src;
 
 function ProviderMark({ provider }: { provider: Provider }): ReactNode {
   const [light, dark] =

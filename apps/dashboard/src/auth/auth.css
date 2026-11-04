@@ -25,9 +25,7 @@
 .auth-lockup {
   display: inline-flex;
   align-items: center;
-  gap: var(--dr-space-8);
-  color: var(--dr-text-ink);
-  font: var(--dr-type-title);
+  height: var(--dr-space-32);
 }
 .auth-main {
   display: grid;
@@ -432,28 +430,6 @@
     grid-area: main;
     align-content: center;
     padding-block: var(--dr-space-48) var(--dr-space-64);
-  }
-}
-
-/* A self hosted page keeps the quiet bracket crop in its empty margin, wide screens only. */
-.auth-crop {
-  display: none;
-}
-@media (width >= 64rem) {
-  .auth:not([data-hosted]) .auth-crop {
-    --height: min(
-      calc(100dvh - var(--dr-space-128) - var(--dr-space-64)),
-      calc(var(--dr-space-128) * 6)
-    );
-    display: block;
-    position: fixed;
-    top: var(--dr-space-96);
-    right: calc(var(--dr-space-128) * -1);
-    width: calc(var(--height) * 0.7);
-    height: var(--height);
-    border: solid var(--dr-border-rule);
-    border-width: calc(var(--height) / 4) 0 calc(var(--height) / 4) calc(var(--height) / 4);
-    pointer-events: none;
   }
 }
 

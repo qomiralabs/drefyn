@@ -34,9 +34,11 @@ Tarball integrity as the registry publishes it, to check a download before unpac
 
 ## Icons
 
-| File                              | Source                                                                                  | Licence                  |
-| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------ |
-| `apps/dashboard/src/app/icon.svg` | Our own drawing of the Drefyn mark on its 100 unit grid, ink in light and paper in dark | Apache-2.0 with the repo |
+| File                                                    | Source                                                                                   | Licence                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------ |
+| `apps/dashboard/src/app/icon.svg`                       | Our own drawing of the Drefyn mark on its 100 unit grid, ink in light and paper in dark  | Apache-2.0 with the repo |
+| `apps/dashboard/src/auth/marks/drefyn-lockup-ink.svg`   | Our own horizontal lockup from the brand guide, with its embedded metadata block removed | Apache-2.0 with the repo |
+| `apps/dashboard/src/auth/marks/drefyn-lockup-paper.svg` | The same lockup for dark grounds                                                         | Apache-2.0 with the repo |
 
 ## Provider marks and the Google button font
 
