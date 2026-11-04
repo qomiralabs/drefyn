@@ -28,7 +28,7 @@ system.
   `AUTH_CLI_LINK_INVALID`. It takes no mailer.
 - `createOperatorSessions(deps)`: `revokeForEmail` and `revokeAll` end sessions and forget
   devices under each person's own user context; the auth role only finds the people.
-- `createOrganizations(...).createOrganizationFor(userId, { name, slug })` is
+- `createOrganizations(...).createOrganizationFor(userId, { name })` is
   `createOrganization` for a person with no session yet: the same rules, limit and inserts.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
@@ -527,12 +527,15 @@ const orgs = createOrganizations(config, { db, authDb, logger, initialTier: 'sel
 - A plain insert can only make the first owner, in the transaction that made the
   organization. Any other member needs a live invitation of the same organization and role,
   named by `memberships.invitation_id`, which the database checks.
-- `createOrganization(session, { name, slug })` checks the name and slug, counts `org_create`
-  (3 a day per person), then writes the organization, its slug and the owner membership in
-  one organization transaction. `AUTH_INPUT_INVALID` for a name with `://`, `www.` or a
-  domain like string (checked after NFKC, which is also the stored form), `AUTH_SLUG_INVALID`
-  outside `^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$` or on `RESERVED_SLUGS`,
-  `AUTH_SLUG_TAKEN` when another organization holds it, `AUTH_RATE_LIMITED` past the cap.
+- `createOrganization(session, { name })` checks the name, counts `org_create` (3 a day per
+  person), then writes the organization, its slug and the owner membership in one
+  organization transaction. It answers `{ access, slug }`. The slug comes from the name:
+  `Acme Inc` gives `acme-inc`. A name whose slug is on `RESERVED_SLUGS` or is empty, and any
+  retry after another organization took the slug, gets four random characters on the end
+  (`acme-inc-k7mq`, or `org-k7mq` for a name with no Latin letters). Callers cannot choose a
+  slug and no answer says one was taken. After five tries it fails as `AUTH_UNAVAILABLE`.
+  `AUTH_INPUT_INVALID` for a name with `://`, `www.` or a domain like string (checked after
+  NFKC, which is also the stored form), `AUTH_RATE_LIMITED` past the cap.
   Logs carry public ids only (`auth.organization_created` at info, when the logger has it).
 - `listMyOrganizations(session)` reads under the person's own context: only organizations
   they belong to, with slug, role, tier and read only state.

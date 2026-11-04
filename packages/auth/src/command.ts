@@ -128,8 +128,6 @@ const INPUT_FLAG: Partial<Record<string, string>> = {
   AUTH_INPUT_INVALID: '--email',
   AUTH_NOT_FOUND: '--email',
   AUTH_SIGNUP_CLOSED: '--email',
-  AUTH_SLUG_INVALID: '--create-organization',
-  AUTH_SLUG_TAKEN: '--create-organization',
 };
 
 const BAD_INPUT: ReadonlySet<string> = new Set(Object.keys(INPUT_FLAG));

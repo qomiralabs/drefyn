@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Result } from '@drefyn/address';
 import {
   newId,
@@ -14,7 +16,12 @@ import { sql, type Transaction } from 'kysely';
 import { grantAccess, storedRole, storedTier, type AccessContext } from './access.ts';
 import type { AuthConfig } from './config.ts';
 import { AuthError } from './errors.ts';
-import { parseOrganizationName, parseSlug } from './organization-rules.ts';
+import {
+  SLUG_SUFFIX_ALPHABET,
+  SLUG_SUFFIX_LENGTH,
+  parseOrganizationName,
+  slugCandidate,
+} from './organization-rules.ts';
 import type { OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
@@ -66,24 +73,42 @@ export interface OrganizationsDeps {
   readonly limiter?: RateLimiter;
   readonly store?: OrganizationStore;
   readonly newOrganizationId?: () => OrganizationId;
+  readonly newSlugSuffix?: () => string;
+}
+
+export interface CreatedOrganization {
+  readonly access: AccessContext;
+  // The server's choice, and the only place a caller learns it.
+  readonly slug: string;
 }
 
 export interface Organizations {
   createOrganization(
     s: SessionInfo,
-    input: { readonly name: string; readonly slug: string },
-  ): Promise<Result<AccessContext, AuthError>>;
+    input: { readonly name: string },
+  ): Promise<Result<CreatedOrganization, AuthError>>;
   listMyOrganizations(s: SessionInfo): Promise<readonly OrganizationSummary[]>;
   // For the operator command, which has a person but no session yet. The same rules, limit
   // and insert path as createOrganization.
   createOrganizationFor(
     userId: UserId,
-    input: { readonly name: string; readonly slug: string },
+    input: { readonly name: string },
   ): Promise<Result<{ readonly organizationId: OrganizationId; readonly slug: string }, AuthError>>;
 }
 
 class SlugTaken extends Error {}
 const TAKEN = new SlugTaken('slug taken');
+
+// With about 530,000 suffixes, five misses means something is wrong, not that a name is
+// popular. Each retry rolls back first, so nothing is left to double up.
+const SLUG_TRIES = 5;
+const RETRY_WAIT_MS = 20;
+
+function randomSlugSuffix(): string {
+  return Array.from({ length: SLUG_SUFFIX_LENGTH }, () =>
+    SLUG_SUFFIX_ALPHABET.charAt(randomInt(SLUG_SUFFIX_ALPHABET.length)),
+  ).join('');
+}
 
 export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps): Organizations {
   if (!INITIAL_TIERS.has(deps.initialTier)) {
@@ -105,6 +130,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
       logger: deps.logger,
     });
   const nextId = deps.newOrganizationId ?? (() => newId('org'));
+  const nextSuffix = deps.newSlugSuffix ?? randomSlugSuffix;
 
   // The one way an organization is made. Its first owner is the acting user, so the
   // database's insert rules see the same person in every write.
@@ -114,8 +140,6 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
   ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
     const name = parseOrganizationName((input as { name?: unknown } | undefined)?.name);
     if (!name.ok) return name;
-    const slug = parseSlug((input as { slug?: unknown } | undefined)?.slug);
-    if (!slug.ok) return slug;
     // Counted before the work and in its own transaction, so a refused or failed attempt
     // still counts and parallel attempts cannot all pass.
     try {
@@ -125,9 +149,8 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
     }
     const organizationId = nextId();
     const ids = { organizationId: ['org', organizationId], userId: ['usr', userId] } as const;
-    let membershipId: string;
-    try {
-      membershipId = await store.organizationAs(organizationId, userId, async (tx) => {
+    const writeWith = (slug: string) =>
+      store.organizationAs(organizationId, userId, async (tx) => {
         await tx
           .insertInto('organizations')
           .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
@@ -136,7 +159,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
         // organization back with it.
         const held = await tx
           .insertInto('organization_slugs')
-          .values({ slug: slug.value, organization_id: organizationId })
+          .values({ slug, organization_id: organizationId })
           .onConflict((oc) => oc.column('slug').doNothing())
           .returning('slug')
           .executeTakeFirst();
@@ -148,25 +171,36 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
           .executeTakeFirstOrThrow();
         return member.id;
       });
+    try {
+      for (let attempt = 0; attempt < SLUG_TRIES; attempt += 1) {
+        if (attempt > 0) await sleep(randomInt(RETRY_WAIT_MS * 2 ** attempt));
+        const slug = slugCandidate(name.value, nextSuffix(), attempt);
+        try {
+          const membershipId = await writeWith(slug);
+          quietInfo(
+            deps.logger,
+            'auth.organization_created',
+            idFields({ ...ids, membershipId: ['mem', membershipId] }),
+          );
+          return ok({ organizationId, slug });
+        } catch (error) {
+          if (error !== TAKEN) throw error;
+        }
+      }
+      throw TAKEN;
     } catch (error) {
-      if (error === TAKEN) return fail(new AuthError('AUTH_SLUG_TAKEN'));
       quietWarn(deps.logger, 'auth.organization_create_failed', idFields(ids));
       return fail(error);
     }
-    quietInfo(
-      deps.logger,
-      'auth.organization_created',
-      idFields({ ...ids, membershipId: ['mem', membershipId] }),
-    );
-    return ok({ organizationId, slug: slug.value });
   }
 
   return Object.freeze({
     async createOrganization(s, input) {
       const made = await insert(s.userId, input);
       if (!made.ok) return made;
-      return ok(
-        grantAccess({
+      return ok({
+        slug: made.value.slug,
+        access: grantAccess({
           organizationId: made.value.organizationId,
           userId: s.userId,
           sessionId: s.sessionId,
@@ -175,7 +209,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
           tier: initialTier,
           authenticatedAt: s.authenticatedAt,
         }),
-      );
+      });
     },
 
     createOrganizationFor: insert,

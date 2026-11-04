@@ -75,22 +75,16 @@ export const makeOrganization = signedInAction(
   async ({ session }, _state: unknown, form: FormData): Promise<OrganizationState> => {
     if (!mayCreateOrganization(authConfig().signUp)) return { closed: true };
     const name = text(form, 'name');
-    const slug = text(form, 'slug');
     const auth = await dashboardAuth();
-    const made = await auth.organizations.createOrganization(session, { name, slug });
-    if (made.ok) redirect(`/${slug}`);
-    const typed = { name, slug };
+    const made = await auth.organizations.createOrganization(session, { name });
+    if (made.ok) redirect(`/${made.value.slug}`);
     switch (made.error.code) {
-      case 'AUTH_SLUG_TAKEN':
-        return { ...typed, problem: 'taken' };
-      case 'AUTH_SLUG_INVALID':
-        return { ...typed, problem: 'address' };
       case 'AUTH_INPUT_INVALID':
-        return { ...typed, problem: 'name' };
+        return { name, problem: 'name' };
       case 'AUTH_RATE_LIMITED':
-        return { ...typed, limited: true };
+        return { name, limited: true };
       default:
-        return { ...typed, notice: notSaved('auth.organization_create_failed') };
+        return { name, notice: notSaved('auth.organization_create_failed') };
     }
   },
 );

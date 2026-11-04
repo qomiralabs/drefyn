@@ -9,11 +9,7 @@ import type { AuthConfig } from './config.ts';
 import type { BrowserContext } from './cookies.ts';
 import { AuthError } from './errors.ts';
 import { sha256 } from './keys.ts';
-import {
-  parseOrganizationName,
-  parseSlug,
-  slugFromOrganizationName,
-} from './organization-rules.ts';
+import { parseOrganizationName } from './organization-rules.ts';
 import { createOrganizations, type InitialTier, type Organizations } from './organizations.ts';
 import {
   createRateLimiter,
@@ -59,7 +55,7 @@ export interface CliLinkInput {
 
 export interface CheckedCliLinkInput {
   readonly address: string;
-  readonly organization: { readonly name: string; readonly slug: string } | null;
+  readonly organization: { readonly name: string } | null;
 }
 
 export interface IssuedCliLink {
@@ -81,9 +77,7 @@ export function checkCliLinkInput(input: CliLinkInput): Result<CheckedCliLinkInp
   if (input.organizationName === undefined) return ok({ address, organization: null });
   const name = parseOrganizationName(input.organizationName);
   if (!name.ok) return name;
-  const slug = parseSlug(slugFromOrganizationName(name.value));
-  if (!slug.ok) return slug;
-  return ok({ address, organization: { name: name.value, slug: slug.value } });
+  return ok({ address, organization: { name: name.value } });
 }
 
 export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks {

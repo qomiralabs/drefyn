@@ -85,6 +85,7 @@ export {
 } from './scopes.ts';
 export {
   createOrganizations,
+  type CreatedOrganization,
   type InitialTier,
   type OrganizationStore,
   type OrganizationSummary,

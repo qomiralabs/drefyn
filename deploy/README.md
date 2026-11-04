@@ -235,8 +235,10 @@ minutes.". Open it in a browser to sign in. A second open fails, and printing a 
 link makes the older unused one worthless. It never sends mail and writes the link nowhere but
 your terminal; treat the scrollback like a password until you have used it. The person is made
 if the address is new, unless `DREFYN_AUTH_SIGNUP=closed`, which only lets existing people in.
-`--create-organization` makes an organization with that person as owner, and its URL name
-from the name: `Acme Docs` becomes `acme-docs`.
+`--create-organization` makes a new organization with that person as owner, and its URL name
+from the name: `Acme Docs` becomes `acme-docs`. Each run makes another one, so drop the flag
+when you only need a fresh link. A URL name already in use gets four random characters on the
+end, as does one the dashboard keeps for itself.
 
 To sign someone out everywhere, for example after a lost laptop:
 
