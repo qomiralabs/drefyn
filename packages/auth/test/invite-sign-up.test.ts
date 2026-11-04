@@ -72,7 +72,10 @@ function setup(respond: Responder = database(), cfg: AuthConfig = config) {
     authDb: {} as AuthDatabase,
     logger,
     limiter: noopLimiter(),
-    mailer: { sendInvitation: () => Promise.resolve() },
+    mailer: {
+      sendInvitation: () => Promise.resolve(),
+      sendSecurityNotice: () => Promise.resolve(),
+    },
     store: scripted.store,
   };
   return { invitations: createInvitations(cfg, deps), scripted, lines };

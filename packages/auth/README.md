@@ -544,7 +544,9 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 ```
 
 - `invite(access, { email, role, defaultProjectRole })` needs `org.manage_members` and
-  `canAssign(role)`, so an admin never invites an owner (`AUTH_FORBIDDEN`). It counts
+  `canAssign(role)`, so an admin never invites an owner (`AUTH_FORBIDDEN`). Inviting an owner
+  also needs a sign in within 15 minutes by database time (`AUTH_RECENT_AUTH_REQUIRED`, or
+  `AUTH_SESSION_INVALID`), checked before anything is written. It counts
   `invite_send` (organization), `invite_send_user` (inviter) and `invite_recipient` (address,
   across organizations) before the work, then in one organization transaction locks the
   organization row, rechecks the inviter's stored role, refuses an address that already
@@ -586,6 +588,11 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
+
+Accepting an owner invitation sends `owner_added` to every owner who was already there, after
+the commit, through `sendSecurityNotice`, so `mailer` needs that too. Each owner is tried on
+their own; a failed send is logged as `auth.member_notice_failed` and never undoes the
+acceptance.
 
 ## Roles and removal
 

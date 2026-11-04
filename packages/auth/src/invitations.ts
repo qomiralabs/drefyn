@@ -3,6 +3,7 @@ import type { Result } from '@drefyn/address';
 import {
   newId,
   withOrganization,
+  withUser,
   type AuthDatabase,
   type Database,
   type OrganizationSchema,
@@ -14,6 +15,7 @@ import { grantAccess, storedRole, storedTier, type AccessContext } from './acces
 import { normalizeAddress } from './address.ts';
 import type { AuthConfig } from './config.ts';
 import { INVITE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
+import type { AuthNoticeMailer } from './email-change.ts';
 import type { PendingInvitations } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import {
@@ -23,6 +25,7 @@ import {
   parseBlockToken,
 } from './invitation-links.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
+import { memberName, noticeEach } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
 import { parseOrganizationName } from './organization-rules.ts';
 import { ORG_ROLES, canAssign, permissionsFor, type OrgRole } from './permissions.ts';
@@ -36,6 +39,7 @@ import {
   unavailable,
   type SessionInfo,
 } from './session-support.ts';
+import { checkRecentAuth } from './step-up.ts';
 import {
   SECRET_BYTES,
   formatInvitationToken,
@@ -121,9 +125,9 @@ export interface InvitationsDeps {
   readonly db: Database;
   readonly authDb: AuthDatabase;
   readonly logger: AuthLogger;
-  readonly mailer: AuthInvitationMailer;
+  readonly mailer: AuthInvitationMailer & AuthNoticeMailer;
   readonly limiter?: RateLimiter;
-  readonly store?: Pick<OrganizationStore, 'organization' | 'organizationAs'>;
+  readonly store?: OrganizationStore;
   readonly random?: (bytes: number) => Uint8Array;
   readonly now?: () => Date;
 }
@@ -216,8 +220,27 @@ async function countUsed(
   return { used: row.used, tier: row.plan_tier };
 }
 
+// Read inside the transaction that made the owner, so the row is there to name them, and the
+// notice goes only to the owners who were there before.
+async function ownersBeside(tx: Transaction<OrganizationSchema>, newOwner: UserId) {
+  const rows = await tx
+    .selectFrom('memberships as m')
+    .innerJoin('users as u', 'u.id', 'm.user_id')
+    .select(['u.id', 'u.email', 'u.display_name', sql<Date>`now()`.as('at')])
+    .where('m.role', '=', 'owner')
+    .execute();
+  const self = rows.find((r) => r.id === newOwner);
+  if (self === undefined) throw new Error('the new owner row is missing');
+  return {
+    name: memberName(self.display_name, self.email),
+    others: rows.filter((r) => r.id !== newOwner).map((r) => r.email),
+    at: self.at,
+  };
+}
+
 export function createInvitations(config: AuthConfig, deps: InvitationsDeps): Invitations {
-  const store = deps.store ?? {
+  const store: OrganizationStore = deps.store ?? {
+    user: (userId, work) => withUser(deps.db, { userId }, work),
     organization: <T>(
       organizationId: OrganizationId,
       work: (tx: Transaction<OrganizationSchema>) => Promise<T>,
@@ -284,6 +307,18 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
       const target = role as OrgRole;
       const defaultProjectRole = defaultRole as DefaultProjectRole | null;
       if (!canAssign(a.role, target)) return refuse('AUTH_FORBIDDEN', ids);
+      // An owner invitation is a way to add an owner, so it answers to the rule for role
+      // changes. First, because the limiter below writes.
+      if (target === 'owner') {
+        const recent = await checkRecentAuth(store, a);
+        if (!recent.ok) {
+          quietInfo(deps.logger, 'auth.invitation_refused', {
+            ...idFields(ids),
+            outcome: recent.error.code,
+          });
+          return recent;
+        }
+      }
       // Counted before the work and outside it, so refused and failed attempts count too.
       try {
         await limiter.reserve('invite_send', [a.organizationId]);
@@ -447,6 +482,7 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
         role: OrgRole;
         defaultProjectRole: unknown;
         tier: string;
+        newOwner: { readonly name: string; readonly others: string[]; readonly at: Date } | null;
       };
       try {
         accepted = await store.organizationAs(parsed.organizationId, s.userId, async (tx) => {
@@ -501,6 +537,7 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
             role: invitation.role,
             defaultProjectRole: invitation.defaultProjectRole,
             tier: org.plan_tier,
+            newOwner: invitation.role === 'owner' ? await ownersBeside(tx, s.userId) : null,
           };
         });
       } catch (error) {
@@ -519,6 +556,27 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
         'auth.invitation_accepted',
         idFields({ ...ids, membershipId: ['mem', accepted.membershipId] }),
       );
+      if (accepted.newOwner !== null) {
+        const { name, others, at } = accepted.newOwner;
+        await noticeEach(
+          deps.mailer,
+          others,
+          {
+            kind: 'owner_added',
+            organizationId: parsed.organizationId,
+            membershipId: idOf('mem', accepted.membershipId),
+            memberName: name,
+            at,
+          },
+          () => {
+            quietWarn(
+              deps.logger,
+              'auth.member_notice_failed',
+              idFields({ ...ids, membershipId: ['mem', accepted.membershipId] }),
+            );
+          },
+        );
+      }
       return ok({
         access: grantAccess({
           organizationId: parsed.organizationId,
