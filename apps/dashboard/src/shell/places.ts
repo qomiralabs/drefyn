@@ -1,4 +1,4 @@
-import { defineCommands, type Command } from './commands.ts';
+import { allowed, defineCommands, type Command } from './commands.ts';
 
 // Places the shell knows without asking a server, so they work even when search is down.
 export function places(org: string): readonly Command[] {
@@ -94,4 +94,10 @@ export function places(org: string): readonly Command[] {
       permission: 'org.read',
     },
   ]);
+}
+
+// What the bar offers this person. It only hides: the server refuses the rest on its own.
+export function visiblePlaces(org: string, permissions: readonly string[]): readonly Command[] {
+  const held = new Set(permissions);
+  return allowed(places(org), (permission) => held.has(permission));
 }

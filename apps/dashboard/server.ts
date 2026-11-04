@@ -5,10 +5,14 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import next from 'next';
 import { logInfo } from './src/server/log.ts';
+import { markClientIpWrapper } from './src/server/wrapper-marker.ts';
 import { createWrapper, startWrapper } from './src/server/wrapper.ts';
 
 // Refuses to start on bad wrapper settings, before Next loads anything.
 const config = startWrapper(process.env);
+// Before Next loads, so its start check and every action reader see that this process
+// owns the only listening socket and every request crossed the wrapper.
+markClientIpWrapper();
 
 const rawPort = process.env['PORT'] ?? '3000';
 if (!/^[0-9]{1,5}$/.test(rawPort) || Number(rawPort) > 65_535) {

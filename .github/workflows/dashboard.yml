@@ -18,19 +18,17 @@ env:
   TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
-  # Every job runs inside the pinned Playwright image, the one the screenshot baselines were
-  # made in, so browsers, fonts and system libraries match and nothing is downloaded at test
-  # time. The app is built in the job and served with next start, once with the release
-  # flag on and once off, by the Playwright config.
+  # The stack runs on the runner, on the same bootstrap as e2e (database) and operators, and
+  # the seed makes real people and sessions on it. Playwright alone runs in the pinned image
+  # the screenshot baselines were made in, so browsers, fonts and system libraries match. The
+  # Playwright config serves the build through server.ts, once with the release flag on and
+  # once off.
   e2e:
     name: dashboard ${{ matrix.project }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
-      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -48,7 +46,10 @@ jobs:
             visual-3,
           ]
     env:
-      HOME: /root
+      # A project of its own per job and attempt, so nothing assumes the default name.
+      COMPOSE_PROJECT_NAME: drefyn-dash-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+      DREFYN_POSTGRES_PORT: '55432'
+      DREFYN_DATABASE_SSL: disable
       DREFYN_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,14 +61,30 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Start the compose stack
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 90
+        run: bash scripts/selfhost.sh up
       - run: pnpm --filter @drefyn/dashboard build
+      - name: Seed people and sessions
+        env:
+          DREFYN_E2E_SEED: real-stack-e2e
+        run: pnpm --filter @drefyn/dashboard seed:e2e
       # Three visual runs until zero tolerance screenshots have proven stable at scale; a
       # missing baseline fails, since the config never writes snapshots.
       - name: playwright ${{ matrix.project }}
-        working-directory: apps/dashboard
         env:
           PROJECT: ${{ matrix.project }}
-        run: pnpm exec playwright test --project="${PROJECT%-[0-9]}"
+        # Node comes from the runner, mounted read only; the host network reaches Postgres.
+        run: |
+          docker run --rm --ipc=host --network host \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
+            -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
+            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}"'
+      - name: Postgres log
+        if: failure()
+        run: docker compose -f deploy/compose.yaml logs postgres
       - name: upload the report
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,3 +1,4 @@
+import type { FetchBody } from 'openid-client';
 import type { OAuthProvider } from '../oauth-types.ts';
 import type { AuthLogger } from '../rate-limiter.ts';
 import { quietWarn } from '../session-support.ts';
@@ -47,7 +48,7 @@ export type OAuthTransport = (url: string, init: RequestInit) => Promise<Respons
 export interface OAuthRequest {
   readonly method?: string | undefined;
   readonly headers?: Record<string, string> | Headers | undefined;
-  readonly body?: RequestInit['body'] | undefined;
+  readonly body?: FetchBody;
   readonly signal?: AbortSignal | null | undefined;
   readonly redirect?: string | undefined;
 }
@@ -66,7 +67,10 @@ const TIMED_OUT = Symbol('timed out');
 
 // GitHub answers token errors with HTTP 200 and an error body. As a 400 the library
 // raises its documented ResponseBodyError, so one mapper handles every provider.
-export function normalizeGitHubTokenError(response: Response, body: Uint8Array): Response {
+export function normalizeGitHubTokenError(
+  response: Response,
+  body: Uint8Array<ArrayBuffer>,
+): Response {
   if (response.status !== 200) return response;
   let parsed: unknown;
   try {
@@ -102,7 +106,10 @@ export function createOAuthFetch(options: OAuthFetchOptions): OAuthFetch {
 
   // Reads at most maxBytes, racing every read against the deadline so a stalled body
   // cannot hold the request past it.
-  async function read(response: Response, deadline: Promise<never>): Promise<Uint8Array> {
+  async function read(
+    response: Response,
+    deadline: Promise<never>,
+  ): Promise<Uint8Array<ArrayBuffer>> {
     const declared = Number(response.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > maxBytes) {
       await response.body?.cancel().catch(() => undefined);
@@ -162,7 +169,9 @@ export function createOAuthFetch(options: OAuthFetchOptions): OAuthFetch {
       const request: RequestInit = { redirect: 'error', signal };
       if (init.method !== undefined) request.method = init.method;
       if (init.headers !== undefined) request.headers = init.headers;
-      if (init.body !== undefined) request.body = init.body;
+      // openid-client only ever sends strings and form parameters, never shared memory.
+      if (init.body !== undefined)
+        request.body = init.body as Exclude<RequestInit['body'], undefined>;
       const response = await Promise.race([send(target.href, request), deadline]);
       if ((response.status >= 300 && response.status < 400) || response.type === 'opaqueredirect') {
         await response.body?.cancel().catch(() => undefined);

@@ -1,3 +1,4 @@
+import type { Permission } from '@drefyn/auth/permissions';
 import type { SectionIcon } from './sections.ts';
 
 // The command registry: places and actions the command bar can reach, as data. Products add
@@ -19,7 +20,7 @@ export interface Command {
   // Where it goes. Every entry needs a target the keyboard can reach.
   readonly href: string;
   // The permission the person needs, checked before the entry is offered.
-  readonly permission: string;
+  readonly permission: Permission;
   readonly shortcut?: string;
   // Undoable work never asks for a typed confirmation: Undo is the safety net.
   readonly undoable?: boolean;
@@ -61,7 +62,7 @@ export function defineCommands(entries: readonly Command[]): readonly Command[] 
 // The entries a person may see: the ones whose permission they hold.
 export function allowed(
   entries: readonly Command[],
-  can: (permission: string) => boolean,
+  can: (permission: Permission) => boolean,
 ): readonly Command[] {
   return entries.filter((entry) => can(entry.permission));
 }

@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { MOBILE, openShell, ROUTES } from './fixtures.ts';
+import { test } from './test.ts';
 
 // Runs in the reduced-motion project: nothing travels and fades finish within 120 ms.
 test.use({ viewport: MOBILE });

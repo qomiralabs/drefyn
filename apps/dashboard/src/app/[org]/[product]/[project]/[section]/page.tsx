@@ -12,12 +12,12 @@ interface Params {
 
 async function load(params: Params['params']) {
   const { org, product, project, section } = await params;
-  await guardOrganization(org);
+  const { access } = await guardOrganization(org);
   const location = parseShellPath(`/${org}/${product}/${project}/${section}`);
   const found =
     location?.product === undefined || location.project === undefined
       ? undefined
-      : findProject(location.product, location.project);
+      : findProject(access, location.product, location.project);
   const entry =
     found === undefined || location?.section === undefined
       ? undefined
