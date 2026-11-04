@@ -31,7 +31,8 @@ async function createKey(page: Page, name: string, scope: string): Promise<strin
   await page.getByRole('button', { name: 'Create key' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create an API key' });
   await dialog.getByLabel('Name').fill(name);
-  await dialog.getByRole('checkbox', { name: scope }).click();
+  // The box is drawn over a hidden input, so the press goes where a person's would.
+  await dialog.getByText(scope, { exact: true }).click();
   await dialog.getByRole('button', { name: 'Create key' }).click();
   const shown = page.getByRole('dialog', { name: 'Copy your new key now' });
   const secret = (await shown.locator('[data-new-key]').textContent()) ?? '';
@@ -40,17 +41,31 @@ async function createKey(page: Page, name: string, scope: string): Promise<strin
   return secret;
 }
 
+async function signedIn(page: Page, address: string): Promise<void> {
+  await signInByCode(page, address);
+  await expect(page).not.toHaveURL(/\/sign-in/);
+}
+
 // A new person who owns a new organization, signed in by code, so their session is their own
 // to rotate and no other test leans on it.
-async function freshOwner(page: Page, password?: string): Promise<{ id: string; address: string }> {
+async function freshOwner(
+  page: Page,
+  password?: string,
+): Promise<{ id: string; address: string; slug: string }> {
   const address = uniqueAddress('settings');
   const id = await seedPerson(address, password);
-  await signInByCode(page, address);
+  await signedIn(page, address);
   await page.goto('/organizations/new');
-  await page.getByLabel('Name').fill(`Team ${id.slice(-6)}`);
+  const name = `Team ${id.slice(-6)}`;
+  const slug = `team-${id.slice(-6)}`;
+  // Typing before hydration is lost, and the address filling in proves it was not.
+  await expect(async () => {
+    await page.getByLabel('Name').fill(name);
+    await expect(page.getByLabel('Address')).toHaveValue(slug, { timeout: 500 });
+  }).toPass();
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('banner')).toBeVisible();
-  return { id, address };
+  await expect(page).toHaveURL(new RegExp(`/${slug}$`));
+  return { id, address, slug };
 }
 
 test('an API key is shown once, works over HTTP, and is gone on reload', async ({
@@ -193,26 +208,27 @@ test('a stale session is asked to confirm, by password, and the action then runs
   await context.close();
 });
 
-test('with no password the prompt mails a code', async ({ browser }) => {
+test('with no password the prompt mails a code, and creating the key then runs', async ({
+  browser,
+}) => {
   const context = await browser.newContext({ storageState: SIGNED_OUT });
   const page = await context.newPage();
-  const { id, address } = await freshOwner(page);
-  await page.goto('/account/sessions');
+  const { id, address, slug } = await freshOwner(page);
+  await page.goto(`/${slug}/settings/api-keys`);
   await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
   await makeStale(id);
-  const other = await browser.newContext({ storageState: SIGNED_OUT });
-  await signInByCode(await other.newPage(), address);
-  await page.reload();
   const seen = await countTo(address);
-  await page.getByRole('button', { name: 'Sign out everywhere else' }).click();
-  await page.getByRole('button', { name: 'Sign out 1 session' }).click();
+  await page.getByRole('button', { name: 'Create key' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create an API key' });
+  await dialog.getByLabel('Name').fill('after-step-up');
+  await dialog.getByText('Read pages', { exact: true }).click();
+  await dialog.getByRole('button', { name: 'Create key' }).click();
   const prompt = page.getByRole('dialog', { name: 'Confirm it is you' });
   const { code } = await nextMail(address, seen);
   await prompt.getByLabel(/Code sent to/).fill(code);
   await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
-  await expect(page.getByText('Signed out 1 other session.')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Copy your new key now' })).toBeVisible();
   await context.close();
-  await other.close();
 });
 
 test('sign out everywhere else takes effect on the next request elsewhere', async ({ browser }) => {
@@ -221,7 +237,7 @@ test('sign out everywhere else takes effect on the next request elsewhere', asyn
   const page = await here.newPage();
   const other = await elsewhere.newPage();
   const { address } = await freshOwner(page);
-  await signInByCode(other, address);
+  await signedIn(other, address);
   await other.goto('/account/sessions');
   await expect(other.locator('html')).toHaveAttribute('data-shell', 'ready');
   await page.goto('/account/sessions');
