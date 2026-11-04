@@ -45,5 +45,6 @@ export function serverEnv(origin: string): Record<string, string> {
     DREFYN_SMTP_TLS: 'none',
     DREFYN_SMTP_ALLOW_PLAINTEXT: 'true',
     DREFYN_HOSTED: 'true',
+    DREFYN_DASHBOARD_STATES: 'on',
   };
 }

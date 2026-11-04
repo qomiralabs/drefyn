@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { OrganizationRef, TenantRef, UserId, UserRef } from '@drefyn/tenancy';
 import {
   DefaultQueryExecutor,
@@ -27,6 +28,7 @@ import {
   AUTH_SETTINGS,
   AUTH_TIMEOUT_MAX_MS,
   READER_TIMEOUT_MAX_MS,
+  assertWritableSettings,
   organizationSettings,
   projectSettings,
   transactionTimeout,
@@ -508,6 +510,21 @@ async function runTransaction<DB, T>(
   }
 }
 
+// A reservation takes a connection of its own. Waiting for one while a limiter or sign in
+// transaction holds another deadlocks a small pool once a few do it at once, until the pool
+// wait runs out. The mark is a flag, not just presence, because fire and forget work keeps
+// this context after the transaction has given its connection back.
+const HOLDING_CONNECTION = new AsyncLocalStorage<{ held: boolean }>();
+
+async function holdingConnection<T>(run: () => Promise<T>): Promise<T> {
+  const mark = { held: true };
+  try {
+    return await HOLDING_CONNECTION.run(mark, run);
+  } finally {
+    mark.held = false;
+  }
+}
+
 function stateOf(kind: PoolKind, db: unknown, what: string): PoolState {
   const state = typeof db === 'object' && db !== null ? POOLS[kind].get(db) : undefined;
   if (state === undefined) {
@@ -613,7 +630,7 @@ export async function withAuth<T>(
     state.statementTimeoutMs,
     AUTH_TIMEOUT_MAX_MS,
   );
-  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'auth');
+  return holdingConnection(() => runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'auth'));
 }
 
 // Counting failed API key checks, before any key or organization is proved. Runs as
@@ -630,7 +647,9 @@ export async function withApiKeyLimiter<T>(
     state.statementTimeoutMs,
     APP_TIMEOUT_MAX_MS,
   );
-  return runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'api_key_limiter');
+  return holdingConnection(() =>
+    runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'api_key_limiter'),
+  );
 }
 
 // One statement and its commit in a single simple protocol message, so a row lock the
@@ -647,6 +666,13 @@ async function runAlone<R>(
   timeoutMs: number,
   statement: string,
 ): Promise<readonly R[]> {
+  if (HOLDING_CONNECTION.getStore()?.held === true) {
+    throw new DbError(
+      'DB_RESERVATION_NESTED',
+      'a reservation must run before withAuth or withApiKeyLimiter, not inside them',
+    );
+  }
+  assertWritableSettings(settings);
   let client: pg.PoolClient;
   try {
     client = await state.pool.connect();

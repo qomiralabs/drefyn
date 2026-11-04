@@ -437,13 +437,18 @@
 }
 @media (width >= 64rem) {
   .auth:not([data-hosted]) .auth-crop {
+    --height: min(
+      calc(100dvh - var(--dr-space-128) - var(--dr-space-64)),
+      calc(var(--dr-space-128) * 6)
+    );
     display: block;
     position: fixed;
     top: var(--dr-space-96);
     right: calc(var(--dr-space-128) * -1);
-    height: calc(100% - var(--dr-space-128) - var(--dr-space-64));
-    max-height: calc(var(--dr-space-128) * 6);
-    color: var(--dr-border-rule);
+    width: calc(var(--height) * 0.7);
+    height: var(--height);
+    border: solid var(--dr-border-rule);
+    border-width: calc(var(--height) / 4) 0 calc(var(--height) / 4) calc(var(--height) / 4);
     pointer-events: none;
   }
 }

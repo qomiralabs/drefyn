@@ -14,6 +14,7 @@ export const RESERVED_SLUGS: readonly string[] = [
   'bundle-baseline',
   'api',
   'auth',
+  'auth-states',
   'invite',
   'sign-in',
   'sign-out',

@@ -1,4 +1,4 @@
-import { isNormalizedEmailAddress } from '@drefyn/address';
+import { isLinkShaped, isNormalizedEmailAddress, isPlainAddress } from '@drefyn/address';
 import { z } from 'zod';
 import { invalidInput } from './errors.ts';
 import { CONTROL } from './headers.ts';
@@ -10,9 +10,10 @@ import {
   type Result,
 } from './types.ts';
 
-// Bidi marks, embeddings, overrides and isolates can make a name read as something
-// else in the rendered mail, which is all a phishing name needs.
-const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+// Bidi controls can make a name read as something else, and zero width characters can hide
+// inside one, which is all a phishing name needs. U+200D stays: it joins emoji and some
+// scripts.
+const HIDDEN = /(?!\u200d)\p{Cf}/u;
 const ELLIPSIS = '\u2026';
 const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
@@ -43,16 +44,27 @@ function cutAtWord(value: string, limit: number): string {
 
 // A long user agent or organization name is cut rather than refused, so it can never
 // block a security notice. Control characters are refused: nothing a person types
-// should hold one, and they are how text breaks out of a line.
-const name = (limit: number, cut: typeof cutName = cutName) =>
+// should hold one, and they are how text breaks out of a line. allowed sees the whole
+// value, so a cut cannot hide what it would have refused.
+const shown = (limit: number, allowed: (value: string) => boolean, cut: typeof cutName = cutName) =>
   z.string().transform((value, ctx) => {
     const trimmed = value.trim();
-    if (trimmed === '' || CONTROL.test(value) || BIDI.test(value)) {
+    if (trimmed === '' || CONTROL.test(value) || HIDDEN.test(value) || !allowed(value)) {
       ctx.addIssue({ code: 'custom', message: 'name' });
       return z.NEVER;
     }
     return cut(trimmed, limit);
   });
+
+// Mail clients link what reads as a URL, and this is the last check before our domain
+// sends it.
+const plainText = (value: string) => !isLinkShaped(value);
+const name = (limit: number, cut: typeof cutName = cutName) => shown(limit, plainText, cut);
+// A member with no usable display name is named by their address, and refusing it would
+// stop the notice that reveals a takeover.
+const person = shown(100, (value) => plainText(value) || isPlainAddress(value));
+// Holds an address on purpose.
+const account = shown(254, () => true);
 
 // A copy is checked and rendered, never the caller's object: rendering awaits, so the
 // caller could edit the original after the check, and a subclass could lie about its
@@ -73,7 +85,7 @@ const notice = z.discriminatedUnion('kind', [
     ...facts,
     kind: z.enum(['identity_linked', 'identity_unlinked']),
     provider,
-    account: name(254),
+    account,
   }),
   z.object({
     ...facts,
@@ -92,7 +104,7 @@ const notice = z.discriminatedUnion('kind', [
   }),
   z.object({
     ...facts,
-    kind: z.literal('api_key_created'),
+    kind: z.enum(['api_key_created', 'api_key_revoked']),
     organizationName: name(100),
     keyName: name(100),
     displaySuffix: z.string().regex(/^[0-9a-hjkmnp-tv-z]{4}$/),
@@ -101,13 +113,13 @@ const notice = z.discriminatedUnion('kind', [
     ...facts,
     kind: z.literal('owner_added'),
     organizationName: name(100),
-    ownerName: name(100),
+    ownerName: person,
   }),
   z.object({
     ...facts,
     kind: z.enum(['member_removed', 'member_keys_revoked']),
     organizationName: name(100),
-    memberName: name(100),
+    memberName: person,
     revokedKeys: z.number().int().min(0).max(1_000_000),
   }),
 ]);
@@ -120,7 +132,7 @@ const message = z.discriminatedUnion('template', [
       code: z.string().regex(/^[0-9]{8}$/),
       link: url,
       expiresInMinutes: z.number().int().min(1).max(1440),
-      linking: z.object({ provider, account: name(254) }).optional(),
+      linking: z.object({ provider, account }).optional(),
     })
     .superRefine((value, ctx) => {
       // The type rules this out; this catches callers that skip the type.

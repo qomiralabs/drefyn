@@ -78,8 +78,11 @@ const setRole = (client: pg.Client, member: string, role: string) =>
     role,
   ]);
 
-const remove = (client: pg.Client, member: string) =>
-  client.query('delete from app.memberships where id = $1', [member]);
+// Keys go first, as in removeMember: a live key refuses the delete.
+async function remove(client: pg.Client, member: string) {
+  await client.query('update app.api_keys set revoked_at = now() where created_by = $1', [member]);
+  return client.query('delete from app.memberships where id = $1', [member]);
+}
 
 const roleOf = async (client: pg.Client, member: string) =>
   (await client.query<{ role: string }>('select role from app.memberships where id = $1', [member]))
@@ -478,7 +481,10 @@ describeWithStack('role changes at the database', () => {
       // subqueries are not shown.
       return {
         removal: await explain(`delete from app.memberships where id = '${OWNER_2.member}'`),
-        keys: await explain(`delete from app.api_keys where created_by = '${ADMIN.member}'`),
+        keys: await explain(
+          `update app.api_keys set revoked_at = now()
+            where created_by = '${ADMIN.member}' and revoked_at is null`,
+        ),
         invitations: await explain(
           `delete from app.invitations where invited_by = '${ADMIN.member}'`,
         ),

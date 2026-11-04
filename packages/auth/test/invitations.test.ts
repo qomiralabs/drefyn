@@ -99,7 +99,7 @@ interface World {
   readonly blocked?: boolean;
   readonly used?: number;
   readonly displayName?: string | null;
-  readonly organizationName?: string;
+  readonly organizationName?: string | null;
   readonly invitation?: Record<string, unknown> | null;
   readonly inviterRole?: OrgRole | null;
   readonly memberInserted?: boolean;

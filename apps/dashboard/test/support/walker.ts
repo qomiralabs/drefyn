@@ -42,6 +42,7 @@ const OWN_MODULES: ReadonlySet<string> = new Set(['src/server/guard', 'src/serve
 const UNGUARDED: ReadonlySet<string> = new Set(['src/app/layout.tsx']);
 // Pages that hold no data. Each new one is a reviewed line here.
 const PUBLIC_PAGES: ReadonlySet<string> = new Set([
+  'src/app/auth-states/[screen]/[state]/page.tsx',
   'src/app/bundle-baseline/page.tsx',
   'src/app/invite/block/page.tsx',
   'src/app/invite/page.tsx',

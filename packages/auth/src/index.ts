@@ -56,6 +56,7 @@ export {
   type ApiKeysDeps,
   type CreateApiKeyInput,
   type CreatedApiKey,
+  type RevokedApiKey,
   type ProjectScope,
 } from './api-keys.ts';
 export {

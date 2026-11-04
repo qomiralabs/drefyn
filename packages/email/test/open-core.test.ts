@@ -212,6 +212,8 @@ describe('package entries', () => {
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
       './testing': './src/testing.ts',
+      // Config parsing alone, with no React or Nodemailer, for a bundled start check.
+      './config': './src/config.ts',
       './package.json': './package.json',
     });
   });
@@ -246,7 +248,7 @@ describe('package entries', () => {
       'password_reset',
       'email_change',
     ]);
-    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(12);
+    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(13);
     expect(main.SECURITY_NOTICE_KINDS).toContain('member_keys_revoked');
   });
 });

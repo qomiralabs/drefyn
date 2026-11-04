@@ -63,13 +63,15 @@ interface Refusal {
 }
 
 // The refusal when any window is past its limit, or null. The retry is the longest of the
-// windows that refused, since every one of them has to reopen.
+// windows that refused, since every one of them has to reopen. Throws for a limit with no
+// count: nothing is known about that window, and a limiter that cannot tell has to refuse.
 function refusal(counts: readonly WindowCount[], limits: readonly RateLimit[]): Refusal | null {
   let retry = 0;
   let first = false;
-  for (const window of counts) {
-    const limit = limits.find((l) => l.windowSeconds === window.windowSeconds);
-    if (limit !== undefined && window.count > limit.count) {
+  for (const limit of limits) {
+    const window = counts.find((c) => c.windowSeconds === limit.windowSeconds);
+    if (window === undefined) throw new AuthError('AUTH_UNAVAILABLE');
+    if (window.count > limit.count) {
       retry = Math.max(retry, window.retryAfterSeconds);
       first ||= window.count === limit.count + 1;
     }

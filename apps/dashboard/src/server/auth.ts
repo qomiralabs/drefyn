@@ -31,10 +31,10 @@ import {
   withOrganization,
   type Database,
 } from '@drefyn/db';
-import { createMailer, parseEmailConfig, type EmailDeps } from '@drefyn/email';
-import type { OrganizationId } from '@drefyn/tenancy';
+import { parseEmailConfig } from '@drefyn/email/config';
 import { signInMethods, type SignInMethods } from '../auth/outcomes.ts';
-import { createAuthMailer } from './auth-mail.ts';
+import { dashboardMail, noteEmailOff, type OrganizationName } from './auth-mailer.ts';
+import { mailDeliveryEnabled } from './gate.ts';
 import { logInfo, logWarn, type LogContext } from './log.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
@@ -93,26 +93,8 @@ export function sessionCookieName(): string {
   return authConfig().cookies.session;
 }
 
-// Mail logs carry fixed events and no addresses, so they share the dashboard log.
-const emailLogger: EmailDeps['logger'] = {
-  info: (event, fields) => {
-    logInfo(event, plainFields(fields ?? {}));
-  },
-  warn: (event, fields) => {
-    logWarn(event, plainFields(fields ?? {}));
-  },
-  error: (event, fields) => {
-    logWarn(event, plainFields(fields ?? {}));
-  },
-};
-const noMetrics: EmailDeps['metrics'] = {
-  counter: () => undefined,
-  histogram: () => undefined,
-  gauge: () => undefined,
-};
-
-function organizationNames(db: Database) {
-  return async (organizationId: OrganizationId): Promise<string> => {
+function organizationNames(db: Database): OrganizationName {
+  return async (organizationId) => {
     const row = await withOrganization(db, { organizationId }, (tx) =>
       tx
         .selectFrom('organizations')
@@ -128,14 +110,13 @@ async function compose(): Promise<DashboardAuth> {
   const parsed = authConfig();
   const db = await createDatabase(parseDatabaseConfig(process.env));
   const authDb = await createAuthDatabase(parseAuthDatabaseConfig(process.env));
-  const email = parseEmailConfig(process.env);
-  if (!email.ok) throw new Error(`${email.error.key} ${email.error.reason}`);
-  const transport = createMailer(email.value, {
+  const mail = await dashboardMail({
     linkOrigin: new URL(parsed.appOrigin),
-    logger: emailLogger,
-    metrics: noMetrics,
+    organizationName: organizationNames(db),
+    enabled: mailDeliveryEnabled,
   });
-  const mailer = createAuthMailer(transport, organizationNames(db));
+  noteEmailOff(mail, parsed.email);
+  const mailer = mail.auth;
   const limiter = createRateLimiter({
     db: authDb,
     keys: parsed.keys,
@@ -213,7 +194,7 @@ async function compose(): Promise<DashboardAuth> {
       readInvitationBlock: (token) => invitations.readInvitationBlock(token),
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
-    methods: signInMethods(parsed, transport.configured),
+    methods: signInMethods(parsed, mail.configured),
   };
 }
 

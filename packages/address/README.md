@@ -34,6 +34,17 @@ if (isNormalizedEmailAddress(stored)) send(stored);
   only the two functions above produce it.
 - `AddressError` and `Result<T, E>` are the shapes above.
 
+`isLinkShaped` and `isPlainAddress` live here too, because auth and email both need them
+and neither may depend on the other for a security rule.
+
+- `isLinkShaped(text)` is true for text a mail client could turn into a link: a scheme,
+  `www.` anywhere, a domain shape or a dotted quad. It checks the NFKC form with every
+  format and default ignorable character removed, full width dots folded, lower cased and with marks removed, because clients
+  drop what a reader cannot see.
+- `isPlainAddress(value)` is true for a normalised address whose local part holds only
+  `a-z 0-9 . _ + ' -` and no `www.`. The address rule allows `/ ? # % = &` in a local
+  part, which can read as a link, so a whole address is not safe to show on its own.
+
 ## The rule
 
 In order, with the refusal reason for each step:

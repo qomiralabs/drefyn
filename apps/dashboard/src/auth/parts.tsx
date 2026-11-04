@@ -14,7 +14,7 @@ export { Answer, Head };
 interface FrameProps {
   readonly hosted: boolean;
   readonly label: string;
-  readonly busy?: boolean;
+  readonly busy?: boolean | undefined;
   readonly children: ReactNode;
 }
 
@@ -58,15 +58,7 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
           </div>
         </div>
       ) : (
-        <svg className="auth-crop" viewBox="26 38 34 48" aria-hidden="true" focusable="false">
-          <path
-            d="M54 44H32V80H54"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="12"
-            strokeLinejoin="miter"
-          />
-        </svg>
+        <div className="auth-crop" aria-hidden="true" />
       )}
     </div>
   );

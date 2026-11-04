@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type pg from 'pg';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   databaseOverPool,
   runAloneOnApiKeyLimiter,
@@ -8,7 +8,22 @@ import {
   type AuthDatabase,
   type Database,
 } from '../src/database.ts';
+import type * as TenantContext from '../src/tenant-context.ts';
 import { rejected } from './support.ts';
+
+// Every real path passes the frozen empty settings, so the only way to see the shape check
+// work is to hand it something else.
+const settings = vi.hoisted(() => ({
+  organizationId: '',
+  projectId: '',
+  userId: '',
+  actorUserId: '',
+}));
+
+vi.mock('../src/tenant-context.ts', async (original) => ({
+  ...(await original<typeof TenantContext>()),
+  AUTH_SETTINGS: settings,
+}));
 
 type Answer = (text: string) => unknown;
 
@@ -158,5 +173,39 @@ describe.each(runners)('a statement run alone on the %s pool', (_label, kind, ru
       code: 'DB_CONFIG_INVALID',
     });
     expect(other.clients).toHaveLength(0);
+  });
+});
+
+describe.each(runners)('the settings written on the %s pool', (_label, kind, run) => {
+  const uuid = '01a14984-4476-77ce-9335-2c3c3a59aa8b';
+  const names = ['organizationId', 'projectId', 'userId', 'actorUserId'] as const;
+
+  afterEach(() => {
+    for (const name of names) settings[name] = '';
+  });
+
+  it.each(names)('refuse a %s that is not an id, before any text is sent', async (name) => {
+    for (const value of [
+      `'; drop table app.users; --`,
+      'not-an-id',
+      `${uuid}\n`,
+      uuid.toUpperCase(),
+      ` ${uuid}`,
+      ['a'] as unknown as string,
+    ]) {
+      settings[name] = value;
+      const { db, clients } = scripted(kind, () => fiveResults([]));
+      expect(await rejected(run(db, 'select 1', 1000))).toMatchObject({
+        code: 'DB_TENANT_CONTEXT_INVALID',
+      });
+      expect(clients).toHaveLength(0);
+    }
+  });
+
+  it.each(names)('take a %s that is empty or a canonical id', async (name) => {
+    settings[name] = uuid;
+    const { db, clients } = scripted(kind, () => fiveResults([]));
+    await run(db, 'select 1', 1000);
+    expect(clients[0]?.sent[0]).toContain(`'${uuid}'`);
   });
 });

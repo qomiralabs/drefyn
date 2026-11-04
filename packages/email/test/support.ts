@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import { isLinkShaped } from '@drefyn/address';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import {
   LINK_PROVIDERS,
@@ -109,10 +110,10 @@ export function recorder(): {
   };
 }
 
-// Printable text with no control characters, the shape a cleaned display name has.
+// Printable text with nothing the name guard refuses, the shape a cleaned display name has.
 export const safeName: fc.Arbitrary<string> = fc
   .string({ unit: 'grapheme', minLength: 1, maxLength: 140 })
-  .filter((s) => !/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(s) && s.trim() !== '');
+  .filter((s) => !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(s) && s.trim() !== '' && !isLinkShaped(s));
 
 // One control character somewhere in an otherwise ordinary name.
 export const hostileName: fc.Arbitrary<string> = fc
@@ -150,6 +151,7 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'email_changed':
         return { ...f, kind, newAddress: 'new.person@example.com' as never };
       case 'api_key_created':
+      case 'api_key_revoked':
         return { ...f, kind, organizationName: a, keyName: b, displaySuffix: 'x7qa' };
       case 'owner_added':
         return { ...f, kind, organizationName: a, ownerName: c };

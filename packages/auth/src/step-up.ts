@@ -31,6 +31,8 @@ export interface AuthMailer {
     code: string,
     link: URL,
     purpose: SignInCodePurpose,
+    // The idempotency key for this mail, so a retry of one code is never sent twice.
+    challengeId: string,
     linking?: { readonly provider: 'github' | 'google'; readonly account: string },
   ): Promise<void>;
 }
@@ -210,7 +212,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         );
         const send = async () => {
           try {
-            await mailer.sendSignInCode(s.email, code, link, PURPOSE);
+            await mailer.sendSignInCode(s.email, code, link, PURPOSE, id);
           } catch {
             quietWarn(
               deps.logger,

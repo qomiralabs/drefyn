@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createEmailSignIn, formatChallengeId, sha256 } from '../src/index.ts';
 import {
   ADDRESS,
@@ -96,9 +96,10 @@ describe('readChallenge', () => {
 
   it('reads and never counts an attempt', async () => {
     const { flow, scripted, limiter } = read({ ...challengeRow(), consumed: false });
+    const reserve = vi.spyOn(limiter, 'reserve');
     await flow.readChallenge(browser(), { challenge: PUBLIC_ID });
     expect(scripted.statements().filter((s) => isWrite(s))).toEqual([]);
-    expect(limiter.reserve).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
   });
 
   it('answers unavailable when the read fails', async () => {

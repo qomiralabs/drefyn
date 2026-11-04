@@ -25,9 +25,8 @@ import {
   parseBlockToken,
 } from './invitation-links.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
-import { memberName, noticeEach } from './notices.ts';
+import { UNNAMED_PERSON, checkedDisplayName, memberName, noticeEach } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
-import { parseOrganizationName } from './organization-rules.ts';
 import { ORG_ROLES, canAssign, permissionsFor, type OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
@@ -153,15 +152,10 @@ const ROLES: ReadonlySet<unknown> = new Set(ORG_ROLES);
 
 // Said in the mail when the inviter's own name cannot be: never their address, which a
 // stranger has no business receiving and a mail client would turn into a link.
-export const INVITER_FALLBACK = 'A team member';
+export const INVITER_FALLBACK = UNNAMED_PERSON;
 
-// Display names are typed by people, and a mail client links anything that reads as a
-// domain. The organization name rule already refuses those, so it is the test here too.
-export function plainInviterName(displayName: string | null): string {
-  if (displayName === null) return INVITER_FALLBACK;
-  const checked = parseOrganizationName(displayName);
-  return checked.ok ? checked.value : INVITER_FALLBACK;
-}
+export const plainInviterName = (displayName: string | null): string =>
+  checkedDisplayName(displayName) ?? INVITER_FALLBACK;
 
 class Refused extends Error {
   readonly code: AuthErrorCode;

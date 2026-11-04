@@ -35,6 +35,7 @@ async function compileOnly(): Promise<void> {
       .values({ organization_id: 'x', api_key_id: 'x', target_project_id: 'x' })
       .execute();
     await tx.updateTable('api_keys').set({ last_used_at: new Date() }).execute();
+    await tx.updateTable('api_keys').set({ revoked_at: new Date() }).execute();
     const hash = Buffer.alloc(32);
     const scopes = ['docs:read'];
     // @ts-expect-error a key's hash is set once
@@ -56,10 +57,10 @@ async function compileOnly(): Promise<void> {
 }
 
 describe('API key schema types', () => {
-  it('let organization scope update only the use time', () => {
-    expectTypeOf<
-      keyof Updateable<OrganizationSchema['api_keys']>
-    >().toEqualTypeOf<'last_used_at'>();
+  it('let organization scope update only the use and revoke times', () => {
+    expectTypeOf<keyof Updateable<OrganizationSchema['api_keys']>>().toEqualTypeOf<
+      'last_used_at' | 'revoked_at'
+    >();
     // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty is the point: nothing is updatable
     expectTypeOf<keyof Updateable<OrganizationSchema['api_key_projects']>>().toEqualTypeOf<never>();
   });
