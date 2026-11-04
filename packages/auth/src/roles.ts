@@ -1,5 +1,11 @@
 import type { Result } from '@drefyn/address';
-import { DbError, withOrganization, type Database, type OrganizationSchema } from '@drefyn/db';
+import {
+  DbError,
+  withOrganization,
+  withUser,
+  type Database,
+  type OrganizationSchema,
+} from '@drefyn/db';
 import { idOf, type IdOf, type OrganizationId, type ProjectId } from '@drefyn/tenancy';
 import { sql, type Transaction } from 'kysely';
 import { storedRole, type AccessContext } from './access.ts';
@@ -14,7 +20,16 @@ import {
   removalRefusal,
   roleChangeRefusal,
 } from './role-rules.ts';
-import { asId, fail, idFields, ok, quietInfo, quietWarn } from './session-support.ts';
+import {
+  asId,
+  fail,
+  idFields,
+  ok,
+  quietInfo,
+  quietWarn,
+  type SessionStore,
+} from './session-support.ts';
+import { checkRecentAuth } from './step-up.ts';
 
 export interface RoleChangeSummary {
   readonly from: OrgRole;
@@ -48,9 +63,12 @@ export interface Roles {
   projectRole(a: AccessContext, project: ProjectId): Promise<ProjectRole | null>;
 }
 
+export type RoleStore = Pick<SessionStore, 'user'> &
+  Pick<OrganizationStore, 'organization' | 'organizationAs'>;
+
 export interface RolesDeps {
   readonly db?: Database;
-  readonly store?: Pick<OrganizationStore, 'organization' | 'organizationAs'>;
+  readonly store?: RoleStore;
   readonly logger: AuthLogger;
   readonly mailer: AuthNoticeMailer;
 }
@@ -178,11 +196,12 @@ async function ownerAddresses(tx: Tx): Promise<string[]> {
 
 export function createRoles(deps: RolesDeps): Roles {
   const { db } = deps;
-  let store: Pick<OrganizationStore, 'organization' | 'organizationAs'>;
+  let store: RoleStore;
   if (deps.store !== undefined) {
     store = deps.store;
   } else if (db !== undefined) {
     store = {
+      user: (userId, work) => withUser(db, { userId }, work),
       organization: (organizationId, work) => withOrganization(db, { organizationId }, work),
       organizationAs: (organizationId, actorUserId, work) =>
         withOrganization(db, { organizationId, actorUserId }, work),
@@ -205,13 +224,24 @@ export function createRoles(deps: RolesDeps): Roles {
     return fail(error);
   }
 
-  // After the commit. A failed send is logged and never undoes the change.
+  // After the commit. A failed send is logged and never undoes the change, and each owner is
+  // tried on their own, so one bad address cannot keep the news from the others.
   async function tell(owners: readonly string[], notice: AuthSecurityNotice, ids: Ids) {
-    try {
-      for (const to of owners) await deps.mailer.sendSecurityNotice(to, notice);
-    } catch {
-      quietWarn(deps.logger, 'auth.member_notice_failed', idFields(ids));
+    for (const to of owners) {
+      try {
+        await deps.mailer.sendSecurityNotice(to, notice);
+      } catch {
+        quietWarn(deps.logger, 'auth.member_notice_failed', idFields(ids));
+      }
     }
+  }
+
+  // Before any lock or write. A session taken over or left open must not be able to add an
+  // owner or revoke someone's keys.
+  async function refuseStale(a: AccessContext, ids: Ids, event: string) {
+    const recent = await checkRecentAuth(store, a);
+    if (!recent.ok) quietInfo(deps.logger, event, { ...idFields(ids), outcome: recent.error.code });
+    return recent;
   }
 
   return Object.freeze({
@@ -224,6 +254,8 @@ export function createRoles(deps: RolesDeps): Roles {
         userId: ['usr', a.userId],
         membershipId: ['mem', member],
       };
+      const recent = await refuseStale(a, ids, 'auth.role_change_refused');
+      if (!recent.ok) return recent;
       let from: OrgRole;
       let done: Done | null;
       try {
@@ -244,6 +276,11 @@ export function createRoles(deps: RolesDeps): Roles {
           if (target.role === role) return { from: target.role, done: null };
           await lockTarget(tx, target);
           const revokedKeyIds = keysGoWith(role) ? await revokeKeys(tx, target) : [];
+          // Rows are for members only, and one kept here would come back on a later demotion
+          // as a grant nobody chose.
+          if (target.role === 'member') {
+            await tx.deleteFrom('project_roles').where('membership_id', '=', target.id).execute();
+          }
           const lost = invitationRolesLost(role);
           let pending = tx.deleteFrom('invitations').where('invited_by', '=', target.id);
           // A member can grant nothing, so every invitation goes.
@@ -311,6 +348,8 @@ export function createRoles(deps: RolesDeps): Roles {
         userId: ['usr', a.userId],
         membershipId: ['mem', member],
       };
+      const recent = await refuseStale(a, ids, 'auth.member_remove_refused');
+      if (!recent.ok) return recent;
       let done: Done;
       try {
         done = await store.organizationAs(a.organizationId, a.userId, async (tx) => {

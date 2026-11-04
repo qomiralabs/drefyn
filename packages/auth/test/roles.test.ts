@@ -334,7 +334,8 @@ describe('changeRole', () => {
         },
       },
     ]);
-    expect(scripted.events.filter((e) => e.kind === 'commit')).toHaveLength(1);
+    // One for the recent sign in read, one for the change.
+    expect(scripted.events.filter((e) => e.kind === 'commit')).toHaveLength(2);
   });
 
   it('tells every owner when a demotion revoked keys, and nobody when it revoked none', async () => {
