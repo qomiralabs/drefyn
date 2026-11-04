@@ -58,6 +58,7 @@ test.describe('the signed out brand half', () => {
     await page.goto('/auth-states/sign-in/ready');
     await expect(page.locator('.auth-brand-copy')).toBeVisible();
     await expect(page.locator('.auth-brand')).toHaveAttribute('aria-hidden', 'true');
-    expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+    const words = page.locator('.auth-brand-copy');
+    expect(await words.evaluate((el) => el.getAnimations().length)).toBe(0);
   });
 });

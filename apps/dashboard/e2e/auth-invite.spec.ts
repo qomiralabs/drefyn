@@ -54,7 +54,7 @@ test('an invited newcomer signs up by code in the same browser and lands inside'
   const address = uniqueAddress('newcomer');
   const token = await invitation(address);
   await page.goto(`/invite#${token}`);
-  expect(new URL(page.url()).hash).toBe('');
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
   await page.getByRole('link', { name: `Sign in as ${address} to join` }).click();
   await signInFromForm(page, address);
   await page.getByRole('button', { name: 'Join Acme' }).click();
