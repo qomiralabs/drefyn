@@ -22,7 +22,6 @@ describe('the mail guard and the auth name rule', () => {
     await fc.assert(
       fc.asyncProperty(candidate, async (input) => {
         const parsed = parseOrganizationName(input);
-        fc.pre(parsed.ok);
         if (!parsed.ok) return;
         const rendered = await renderMail(
           {

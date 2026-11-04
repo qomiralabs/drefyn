@@ -1,4 +1,10 @@
+import { isPlainAddress } from '@drefyn/address';
 import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
+import { parseOrganizationName } from './organization-rules.ts';
+
+// Said in mail when a person's name cannot be. It is the last step, so no name or address
+// can stop a notice.
+export const UNNAMED_PERSON = 'A team member';
 
 // Each address is tried on its own, so one bad address cannot keep the news from the others.
 // failed runs once per missed send and gets no address: logs carry none.
@@ -17,6 +23,19 @@ export async function noticeEach(
   }
 }
 
-// How a notice names a member: their display name, or their address when they set none.
-export const memberName = (displayName: string | null, email: string): string =>
-  displayName === null || displayName === '' ? email : displayName;
+// Display names are typed by people, and a mail client links anything that reads as a
+// domain. The organization name rule already refuses those, so it is the test here too.
+export function checkedDisplayName(displayName: string | null): string | null {
+  if (displayName === null) return null;
+  const checked = parseOrganizationName(displayName);
+  return checked.ok ? checked.value : null;
+}
+
+// The person being named picks both the name and the local part of the address, and this
+// notice can be the one that reveals their takeover, so neither may carry a link or get the
+// send refused.
+export function memberName(displayName: string | null, email: string): string {
+  const name = checkedDisplayName(displayName);
+  if (name !== null) return name;
+  return isPlainAddress(email) ? email : UNNAMED_PERSON;
+}
