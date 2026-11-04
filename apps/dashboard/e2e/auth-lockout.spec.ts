@@ -1,5 +1,5 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { seedPerson, sql, uniqueAddress } from './auth-helpers.ts';
+import { authSql, seedPerson, uniqueAddress } from './auth-helpers.ts';
 import { behindHop } from './hop.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { SIGNED_OUT } from './people.ts';
@@ -64,7 +64,7 @@ for (const count of [4, 16]) {
     await expect(page).toHaveURL(/\/sign-in\/verify/);
     const held = await nextMail(victim, before);
     const attemptsOfNewest = () =>
-      sql(`select attempts from app.email_challenges
+      authSql(`select attempts from app.email_challenges
            where email_normalized = '${victim}' and consumed_at is null
            order by created_at limit 1`);
 
@@ -96,7 +96,7 @@ for (const count of [4, 16]) {
     const seen = await countTo(victim);
     const strangerPage = await stranger.newPage();
     await ask(strangerPage, victim);
-    await expect.poll(async () => sql(CEILING_ROWS)).not.toBe('0');
+    await expect.poll(async () => authSql(CEILING_ROWS)).not.toBe('0');
     await strangerPage.waitForTimeout(MAIL_SETTLE_MS);
     expect(await countTo(victim)).toBe(seen);
 

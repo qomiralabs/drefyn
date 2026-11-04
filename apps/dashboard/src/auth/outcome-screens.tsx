@@ -7,6 +7,18 @@ import type { BlockState, CliState, InviteState } from './states.ts';
 
 type FormAction = ((form: FormData) => void) | undefined;
 
+// Every page has a heading, so a failure names itself before the notice explains it.
+export function Failed({ notice }: { notice: FormNotice }): ReactNode {
+  return (
+    <>
+      <Head>
+        <Answer claim="That did not go through." rest="Nothing changed." />
+      </Head>
+      <Notice notice={notice} />
+    </>
+  );
+}
+
 const CLI_INVALID = (
   <>
     <Head>
@@ -33,8 +45,8 @@ export function CliScreen({
   return (
     <AuthFrame hosted={hosted} label="Sign in" busy={pending}>
       {view.kind === 'invalid' ? CLI_INVALID : null}
-      {view.kind === 'failed' ? <Notice notice={view.notice} /> : null}
-      {notice === undefined ? null : <Notice notice={notice} />}
+      {view.kind === 'failed' ? <Failed notice={view.notice} /> : null}
+      {notice === undefined ? null : <Failed notice={notice} />}
       {view.kind === 'idle' && notice === undefined ? (
         <>
           <div className="auth-reading contents">
@@ -149,8 +161,8 @@ export function InviteScreen({
         </>
       ) : null}
       {view.kind === 'invalid' ? INVALID_INVITE : null}
-      {view.kind === 'failed' ? <Notice notice={view.notice} /> : null}
-      {notice === undefined ? null : <Notice notice={notice} />}
+      {view.kind === 'failed' ? <Failed notice={view.notice} /> : null}
+      {notice === undefined ? null : <Failed notice={notice} />}
       {view.kind === 'signed_out' ? (
         <>
           <Head>
@@ -247,8 +259,8 @@ export function BlockScreen({
           </noscript>
         </>
       ) : null}
-      {view.kind === 'failed' ? <Notice notice={view.notice} /> : null}
-      {notice === undefined ? null : <Notice notice={notice} />}
+      {view.kind === 'failed' ? <Failed notice={view.notice} /> : null}
+      {notice === undefined ? null : <Failed notice={notice} />}
       {view.kind === 'ask' ? (
         <>
           <Head>

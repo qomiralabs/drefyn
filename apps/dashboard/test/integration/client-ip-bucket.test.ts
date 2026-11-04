@@ -11,7 +11,7 @@ const ORIGIN = 'http://127.0.0.1:3110';
 const HOP_ORIGIN = 'https://app.drefyn.test';
 
 async function query(text: string): Promise<string> {
-  const client = new pg.Client(roleUrl(stackFile(), 'postgres', 'DREFYN_POSTGRES_PASSWORD'));
+  const client = new pg.Client(roleUrl(stackFile(), 'drefyn_auth', 'DREFYN_AUTH_PASSWORD'));
   await client.connect();
   try {
     const result = await client.query({ text, rowMode: 'array' });

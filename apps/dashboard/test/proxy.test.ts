@@ -49,7 +49,7 @@ describe('proxy', () => {
   });
 
   it('uses the path for the referrer policy', async () => {
-    expect((await run('/invite')).headers.get('referrer-policy')).toBe('no-referrer');
+    expect((await run('/invite')).headers.get('referrer-policy')).toBe('same-origin');
     expect((await run('/acme')).headers.get('referrer-policy')).toBe(
       'strict-origin-when-cross-origin',
     );

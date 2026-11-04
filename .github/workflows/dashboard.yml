@@ -107,6 +107,11 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # The name the seed's guard expects, so it runs here and on no real stack.
+      COMPOSE_PROJECT_NAME: drefyn-dash-99-${{ github.run_id }}-${{ github.run_attempt }}
+      DREFYN_POSTGRES_PORT: '55432'
+      DREFYN_DATABASE_SSL: disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

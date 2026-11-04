@@ -133,6 +133,7 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
   invite: {
     reading: (h) => <InviteScreen {...shared(h)} view={{ kind: 'reading' }} />,
     'signed-out': (h) => <InviteScreen {...shared(h)} view={{ kind: 'signed_out', ...FACTS }} />,
+    failed: (h) => <InviteScreen {...shared(h)} view={{ kind: 'failed', notice: UNAVAILABLE }} />,
     match: (h) => <InviteScreen {...shared(h)} view={{ kind: 'match', token: 't', ...FACTS }} />,
     mismatch: (h) => (
       <InviteScreen

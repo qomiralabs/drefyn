@@ -20,11 +20,10 @@ const SIGNED_OUT_PAGES = [
   '/sign-in/cli',
   '/invite',
   '/invite/block',
-  '/auth/pre',
   '/auth-states/sign-in/ready',
-  '/auth/oauth/github/start',
-  '/auth/oauth/github/callback',
 ];
+// Route handlers, so a 404 here has no page to carry a title.
+const SIGNED_OUT_ROUTES = ['/auth/pre', '/auth/oauth/github/start', '/auth/oauth/github/callback'];
 const paths = [
   '/',
   ...Object.values(ROUTES),
@@ -38,6 +37,14 @@ for (const path of paths) {
   test(`${path} is 404 with the release flag off`, async ({ request }) => {
     const res = await request.get(path, { maxRedirects: 0 });
     expect(res.status()).toBe(404);
+  });
+}
+
+for (const path of SIGNED_OUT_ROUTES) {
+  test(`${path} is 404 and sets no cookie with the release flag off`, async ({ request }) => {
+    const res = await request.get(path, { maxRedirects: 0 });
+    expect(res.status()).toBe(404);
+    expect(res.headers()['set-cookie']).toBeUndefined();
   });
 }
 

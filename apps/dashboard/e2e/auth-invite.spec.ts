@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { formatInvitationToken, sha256 } from '@drefyn/auth';
 import { idOf } from '@drefyn/tenancy';
 import { expect, type Page } from '@playwright/test';
-import { sql, uniqueAddress } from './auth-helpers.ts';
+import { organizationSql, uniqueAddress } from './auth-helpers.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { ACME_ID, MAYA, SAM, SIGNED_OUT, stateFile } from './people.ts';
 import { test } from './test.ts';
@@ -12,10 +12,12 @@ test.use({ storageState: SIGNED_OUT });
 async function invitation(email: string): Promise<string> {
   const id = randomUUID();
   const secret = randomBytes(32);
-  const membership = await sql(
+  const membership = await organizationSql(
+    ACME_ID,
     `select id from app.memberships where organization_id = '${ACME_ID}' and user_id = '${MAYA.id}'`,
   );
-  await sql(
+  await organizationSql(
+    ACME_ID,
     `insert into app.invitations
        (id, organization_id, email, email_normalized, role, invited_by, secret_hash, expires_at)
      values ('${id}', '${ACME_ID}', '${email}', '${email}', 'member', '${membership}',
@@ -93,7 +95,7 @@ test('a GET of the block link writes nothing, and only the button does', async (
     .getByRole('link', { name: 'I did not expect this invitation' })
     .getAttribute('href');
   if (href === null) throw new Error('no block link');
-  const count = () => sql('select count(*) from app.invitation_blocks');
+  const count = () => organizationSql(ACME_ID, 'select count(*) from app.invitation_blocks');
   const before = await count();
   await request.get(href);
   expect(await count()).toBe(before);

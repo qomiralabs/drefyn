@@ -15,8 +15,8 @@ import {
 } from '../server/sign-in-actions.ts';
 import { useFocusOnChange } from './controls.tsx';
 import { isRefusal, refusalNotice } from './outcomes.ts';
-import { BlockScreen, CliScreen, InviteScreen } from './outcome-screens.tsx';
-import { AuthFrame, Notice } from './parts.tsx';
+import { BlockScreen, CliScreen, Failed, InviteScreen } from './outcome-screens.tsx';
+import { AuthFrame } from './parts.tsx';
 import {
   ChoosePassword,
   CodeElsewhere,
@@ -102,19 +102,37 @@ export function SignUpForm(props: SignUpBase): ReactNode {
   );
 }
 
+// Reads the secret once on load, and again if a link lands on this same page, where the
+// browser changes the fragment and loads nothing.
 function useFragment(run: (fragment: string) => void): void {
   const once = useRef(false);
+  const latest = useRef(run);
   useEffect(() => {
-    if (once.current) return;
-    once.current = true;
-    const fragment = window.location.hash.slice(1);
-    // Out of the address bar and the history entry before anything else happens.
-    if (fragment !== '') {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    latest.current = run;
+  });
+  useEffect(() => {
+    const read = (): string => {
+      const fragment = window.location.hash.slice(1);
+      // Out of the address bar and the history entry before anything else happens.
+      if (fragment !== '') {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+      document.documentElement.removeAttribute('data-fragment');
+      return fragment;
+    };
+    if (!once.current) {
+      once.current = true;
+      latest.current(read());
     }
-    document.documentElement.removeAttribute('data-fragment');
-    run(fragment);
-  }, [run]);
+    const changed = () => {
+      const fragment = read();
+      if (fragment !== '') latest.current(fragment);
+    };
+    window.addEventListener('hashchange', changed);
+    return () => {
+      window.removeEventListener('hashchange', changed);
+    };
+  }, []);
 }
 
 function asForm(fields: Readonly<Record<string, string>>): FormData {
@@ -181,7 +199,7 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
             problem="expired"
           />
         ) : null}
-        {current.kind === 'failed' ? <Notice notice={current.notice} /> : null}
+        {current.kind === 'failed' ? <Failed notice={current.notice} /> : null}
         {current.kind === 'idle' && !reading ? (
           <div className="auth-typed contents">
             <TypedCode
