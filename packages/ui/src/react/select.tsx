@@ -11,10 +11,10 @@ import {
   Text,
 } from 'react-aria-components';
 import { FieldMessage, markDisabled } from './field-parts.tsx';
-import { ROW, Sheet, usePhone } from './sheet.tsx';
+import { Sheet, usePhone } from './sheet.tsx';
 import { chevronDownShape } from './icons/chevron-down.tsx';
 import { Icon } from './icons/icon.tsx';
-import { Skeleton } from './skeleton.tsx';
+import { LoadingRows, markBusy } from './list-parts.tsx';
 
 export interface SelectProps {
   // The visible label.
@@ -54,20 +54,6 @@ function triggerPaint(disabled: boolean, invalid: boolean): string {
   return `${invalid ? 'border-state-broken-mark' : 'border-control'} bg-ground text-ink cursor-pointer`;
 }
 
-// The list announces what is happening while it waits, and draws three rows in their place.
-function LoadingRows(): ReactNode {
-  return (
-    <span className="flex flex-col">
-      <span className="sr-only">Loading options</span>
-      {(['3/4', '1/2', '3/4'] as const).map((width, i) => (
-        <span key={i} data-skeleton="" className={`flex items-center px-8 ${ROW}`}>
-          <Skeleton width={width} />
-        </span>
-      ))}
-    </span>
-  );
-}
-
 // The sheet follows the select's own state. React Aria also renders the select's children in
 // a hidden copy to find the options, where that state is missing; nothing is drawn there.
 function SelectSheet({
@@ -94,14 +80,6 @@ function SelectSheet({
     </Sheet>
   );
 }
-
-const markBusy =
-  (busy: boolean) =>
-  (el: HTMLElement | null): void => {
-    if (el === null) return;
-    if (busy) el.setAttribute('aria-busy', 'true');
-    else el.removeAttribute('aria-busy');
-  };
 
 // A React Aria select: a button that opens a listbox in a popover on the overlay surface, or
 // in the bottom sheet titled by the label on a phone, with a hidden native select so a form posts the value. It holds the value itself, so a

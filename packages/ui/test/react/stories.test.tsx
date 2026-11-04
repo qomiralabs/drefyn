@@ -71,6 +71,20 @@ const REQUIRED: Record<string, string[]> = {
   popover: ['Default', 'Failed', 'IconTrigger', 'InARow', 'Loading', 'Open', 'WithSelect'],
   // The panel holds the loading and empty states; the tabs themselves have neither.
   tabs: ['Default', 'Disabled', 'EmptyPanel', 'LoadingPanel', 'Manual', 'WithCounts'],
+  // No list, so its states are the chips: none, some, some with errors.
+  'tag-field': ['Default', 'Disabled', 'Filled', 'InADialog', 'Invalid', 'InvalidTags'],
+  'multi-combobox': [
+    'Chosen',
+    'Default',
+    'Disabled',
+    'EmptyList',
+    'Filtered',
+    'InADialog',
+    'Invalid',
+    'Loading',
+    'NoMatches',
+    'Open',
+  ],
   // A failed refresh keeps the rows, so it is a state of its own beside a failed first load.
   table: [
     'Comfortable',
@@ -101,6 +115,9 @@ const DISABLED: Record<string, string[]> = {
   // The open list shows a disabled option.
   select: ['Disabled', 'Open'],
   tabs: ['Disabled'],
+  'tag-field': ['Disabled'],
+  // The open list shows a disabled option.
+  'multi-combobox': ['Disabled', 'Open'],
   table: ['DisabledRows'],
   'command-bar': ['Disabled'],
 };

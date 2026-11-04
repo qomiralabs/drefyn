@@ -77,7 +77,11 @@ Rules for the work:
   ones it set; if the work changed them, or committed or rolled back
   itself, the call fails with `DB_TRANSACTION_INVALID` and the connection is replaced.
   `check:sources` refuses `begin`, `commit`, `rollback` and session `SET` in raw SQL, and any
-  setting of a `drefyn.` value outside this package. Savepoints are fine.
+  setting of a `drefyn.` value outside this package, however it is spaced, quoted or commented.
+  Savepoints are fine.
+- The commit check is a tripwire, not a boundary. It reads the settings once, so a switch undone
+  by a rollback to a savepoint gets past it, and `check:sources` is the guard for that case. A
+  source check cannot see a statement built at run time, so neither check stops deliberate code.
 - If a statement fails, the transaction is over. Work that catches a SQL error and returns
   still rejects with that error.
 - After every transaction the connection runs `DISCARD ALL` before it goes back to the pool,

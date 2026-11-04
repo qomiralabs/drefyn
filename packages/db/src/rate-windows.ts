@@ -89,6 +89,8 @@ interface Row {
   retry_after: number;
 }
 
+const isPositive = (value: number) => Number.isSafeInteger(value) && value > 0;
+
 // In the order the windows were asked for, one for each. A window with no row would have its
 // limit skipped, so an answer that does not name each window exactly once is a failure.
 function toCounts(rows: readonly Row[], order: readonly number[]): WindowCount[] {
@@ -98,6 +100,10 @@ function toCounts(rows: readonly Row[], order: readonly number[]): WindowCount[]
   return order.map((windowSeconds) => {
     const [row, repeat] = rows.filter((r) => r.window_seconds === windowSeconds);
     if (row === undefined || repeat !== undefined) throw incomplete();
+    // The statement cannot return these, so one here means the numbers cannot be trusted.
+    if (!isPositive(row.count) || !isPositive(row.retry_after)) {
+      throw new DbError('DB_CONFIG_INVALID', 'a rate window reservation returned a bad number');
+    }
     return { windowSeconds, count: row.count, retryAfterSeconds: row.retry_after };
   });
 }

@@ -4,7 +4,9 @@ import {
   AuthError,
   apiKeyErrorResponse,
   checkApiKeyScope,
+  createApiKeyFailureLimiter,
   createApiKeyVerifier,
+  parseApiAuthConfig,
   redact,
   type ApiKeyActor,
   type ApiKeyFailureLimiter,
@@ -74,6 +76,25 @@ describe('the failure limiter', () => {
     const limiter: ApiKeyFailureLimiter = {
       reserve: () => Promise.reject(new AuthError('AUTH_UNAVAILABLE')),
     };
+    const { verifier } = verifierFor(verifyResponder([]), limiter);
+    const result = await verifier.verifyApiKey(bearer(), IP);
+    if (result.ok) throw new Error('expected a refusal');
+    expect(result.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('refuses the key when the limiter gets a row it cannot trust', async () => {
+    const limiter = createApiKeyFailureLimiter({
+      db: {} as Database,
+      config: parseApiAuthConfig(API_ENV),
+      reserve: (_db, request) =>
+        Promise.resolve(
+          request.windowSeconds.map((windowSeconds) => ({
+            windowSeconds,
+            count: 999,
+            retryAfterSeconds: 0,
+          })),
+        ),
+    });
     const { verifier } = verifierFor(verifyResponder([]), limiter);
     const result = await verifier.verifyApiKey(bearer(), IP);
     if (result.ok) throw new Error('expected a refusal');
