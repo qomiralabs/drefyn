@@ -5,7 +5,7 @@ import type { BrowserContext } from '../../src/index.ts';
 describe('BrowserContext', () => {
   it('holds nothing a URL could be built from', () => {
     expectTypeOf<Extract<keyof BrowserContext, 'url' | 'host' | 'headers'>>().toBeNever();
-    const typeOnly = (b: BrowserContext) => [
+    const typeOnly = (b: BrowserContext): readonly unknown[] => [
       // @ts-expect-error absolute URLs come only from the configured origin
       b.url,
       // @ts-expect-error absolute URLs come only from the configured origin
