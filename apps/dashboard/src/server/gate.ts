@@ -2,7 +2,7 @@ import { connection } from 'next/server';
 import { notFound } from 'next/navigation';
 import { createFlagClient, loadFlagConfig, type FlagClient, type FlagContext } from '@drefyn/flags';
 import type { OrganizationId, UserId } from '@drefyn/tenancy';
-import { dashboardEnabled, VISITOR_FLAG_ORGANIZATION } from '../shell/release.ts';
+import { dashboardEnabled, mailDelivery, VISITOR_FLAG_ORGANIZATION } from '../shell/release.ts';
 import { logWarn, type LogContext } from './log.ts';
 
 let client: Promise<FlagClient> | undefined;
@@ -50,4 +50,15 @@ export function requireDashboard(organizationId: OrganizationId, userId: UserId)
 // context: the reserved id is not a tenant.
 export function requireDashboardForVisitor(): Promise<void> {
   return check({ organizationId: VISITOR_FLAG_ORGANIZATION }, {});
+}
+
+// Asked once per process, about nobody in particular: mail is a server setting. Any failure
+// is off, the safe value, and a change applies on restart.
+export async function mailDeliveryEnabled(): Promise<boolean> {
+  try {
+    return await mailDelivery(await flagClient(), { organizationId: VISITOR_FLAG_ORGANIZATION });
+  } catch {
+    logWarn('dashboard.flag_client_failed', {});
+    return false;
+  }
 }

@@ -4,6 +4,7 @@ import {
   FLAG_KINDS,
   FlagError,
   defineFlags,
+  flags,
   type DefinitionProblem,
   type FlagDefinition,
 } from '../src/index.ts';
@@ -327,5 +328,12 @@ describe('the area list', () => {
         'dashboard',
       ].sort(),
     );
+  });
+});
+
+describe('email.smtp_delivery', () => {
+  it('is a release flag that is off until someone turns it on', () => {
+    const flag = flags.find((f) => f.name === 'email.smtp_delivery');
+    expect(flag).toMatchObject({ kind: 'release', owner: 'Divine572', safeValue: false });
   });
 });

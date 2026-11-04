@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import next from 'next';
 import { logInfo } from './src/server/log.ts';
+import { drainMailer } from './src/server/mail-holder.ts';
 import { markClientIpWrapper } from './src/server/wrapper-marker.ts';
 import { createWrapper, startWrapper } from './src/server/wrapper.ts';
 
@@ -37,9 +38,18 @@ server.listen(Number(rawPort), hostname, () => {
   logInfo('dashboard.listening', { port });
 });
 
-// Lets in flight requests finish on a container stop instead of cutting them off.
+// Inside compose's default 10 s stop grace.
+const MAIL_DRAIN_MS = 8000;
+
+// Lets in flight requests finish on a container stop instead of cutting them off. Mail goes
+// out after the response, so it gets its own wait once nothing new can queue.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
-    server.close(() => process.exit(0));
+    server.close(() => {
+      void drainMailer(MAIL_DRAIN_MS).then(({ dropped }) => {
+        if (dropped > 0) logInfo('dashboard.email_dropped', { dropped });
+        process.exit(0);
+      });
+    });
   });
 }
