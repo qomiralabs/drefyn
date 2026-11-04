@@ -237,7 +237,7 @@ export function createRoles(deps: RolesDeps): Roles {
   }
 
   // Before any lock or write. A session taken over or left open must not be able to add an
-  // owner or revoke someone's keys.
+  // owner, change what someone can reach or revoke their keys.
   async function refuseStale(a: AccessContext, ids: Ids, event: string) {
     const recent = await checkRecentAuth(store, a);
     if (!recent.ok) quietInfo(deps.logger, event, { ...idFields(ids), outcome: recent.error.code });
@@ -428,6 +428,8 @@ export function createRoles(deps: RolesDeps): Roles {
         membershipId: ['mem', member],
         projectId: ['prj', project],
       };
+      const recent = await refuseStale(a, ids, 'auth.project_role_refused');
+      if (!recent.ok) return recent;
       try {
         await store.organizationAs(a.organizationId, a.userId, async (tx) => {
           const actorRole = await readActor(tx, a);

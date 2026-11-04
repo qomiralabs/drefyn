@@ -593,8 +593,8 @@ const roles = createRoles({ db, logger, mailer }); // mailer has sendSecurityNot
 - The database checks the same rules against the person acting (`app.current_actor_id()`).
   A guarded write that touches no row after the code allowed it is `AUTH_FORBIDDEN` and
   `auth.role_guard_refused`.
-- `setProjectRole(access, membership, project, role | null)` sets or clears a member's role on
-  one project; owners and admins are project admins everywhere and take no row.
+- `setProjectRole(access, membership, project, role | null)` needs the same recent sign in, then
+  sets or clears a member's role on one project; owners and admins are project admins everywhere and take no row.
   `projectRole(access, project)` is the role the person holds there now: `admin` for owners
   and admins, otherwise the project row, else the default project role, else `null`.
 
