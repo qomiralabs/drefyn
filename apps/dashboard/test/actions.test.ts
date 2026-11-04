@@ -506,3 +506,40 @@ describe('refusal logs', () => {
     expect(lines).toHaveLength(2);
   });
 });
+
+describe('publicAction under useActionState', () => {
+  beforeEach(() => {
+    facts = factsFor(GOOD);
+    checkBinding.mockReturnValue(true);
+  });
+
+  const form = () => {
+    const body = new FormData();
+    body.set('csrf', 'x'.repeat(43));
+    return body;
+  };
+
+  it('takes the previous state first and hands the handler only the form', async () => {
+    const handler = vi.fn((_c: unknown, _f: FormData) => Promise.resolve('done'));
+    const action = wrappers().publicAction(handler);
+    const body = form();
+    await expect(action({ earlier: 'state' }, body)).resolves.toBe('done');
+    expect(handler.mock.calls[0]?.[1]).toBe(body);
+  });
+
+  it('still takes a form alone', async () => {
+    const action = wrappers().publicAction(() => Promise.resolve('done'));
+    await expect(action(form())).resolves.toBe('done');
+  });
+
+  it('refuses when the last argument is not a form, whatever came before it', async () => {
+    const handler = vi.fn(() => Promise.resolve('done'));
+    const action = wrappers().publicAction(handler);
+    const forged = form() as unknown as FormData;
+    await expect(action(forged, 'not a form' as unknown as FormData)).resolves.toMatchObject({
+      ok: false,
+      code: 'auth.challenge_binding',
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});

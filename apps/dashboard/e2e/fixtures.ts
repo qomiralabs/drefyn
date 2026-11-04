@@ -5,6 +5,12 @@ export const OFF_PORT = 3101;
 export const ON_ORIGIN = `http://127.0.0.1:${ON_PORT}`;
 export const OFF_ORIGIN = `http://127.0.0.1:${OFF_PORT}`;
 
+// The trusted hop in front of a third server, for the specs that need real client addresses.
+export const HOP_PORT = 3102;
+export const HOP_SERVER_PORT = 3103;
+export const HOP_HOST = 'drefyn.test';
+export const HOP_ORIGIN = `https://${HOP_HOST}:${HOP_PORT}`;
+
 export const MOBILE = { width: 390, height: 844 };
 export const TABLET = { width: 834, height: 1112 };
 export const DESKTOP = { width: 1440, height: 900 };

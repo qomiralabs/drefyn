@@ -161,3 +161,14 @@ describe('withSignOutHeaders', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 });
+
+describe('the sign in link pages', () => {
+  it.each(['/sign-in/verify', '/sign-in/cli', '/invite', '/invite/block'])(
+    '%s sends no referrer, since its link carries a secret',
+    (pathname) => {
+      const headers = securityHeaders({ nonce: 'abc', pathname, https: true, development: false });
+      expect(headers['Referrer-Policy']).toBe('no-referrer');
+      expect(headers['Cache-Control']).toBe('no-store');
+    },
+  );
+});

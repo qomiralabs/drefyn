@@ -837,3 +837,103 @@ describe('accepting an owner invitation', () => {
     expect(mail.notices).toEqual([]);
   });
 });
+
+describe('readInvitation', () => {
+  const rowFor = (overrides: Record<string, unknown> = {}) => ({
+    ...invitationRow(overrides),
+    expires_at: EXPIRES,
+  });
+
+  function reading(w: World = {}) {
+    const scripted = scriptedStore((s) => {
+      if (isProof(s)) {
+        return w.invitation === null ? [] : [{ ...rowFor(), ...(w.invitation ?? {}) }];
+      }
+      if (has(s, 'select', 'memberships')) {
+        return [{ display_name: w.displayName === undefined ? 'Ada Admin' : w.displayName }];
+      }
+      if (has(s, 'select', 'organizations')) {
+        return w.organizationName === null ? [] : [{ name: w.organizationName ?? 'Acme Widgets' }];
+      }
+      return [];
+    });
+    const { logger } = capturingLogger();
+    const invitations = createInvitations(config, {
+      db: {} as Database,
+      authDb: {} as AuthDatabase,
+      logger,
+      mailer: {
+        sendInvitation: () => Promise.resolve(),
+        sendSecurityNotice: () => Promise.resolve(),
+      },
+      limiter: noopLimiter(),
+      store: scripted.store,
+    });
+    return { invitations, scripted };
+  }
+
+  const token = () =>
+    formatInvitationToken({ organizationId: ORG, invitationId: INV, secret: SECRET });
+
+  it('shows the person holding the token what they were invited to', async () => {
+    const { invitations } = reading();
+    const read = await invitations.readInvitation(token());
+    if (!read.ok) throw read.error;
+    expect(read.value).toMatchObject({
+      organizationId: ORG,
+      organizationName: 'Acme Widgets',
+      inviterName: 'Ada Admin',
+      email: ADDRESS,
+      role: 'member',
+      defaultProjectRole: 'editor',
+      expiresAt: EXPIRES,
+    });
+    expect(read.value.blockLink.pathname).toBe('/invite/block');
+    expect(read.value.blockLink.search).toBe('');
+    expect(parseBlockToken(read.value.blockLink.hash.slice(1))).not.toBeNull();
+  });
+
+  it('never prints a display name that a mail client would link', async () => {
+    const { invitations } = reading({ displayName: 'click evil.example now' });
+    const read = await invitations.readInvitation(token());
+    expect(read).toMatchObject({ ok: true, value: { inviterName: 'A team member' } });
+  });
+
+  it.each([
+    ['a token of the wrong shape', 'nope', {}],
+    ['an invitation that is gone', null, { invitation: null }],
+    ['a dead invitation', null, { invitation: { live: false } }],
+    ['a wrong secret', null, { invitation: { secret_hash: Buffer.alloc(32, 7) } }],
+    ['an organization that is gone', null, { organizationName: null }],
+  ] as const)('answers invalid for %s', async (_name, raw, w) => {
+    const { invitations } = reading(w as World);
+    const read = await invitations.readInvitation(raw ?? token());
+    expect(read).toMatchObject({ ok: false, error: { code: 'AUTH_INVITATION_INVALID' } });
+  });
+
+  it('reads and writes nothing', async () => {
+    const { invitations, scripted } = reading();
+    await invitations.readInvitation(token());
+    expect(writesOf(scripted)).toEqual([]);
+  });
+
+  it('answers unavailable when the read fails', async () => {
+    const scripted = scriptedStore(() => {
+      throw new Error('connection reset');
+    });
+    const { logger } = capturingLogger();
+    const invitations = createInvitations(config, {
+      db: {} as Database,
+      authDb: {} as AuthDatabase,
+      logger,
+      mailer: {
+        sendInvitation: () => Promise.resolve(),
+        sendSecurityNotice: () => Promise.resolve(),
+      },
+      limiter: noopLimiter(),
+      store: scripted.store,
+    });
+    const read = await invitations.readInvitation(token());
+    expect(read).toMatchObject({ ok: false, error: { code: 'AUTH_UNAVAILABLE' } });
+  });
+});

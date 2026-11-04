@@ -19,13 +19,14 @@
     "test": "vitest run --coverage",
     "bench:wrapper": "node bench/wrapper.ts",
     "test:server": "vitest run --config vitest.server.config.ts",
-    "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle",
+    "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle --project=auth --project=auth-no-js --project=auth-hop",
     "test:visual": "playwright test --project=visual",
     "seed:e2e": "node e2e/seed.ts"
   },
   "dependencies": {
     "@drefyn/auth": "workspace:*",
     "@drefyn/db": "workspace:*",
+    "@drefyn/email": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
@@ -41,9 +42,11 @@
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
+    "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "fast-check": "4.10.2",
+    "pg": "8.23.1",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3"
   }
