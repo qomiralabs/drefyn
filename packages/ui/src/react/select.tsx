@@ -87,6 +87,7 @@ function SelectSheet({
 // Validity stays with the form: an error is joined to the trigger and never blocks a submit.
 export function Select({
   label,
+  labelHidden = false,
   children,
   value,
   defaultValue,
@@ -144,7 +145,13 @@ export function Select({
       validationBehavior="aria"
       className="flex flex-col gap-4"
     >
-      <Label className={`text-body-s font-medium ${disabled ? 'text-disabled-text' : 'text-body'}`}>
+      <Label
+        className={
+          labelHidden
+            ? 'sr-only'
+            : `text-body-s font-medium ${disabled ? 'text-disabled-text' : 'text-body'}`
+        }
+      >
         {label}
       </Label>
       {description === undefined ? null : (

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { idOf, type IdOf } from '@drefyn/tenancy';
+import { idOf } from '@drefyn/tenancy';
 import { beforeAll, expect, it } from 'vitest';
 import type { AccessContext, OrgRole } from '../../src/index.ts';
 import { addProjects, input, newOrg, signIn, type Org } from './support/api-keys.ts';
@@ -20,7 +20,7 @@ async function join(org: Org, role: OrgRole, defaultProjectRole: string | null =
   return {
     access: resolved.access,
     session,
-    membership: idOf('mem', id.trim().split('\n')[0] ?? '') as IdOf<'mem'>,
+    membership: idOf('mem', id.trim().split('\n')[0] ?? ''),
   };
 }
 

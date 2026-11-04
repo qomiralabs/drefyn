@@ -62,14 +62,16 @@ export type DialogProps = DialogBase & ((Drawn & (OwnState | HeldState)) | (Undr
 
 const FIELD = 'input:not([type="hidden"]), textarea, select';
 
-// Focus goes to the first field, so a form starts where typing starts. With no field React
-// Aria focuses the dialog itself, which reads its title. This renders after the dialog, so
+// Focus goes to the first field, so a form starts where typing starts. Where the action
+// cannot be undone a control marked data-autofocus takes it instead, so Enter cancels. With
+// neither React Aria focuses the dialog itself, which reads its title. This renders after the dialog, so
 // its effect runs after React Aria's and has the last word.
 function FirstField({ panel }: { panel: RefObject<HTMLElement | null> }): ReactNode {
   useEffect(() => {
     // A dialog that opens on a failed submit starts on the message instead.
     const start =
       panel.current?.querySelector<HTMLElement>('[data-submit-error]') ??
+      panel.current?.querySelector<HTMLElement>('[data-autofocus]') ??
       panel.current?.querySelector<HTMLElement>(FIELD);
     start?.focus();
   }, [panel]);
