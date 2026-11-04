@@ -170,6 +170,8 @@ export type RevokeState = 'live' | 'revoked' | 'absent';
 export interface RevokeShape extends CreateShape {
   readonly state?: RevokeState;
   readonly projectScope?: 'all' | 'listed';
+  // A name kept from before a rule tightened.
+  readonly storedName?: string;
 }
 
 export function storedKey(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -191,7 +193,10 @@ export function storedKey(over: Record<string, unknown> = {}): Record<string, un
 // Every statement revokeApiKey sends, answered as the database would for a key in that state.
 export function revokeResponder(shape: RevokeShape = {}): Responder {
   const state = shape.state ?? 'live';
-  const row = { project_scope: shape.projectScope ?? 'all' };
+  const row = {
+    project_scope: shape.projectScope ?? 'all',
+    ...(shape.storedName === undefined ? {} : { name: shape.storedName }),
+  };
   const members = createResponder(shape);
   return (s) => {
     if (isRevokeWrite(s)) {

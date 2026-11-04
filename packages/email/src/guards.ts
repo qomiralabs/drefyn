@@ -113,7 +113,7 @@ const notice = z.discriminatedUnion('kind', [
     ...facts,
     kind: z.literal('owner_added'),
     organizationName: name(100),
-    ownerName: person,
+    memberName: person,
   }),
   z.object({
     ...facts,

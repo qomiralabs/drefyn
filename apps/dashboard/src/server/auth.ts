@@ -33,6 +33,7 @@ import {
 } from '@drefyn/db';
 import { parseEmailConfig } from '@drefyn/email/config';
 import { signInMethods, type SignInMethods } from '../auth/outcomes.ts';
+import { mailableOrganizationName } from './organization-name.ts';
 import { dashboardMail, noteEmailOff, type OrganizationName } from './auth-mailer.ts';
 import { mailDeliveryEnabled } from './gate.ts';
 import { logInfo, logWarn, type LogContext } from './log.ts';
@@ -112,7 +113,7 @@ async function compose(): Promise<DashboardAuth> {
   const authDb = await createAuthDatabase(parseAuthDatabaseConfig(process.env));
   const mail = await dashboardMail({
     linkOrigin: new URL(parsed.appOrigin),
-    organizationName: organizationNames(db),
+    organizationName: mailableOrganizationName(organizationNames(db)),
     enabled: mailDeliveryEnabled,
   });
   noteEmailOff(mail, parsed.email);

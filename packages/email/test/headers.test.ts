@@ -112,8 +112,8 @@ const hostileCases: readonly [string, (name: string) => MailMessage][] = [
       }),
   ],
   [
-    'notice.ownerName',
-    (n) => notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', ownerName: n }),
+    'notice.memberName',
+    (n) => notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', memberName: n }),
   ],
   [
     'notice.memberName',
