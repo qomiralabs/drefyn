@@ -112,6 +112,17 @@ export {
   type Roles,
   type RolesDeps,
 } from './roles.ts';
+export { createAccount, type Account, type AccountView, type LinkedIdentity } from './account.ts';
+export {
+  createMembers,
+  type MemberList,
+  type MemberSummary,
+  type Members,
+  type MembersDeps,
+  type PendingInvitation,
+  type ProjectSummary,
+  type WithdrawnInvitation,
+} from './members.ts';
 export { countSeats, type SeatHolder } from './seats.ts';
 export {
   RESERVED_SLUGS,
@@ -296,6 +307,8 @@ export {
   canChangeRole,
   canRemove,
   permissionsFor,
+  API_KEY_SCOPES,
+  type ApiKeyScope,
   type OrgRole,
   type Permission,
   type ProjectRole,

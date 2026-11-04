@@ -70,7 +70,7 @@ describe('package layout', () => {
   // revoke, and the command that opens both pools for them. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
   // breached list lookup and its build command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke and the command, files only from the breached list, and no network anywhere', () => {
+  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke and the command, files only from the breached list, and no network anywhere', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -81,6 +81,8 @@ describe('package layout', () => {
       'organizations.ts': database,
       'invitations.ts': database,
       'roles.ts': database,
+      'account.ts': database,
+      'members.ts': database,
       'email-sign-in.ts': database,
       'email-change.ts': database,
       'devices.ts': database,
@@ -112,6 +114,7 @@ describe('the main entry', () => {
   it('exports exactly the public API', () => {
     expect(Object.keys(main).sort()).toEqual(
       [
+        'API_KEY_SCOPES',
         'ARGON2_FLOOR',
         'AUTH_CONFIG_KEYS',
         'ApiKeyReplayError',
@@ -165,12 +168,14 @@ describe('the main entry', () => {
         'constantTimeEqual',
         'cookieNames',
         'countSeats',
+        'createAccount',
         'createApiKeyFailureLimiter',
         'createCodeIssuer',
         'createCliLinks',
         'createEmailChange',
         'createEmailSignIn',
         'createInvitations',
+        'createMembers',
         'createOrganizations',
         'createOperatorSessions',
         'createRoles',
@@ -228,6 +233,7 @@ describe('the main entry', () => {
   it('exports exactly the permission model from the pure entry', () => {
     expect(Object.keys(permissions).sort()).toEqual(
       [
+        'API_KEY_SCOPES',
         'ORG_ROLES',
         'PERMISSIONS',
         'PROJECT_ROLES',
