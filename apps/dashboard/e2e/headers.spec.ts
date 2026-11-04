@@ -167,8 +167,8 @@ test.describe('the WebKit select rule', () => {
     lines: list.filter((v) => v.directive === 'console').length,
   });
 
-  test.beforeEach(({}, info) => {
-    test.skip(info.project.name === 'flag-off', 'needs a page, and the flag off has none');
+  test.beforeEach(() => {
+    test.skip(!flagOn(), 'needs a page, and the flag off has none');
   });
 
   test('a bare select makes one pair on WebKit, none elsewhere, and balances out', async ({
