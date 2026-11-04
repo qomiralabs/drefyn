@@ -43,6 +43,7 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
       case 'email_changed':
         return { ...facts, kind, newAddress: 'new.person@example.com' as NormalizedEmailAddress };
       case 'api_key_created':
+      case 'api_key_revoked':
         return {
           ...facts,
           kind,

@@ -29,7 +29,7 @@ const isOwnerCount = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('count(*)') && s.sql.includes('"id" <> ');
 const isTargetLock = (s: Statement) =>
   select(s, 'memberships') && !s.sql.includes('"m".') && s.sql.endsWith(' for no key update');
-const isKeyDelete = (s: Statement) => s.sql.startsWith('delete from "api_keys"');
+const isKeyRevoke = (s: Statement) => s.sql.startsWith('update "api_keys"');
 const isInvitationDelete = (s: Statement) => s.sql.startsWith('delete from "invitations"');
 const isInvitationCount = (s: Statement) => select(s, 'invitations') && s.sql.includes('count(*)');
 const isRoleUpdate = (s: Statement) => s.sql.startsWith('update "memberships"');
@@ -84,7 +84,7 @@ function respond(w: World) {
         ? []
         : [{ id: ACTOR_MEMBERSHIP, role: r, default_project_role: w.actorDefault ?? null }];
     }
-    if (isKeyDelete(s)) return (w.keys ?? []).map((id) => ({ id }));
+    if (isKeyRevoke(s)) return (w.keys ?? []).map((id) => ({ id }));
     if (isInvitationDelete(s))
       return Array.from({ length: w.invitations ?? 0 }, () => ({ id: fixed(16) }));
     if (isInvitationCount(s)) return [{ n: w.invitations ?? 0 }];
@@ -121,7 +121,7 @@ const kinds = (statements: readonly Statement[]) =>
       ['count', isOwnerCount],
       ['target_lock', isTargetLock],
       ['actor', isActorRead],
-      ['keys', isKeyDelete],
+      ['keys', isKeyRevoke],
       ['invitations', isInvitationDelete],
       ['invitation_count', isInvitationCount],
       ['update', isRoleUpdate],
@@ -195,7 +195,7 @@ describe('changeRole', () => {
       'owners',
     ]);
     // Owner to admin keeps keys: the scopes registry never held management scopes.
-    expect(scripted.statements().some(isKeyDelete)).toBe(false);
+    expect(scripted.statements().some(isKeyRevoke)).toBe(false);
     const invitations = scripted.statements().find(isInvitationDelete);
     expect(invitations?.parameters).toContain('owner');
   });
@@ -209,7 +209,7 @@ describe('changeRole', () => {
     const owner = setup({ target: { role: 'admin' } });
     await owner.roles.changeRole(access('owner'), TARGET, 'owner');
     expect(owner.scripted.statements().some(isInvitationDelete)).toBe(false);
-    expect(owner.scripted.statements().some(isKeyDelete)).toBe(false);
+    expect(owner.scripted.statements().some(isKeyRevoke)).toBe(false);
   });
 
   it.each<[string, World, OrgRole, OrgRole]>([
@@ -373,6 +373,21 @@ describe('changeRole', () => {
   });
 });
 
+describe('the keys that go with a person', () => {
+  it('are revoked in place, the live ones only, and never deleted', async () => {
+    const { roles, scripted } = setup({ target: { role: 'admin' }, keys: [KEY_1] });
+    const result = await roles.removeMember(access('owner'), TARGET);
+    if (!result.ok) throw result.error;
+    const write = scripted.statements().find(isKeyRevoke);
+    expect(write?.sql).toContain('"revoked_at" = now()');
+    expect(write?.sql).toContain('"revoked_at" is null');
+    expect(write?.parameters).toContain(TARGET);
+    expect(scripted.statements().some((s) => s.sql.startsWith('delete from "api_keys"'))).toBe(
+      false,
+    );
+  });
+});
+
 describe('removeMember', () => {
   it('locks, reads, revokes keys before the membership goes, then notifies every owner', async () => {
     const { roles, scripted, mail } = setup({
@@ -419,7 +434,7 @@ describe('removeMember', () => {
       ...args: unknown[]
     ) => ReturnType<typeof roles.removeMember>;
     await remove(access('owner'), TARGET, { keys: 'keep' });
-    expect(scripted.statements().some(isKeyDelete)).toBe(true);
+    expect(scripted.statements().some(isKeyRevoke)).toBe(true);
   });
 
   it.each<[string, World, OrgRole]>([

@@ -607,9 +607,9 @@ const roles = createRoles({ db, logger, mailer }); // mailer has sendSecurityNot
   or `canRemove`, then lock the target membership before writing. Lowering or removing the
   last owner is `AUTH_LAST_OWNER`; no authority is `AUTH_FORBIDDEN`; an unknown membership is
   `AUTH_NOT_FOUND`. The same role again is a no op.
-- Removal deletes every API key the person made, then the membership, which takes their
-  pending invitations and project roles with it. A change to member deletes every key they
-  made and all their pending invitations; owner to admin keeps keys and drops only owner
+- Removal revokes every live API key the person made, then deletes the membership, which takes
+  their pending invitations and project roles with it. A change to member revokes every live
+  key they made and deletes their pending invitations; owner to admin keeps keys and drops only owner
   invitations. A member promoted loses their project role rows, so a later demotion brings
   none back. There is no option to keep keys.
 - Every owner gets `member_removed`, `member_keys_revoked` (a demotion that revoked keys) or
@@ -648,10 +648,19 @@ const verifier = createApiKeyVerifier(process.env, { db, logger }); // API servi
 - A repeated `idempotencyKey` with the same request fails with `ApiKeyReplayError`
   (`AUTH_IDEMPOTENCY_REPLAY`), whose `existing` is the summary without the secret. The same
   key with a different request is `AUTH_INPUT_INVALID`.
+- `revokeApiKey(access, keyId)` needs `org.manage_api_keys`, by the context and again as stored
+  (`AUTH_FORBIDDEN`), and a sign in within 15 minutes. Revoking is final and sets `revoked_at`;
+  the row stays, so a replayed create finds it and shows `revokedAt` instead of making a key.
+  An unknown id and another organization's key both answer `AUTH_NOT_FOUND`. A second revoke is
+  `ok` with `alreadyRevoked: true` and the first time. `send` tells every owner `api_key_revoked`,
+  never throws, and does nothing on a repeat.
+- A key cannot outlive its creator: `created_by` clearing on a live key fails the
+  `api_keys_ownerless_is_revoked` check, and `drefyn_app` cannot delete a key or change a revoked
+  one.
 - `verifyApiKey(authorization, ip)` reads `Authorization: Bearer drf_ak_...` only. Under the
   key's organization, the first statement selects the key row by id with its project scope;
-  the SHA-256 compare runs in constant time (a dummy compare on a miss) with expiry by
-  database time, and any failure rolls back before a second statement. `projectIds` is
+  the SHA-256 compare runs in constant time (a dummy compare on a miss) with expiry and
+  revocation by database time, and any failure rolls back before a second statement. `projectIds` is
   `'all'` only when the stored scope says so; a listed key whose projects are gone reaches
   none. `last_used_at` is written at most once an hour.
 - Each failure is counted in `api_key_failures` by IP or /64 (60 a minute by default); past it

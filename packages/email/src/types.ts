@@ -26,6 +26,7 @@ export const SECURITY_NOTICE_KINDS = Object.freeze([
   'password_reset',
   'new_device_sign_in',
   'api_key_created',
+  'api_key_revoked',
   'owner_added',
   'member_removed',
   'member_keys_revoked',
@@ -56,7 +57,7 @@ export type SecurityNoticeMail =
         | 'new_device_sign_in';
     })
   | (NoticeFacts & {
-      readonly kind: 'api_key_created';
+      readonly kind: 'api_key_created' | 'api_key_revoked';
       readonly organizationName: string;
       readonly keyName: string;
       // The last 4 characters, the only part of a key ever shown again.
