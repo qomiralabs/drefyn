@@ -1,4 +1,4 @@
-import type { Result } from '@drefyn/address';
+import { isLinkShaped, type Result } from '@drefyn/address';
 import { AuthError } from './errors.ts';
 
 // The same pattern as the database check on organization_slugs, so the code refuses first
@@ -68,17 +68,6 @@ export const RESERVED_SLUGS: readonly string[] = Object.freeze([
 const RESERVED: ReadonlySet<string> = new Set(RESERVED_SLUGS);
 const NAME_MAX = 100;
 
-// Names go into invitation mail. A mail client turns a domain into a link, so a name that
-// reads as one would let anyone send our mail pointing at their site.
-const SCHEME = '://';
-const WWW = 'www.';
-// Separators IDNA and browsers treat as a dot, after NFKC has folded the full width forms.
-const DOTS = /[。．｡]/g;
-// Anything but a space or another dot before it: linkifiers take underscores, hyphens and
-// marks in a label, and checking for letters only let those through.
-const DOMAIN_LIKE = /[^\s.]\.\p{L}{2,}/u;
-// Combining marks are dropped for the check only, so a mark inside the top level label (or
-// the one the dotted capital I leaves after lowercasing) cannot split it.
 const MARKS = /\p{M}/gu;
 // Control, format (zero width and bidi), line and paragraph separators, and private use.
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Zl}\p{Zp}]/u;
@@ -109,10 +98,9 @@ export function parseOrganizationName(value: unknown): Result<string, AuthError>
   const name = value.normalize('NFKC').trim();
   const length = Array.from(name).length;
   if (length === 0 || length > NAME_MAX || HIDDEN.test(name)) return refuse('AUTH_INPUT_INVALID');
-  const folded = name.replace(DOTS, '.').toLowerCase().replace(MARKS, '');
-  if (folded.includes(SCHEME) || folded.includes(WWW) || DOMAIN_LIKE.test(folded)) {
-    return refuse('AUTH_INPUT_INVALID');
-  }
+  // Names go into mail, and a client turns a domain into a link, so a name that reads as one
+  // would let anyone send our mail pointing at their site.
+  if (isLinkShaped(name)) return refuse('AUTH_INPUT_INVALID');
   return ok(name);
 }
 
