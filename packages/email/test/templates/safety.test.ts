@@ -88,8 +88,8 @@ describe('rendered mail', () => {
     for (const [name, message] of PREVIEW_MESSAGES) {
       const result = await renderMail(message, { linkOrigin: ORIGIN });
       if (!result.ok) throw new Error(result.error.code);
-      const stripped = result.value.html.replace(/<style[\s\S]*?<\/style>/g, '');
-      for (const tag of stripped.matchAll(/<(h1|p|a|th|td)\b[^>]*class="[^"]*"[^>]*>/g)) {
+      // The style block holds no tags, so these matches are all in the body.
+      for (const tag of result.value.html.matchAll(/<(h1|p|a|th|td)\b[^>]*class="[^"]*"[^>]*>/g)) {
         expect(tag[0], name).toContain('style="');
       }
     }

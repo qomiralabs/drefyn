@@ -82,13 +82,30 @@ describe('facts per kind', () => {
         at: AT,
         organizationName: 'Acme',
         keyName: 'deploy',
-        displaySuffix: 'x7Qa',
+        displaySuffix: 'x7qa',
       }),
     );
     expect(mail.text).toMatch(/^Organization: +Acme$/m);
     expect(mail.text).toMatch(/^API key: +deploy$/m);
-    expect(mail.text).toMatch(/^Ends in: +x7Qa$/m);
+    expect(mail.text).toMatch(/^Ends in: +x7qa$/m);
   });
+
+  it.each(['x7q', 'x7qa9', 'x7Qa', 'drf_ak_secret', 'x7 a'])(
+    'refuses a key suffix that is not the last four characters: %s',
+    async (displaySuffix) => {
+      const result = await renderMail(
+        notice({
+          kind: 'api_key_created',
+          at: AT,
+          organizationName: 'Acme',
+          keyName: 'deploy',
+          displaySuffix,
+        }),
+        { linkOrigin: ORIGIN },
+      );
+      expect(result.ok ? null : result.error.field).toBe('notice.displaySuffix');
+    },
+  );
 
   it('owner_added names the organization and the owner', async () => {
     const mail = await rendered(

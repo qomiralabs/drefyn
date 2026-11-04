@@ -19,7 +19,7 @@ const fixture = (purpose: string): MailMessage => {
 function codeCell(html: string): { readonly markup: string; readonly text: string } {
   const match = /<p class="[^"]*dr-code[^"]*"[^>]*>(.*?)<\/p>/.exec(html);
   if (match?.[0] === undefined || match[1] === undefined) throw new Error('no code cell');
-  return { markup: match[0], text: match[1].replace(/<[^>]*>/g, '') };
+  return { markup: match[0], text: match[1].split(/<[^>]*>/).join('') };
 }
 
 describe('sign in code mail', () => {

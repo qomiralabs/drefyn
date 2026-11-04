@@ -59,7 +59,7 @@ export type SecurityNoticeMail =
       readonly kind: 'api_key_created';
       readonly organizationName: string;
       readonly keyName: string;
-      // The last few characters, the only part of a key ever shown again.
+      // The last 4 characters, the only part of a key ever shown again.
       readonly displaySuffix: string;
     })
   | (NoticeFacts & {

@@ -48,7 +48,7 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
           kind,
           organizationName: ORG,
           keyName: 'deploy <ci>',
-          displaySuffix: 'x7Qa',
+          displaySuffix: 'x7qa',
         };
       case 'owner_added':
         return { ...facts, kind, organizationName: ORG, ownerName: PERSON };
@@ -155,7 +155,7 @@ export const PREVIEW_MESSAGES: readonly (readonly [string, MailMessage])[] = [
         at: AT,
         organizationName: LONG_ORG,
         keyName: LONG_WORD,
-        displaySuffix: 'x7Qa',
+        displaySuffix: 'x7qa',
       },
     },
   ],
@@ -216,7 +216,7 @@ export const PREVIEW_MESSAGES: readonly (readonly [string, MailMessage])[] = [
         at: AT,
         organizationName: HOSTILE,
         keyName: HOSTILE,
-        displaySuffix: 'x7Qa',
+        displaySuffix: 'x7qa',
       },
     },
   ],

@@ -21,10 +21,7 @@ const modes = [
   { name: 'dark 390', scheme: 'dark', width: 390, strip: false },
 ] as const;
 
-function html(id: string, strip: boolean): string {
-  const raw = readFileSync(`${PREVIEW_DIR}/${id}.html`, 'utf8');
-  return strip ? raw.replace(/<style[\s\S]*?<\/style>/g, '') : raw;
-}
+const html = (id: string): string => readFileSync(`${PREVIEW_DIR}/${id}.html`, 'utf8');
 
 async function open(page: Page, id: string, mode: (typeof modes)[number]): Promise<string[]> {
   const requests: string[] = [];
@@ -35,7 +32,13 @@ async function open(page: Page, id: string, mode: (typeof modes)[number]): Promi
   });
   await page.emulateMedia({ colorScheme: mode.scheme });
   await page.setViewportSize({ width: mode.width, height: 900 });
-  await page.setContent(html(id, mode.strip));
+  await page.setContent(html(id));
+  // Through the DOM, the way a client that drops head styles sees it.
+  if (mode.strip) {
+    await page.locator('style').evaluateAll((styles) => {
+      for (const style of styles) style.remove();
+    });
+  }
   return requests;
 }
 

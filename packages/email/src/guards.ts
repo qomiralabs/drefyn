@@ -95,7 +95,7 @@ const notice = z.discriminatedUnion('kind', [
     kind: z.literal('api_key_created'),
     organizationName: name(100),
     keyName: name(100),
-    displaySuffix: name(8),
+    displaySuffix: z.string().regex(/^[0-9a-hjkmnp-tv-z]{4}$/),
   }),
   z.object({
     ...facts,

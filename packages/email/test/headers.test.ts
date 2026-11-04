@@ -97,7 +97,7 @@ const hostileCases: readonly [string, (name: string) => MailMessage][] = [
         at: AT,
         organizationName: n,
         keyName: 'ci',
-        displaySuffix: 'x7Qa',
+        displaySuffix: 'x7qa',
       }),
   ],
   [
@@ -108,7 +108,7 @@ const hostileCases: readonly [string, (name: string) => MailMessage][] = [
         at: AT,
         organizationName: 'Acme',
         keyName: n,
-        displaySuffix: 'x7Qa',
+        displaySuffix: 'x7qa',
       }),
   ],
   [
