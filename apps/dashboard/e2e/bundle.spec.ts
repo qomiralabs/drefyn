@@ -87,10 +87,12 @@ test('sign in stays under 30 KB beyond the framework baseline', async ({ browser
 
 // Welcome shares this page's one client file, so measuring one measures both.
 test('the first run pages stay under 150 KB beyond the framework baseline', async ({ browser }) => {
-  const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
+  // The same server, because scripts are matched to the baseline by URL.
+  const baseline = await coldLoad(browser, `${OPEN_ORIGIN}${BASELINE_ROUTE}`, SIGNED_OUT);
   const path = `${OPEN_ORIGIN}/organizations/new`;
   const report = routeReport(path, await coldLoad(browser, path, stateFile(ZARA)), baseline);
   console.log(`${path}: ${kb(report.beyondBaselineBytes)} beyond baseline`);
+  expect(report.beyondBaselineBytes).toBeGreaterThan(0);
   expect(report.overBudget).toBe(false);
 });
 

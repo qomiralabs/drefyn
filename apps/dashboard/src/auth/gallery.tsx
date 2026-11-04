@@ -205,6 +205,7 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
       <BlockScreen {...shared(h)} view={{ kind: 'ask', organizationName: 'Acme', token: 't' }} />
     ),
     done: (h) => <BlockScreen {...shared(h)} view={{ kind: 'done', organizationName: 'Acme' }} />,
+    failed: (h) => <BlockScreen {...shared(h)} view={{ kind: 'failed', notice: UNAVAILABLE }} />,
     invalid: (h) => <BlockScreen {...shared(h)} view={{ kind: 'invalid' }} />,
   },
 };
