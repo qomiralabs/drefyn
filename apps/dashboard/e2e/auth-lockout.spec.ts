@@ -87,6 +87,7 @@ for (const count of [4, 16]) {
     const link = new URL(held.link);
     // The refresh a redirect becomes here drops a fragment, so B gets its cookie first.
     await secondPage.goto('/sign-in');
+    await expect(secondPage.getByLabel('Email address')).toBeVisible();
     await secondPage.goto(link.pathname + link.hash);
     await expect(secondPage.getByRole('heading', { level: 1 })).toContainText(
       'Type this code where you asked.',

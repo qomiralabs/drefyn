@@ -107,8 +107,14 @@ export function SignUpForm(props: SignUpBase): ReactNode {
 function useFragment(run: (fragment: string) => void): void {
   const once = useRef(false);
   const latest = useRef(run);
+  const consumed = useRef(false);
   useEffect(() => {
     latest.current = run;
+    // Next writes its own copy of the URL back after an action, fragment and all, so the
+    // secret is taken out again after every render.
+    if (consumed.current && window.location.hash !== '') {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+    }
   });
   useEffect(() => {
     const read = (): string => {
@@ -124,6 +130,7 @@ function useFragment(run: (fragment: string) => void): void {
       once.current = true;
       latest.current(read());
     }
+    consumed.current = true;
     const changed = () => {
       const fragment = read();
       if (fragment !== '') latest.current(fragment);
@@ -157,9 +164,10 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
       readAction(asForm({ csrf, fragment }));
     });
   });
-  const { view: linked } = noticed(link, { kind: 'idle' });
-  const { view: done } = noticed(finished, { kind: 'idle' });
-  const current = done.kind === 'idle' ? linked : done;
+  const read = noticed<LinkState>(link, { kind: 'idle' });
+  const pressed = noticed<LinkState>(finished, { kind: 'idle' });
+  const current = pressed.view.kind === 'idle' ? read.view : pressed.view;
+  const linkNotice = pressed.notice ?? read.notice;
   const { view: typedView, notice } = noticed(typed, {});
   const focus = useFocusOnChange(current.kind === 'idle' ? typed : current);
   const { view: resetView } = noticed(reset, { step: 'ask' });
@@ -200,7 +208,8 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
           />
         ) : null}
         {current.kind === 'failed' ? <Failed notice={current.notice} /> : null}
-        {current.kind === 'idle' && !reading ? (
+        {linkNotice === undefined ? null : <Failed notice={linkNotice} />}
+        {current.kind === 'idle' && !reading && linkNotice === undefined ? (
           <div className="auth-typed contents">
             <TypedCode
               hosted={hosted}
