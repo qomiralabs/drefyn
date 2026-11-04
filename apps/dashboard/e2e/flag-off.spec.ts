@@ -6,7 +6,7 @@ import {
   LEAK_PATHS,
   UNKNOWN_ORG_PATHS,
 } from './leaks.ts';
-import { MAYA, stateFile } from './people.ts';
+import { MAYA, stateFile, ZARA } from './people.ts';
 import { test } from './test.ts';
 
 // This project runs against the server started with dashboard.shell off.
@@ -18,6 +18,8 @@ const SIGNED_OUT_PAGES = [
   '/sign-in/reset',
   '/sign-in/link',
   '/sign-in/cli',
+  '/welcome',
+  '/organizations/new',
   '/invite',
   '/invite/block',
   '/auth-states/sign-in/ready',
@@ -65,6 +67,18 @@ for (const path of [...LEAK_PATHS, ...UNKNOWN_ORG_PATHS]) {
     await expectTitleLeaksNothing(page, path);
   });
 }
+
+// The person the first run pages are for gets the same 404 as anyone else.
+test.describe('signed in, with no organization', () => {
+  test.use({ storageState: stateFile(ZARA) });
+
+  for (const path of ['/', '/welcome', '/organizations/new']) {
+    test(`${path} is a 404 with no page content`, async ({ request, page }) => {
+      await expectBodyLeaksNothing(request, path);
+      await expectTitleLeaksNothing(page, path);
+    });
+  }
+});
 
 // A valid session changes nothing: with the flag off there is no dashboard for anyone.
 test.describe('signed in', () => {

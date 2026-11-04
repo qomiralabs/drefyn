@@ -22,6 +22,7 @@ const VIEW: AccessView = {
   displayName: 'Maya Okafor',
 };
 const SESSION = { sessionId: SESSION_ID, userId: USER } as unknown as SessionInfo;
+const ACCOUNT = { displayName: 'Maya Okafor', passwordSetAt: null };
 
 // Slow under coverage on a shared runner; the default 5 s failed there with nothing wrong.
 const SLOW_TIMEOUT_MS = 60_000;
@@ -40,6 +41,7 @@ const resolveAccess = vi.fn();
 const resolveSession = vi.fn();
 const touchSession = vi.fn();
 const listMyOrganizations = vi.fn();
+const readAccount = vi.fn();
 const dashboardAuth = vi.fn();
 const sessionCookieName = vi.fn(() => 'drefyn_session');
 const after = vi.fn();
@@ -81,7 +83,9 @@ beforeEach(() => {
   dashboardAuth.mockResolvedValue({
     sessions: { resolveAccess, resolveSession, touchSession },
     organizations: { listMyOrganizations },
+    account: { readAccount },
   });
+  readAccount.mockResolvedValue({ ok: true, value: ACCOUNT });
 });
 
 const load = async () => import('../src/server/guard.ts');
@@ -290,14 +294,36 @@ describe('guardSignedIn', () => {
     await expect(guardSignedIn()).resolves.toEqual({
       session: SESSION,
       organizations: [first, other],
+      account: ACCOUNT,
     });
     expect(requireDashboard).toHaveBeenCalledWith(ORG, USER);
   });
 
-  it('is a 404 for a person with no organization', async () => {
+  it('lets a person with no organization through, so / is never their dead end', async () => {
     listMyOrganizations.mockResolvedValue([]);
     const { guardSignedIn } = await load();
+    await expect(guardSignedIn()).resolves.toEqual({
+      session: SESSION,
+      organizations: [],
+      account: ACCOUNT,
+    });
+    expect(requireDashboardForVisitor).toHaveBeenCalled();
+    expect(requireDashboard).not.toHaveBeenCalled();
+  });
+
+  it('is a 404 for a person with no organization while the flag is off', async () => {
+    listMyOrganizations.mockResolvedValue([]);
+    requireDashboardForVisitor.mockRejectedValue(NOT_FOUND);
+    const { guardSignedIn } = await load();
     await expect(guardSignedIn()).rejects.toBe(NOT_FOUND);
+    expect(readAccount).not.toHaveBeenCalled();
+  });
+
+  it('never turns a failed account read into a 404 or a sign out', async () => {
+    const down = new Error('down');
+    readAccount.mockResolvedValue({ ok: false, error: down });
+    const { guardSignedIn } = await load();
+    await expect(guardSignedIn()).rejects.toBe(down);
   });
 
   it('redirects with no cookie, after the visitor check, with no database', async () => {

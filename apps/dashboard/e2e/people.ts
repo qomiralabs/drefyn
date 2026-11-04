@@ -23,7 +23,7 @@ export const MAYA = person('maya', '0001', 'Maya Okafor', 'maya@acme.dev');
 export const ADA = person('ada', '0002', 'Ada Lindqvist', 'ada@acme.dev');
 export const SAM = person('sam', '0003', 'Sam Reyes', 'sam@acme.dev');
 export const NOOR = person('noor', '0004', 'Noor Haddad', 'noor@beta.dev');
-// Belongs to nothing, for the 404 at / until a page for that state exists.
+// Belongs to nothing, for the page that person lands on.
 export const ZARA = person('zara', '0005', 'Zara Ito', 'zara@example.dev');
 
 export const PEOPLE: readonly Person[] = [MAYA, ADA, SAM, NOOR, ZARA];

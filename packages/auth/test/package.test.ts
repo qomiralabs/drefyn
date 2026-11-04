@@ -165,6 +165,7 @@ describe('the main entry', () => {
         'constantTimeEqual',
         'cookieNames',
         'countSeats',
+        'createAccount',
         'createApiKeyFailureLimiter',
         'createCodeIssuer',
         'createCliLinks',
