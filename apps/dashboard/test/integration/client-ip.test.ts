@@ -298,3 +298,65 @@ describe.runIf(runBuilt)('next start on the production build', () => {
     expect(output).toContain('"event":"dashboard.wrapper_missing"');
   });
 });
+
+describe.runIf(runBuilt)('mail through the built server', () => {
+  const TRANSPORT = {
+    DREFYN_EMAIL_TRANSPORT: 'smtp',
+    DREFYN_EMAIL_FROM: 'drefyn@example.dev',
+    DREFYN_SMTP_HOST: '127.0.0.1',
+    DREFYN_SMTP_PORT: '51025',
+    DREFYN_SMTP_TLS: 'none',
+    DREFYN_SMTP_ALLOW_PLAINTEXT: 'true',
+  };
+
+  async function bootLog(nodeArgs: readonly string[], extra: Record<string, string>) {
+    const child = spawn(process.execPath, [...nodeArgs, 'server.ts'], {
+      cwd: root,
+      env: {
+        PATH: process.env['PATH'],
+        NODE_ENV: 'production',
+        HOSTNAME: '127.0.0.1',
+        PORT: '0',
+        UV_THREADPOOL_SIZE: '16',
+        NEXT_TELEMETRY_DISABLED: '1',
+        DREFYN_APP_ORIGIN: ORIGIN,
+        DREFYN_FLAGS_SOURCE: 'file',
+        DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+        ...AUTH_ENV,
+        ...extra,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    const exited = new Promise<void>((done) => {
+      child.once('exit', () => {
+        done();
+      });
+    });
+    const settled = /dashboard\.email_(ready|load_failed)/;
+    const started = Date.now();
+    while (!settled.test(output) && child.exitCode === null && Date.now() - started < 30_000) {
+      await new Promise((wake) => setTimeout(wake, 100));
+    }
+    const stayedUp = child.exitCode === null;
+    child.kill('SIGTERM');
+    await exited;
+    return { output, stayedUp };
+  }
+
+  it('loads the mail package through Node with the flag on and a transport set', async () => {
+    const { output, stayedUp } = await bootLog([], TRANSPORT);
+    expect(output).toContain('"event":"dashboard.email_ready"');
+    expect(stayedUp).toBe(true);
+  }, 60_000);
+
+  it('keeps serving when the package fails to load, and says so without detail', async () => {
+    const breaker = join(root, 'test', 'integration', 'support', 'break-email.ts');
+    const { output, stayedUp } = await bootLog(['--import', breaker], TRANSPORT);
+    expect(output).toContain('"event":"dashboard.email_load_failed"');
+    expect(output).not.toContain('Cannot find package');
+    expect(stayedUp).toBe(true);
+  }, 60_000);
+});

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { expect, type Browser, type BrowserContextOptions } from '@playwright/test';
 import {
@@ -74,4 +74,17 @@ test('the framework baseline has not grown more than 5 percent', async ({ browse
     `baseline ${kb(measured)}, recorded ${kb(recorded.gzipBytes)}, growth ${(report.growth * 100).toFixed(1)} percent`,
   );
   expect(report.ok).toBe(true);
+});
+
+// Mail loads through Node at run time, so a browser must never be sent a byte of it.
+test('no client chunk holds mail code', () => {
+  const root = new URL('../.next/static/', import.meta.url);
+  const files = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter((f) =>
+    f.endsWith('.js'),
+  );
+  expect(files.length, 'the build wrote client chunks').toBeGreaterThan(0);
+  const holding = files.filter((f) =>
+    /nodemailer|MailDocument/.test(readFileSync(new URL(f, root), 'utf8')),
+  );
+  expect(holding).toEqual([]);
 });

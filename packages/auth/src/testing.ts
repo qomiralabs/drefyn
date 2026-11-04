@@ -11,6 +11,7 @@ export interface SentCode {
   readonly code: string;
   readonly link: URL;
   readonly purpose: SignInCodePurpose;
+  readonly challengeId: string;
   readonly linking?: { readonly provider: 'github' | 'google'; readonly account: string };
 }
 
@@ -53,12 +54,13 @@ export function createTestAuthMailer(options: { readonly delayMs?: number } = {}
     }
   };
   const mailer: AuthMailer & AuthNoticeMailer & AuthInvitationMailer = {
-    async sendSignInCode(to, code, link, purpose, linking) {
+    async sendSignInCode(to, code, link, purpose, challengeId, linking) {
       const mail: SentCode = {
         to,
         code,
         link,
         purpose,
+        challengeId,
         ...(linking === undefined
           ? {}
           : { linking: { provider: linking.provider, account: linking.account } }),

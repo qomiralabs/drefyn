@@ -5,6 +5,8 @@ export async function register(): Promise<void> {
   if (process.env['NEXT_RUNTIME'] === 'nodejs') {
     const { runStartCheck } = await import('./server/start-check.ts');
     runStartCheck();
+    const { warmMail } = await import('./server/start-check.ts');
+    void warmMail();
   }
 }
 

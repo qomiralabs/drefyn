@@ -6,6 +6,8 @@ const config: NextConfig = {
     '@drefyn/address',
     '@drefyn/auth',
     '@drefyn/db',
+    // For ./config only. The mail itself loads through Node: see src/server/email-runtime.ts.
+    '@drefyn/email',
     '@drefyn/entitlements',
     '@drefyn/flags',
     '@drefyn/tenancy',

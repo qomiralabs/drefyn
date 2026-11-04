@@ -37,6 +37,15 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'email.smtp_delivery',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'Real mail delivery from the dashboard through the configured SMTP relay.',
+    created: '2026-11-04',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;
