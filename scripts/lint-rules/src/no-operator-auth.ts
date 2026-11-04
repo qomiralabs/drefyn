@@ -43,7 +43,8 @@ export const noOperatorAuth: Rule.RuleModule = {
         }
       },
       ExportSpecifier: (node) => {
-        if (isRecord(node.parent) && isAuth(node.parent['source'])) {
+        const parent: unknown = node.parent;
+        if (isRecord(parent) && isAuth(parent['source'])) {
           check(keyName(node.local, false), node);
         }
       },
