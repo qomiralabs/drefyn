@@ -59,7 +59,7 @@ export const organizationSql = (organizationId: string, statement: string): Prom
     statement,
   );
 
-const userSql = (id: string, statement: string): Promise<string> =>
+export const userSql = (id: string, statement: string): Promise<string> =>
   appSql((db, query) => withUser(db, { userId: userId(id) }, (tx) => query.execute(tx)), statement);
 
 export const uniqueAddress = (label: string): string =>
@@ -103,3 +103,10 @@ export async function seedPerson(address: string, password?: string): Promise<st
   }
   return id;
 }
+
+// How a session looks an hour after its last sign in, without waiting the hour.
+export const makeStale = (id: string): Promise<string> =>
+  userSql(id, `update app.sessions set authenticated_at = now() - interval '1 hour'`);
+
+export const makeFresh = (id: string): Promise<string> =>
+  userSql(id, `update app.sessions set authenticated_at = now()`);

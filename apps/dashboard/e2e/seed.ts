@@ -17,7 +17,20 @@ import {
 } from '@drefyn/db';
 import { userId } from '@drefyn/tenancy';
 import { ON_ORIGIN } from './fixtures.ts';
-import { ACME_ID, ADA, BETA_ID, MAYA, NOOR, PEOPLE, SAM, stateFile } from './people.ts';
+import {
+  ACME_ID,
+  ADA,
+  BETA_ID,
+  KESTREL_ID,
+  MAYA,
+  NOOR,
+  OMAR,
+  PEOPLE,
+  RAFA,
+  SAM,
+  stateFile,
+  TESS,
+} from './people.ts';
 import { refuseOutsideTests } from './seed-guard.ts';
 import { roleUrl, serverEnv, stackFile } from './stack-env.ts';
 
@@ -56,17 +69,24 @@ const sql = `
 insert into app.users (id, email, email_normalized, display_name, email_verified_at)
 values ${people} on conflict do nothing;
 insert into app.organizations (organization_id, name, plan_tier)
-values (${quoted(ACME_ID)}, 'Acme', 'starter'), (${quoted(BETA_ID)}, 'Beta', 'starter')
+values (${quoted(ACME_ID)}, 'Acme', 'starter'), (${quoted(BETA_ID)}, 'Beta', 'starter'),
+  (${quoted(KESTREL_ID)}, 'Kestrel', 'growth')
 on conflict do nothing;
 insert into app.organization_slugs (slug, organization_id)
-values ('acme', ${quoted(ACME_ID)}), ('beta', ${quoted(BETA_ID)}) on conflict do nothing;
+values ('acme', ${quoted(ACME_ID)}), ('beta', ${quoted(BETA_ID)}),
+  ('kestrel', ${quoted(KESTREL_ID)}) on conflict do nothing;
 insert into app.memberships (organization_id, user_id, role)
 values ${[
   membership(ACME_ID, MAYA.id, 'owner'),
   membership(ACME_ID, ADA.id, 'admin'),
   membership(ACME_ID, SAM.id, 'member'),
   membership(BETA_ID, NOOR.id, 'owner'),
+  membership(KESTREL_ID, OMAR.id, 'owner'),
+  membership(KESTREL_ID, TESS.id, 'admin'),
+  membership(KESTREL_ID, RAFA.id, 'member'),
 ].join(', ')} on conflict do nothing;
+insert into app.projects (organization_id, product, slug, name)
+values (${quoted(KESTREL_ID)}, 'docs', 'handbook', 'Handbook') on conflict do nothing;
 `;
 
 check(

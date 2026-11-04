@@ -21,6 +21,8 @@ const SIGNED_OUT_PAGES = [
   '/invite',
   '/invite/block',
   '/auth-states/sign-in/ready',
+  '/settings-states/members/ready',
+  '/settings-states/whoami',
 ];
 // Route handlers, so a 404 here has no page to carry a title.
 const SIGNED_OUT_ROUTES = ['/auth/pre', '/auth/oauth/github/start', '/auth/oauth/github/callback'];

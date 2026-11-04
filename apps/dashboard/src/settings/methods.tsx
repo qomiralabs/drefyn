@@ -262,6 +262,7 @@ export function MethodsScreen({
   const password = gone.includes('password') ? null : facts.passwordSetAt;
   const identities = facts.identities.filter((i) => !gone.includes(i.provider));
   const { count, only } = methodsFrom({ passwordSetAt: password, identities }, facts.emailOn);
+  const canSetPassword = password === null && facts.passwordsOn;
   const linkable = PROVIDERS.filter(
     ([id]) => facts.configured.includes(id) && !identities.some((i) => i.provider === id),
   );
@@ -325,37 +326,35 @@ export function MethodsScreen({
         <SectionHead
           id="methods-list"
           actions={
-            <Menu
-              size="sm"
-              label="Add a method"
-              defaultOpen={addOpen}
-              trigger={
-                <span className="inline-flex items-center gap-4">
-                  <IconPlus />
-                  Add a method
-                </span>
-              }
-            >
-              {linkable.map(([id, label]) => (
-                <MenuItem key={id} id={`link-${id}`} onAction={() => void link(id)}>
-                  {`Link ${label}`}
-                </MenuItem>
-              ))}
-              <MenuItem
-                id="set-password"
-                disabled={password !== null || !facts.passwordsOn}
-                reason={
-                  password === null
-                    ? 'This server has passwords off.'
-                    : 'You have one. Change it from its row.'
+            !canSetPassword && linkable.length === 0 ? undefined : (
+              <Menu
+                size="sm"
+                label="Add a method"
+                defaultOpen={addOpen}
+                trigger={
+                  <span className="inline-flex items-center gap-4">
+                    <IconPlus />
+                    Add a method
+                  </span>
                 }
-                onAction={() => {
-                  setDialog('password');
-                }}
               >
-                Set a password
-              </MenuItem>
-            </Menu>
+                {linkable.map(([id, label]) => (
+                  <MenuItem key={id} id={`link-${id}`} onAction={() => void link(id)}>
+                    {`Link ${label}`}
+                  </MenuItem>
+                ))}
+                {canSetPassword ? (
+                  <MenuItem
+                    id="set-password"
+                    onAction={() => {
+                      setDialog('password');
+                    }}
+                  >
+                    Set a password
+                  </MenuItem>
+                ) : null}
+              </Menu>
+            )
           }
         >
           Methods

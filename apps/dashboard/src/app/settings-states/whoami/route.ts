@@ -9,15 +9,20 @@ import { appUrl, requestPath } from '../../../server/origin.ts';
 let verifier: ReturnType<typeof createApiKeyVerifier> | undefined;
 
 async function apiVerifier() {
-  verifier ??= createApiKeyVerifier(process.env, {
-    db: await createDatabase(parseDatabaseConfig(process.env)),
-    logger: {
-      info: () => undefined,
-      warn: (event) => {
-        logWarn(event);
+  // Only its own key: the verifier refuses to start beside any auth setting.
+  const { DREFYN_API_RATE_LIMIT_KEY } = process.env;
+  verifier ??= createApiKeyVerifier(
+    { DREFYN_API_RATE_LIMIT_KEY },
+    {
+      db: await createDatabase(parseDatabaseConfig(process.env)),
+      logger: {
+        info: () => undefined,
+        warn: (event) => {
+          logWarn(event);
+        },
       },
     },
-  });
+  );
   return verifier;
 }
 

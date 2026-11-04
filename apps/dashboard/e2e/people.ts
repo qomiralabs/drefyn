@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 // shell, so an owner sees every entry and the screenshots do not move.
 export const ACME_ID = '01900000-0000-7000-8000-000000000a01';
 export const BETA_ID = '01900000-0000-7000-8000-000000000b01';
+// The settings spec changes people and keys here, so no other spec reads this organization.
+export const KESTREL_ID = '01900000-0000-7000-8000-000000000c01';
 
 export interface Person {
   readonly key: string;
@@ -26,7 +28,11 @@ export const NOOR = person('noor', '0004', 'Noor Haddad', 'noor@beta.dev');
 // Belongs to nothing, for the 404 at / until a page for that state exists.
 export const ZARA = person('zara', '0005', 'Zara Ito', 'zara@example.dev');
 
-export const PEOPLE: readonly Person[] = [MAYA, ADA, SAM, NOOR, ZARA];
+export const OMAR = person('omar', '0006', 'Omar Bello', 'omar@kestrel.dev');
+export const TESS = person('tess', '0007', 'Tess Moore', 'tess@kestrel.dev');
+export const RAFA = person('rafa', '0008', 'Rafa Dias', 'rafa@kestrel.dev');
+
+export const PEOPLE: readonly Person[] = [MAYA, ADA, SAM, NOOR, ZARA, OMAR, TESS, RAFA];
 
 export const stateFile = (who: Person): string =>
   fileURLToPath(new URL(`./.auth/${who.key}.json`, import.meta.url));

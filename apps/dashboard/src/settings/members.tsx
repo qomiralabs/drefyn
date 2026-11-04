@@ -11,7 +11,7 @@ import {
 } from '@drefyn/ui/react';
 import type { OrgRole } from '@drefyn/auth/permissions';
 import dynamic from 'next/dynamic';
-import { useState, type ReactNode } from 'react';
+import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   changeMemberRole,
   keysOfMember,
@@ -134,6 +134,10 @@ function statusValue(statuses: readonly PeopleStatus[]): string {
   return words === '' ? 'None' : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
+const noSubscribe = () => () => undefined;
+const onClient = () => true;
+const onServer = () => false;
+
 const firstName = (name: string) => name.split(/\s+/)[0] ?? name;
 
 function RemoveDialog({
@@ -233,7 +237,18 @@ function RoleCell({
   lastOwner: boolean;
   onChange: (role: OrgRole) => void;
 }): ReactNode {
+  const hydrated = useSyncExternalStore(noSubscribe, onClient, onServer);
   if (!facts.manage) return roleLabel(role);
+  // React Aria's hidden select carries a style attribute, which the content security policy
+  // strips from server HTML, and hydration does not put it back. So the picker mounts in the
+  // browser, over a box of the same size.
+  if (!hydrated) {
+    return (
+      <span className="flex h-control-md w-full max-w-128 items-center rounded-sm border border-control px-8">
+        {roleLabel(role)}
+      </span>
+    );
+  }
   const options = roleOptions(
     { actor: facts.actorRole, target: role, self: member.self, lastOwner },
     facts.organization,

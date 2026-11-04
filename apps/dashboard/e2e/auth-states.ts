@@ -17,6 +17,7 @@ export const AUTH_STATES: Readonly<Record<string, readonly string[]>> = {
   reset: ['ask', 'code', 'choose', 'refused', 'breached', 'saved'],
   link: ['ready', 'wrong'],
   cli: ['invalid', 'failed'],
+  'new-organization': ['ready', 'taken', 'limited'],
   invite: ['reading', 'signed-out', 'match', 'mismatch', 'invalid', 'failed'],
   block: ['reading', 'ask', 'done', 'invalid', 'failed'],
 };

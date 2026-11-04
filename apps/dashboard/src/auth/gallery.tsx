@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BlockScreen, CliScreen, InviteScreen } from './outcome-screens.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
+import { NewOrganizationScreen } from '../settings/new-organization.tsx';
 import { AuthFrame } from './parts.tsx';
 import {
   ChoosePassword,
@@ -59,6 +60,15 @@ function verify(child: ReactNode): Screen {
 const typed = (extra: Partial<Parameters<typeof TypedCode>[0]> = {}) => (
   <TypedCode {...shared(true)} email={EMAIL} fromSignUp={false} {...extra} />
 );
+
+function newOrganization(props: { limited?: boolean; taken?: string }): Screen {
+  const Page = (hosted: boolean) => (
+    <AuthFrame hosted={hosted} label="New organization">
+      <NewOrganizationScreen origin="https://app.drefyn.com" {...props} />
+    </AuthFrame>
+  );
+  return Page;
+}
 
 const CHOOSE = { step: 'choose', code: '48210937', challenge: '' } as const;
 
@@ -142,6 +152,11 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
       />
     ),
     invalid: (h) => <InviteScreen {...shared(h)} view={{ kind: 'invalid' }} />,
+  },
+  'new-organization': {
+    ready: newOrganization({}),
+    taken: newOrganization({ taken: 'acme' }),
+    limited: newOrganization({ limited: true }),
   },
   block: {
     reading: (h) => <BlockScreen {...shared(h)} view={{ kind: 'reading' }} />,

@@ -27,6 +27,41 @@ export const ROUTES = {
   loading: '/acme/docs/pending',
 } as const;
 
+// Every state of the settings pages, drawn from fixed words with no account.
+export const SETTINGS_STATES: Readonly<Record<string, readonly string[]>> = {
+  profile: ['ready', 'loading', 'error', 'change', 'code', 'changed'],
+  methods: [
+    'ready',
+    'loading',
+    'error',
+    'only-one',
+    'remove',
+    'removed',
+    'password',
+    'add-open',
+    'failed',
+  ],
+  sessions: ['ready', 'loading', 'error', 'single', 'everywhere'],
+  members: [
+    'ready',
+    'loading',
+    'error',
+    'member',
+    'full',
+    'over',
+    'filtered',
+    'invite',
+    'access',
+    'remove',
+  ],
+  keys: ['ready', 'loading', 'error', 'empty', 'member', 'filtered', 'create', 'shown', 'revoke'],
+};
+
+export const settingsStatePaths = (): readonly (readonly [string, string])[] =>
+  Object.entries(SETTINGS_STATES).flatMap(([screen, states]) =>
+    states.map((state) => [`${screen}-${state}`, `/settings-states/${screen}/${state}`] as const),
+  );
+
 // What needs the person on the overview. The inbox count, the overview sentence and the
 // Needs you list all say this number.
 export const NEEDS_YOU = 2;

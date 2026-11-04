@@ -38,7 +38,7 @@ export function PageHead({
 }): ReactNode {
   return (
     <div className="flex flex-wrap items-start justify-between gap-16">
-      <div className="flex max-w-measure min-w-0 flex-col gap-8">
+      <div className={`flex min-w-0 flex-col gap-8 ${size === 'calm' ? 'max-w-measure' : ''}`}>
         <Eyebrow>{label}</Eyebrow>
         <h1
           tabIndex={-1}
