@@ -10,7 +10,15 @@ export interface ShellLocation {
 }
 
 // Top level paths the app owns, so no organization can take them as its slug.
-export const RESERVED_SLUGS: readonly string[] = ['bundle-baseline', 'api'];
+export const RESERVED_SLUGS: readonly string[] = [
+  'bundle-baseline',
+  'api',
+  'auth',
+  'invite',
+  'sign-in',
+  'sign-out',
+  'sign-up',
+];
 
 // Lower case letters, digits and inner hyphens, at most 63 characters: the DNS label rule,
 // so a slug can also name a subdomain later. Percent escapes and dot segments never match.

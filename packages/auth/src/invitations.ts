@@ -92,6 +92,19 @@ export interface InvitationBlockView {
   readonly organizationName: string;
 }
 
+// What the invitation page shows the person holding the token.
+export interface InvitationView {
+  readonly organizationId: OrganizationId;
+  readonly organizationName: string;
+  readonly inviterName: string;
+  readonly email: string;
+  readonly role: OrgRole;
+  readonly defaultProjectRole: DefaultProjectRole | null;
+  readonly expiresAt: Date;
+  // Refusing must not need the mail, so the page offers the same link the mail carries.
+  readonly blockLink: URL;
+}
+
 export interface AcceptedInvitation {
   readonly access: AccessContext;
   // Clears the held invitation, which has done its job.
@@ -114,6 +127,8 @@ export interface Invitations extends PendingInvitations {
     b: BrowserContext,
     token: string,
   ): Result<{ readonly setCookies: readonly CookieSpec[] }, AuthError>;
+  // What the invitation page shows. Reads only, and only for the token's own organization.
+  readInvitation(token: string): Promise<Result<InvitationView, AuthError>>;
   // What the block page shows. Reads only: mail scanners open every link.
   readInvitationBlock(token: string): Promise<Result<InvitationBlockView, AuthError>>;
   // The page's POST. A second call with the same token changes nothing and still succeeds.
@@ -164,6 +179,7 @@ interface ProvedInvitation {
   readonly role: OrgRole;
   readonly defaultProjectRole: unknown;
   readonly invitedBy: string;
+  readonly expiresAt: Date;
 }
 
 // The one check of an invitation token. It sends a single statement, by id within the
@@ -182,6 +198,7 @@ export async function proveInvitation(
       'default_project_role',
       'invited_by',
       'secret_hash',
+      'expires_at',
       sql<boolean>`expires_at > now()`.as('live'),
     ])
     .where('organization_id', '=', token.organizationId)
@@ -197,6 +214,7 @@ export async function proveInvitation(
     role: storedRole(row.role),
     defaultProjectRole: row.default_project_role,
     invitedBy: row.invited_by,
+    expiresAt: row.expires_at,
   };
 }
 
@@ -620,6 +638,51 @@ export function createInvitations(config: AuthConfig, deps: InvitationsDeps): In
           idFields({ organizationId: ['org', parsed.organizationId] }),
         );
         return false;
+      }
+    },
+
+    async readInvitation(token) {
+      const parsed = parseInvitationToken(token);
+      if (parsed === null) return fail(new AuthError('AUTH_INVITATION_INVALID'));
+      const { organizationId } = parsed;
+      try {
+        const view = await store.organization(organizationId, async (tx) => {
+          const invitation = await proveInvitation(tx, parsed);
+          if (invitation === null) return null;
+          const organization = await tx
+            .selectFrom('organizations')
+            .select('name')
+            .where('organization_id', '=', organizationId)
+            .executeTakeFirst();
+          if (organization === undefined) return null;
+          const inviter = await tx
+            .selectFrom('memberships as m')
+            .innerJoin('users as u', 'u.id', 'm.user_id')
+            .select('u.display_name')
+            .where('m.organization_id', '=', organizationId)
+            .where('m.id', '=', invitation.invitedBy)
+            .executeTakeFirst();
+          return { invitation, organization, inviter };
+        });
+        if (view === null) return fail(new AuthError('AUTH_INVITATION_INVALID'));
+        const { invitation } = view;
+        const projectRole = invitation.defaultProjectRole;
+        return ok({
+          organizationId,
+          organizationName: view.organization.name,
+          inviterName: plainInviterName(view.inviter?.display_name ?? null),
+          email: invitation.emailNormalized,
+          role: invitation.role,
+          defaultProjectRole:
+            projectRole === 'editor' || projectRole === 'viewer' ? projectRole : null,
+          expiresAt: invitation.expiresAt,
+          blockLink: invitationBlockLink(
+            config.appOrigin,
+            blockTokenFor(organizationId, invitation.id, invitation.emailNormalized),
+          ),
+        });
+      } catch (error) {
+        return fail(error);
       }
     },
 

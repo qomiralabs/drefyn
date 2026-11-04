@@ -274,7 +274,25 @@ export type LinkVerified =
   // completePasswordReset. Nothing is proved or spent yet, and nobody is signed in.
   | { readonly kind: 'choose_password' };
 
+// What the verify page may say about a challenge. Only the browser that asked is told the
+// address, and a missing, spent or expired challenge reads the same for everyone.
+export type ChallengeView =
+  | {
+      readonly kind: 'here';
+      readonly email: string;
+      readonly purpose: SignInCodePurpose;
+      readonly provider: OAuthProvider | null;
+    }
+  | { readonly kind: 'elsewhere' }
+  | { readonly kind: 'gone' };
+
 export interface EmailSignIn {
+  // Read only: no attempt is counted and no limit is spent, so opening a link costs nothing.
+  // With no id, the newest open sign in challenge of this browser.
+  readChallenge(
+    b: BrowserContext,
+    input: { readonly challenge?: string },
+  ): Promise<Result<ChallengeView, AuthError>>;
   // One answer for every address: the same cookies and the same shape, mail or not.
   startEmailSignIn(
     b: BrowserContext,
@@ -597,6 +615,53 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
   }
 
   return Object.freeze({
+    async readChallenge(b, input) {
+      const GONE = ok<ChallengeView>({ kind: 'gone' });
+      const id = input.challenge === undefined ? null : parseChallengeId(input.challenge);
+      if (input.challenge !== undefined && id === null) return GONE;
+      const binding = bindingOf(config, b);
+      if (id === null && binding === null) return GONE;
+      try {
+        const row = await store.auth(async (tx) => {
+          const query = tx
+            .selectFrom('email_challenges')
+            .select([
+              'email_normalized',
+              'purpose',
+              'pending_provider',
+              'browser_hash',
+              sql<boolean>`expires_at > now() and attempts < ${MAX_ATTEMPTS}`.as('live'),
+              sql<boolean>`consumed_at is not null`.as('consumed'),
+            ]);
+          const found = await (
+            id === null
+              ? query
+                  .where('browser_hash', '=', binding ?? Buffer.alloc(0))
+                  .where('purpose', 'in', SIGN_IN_PURPOSES)
+                  .where('consumed_at', 'is', null)
+                  .orderBy('created_at', 'desc')
+                  .limit(1)
+              : query.where('id', '=', id)
+          ).executeTakeFirst();
+          return found;
+        });
+        if (row === undefined || row.consumed || !row.live) return GONE;
+        if (binding === null || !constantTimeEqual(row.browser_hash, binding)) {
+          return ok<ChallengeView>({ kind: 'elsewhere' });
+        }
+        const purpose = parseSignInCodePurpose(row.purpose);
+        if (purpose === null) return GONE;
+        return ok<ChallengeView>({
+          kind: 'here',
+          email: row.email_normalized,
+          purpose,
+          provider: parseOAuthProvider(row.pending_provider),
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
     async startEmailSignIn(b, input) {
       const address = normalizeAddress(input.email);
       if (address === null) return fail(new AuthError('AUTH_INPUT_INVALID'));

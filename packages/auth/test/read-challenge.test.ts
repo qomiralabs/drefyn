@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEmailSignIn, sha256 } from '../src/index.ts';
+import { createEmailSignIn, formatChallengeId, sha256 } from '../src/index.ts';
 import {
   ADDRESS,
   CHALLENGE,
@@ -14,6 +14,7 @@ import { isWrite } from './scripted-store.ts';
 
 const consumed = (row: Record<string, unknown>) => ({ ...row, consumed: true });
 const OTHER = Buffer.alloc(32, 9);
+const PUBLIC_ID = formatChallengeId(CHALLENGE);
 
 function read(challenge: Record<string, unknown> | null) {
   const t = unitDeps(emailResponder({ challenge }));
@@ -23,7 +24,7 @@ function read(challenge: Record<string, unknown> | null) {
 describe('readChallenge', () => {
   it('names the address only to the browser that asked', async () => {
     const { flow } = read({ ...challengeRow(), consumed: false });
-    const result = await flow.readChallenge(browser(), { challenge: CHALLENGE });
+    const result = await flow.readChallenge(browser(), { challenge: PUBLIC_ID });
     expect(result).toEqual({
       ok: true,
       value: { kind: 'here', email: ADDRESS, purpose: 'sign_in', provider: null },
@@ -32,13 +33,13 @@ describe('readChallenge', () => {
 
   it('says elsewhere and no address in any other browser', async () => {
     const { flow } = read({ ...challengeRow({ browserHash: sha256(OTHER) }), consumed: false });
-    const result = await flow.readChallenge(browser(), { challenge: CHALLENGE });
+    const result = await flow.readChallenge(browser(), { challenge: PUBLIC_ID });
     expect(result).toEqual({ ok: true, value: { kind: 'elsewhere' } });
   });
 
   it('says elsewhere to a browser with no pre sign in cookie', async () => {
     const { flow } = read({ ...challengeRow(), consumed: false });
-    const result = await flow.readChallenge(browser(null), { challenge: CHALLENGE });
+    const result = await flow.readChallenge(browser(null), { challenge: PUBLIC_ID });
     expect(result).toEqual({ ok: true, value: { kind: 'elsewhere' } });
   });
 
@@ -48,7 +49,7 @@ describe('readChallenge', () => {
     ['an expired challenge', { ...challengeRow({ live: false }), consumed: false }],
   ])('says gone for %s, in the browser that asked or any other', async (_name, row) => {
     const { flow } = read(row);
-    expect(await flow.readChallenge(browser(), { challenge: CHALLENGE })).toEqual({
+    expect(await flow.readChallenge(browser(), { challenge: PUBLIC_ID })).toEqual({
       ok: true,
       value: { kind: 'gone' },
     });
@@ -95,7 +96,7 @@ describe('readChallenge', () => {
 
   it('reads and never counts an attempt', async () => {
     const { flow, scripted, limiter } = read({ ...challengeRow(), consumed: false });
-    await flow.readChallenge(browser(), { challenge: CHALLENGE });
+    await flow.readChallenge(browser(), { challenge: PUBLIC_ID });
     expect(scripted.statements().filter((s) => isWrite(s))).toEqual([]);
     expect(limiter.reserve).not.toHaveBeenCalled();
   });

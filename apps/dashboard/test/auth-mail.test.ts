@@ -7,11 +7,10 @@ const sent: SendResult = { ok: true, value: { messageId: 'm', attempts: 1 } };
 
 function mailer(result: SendResult = sent) {
   const send = vi.fn<Mailer['send']>(() => Promise.resolve(result));
-  const adapter = createAuthMailer({
-    configured: true,
-    send,
-    drain: () => Promise.resolve({ dropped: 0 }),
-  });
+  const adapter = createAuthMailer(
+    { configured: true, send, drain: () => Promise.resolve({ dropped: 0 }) },
+    () => Promise.resolve('Acme'),
+  );
   return { send, adapter };
 }
 
@@ -54,6 +53,29 @@ describe('the auth mail adapter', () => {
     });
     expect(firstMessage(send)).toMatchObject({
       linking: { provider: 'github', account: 'octocat' },
+    });
+  });
+
+  it('refuses a link code that names no account, rather than guessing one', async () => {
+    const { send, adapter } = mailer();
+    const link = new URL('https://app.drefyn.test/sign-in/verify#x.12345678');
+    await expect(
+      adapter.sendSignInCode('a@example.com', '12345678', link, 'link_identity'),
+    ).rejects.toThrow('email.input_invalid');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('names the organization on a notice that carries only its id', async () => {
+    const { send, adapter } = mailer();
+    await adapter.sendSecurityNotice('a@example.com', {
+      kind: 'owner_added',
+      organizationId: idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070'),
+      membershipId: idOf('mem', '01890a5d-ac96-774b-bcce-b302099a8071'),
+      memberName: 'Ada',
+      at: new Date('2026-11-04T10:00:00Z'),
+    });
+    expect(firstMessage(send)).toMatchObject({
+      notice: { kind: 'owner_added', organizationName: 'Acme', ownerName: 'Ada' },
     });
   });
 

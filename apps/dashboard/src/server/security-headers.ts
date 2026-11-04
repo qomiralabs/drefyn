@@ -31,7 +31,7 @@ export function contentSecurityPolicy(nonce: string, development = false): strin
 
 // These pages are opened from links that carry a secret. The secret sits in the fragment,
 // which browsers never send, and no-referrer is the second lock.
-const NO_REFERRER = ['/sign-in/verify', '/invite'] as const;
+const NO_REFERRER = ['/sign-in/verify', '/sign-in/cli', '/invite'] as const;
 
 function referrerPolicy(pathname: string): string {
   const quiet = NO_REFERRER.some((base) => pathname === base || pathname.startsWith(`${base}/`));
