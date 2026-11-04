@@ -156,6 +156,21 @@ const USES: Use[] = [
   ...each('Tabs disabled', ['disabled.text'], ON, 'text', 'disabled'),
   // A disabled tab's reason shows in a tooltip on the overlay surface.
   ...each('Tabs reason tooltip', ['text.body'], ON, 'text'),
+  // A chip is raised on the ground of its box. Its button fills on hover.
+  ...each('TagField label', ['text.body'], ON, 'text'),
+  ...each('TagField text and chip', ['text.ink'], ON, 'text'),
+  ...each('TagField placeholder and description', ['text.secondary'], ON, 'text'),
+  ...each('TagField edge', ['border.control'], ON, 'non-text'),
+  ...each('TagField chip button', ['text.secondary'], ['surface.raised', ...FILLS], 'text'),
+  ...each('TagField chip button', ['text.ink'], FILLS, 'text'),
+  ...each('TagField invalid edge and chip mark', ['state.broken.mark'], ON, 'non-text'),
+  ...each('TagField error', ['state.broken.text'], ON, 'text'),
+  ...each('TagField focus', ['focus.ring'], ON, 'non-text'),
+  ...each('TagField disabled', ['disabled.text'], ['disabled.fill', ...ON], 'text', 'disabled'),
+  ...each('TagField disabled', ['disabled.edge'], ['disabled.fill', ...ON], 'non-text', 'disabled'),
+  // The list is Select's own options; the box and chips are TagField's. This is the count line.
+  ...each('MultiCombobox count and empty list', ['text.secondary'], ON, 'text'),
+  ...each('MultiCombobox count rule', ['border.rule'], ON, 'non-text', 'supplementary'),
 ];
 
 const key = (p: { mode: Mode; fg: string; bg: string; kind: PairKind }) =>
@@ -178,12 +193,14 @@ describe('colour combinations the components paint', () => {
         'Dialog',
         'EmptyState',
         'Menu',
+        'MultiCombobox',
         'Popover',
         'RadioGroup',
         'Select',
         'StatusDot',
         'Switch',
         'Tabs',
+        'TagField',
         'TextField',
         'Toast',
         'Tooltip',
