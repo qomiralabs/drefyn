@@ -187,6 +187,7 @@ function sharedEntries(t: Tokens): Entry[] {
     entries.push([`--dr-timer-${kebab(k)}`, `${v.ms}ms`]);
   entries.push(['--dr-page-max', px(t.layout.pageMax)]);
   entries.push(['--dr-landing', rem(t.layout.landing)]);
+  entries.push(['--dr-layout-auth', rem(t.layout.auth)]);
   for (const [k, v] of Object.entries(t.layout.docs)) entries.push([`--dr-docs-${k}`, px(v)]);
   for (const [k, v] of Object.entries(t.layout.shell)) {
     entries.push([`--dr-shell-${kebab(k)}`, rem(v)]);
@@ -340,6 +341,7 @@ export function renderTailwindCss(t: Tokens = source): string {
     '--container-page: var(--dr-page-max)',
     '--container-measure: var(--dr-measure)',
     '--container-landing: var(--dr-landing)',
+    '--container-auth: var(--dr-layout-auth)',
     '--default-font-family: var(--dr-font-sans)',
     '--default-mono-font-family: var(--dr-font-mono)',
     '--default-border-width: var(--dr-stroke-hairline)',
@@ -470,6 +472,7 @@ export function renderDtcg(t: Tokens = source): string {
     layout: {
       'page-max': dimension(t.layout.pageMax, 'px'),
       landing: dimension(t.layout.landing / 16, 'rem'),
+      auth: dimension(t.layout.auth / 16, 'rem'),
       ...Object.fromEntries(
         Object.entries(t.layout.breakpoints).map(([k, v]) => [
           `breakpoint-${k}`,

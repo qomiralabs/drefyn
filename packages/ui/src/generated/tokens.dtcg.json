@@ -1582,6 +1582,13 @@
         "unit": "rem"
       }
     },
+    "auth": {
+      "$type": "dimension",
+      "$value": {
+        "value": 26,
+        "unit": "rem"
+      }
+    },
     "breakpoint-md": {
       "$type": "dimension",
       "$value": {

@@ -163,11 +163,17 @@ export function createWrappers(deps: WrapperDeps) {
     }
   }
 
+  // A plain form action gets (form). useActionState gets (state, form), and it is the only
+  // way a refusal reaches the page with scripts off. The state is the client's, so it is
+  // never read here and the handler never sees it.
   function publicAction<R>(handler: (context: PublicContext, form: FormData) => Promise<R>) {
-    return async (form: FormData): Promise<R | Refusal> => {
+    return async (
+      ...args: readonly [FormData] | readonly [unknown, FormData]
+    ): Promise<R | Refusal> => {
       await deps.visitorFlag();
       const browser = admit(await deps.request());
       if (isRefusal(browser)) return browser;
+      const form = args.at(-1) as FormData;
       const refused = formRefusal(browser, form);
       return refused ?? handler({ browser }, form);
     };

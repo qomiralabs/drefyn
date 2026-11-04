@@ -10,6 +10,7 @@ import {
 import { readClientAddress } from '../src/server/client-address.ts';
 
 const ORIGIN = 'https://app.drefyn.test';
+const NOT_A_FORM: unknown = 'text';
 const IP = '203.0.113.9';
 const GOOD = { origin: ORIGIN, 'x-forwarded-for': IP, 'user-agent': 'Firefox' };
 const SESSION = { sessionId: 'ses_1', userId: 'usr_1' } as unknown as SessionInfo;
@@ -313,9 +314,10 @@ describe('publicAction', () => {
 
   it('refuses something that is not a form', async () => {
     const handler = vi.fn(() => Promise.resolve('ran'));
-    await expect(
-      wrappers().publicAction(handler)('text' as unknown as FormData),
-    ).resolves.toMatchObject({ status: 403, code: 'auth.challenge_binding' });
+    await expect(wrappers().publicAction(handler)(NOT_A_FORM as FormData)).resolves.toMatchObject({
+      status: 403,
+      code: 'auth.challenge_binding',
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -504,5 +506,44 @@ describe('refusal logs', () => {
     now += 60_000;
     await run();
     expect(lines).toHaveLength(2);
+  });
+});
+
+describe('publicAction under useActionState', () => {
+  beforeEach(() => {
+    facts = factsFor(GOOD);
+    checkBinding.mockReturnValue(true);
+  });
+
+  const form = () => {
+    const body = new FormData();
+    body.set('csrf', 'x'.repeat(43));
+    return body;
+  };
+
+  it('takes the previous state first and hands the handler only the form', async () => {
+    const handler = vi.fn<(c: unknown, f: FormData) => Promise<string>>(() =>
+      Promise.resolve('done'),
+    );
+    const action = wrappers().publicAction(handler);
+    const body = form();
+    await expect(action({ earlier: 'state' }, body)).resolves.toBe('done');
+    expect(handler.mock.calls[0]?.[1]).toBe(body);
+  });
+
+  it('still takes a form alone', async () => {
+    const action = wrappers().publicAction(() => Promise.resolve('done'));
+    await expect(action(form())).resolves.toBe('done');
+  });
+
+  it('refuses when the last argument is not a form, whatever came before it', async () => {
+    const handler = vi.fn(() => Promise.resolve('done'));
+    const action = wrappers().publicAction(handler);
+    const forged = form();
+    await expect(action(forged, 'not a form' as unknown as FormData)).resolves.toMatchObject({
+      ok: false,
+      code: 'auth.challenge_binding',
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 });

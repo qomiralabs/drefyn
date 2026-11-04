@@ -10,12 +10,41 @@ import { MAYA, stateFile } from './people.ts';
 import { test } from './test.ts';
 
 // This project runs against the server started with dashboard.shell off.
-const paths = ['/', ...Object.values(ROUTES), '/acme/docs', '/acme/status', '/bundle-baseline'];
+const SIGNED_OUT_PAGES = [
+  '/sign-in',
+  '/sign-up',
+  '/sign-in/verify',
+  '/sign-in/password',
+  '/sign-in/reset',
+  '/sign-in/link',
+  '/sign-in/cli',
+  '/invite',
+  '/invite/block',
+  '/auth-states/sign-in/ready',
+];
+// Route handlers, so a 404 here has no page to carry a title.
+const SIGNED_OUT_ROUTES = ['/auth/pre', '/auth/oauth/github/start', '/auth/oauth/github/callback'];
+const paths = [
+  '/',
+  ...Object.values(ROUTES),
+  '/acme/docs',
+  '/acme/status',
+  '/bundle-baseline',
+  ...SIGNED_OUT_PAGES,
+];
 
 for (const path of paths) {
   test(`${path} is 404 with the release flag off`, async ({ request }) => {
     const res = await request.get(path, { maxRedirects: 0 });
     expect(res.status()).toBe(404);
+  });
+}
+
+for (const path of SIGNED_OUT_ROUTES) {
+  test(`${path} is 404 and sets no cookie with the release flag off`, async ({ request }) => {
+    const res = await request.get(path, { maxRedirects: 0 });
+    expect(res.status()).toBe(404);
+    expect(res.headers()['set-cookie']).toBeUndefined();
   });
 }
 

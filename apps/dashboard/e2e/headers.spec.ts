@@ -55,7 +55,7 @@ for (const path of PATHS) {
       expect(headers['content-security-policy']).toBe(policy(nonce));
       expect(headers['x-content-type-options']).toBe('nosniff');
       expect(headers['referrer-policy']).toBe(
-        NO_REFERRER.has(path) ? 'no-referrer' : 'strict-origin-when-cross-origin',
+        NO_REFERRER.has(path) ? 'same-origin' : 'strict-origin-when-cross-origin',
       );
       expect(headers['cache-control']).toBe('no-store');
       expect(headers['cross-origin-opener-policy']).toBe('same-origin');

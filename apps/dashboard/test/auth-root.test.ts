@@ -16,12 +16,27 @@ vi.mock('@drefyn/db', () => ({
   withOrganization: vi.fn(),
 }));
 vi.mock('@drefyn/email/config', () => ({ parseEmailConfig: () => ({ ok: true }) }));
-vi.mock('@drefyn/auth', () => ({ createSessions, createOrganizations, parseAuthConfig }));
+vi.mock('@drefyn/auth', () => ({
+  createSessions,
+  createOrganizations,
+  parseAuthConfig,
+  createCliLinks: () => ({}),
+  createEmailSignIn: () => ({}),
+  createInvitations: () => ({}),
+  createOAuth: () => ({}),
+  createPasswordAccount: () => ({}),
+  createPasswordHasher: () => ({}),
+  createPasswordSignIn: () => ({}),
+  createRateLimiter: () => ({}),
+  loadBreachedPasswords: () => Promise.resolve(undefined),
+}));
 
 const CONFIG = {
   appOrigin: 'https://app.drefyn.test',
   email: 'auto',
   cookies: { session: '__Host-drefyn_session' },
+  oauth: { github: null, google: null },
+  passwords: { enabled: true, argon2: {} },
 };
 const sessions = {
   resolveAccess: vi.fn(),
@@ -69,18 +84,29 @@ describe('the composition root', () => {
     expect(Object.keys(auth.sessions).sort()).toEqual([
       'resolveAccess',
       'resolveSession',
+      'signOut',
       'touchSession',
     ]);
     expect(Object.keys(auth.organizations)).toEqual(['listMyOrganizations']);
-    expect(Object.keys(auth).sort()).toEqual(['emailOn', 'organizations', 'sessions']);
+    expect(Object.keys(auth).sort()).toEqual([
+      'cliLinks',
+      'emailSignIn',
+      'invitations',
+      'methods',
+      'oauth',
+      'organizations',
+      'passwordAccount',
+      'passwordSignIn',
+      'sessions',
+    ]);
   });
 
   it('reports email on only with a working mailer', async () => {
     const { dashboardAuth } = await load();
-    expect((await dashboardAuth()).emailOn).toBe(true);
+    expect((await dashboardAuth()).methods.email).toBe(true);
     vi.resetModules();
     dashboardMail.mockResolvedValueOnce({ auth: {}, configured: false });
-    expect((await (await load()).dashboardAuth()).emailOn).toBe(false);
+    expect((await (await load()).dashboardAuth()).methods.email).toBe(false);
   });
 
   it('keeps the method receivers working', async () => {

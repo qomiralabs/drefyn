@@ -12,6 +12,9 @@ import {
 const https = servedOverHttps(process.env);
 const development = process.env.NODE_ENV === 'development';
 
+const isTokenInPath = (pathname: string): boolean =>
+  pathname.startsWith('/invite/') && pathname !== '/invite/block';
+
 // Headers and the nonce only. Who may see a page is decided by the guard each page awaits.
 export function proxy(request: NextRequest): NextResponse {
   const nonce = newNonce();
@@ -21,6 +24,13 @@ export function proxy(request: NextRequest): NextResponse {
     https,
     development,
   });
+  // Next writes the path into its 404 payload, and a token here must reach neither that page
+  // nor a log. Invitation tokens live in the fragment, so this path is only ever a mistake.
+  if (isTokenInPath(requestPathname(request))) {
+    const refused = new NextResponse('Not found', { status: 404 });
+    for (const [name, value] of Object.entries(headers)) refused.headers.set(name, value);
+    return refused;
+  }
   const forwarded = forwardedRequestHeaders(
     request.headers,
     nonce,

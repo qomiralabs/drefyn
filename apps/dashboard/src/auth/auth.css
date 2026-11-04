@@ -1,0 +1,457 @@
+/* The signed out pages: a note on paper, not a card on a backdrop. Only --dr-* values, except
+   the provider colours named below. Media queries carry literal rems because CSS cannot read a
+   custom property there: md is 64rem, sm is 40rem. */
+
+@font-face {
+  font-family: 'Google Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./marks/google-sans-latin-500-normal.woff2') format('woff2');
+}
+
+.auth {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100dvh;
+}
+.auth-head {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-16);
+  padding: var(--dr-space-24) var(--dr-space-48);
+}
+.auth-lockup {
+  display: inline-flex;
+  align-items: center;
+  height: var(--dr-space-32);
+}
+.auth-main {
+  display: grid;
+  grid-template-columns: minmax(0, var(--dr-layout-auth));
+  justify-content: center;
+  row-gap: var(--dr-space-24);
+  align-content: start;
+  padding: var(--dr-space-64) var(--dr-space-48) var(--dr-space-96);
+}
+.auth-main:focus-visible {
+  outline-offset: var(--dr-stroke-focus-inset);
+}
+.auth-margin {
+  display: grid;
+  gap: var(--dr-space-16);
+}
+.auth-content {
+  display: grid;
+  gap: var(--dr-space-32);
+  align-content: start;
+  min-width: 0;
+}
+.auth-form {
+  display: grid;
+  gap: var(--dr-space-16);
+}
+.auth-lede {
+  font: var(--dr-type-body-m);
+  color: var(--dr-text-body);
+  max-width: var(--dr-measure);
+}
+.auth-fine {
+  font: var(--dr-type-caption);
+  color: var(--dr-text-secondary);
+  max-width: var(--dr-measure);
+}
+.auth-fine a,
+.auth-links a,
+.auth-notice a {
+  color: var(--dr-accent-ink);
+  text-decoration: underline;
+}
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dr-space-4) var(--dr-space-16);
+  font: var(--dr-type-body-s);
+}
+.auth-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dr-space-24);
+}
+.auth-address {
+  color: var(--dr-text-ink);
+  font-weight: var(--dr-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+/* The 8 digit code. One field, so paste, autofill from the message and typing with scripts off
+   all just work. Mono digits on an even pitch, a hairline under each place. */
+.auth-code-label {
+  display: block;
+  font: var(--dr-type-body-s);
+  font-weight: var(--dr-weight-medium);
+  color: var(--dr-text-body);
+}
+.auth-code {
+  --pitch: calc(1ch + var(--dr-space-16));
+  width: calc(var(--pitch) * 8 + var(--dr-space-16));
+  max-width: 100%;
+  height: calc(var(--dr-size-control-lg) + var(--dr-space-16));
+  padding: 0 var(--dr-space-8) 0 var(--dr-space-16);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background-color: var(--dr-surface-ground);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--dr-border-rule-strong) 0 1ch,
+    transparent 1ch var(--pitch)
+  );
+  background-size: calc(var(--pitch) * 8) var(--dr-stroke-hairline);
+  background-position: var(--dr-space-16) calc(100% - var(--dr-space-12));
+  background-repeat: no-repeat;
+  color: var(--dr-text-ink);
+  font: var(--dr-type-title);
+  font-family: var(--dr-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--dr-space-16);
+}
+.auth-code:focus-visible {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+.auth-code[aria-invalid='true'] {
+  border-color: var(--dr-state-broken-mark);
+}
+.auth-code[readonly] {
+  background-color: var(--dr-surface-raised);
+  border-color: transparent;
+}
+.auth-code-show {
+  display: inline-flex;
+  gap: var(--dr-space-16);
+  justify-self: start;
+  padding: var(--dr-space-16) var(--dr-space-24);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-sm);
+  font: var(--dr-type-display-s);
+  font-family: var(--dr-font-mono);
+  letter-spacing: var(--dr-type-label-tracking);
+  color: var(--dr-text-ink);
+  font-variant-numeric: tabular-nums;
+}
+.auth-reveal {
+  position: relative;
+}
+.auth-reveal-button {
+  position: absolute;
+  inset-block-end: calc((var(--dr-size-control-lg) - var(--dr-size-control-sm)) / 2);
+  inset-inline-end: var(--dr-space-4);
+}
+.auth-field-error {
+  display: flex;
+  align-items: start;
+  gap: var(--dr-space-4);
+  font: var(--dr-type-caption);
+  color: var(--dr-state-broken-text);
+}
+
+/* A failure of ours has the broken gutter; a limit is neutral with a clock, because a limit is
+   not a health state. */
+.auth-notice {
+  display: flex;
+  gap: var(--dr-space-8);
+  padding: var(--dr-space-12);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-raised);
+  font: var(--dr-type-body-s);
+  color: var(--dr-text-body);
+}
+.auth-notice:focus-visible {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+.auth-notice-broken {
+  box-shadow: inset var(--dr-stroke-gutter) 0 0 var(--dr-state-broken-mark);
+}
+.auth-notice-title {
+  color: var(--dr-text-ink);
+  font-weight: var(--dr-weight-medium);
+}
+.auth-cli {
+  display: flex;
+  align-items: start;
+  gap: var(--dr-space-8);
+  padding: var(--dr-space-12) var(--dr-space-12) var(--dr-space-12) var(--dr-space-16);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-raised);
+}
+.auth-cli code {
+  flex: 1;
+  min-width: 0;
+  font: var(--dr-type-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.auth-facts {
+  display: grid;
+  border-top: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+.auth-facts > div {
+  display: grid;
+  grid-template-columns: calc(var(--dr-space-96) + var(--dr-space-16)) minmax(0, 1fr);
+  gap: var(--dr-space-12);
+  padding: var(--dr-space-8) 0;
+  border-bottom: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+.auth-facts dt {
+  font: var(--dr-type-label);
+  letter-spacing: var(--dr-type-label-tracking);
+  text-transform: uppercase;
+  color: var(--dr-text-secondary);
+  padding-top: var(--dr-space-4);
+}
+.auth-facts dd {
+  color: var(--dr-text-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.auth-rule {
+  border: 0;
+  border-top: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+.auth-or {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dr-space-12);
+  font: var(--dr-type-caption);
+  color: var(--dr-text-secondary);
+}
+.auth-or::before,
+.auth-or::after {
+  content: '';
+  border-top: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+}
+.auth-providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--dr-space-8);
+}
+.auth-ways {
+  display: grid;
+  gap: var(--dr-space-12);
+}
+
+/* Both buttons share one box, so neither provider is more prominent. Google's are its required
+   button colours and font, kept here because they are its rules and not our palette. */
+.auth-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--dr-space-8);
+  height: var(--dr-size-control-lg);
+  padding: 0 var(--dr-space-12);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-ground);
+  color: var(--dr-text-body);
+  font: var(--dr-type-body-s);
+  font-weight: var(--dr-weight-medium);
+  white-space: nowrap;
+}
+.auth-provider:focus-visible {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+.auth-provider img {
+  width: var(--dr-size-icon-md);
+  height: var(--dr-size-icon-md);
+}
+.auth-provider-google {
+  --google-fill: #ffffff;
+  --google-stroke: #747775;
+  --google-text: #1f1f1f;
+  border-color: var(--google-stroke);
+  background: var(--google-fill);
+  color: var(--google-text);
+  font-family: 'Google Sans', var(--dr-font-sans);
+}
+.auth-only-dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .auth-provider-google {
+    --google-fill: #131314;
+    --google-stroke: #8e918f;
+    --google-text: #e3e3e3;
+  }
+  :root:not([data-theme='light']) .auth-only-dark {
+    display: block;
+  }
+  :root:not([data-theme='light']) .auth-only-light {
+    display: none;
+  }
+}
+:root[data-theme='dark'] .auth-provider-google {
+  --google-fill: #131314;
+  --google-stroke: #8e918f;
+  --google-text: #e3e3e3;
+}
+:root[data-theme='dark'] .auth-only-dark {
+  display: block;
+}
+:root[data-theme='dark'] .auth-only-light {
+  display: none;
+}
+
+/* Waits on script: hidden with scripts off, where the noscript form takes its place. */
+@media (scripting: none) {
+  .auth-needs-script {
+    display: none;
+  }
+}
+/* A link with a secret in its fragment: the skeleton from first paint, never the typed form. */
+:root[data-fragment] .auth-typed {
+  display: none;
+}
+:root:not([data-fragment]) .auth-reading {
+  display: none;
+}
+.auth-skeleton-title {
+  height: var(--dr-space-24);
+}
+.auth-skeleton-button {
+  height: var(--dr-size-control-lg);
+}
+
+/* The brand half: hidden from assistive technology, hosted only, gone below 64rem. A halftone
+   of four dot sizes on one grid, each masked to a band, so dots grow from nothing around the
+   words. The masks choose which dots print; there is no colour gradient. */
+.auth-brand {
+  display: none;
+}
+.auth-dots {
+  --pitch: var(--dr-space-12);
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle,
+    var(--dr-border-rule-strong) var(--r),
+    transparent calc(var(--r) + var(--dr-stroke-hairline) / 2)
+  );
+  background-size: var(--pitch) var(--pitch);
+  background-position: center;
+}
+.auth-dots-1 {
+  --r: calc(var(--dr-stroke-hairline) * 0.75);
+  mask-image: radial-gradient(
+    ellipse 75% 70% at 50% 46%,
+    transparent 48%,
+    black 58%,
+    black 66%,
+    transparent 72%
+  );
+}
+.auth-dots-2 {
+  --r: calc(var(--dr-stroke-hairline) * 1.5);
+  mask-image: radial-gradient(
+    ellipse 75% 70% at 50% 46%,
+    transparent 64%,
+    black 72%,
+    black 80%,
+    transparent 86%
+  );
+}
+.auth-dots-3 {
+  --r: calc(var(--dr-stroke-hairline) * 2.5);
+  mask-image: radial-gradient(
+    ellipse 75% 70% at 50% 46%,
+    transparent 78%,
+    black 86%,
+    black 94%,
+    transparent 100%
+  );
+}
+.auth-dots-4 {
+  --r: calc(var(--dr-stroke-hairline) * 4.25);
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 46%, transparent 92%, black 100%);
+}
+.auth-brand-copy {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--dr-space-16);
+  max-width: calc(var(--dr-space-128) * 4);
+  padding: var(--dr-space-48);
+  text-align: center;
+  color: var(--dr-text-ink);
+}
+.auth-brand-copy [data-mark] {
+  width: var(--dr-space-48);
+  height: var(--dr-space-48);
+}
+.auth-brand-line {
+  font: var(--dr-type-display-m);
+  letter-spacing: var(--dr-type-display-m-tracking);
+  text-wrap: balance;
+}
+.auth-brand-support {
+  font: var(--dr-type-body-m);
+  color: var(--dr-text-secondary);
+  text-wrap: balance;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .auth-brand-copy {
+    animation: dr-fade-in var(--dr-duration-slow) var(--dr-ease-enter) both;
+  }
+}
+@media (width >= 64rem) {
+  .auth[data-hosted] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      'brand head'
+      'brand main';
+  }
+  .auth[data-hosted] .auth-brand {
+    grid-area: brand;
+    position: relative;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: var(--dr-surface-raised);
+    border-inline-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  }
+  .auth[data-hosted] .auth-head {
+    grid-area: head;
+  }
+  .auth[data-hosted] .auth-main {
+    grid-area: main;
+    align-content: center;
+    padding-block: var(--dr-space-48) var(--dr-space-64);
+  }
+}
+
+@media (width < 40rem) {
+  .auth-head {
+    padding: var(--dr-space-16) var(--dr-gutter);
+  }
+  .auth-main {
+    padding: var(--dr-space-24) var(--dr-gutter) var(--dr-space-64);
+  }
+  .auth-content {
+    gap: var(--dr-space-24);
+  }
+  .auth-providers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .auth-code-show {
+    font: var(--dr-type-title);
+    font-family: var(--dr-font-mono);
+  }
+  .auth-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--dr-space-2);
+  }
+}
