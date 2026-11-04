@@ -23,6 +23,9 @@ const VIEW: AccessView = {
 };
 const SESSION = { sessionId: SESSION_ID, userId: USER } as unknown as SessionInfo;
 
+// Slow under coverage on a shared runner; the default 5 s failed there with nothing wrong.
+const PROPERTY_TIMEOUT_MS = 60_000;
+
 class Redirect extends Error {
   readonly target: string;
   constructor(target: string) {
@@ -237,31 +240,35 @@ describe('guardOrganization', () => {
       expect(await target(path)).toBe(`/sign-in?next=${encodeURIComponent(next)}`);
     });
 
-    it('stays on the origin for any input', async () => {
-      const hostile = fc.oneof(
-        fc.string(),
-        fc.webUrl(),
-        fc.webPath(),
-        fc
-          .array(
-            fc.constantFrom('/', '\\', '.', '..', '//', '@', ':', '%2f', 'evil.test', '?', '#'),
-            {
-              maxLength: 8,
-            },
-          )
-          .map((parts) => parts.join('')),
-      );
-      await fc.assert(
-        fc.asyncProperty(hostile, async (path) => {
-          const location = new URL(await target(path), ORIGIN);
-          expect(location.origin).toBe(ORIGIN);
-          expect(location.pathname).toBe('/sign-in');
-          const next = location.searchParams.get('next') ?? '';
-          expect(next.startsWith('/')).toBe(true);
-          expect(new URL(next, ORIGIN).origin).toBe(ORIGIN);
-        }),
-      );
-    });
+    it(
+      'stays on the origin for any input',
+      async () => {
+        const hostile = fc.oneof(
+          fc.string(),
+          fc.webUrl(),
+          fc.webPath(),
+          fc
+            .array(
+              fc.constantFrom('/', '\\', '.', '..', '//', '@', ':', '%2f', 'evil.test', '?', '#'),
+              {
+                maxLength: 8,
+              },
+            )
+            .map((parts) => parts.join('')),
+        );
+        await fc.assert(
+          fc.asyncProperty(hostile, async (path) => {
+            const location = new URL(await target(path), ORIGIN);
+            expect(location.origin).toBe(ORIGIN);
+            expect(location.pathname).toBe('/sign-in');
+            const next = location.searchParams.get('next') ?? '';
+            expect(next.startsWith('/')).toBe(true);
+            expect(new URL(next, ORIGIN).origin).toBe(ORIGIN);
+          }),
+        );
+      },
+      PROPERTY_TIMEOUT_MS,
+    );
   });
 });
 

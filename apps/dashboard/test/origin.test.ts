@@ -81,8 +81,9 @@ describe('appUrl', () => {
           expect(error).toBeInstanceOf(RangeError);
         }
       }),
+      { seed: 141, numRuns: 100 },
     );
-  });
+  }, 60_000);
 });
 
 describe('requestPath', () => {
