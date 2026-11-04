@@ -30,18 +30,25 @@ describeWithStack('verifyApiKey timing', () => {
   beforeAll(async () => {
     h = await fresh();
     verifier = h.verifier({ limiter: { reserve: () => Promise.resolve() } });
+    const creator = newId('usr');
     await h.sql(`
       insert into app.organizations (organization_id, name, plan_tier)
         select uuidv7(), 'Org ' || g, 'self_hosted' from generate_series(1, ${String(ORGS)}) g;
       insert into app.projects (organization_id, product, slug, name)
         select o.organization_id, 'docs', 'p' || n, 'Handbook'
           from app.organizations o cross join generate_series(1, 2) n;
+      insert into app.users (id, email, email_normalized, email_verified_at)
+        values ('${creator}', 'timing@example.com', 'timing@example.com', now());
+      insert into app.memberships (organization_id, user_id, role)
+        select organization_id, '${creator}', 'owner' from app.organizations;
       insert into app.api_keys (organization_id, name, secret_hash, display_suffix, scopes,
-                                project_scope, idempotency_key, request_hash)
+                                project_scope, created_by, idempotency_key, request_hash)
         select o.organization_id, 'Seed', sha256(random()::text::bytea), 'abcd',
                array['docs:read'], case when n % 2 = 0 then 'listed' else 'all' end,
-               'seed-' || n, sha256(n::text::bytea)
-          from app.organizations o cross join generate_series(1, 5) n;
+               m.id, 'seed-' || n, sha256(n::text::bytea)
+          from app.organizations o
+          join app.memberships m using (organization_id)
+          cross join generate_series(1, 5) n;
       insert into app.api_key_projects (organization_id, api_key_id, target_project_id)
         select k.organization_id, k.id, p.id
           from app.api_keys k join app.projects p using (organization_id)
@@ -60,13 +67,13 @@ describeWithStack('verifyApiKey timing', () => {
       const secret = randomBytes(32);
       const scope = i % 2 === 0 ? 'listed' : 'all';
       values.push(
-        `('${keyId}', '${org}', 'Measured', '\\x${hex(createHash('sha256').update(secret).digest())}', 'abcd', array['docs:read'], '${scope}', 'measured-${String(i)}', '\\x${hex(Buffer.alloc(32))}')`,
+        `('${keyId}', '${org}', 'Measured', '\\x${hex(createHash('sha256').update(secret).digest())}', 'abcd', array['docs:read'], '${scope}', (select id from app.memberships where organization_id = '${org}'), 'measured-${String(i)}', '\\x${hex(Buffer.alloc(32))}')`,
       );
       measured.push(formatApiKey({ organizationId: idOf('org', org), keyId, secret }));
     });
     await h.sql(`
       insert into app.api_keys (id, organization_id, name, secret_hash, display_suffix, scopes,
-                                project_scope, idempotency_key, request_hash)
+                                project_scope, created_by, idempotency_key, request_hash)
       values ${values.join(',\n')};
       insert into app.api_key_projects (organization_id, api_key_id, target_project_id)
         select k.organization_id, k.id, p.id

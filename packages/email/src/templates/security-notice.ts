@@ -140,6 +140,19 @@ export const NOTICE_TEMPLATES: NoticeTemplates = {
     next: 'If you do not recognize it, revoke it in your organization settings.',
     fineprint: OWNER_FINEPRINT,
   },
+  api_key_revoked: {
+    subject: 'An API key was revoked in your Drefyn organization',
+    preheader: OWNER_PREHEADER,
+    heading: 'An API key was revoked',
+    lead: () => 'This API key was revoked. Anything using it has stopped working.',
+    rows: (n) => [
+      { label: 'Organization', value: n.organizationName },
+      { label: 'API key', value: n.keyName },
+      { label: 'Ends in', value: n.displaySuffix },
+    ],
+    next: 'If you did not expect this, check who manages API keys in your organization settings.',
+    fineprint: OWNER_FINEPRINT,
+  },
   owner_added: {
     subject: 'A new owner was added to your Drefyn organization',
     preheader: OWNER_PREHEADER,

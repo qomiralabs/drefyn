@@ -240,8 +240,62 @@ describeWithStack('API key tables', () => {
     expect(seen).toEqual({ scope: 'listed', listed: 0 });
   });
 
+  it('let organization work revoke a live key, once', async () => {
+    const app = await as('app');
+    const rows = await within(app, ORG_A, async () => {
+      const first = await app.query(
+        'update app.api_keys set revoked_at = now() where revoked_at is null',
+      );
+      const second = await app.query('update app.api_keys set revoked_at = now()');
+      return [first.rowCount, second.rowCount];
+    });
+    expect(rows).toEqual([1, 0]);
+  });
+
+  it('refuse organization work deleting a key', async () => {
+    const app = await as('app');
+    expect(await within(app, ORG_A, () => sqlState(app.query('delete from app.api_keys')))).toBe(
+      '42501',
+    );
+  });
+
+  it.each([
+    ['clearing the revoke time', 'revoked_at = null'],
+    ['moving the revoke time', "revoked_at = now() + interval '1 day'"],
+    ['recording a use', 'last_used_at = now()'],
+  ])('leave a revoked key alone when %s', async (_name, assignment) => {
+    const app = await as('app');
+    const seen = await within(app, ORG_A, async () => {
+      await app.query('update app.api_keys set revoked_at = now()');
+      const changed = await app.query(`update app.api_keys set ${assignment}`);
+      const row = await app.query<{ revoked: boolean; used: boolean }>(
+        `select revoked_at = now() as revoked, last_used_at is not null as used
+           from app.api_keys where id = '${KEY_A}'`,
+      );
+      return { changed: changed.rowCount, row: row.rows[0] };
+    });
+    expect(seen).toEqual({ changed: 0, row: { revoked: true, used: false } });
+  });
+
+  it('refuse to remove a creator whose key is live, since it would outlive them', async () => {
+    const app = await as('app');
+    const state = await within(
+      app,
+      ORG_A,
+      async () => {
+        await app.query(`update app.memberships set role = 'admin' where id = '${PLAIN_A}'`);
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_C]);
+        await app.query(keyInsert(ORG_A, KEY_D, PLAIN_A));
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_A]);
+        return sqlState(app.query(`delete from app.memberships where id = '${PLAIN_A}'`));
+      },
+      USER_A,
+    );
+    expect(state).toBe('23514');
+  });
+
   // Made an admin, the plain member creates a key, and the owner then removes them.
-  it("clear only the creator when the creator's membership goes", async () => {
+  it("clear only the creator of a revoked key when the creator's membership goes", async () => {
     const app = await as('app');
     const seen = await within(
       app,
@@ -251,6 +305,7 @@ describeWithStack('API key tables', () => {
         await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_C]);
         await app.query(keyInsert(ORG_A, KEY_D, PLAIN_A));
         await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_A]);
+        await app.query(`update app.api_keys set revoked_at = now() where id = '${KEY_D}'`);
         const removed = await app.query(`delete from app.memberships where id = '${PLAIN_A}'`);
         const row = await app.query<{ organization_id: string; created_by: string | null }>(
           `select organization_id, created_by from app.api_keys where id = '${KEY_D}'`,
@@ -357,6 +412,21 @@ describeWithStack('API key tables', () => {
       (p) => p.name === 'app.api_keys.api_key_insert_creator',
     );
     expect(text.trim()).toBe(entry?.withCheck);
+  });
+
+  it('carry the revoke guard with the exact text the allow list reviews', async () => {
+    const text = await superuser(
+      `set search_path = pg_catalog;
+       select pg_get_expr(polqual, polrelid) || '|' || pg_get_expr(polwithcheck, polrelid)
+         from pg_policy
+        where polname = 'api_key_update_unrevoked' and polrelid = 'app.api_keys'::regclass
+          and not polpermissive;`,
+      db.name,
+    );
+    const entry = RESTRICTIVE_POLICIES.find(
+      (p) => p.name === 'app.api_keys.api_key_update_unrevoked',
+    );
+    expect(text.trim()).toBe(`${String(entry?.using)}|${String(entry?.withCheck)}`);
   });
 
   it('pass check:catalog', async () => {

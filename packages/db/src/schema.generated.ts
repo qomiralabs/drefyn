@@ -45,6 +45,7 @@ export interface ApiKeysTable {
   idempotency_key: string;
   request_hash: Buffer;
   created_at: Generated<Date>;
+  revoked_at: Date | null;
 }
 
 // app.auth_rate_limits

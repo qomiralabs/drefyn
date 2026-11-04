@@ -6,8 +6,10 @@ import {
   withUser,
   type AuthDatabase,
   type Database,
+  type OrganizationSchema,
 } from '@drefyn/db';
-import { idOf, type IdOf, type OrganizationId, type ProjectId } from '@drefyn/tenancy';
+import { idOf, type IdOf, type OrganizationId, type ProjectId, type UserId } from '@drefyn/tenancy';
+import { sql, type Transaction } from 'kysely';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { storedPermissions, type AccessContext } from './access.ts';
@@ -44,11 +46,13 @@ export interface ApiKeySummary {
   readonly projectScope: ProjectScope;
   // Empty unless the scope is listed.
   readonly projectIds: readonly ProjectId[];
-  // Null once the creator's membership is gone.
+  // Null once the creator's membership is gone, and their keys are revoked by then.
   readonly createdBy: IdOf<'mem'> | null;
   readonly createdAt: Date;
   readonly expiresAt: Date | null;
   readonly lastUsedAt: Date | null;
+  // Set once, by the database, and final.
+  readonly revokedAt: Date | null;
 }
 
 export interface CreateApiKeyInput {
@@ -69,8 +73,16 @@ export interface CreatedApiKey {
   readonly send: () => Promise<void>;
 }
 
+export interface RevokedApiKey {
+  readonly key: ApiKeySummary;
+  // True when an earlier call already revoked it. key.revokedAt is that first time.
+  readonly alreadyRevoked: boolean;
+  // Tells every owner, once. Does nothing when alreadyRevoked. Never throws.
+  readonly send: () => Promise<void>;
+}
+
 // A repeat of a request already made: the key it made, without the secret, which was shown
-// once and is gone.
+// once and is gone. A set revokedAt means the key is dead.
 export class ApiKeyReplayError extends AuthError {
   readonly existing: ApiKeySummary;
 
@@ -98,6 +110,7 @@ export interface ApiKeys {
     a: AccessContext,
     input: CreateApiKeyInput,
   ): Promise<Result<CreatedApiKey, AuthError>>;
+  revokeApiKey(a: AccessContext, id: IdOf<'key'>): Promise<Result<RevokedApiKey, AuthError>>;
 }
 
 const MAX_KEY_SCOPES = 32;
@@ -192,6 +205,22 @@ export function storedProjectScope(value: unknown): ProjectScope {
   return scope;
 }
 
+// Everything a summary shows, and neither hash nor idempotency key.
+const KEY_COLUMNS = [
+  'id',
+  'name',
+  'display_suffix',
+  'scopes',
+  'project_scope',
+  'created_by',
+  'created_at',
+  'expires_at',
+  'last_used_at',
+  'revoked_at',
+] as const;
+
+type Tx = Transaction<OrganizationSchema>;
+
 interface StoredKey {
   readonly id: string;
   readonly name: string;
@@ -202,6 +231,7 @@ interface StoredKey {
   readonly created_at: Date;
   readonly expires_at: Date | null;
   readonly last_used_at: Date | null;
+  readonly revoked_at: Date | null;
 }
 
 function summaryOf(
@@ -221,13 +251,66 @@ function summaryOf(
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     lastUsedAt: row.last_used_at,
+    revokedAt: row.revoked_at,
   });
+}
+
+// The role as stored now, not as the guard saw it. For share, so a demotion or removal in
+// flight waits for this work and then sees what it did.
+async function storedManager(
+  tx: Tx,
+  userId: UserId,
+  needs: readonly Permission[],
+): Promise<string> {
+  const member = await tx
+    .selectFrom('memberships')
+    .select(['id', 'role', 'default_project_role'])
+    .where('user_id', '=', userId)
+    .forShare()
+    .executeTakeFirst();
+  if (member === undefined) throw FORBIDDEN();
+  if (!holdsAll(storedPermissions(member.role, member.default_project_role), needs)) {
+    throw FORBIDDEN();
+  }
+  return member.id;
+}
+
+async function listedProjects(
+  tx: Tx,
+  key: Pick<StoredKey, 'id' | 'project_scope'>,
+): Promise<ProjectId[]> {
+  if (key.project_scope !== 'listed') return [];
+  const rows = await tx
+    .selectFrom('api_key_projects')
+    .select('target_project_id')
+    .where('api_key_id', '=', key.id)
+    .orderBy('target_project_id')
+    .execute();
+  return rows.map((r) => idOf('prj', r.target_project_id));
+}
+
+async function ownerIds(tx: Tx): Promise<string[]> {
+  const rows = await tx
+    .selectFrom('memberships')
+    .select('user_id')
+    .where('role', '=', 'owner')
+    .execute();
+  return rows.map((o) => o.user_id);
 }
 
 interface Made {
   readonly membershipId: string;
   readonly createdAt: Date;
   readonly owners: readonly string[];
+}
+
+interface Revoked {
+  readonly key: StoredKey;
+  readonly revokedAt: Date;
+  readonly projectIds: readonly ProjectId[];
+  readonly membershipId: string;
+  // Null when an earlier call revoked it: that call owns the notice.
+  readonly owners: readonly string[] | null;
 }
 
 export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
@@ -249,6 +332,34 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
   const random = deps.random ?? ((n: number) => randomBytes(n));
   const nextKeyId = deps.newKeyId ?? (() => newId('key'));
 
+  // Never throws, and every miss is one line with no address.
+  function noticeSender(
+    owners: readonly string[],
+    notice: AuthSecurityNotice,
+    ids: Parameters<typeof idFields>[0],
+  ): () => Promise<void> {
+    const missed = () => {
+      quietWarn(deps.logger, 'auth.api_key_notice_failed', idFields(ids));
+    };
+    return async () => {
+      try {
+        if (owners.length === 0) return;
+        // Addresses are read through the sign in role, the one that holds them.
+        const rows = await store.auth((tx) =>
+          tx.selectFrom('users').select('email').where('id', 'in', owners).execute(),
+        );
+        await noticeEach(
+          deps.mailer,
+          rows.map((row) => row.email),
+          notice,
+          missed,
+        );
+      } catch {
+        missed();
+      }
+    };
+  }
+
   return Object.freeze({
     async createApiKey(a, raw) {
       const input = parse(raw, deps.scopes);
@@ -268,18 +379,7 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
       let made: Made;
       try {
         made = await store.organizationAs(organizationId, a.userId, async (tx) => {
-          // The role as stored now: one demoted since the guard ran cannot mint a key. For
-          // share, so a demotion or removal in flight waits for this key and then revokes it.
-          const member = await tx
-            .selectFrom('memberships')
-            .select(['id', 'role', 'default_project_role'])
-            .where('user_id', '=', a.userId)
-            .forShare()
-            .executeTakeFirst();
-          if (member === undefined) throw FORBIDDEN();
-          if (!holdsAll(storedPermissions(member.role, member.default_project_role), input.needs)) {
-            throw FORBIDDEN();
-          }
+          const membershipId = await storedManager(tx, a.userId, input.needs);
           if (input.projectScope === 'listed') {
             const found = await tx
               .selectFrom('projects')
@@ -298,7 +398,7 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
               display_suffix: displaySuffix,
               scopes: [...input.scopes],
               project_scope: input.projectScope,
-              created_by: member.id,
+              created_by: membershipId,
               expires_at: input.expiresAt,
               idempotency_key: input.idempotencyKey,
               request_hash: hash,
@@ -309,38 +409,14 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
           if (inserted === undefined) {
             const existing = await tx
               .selectFrom('api_keys')
-              .select([
-                'id',
-                'name',
-                'display_suffix',
-                'scopes',
-                'project_scope',
-                'created_by',
-                'created_at',
-                'expires_at',
-                'last_used_at',
-                'request_hash',
-              ])
+              .select([...KEY_COLUMNS, 'request_hash'])
               .where('idempotency_key', '=', input.idempotencyKey)
               .executeTakeFirst();
             // A conflict with no row to show is a fault, not a person to answer.
             if (existing === undefined) throw new AuthError('AUTH_UNAVAILABLE');
             if (!constantTimeEqual(existing.request_hash, hash)) throw INVALID();
-            const listed =
-              existing.project_scope === 'listed'
-                ? await tx
-                    .selectFrom('api_key_projects')
-                    .select('target_project_id')
-                    .where('api_key_id', '=', existing.id)
-                    .orderBy('target_project_id')
-                    .execute()
-                : [];
             throw new ApiKeyReplayError(
-              summaryOf(
-                organizationId,
-                existing,
-                listed.map((r) => idOf('prj', r.target_project_id)),
-              ),
+              summaryOf(organizationId, existing, await listedProjects(tx, existing)),
             );
           }
           if (input.projectScope === 'listed') {
@@ -355,15 +431,10 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
               )
               .execute();
           }
-          const owners = await tx
-            .selectFrom('memberships')
-            .select('user_id')
-            .where('role', '=', 'owner')
-            .execute();
           return {
-            membershipId: member.id,
+            membershipId,
             createdAt: inserted.created_at,
-            owners: owners.map((o) => o.user_id),
+            owners: await ownerIds(tx),
           };
         });
       } catch (error) {
@@ -385,6 +456,7 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
           created_at: made.createdAt,
           expires_at: input.expiresAt,
           last_used_at: null,
+          revoked_at: null,
         },
         input.projectIds,
       );
@@ -406,26 +478,85 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
         displaySuffix,
         at: made.createdAt,
       };
-      const send = async () => {
-        try {
-          if (made.owners.length === 0) return;
-          // Addresses are read through the sign in role, the one that holds them.
-          const rows = await store.auth((tx) =>
-            tx.selectFrom('users').select('email').where('id', 'in', made.owners).execute(),
-          );
-          await noticeEach(
-            deps.mailer,
-            rows.map((row) => row.email),
-            notice,
-            () => {
-              quietWarn(deps.logger, 'auth.api_key_notice_failed', idFields(ids));
-            },
-          );
-        } catch {
-          quietWarn(deps.logger, 'auth.api_key_notice_failed', idFields(ids));
+      return ok({
+        key,
+        secret: formatApiKey({ organizationId, keyId, secret }),
+        send: noticeSender(made.owners, notice, ids),
+      });
+    },
+
+    async revokeApiKey(a, rawId) {
+      const keyId = asId('key', rawId);
+      if (keyId === null) return fail(INVALID());
+      // The guard's context first, before any statement: a member never reaches the database.
+      if (!holdsAll(a.permissions, [])) return fail(FORBIDDEN());
+      const recent = await checkRecentAuth(store, a);
+      if (!recent.ok) return recent;
+
+      const organizationId = a.organizationId;
+      const ids = { organizationId: ['org', organizationId], keyId: ['key', keyId] } as const;
+
+      let done: Revoked;
+      try {
+        done = await store.organizationAs(organizationId, a.userId, async (tx) => {
+          const membershipId = await storedManager(tx, a.userId, []);
+          // Live keys only, so of two racing revokes the second waits, matches nothing and
+          // reads the first one's time.
+          const written = await tx
+            .updateTable('api_keys')
+            .set({ revoked_at: sql<Date>`now()` })
+            .where('organization_id', '=', organizationId)
+            .where('id', '=', keyId)
+            .where('revoked_at', 'is', null)
+            .returning(KEY_COLUMNS)
+            .executeTakeFirst();
+          const key =
+            written ??
+            (await tx
+              .selectFrom('api_keys')
+              .select(KEY_COLUMNS)
+              .where('organization_id', '=', organizationId)
+              .where('id', '=', keyId)
+              .executeTakeFirst());
+          // A foreign key is hidden by row level security, so it reads as unknown.
+          if (key?.revoked_at == null) throw new AuthError('AUTH_NOT_FOUND');
+          return {
+            key,
+            revokedAt: key.revoked_at,
+            projectIds: await listedProjects(tx, key),
+            membershipId,
+            owners: written === undefined ? null : await ownerIds(tx),
+          };
+        });
+      } catch (error) {
+        if (!(error instanceof AuthError)) {
+          quietWarn(deps.logger, 'auth.api_key_revoke_failed', idFields(ids));
         }
+        return fail(error);
+      }
+
+      const key = summaryOf(organizationId, done.key, done.projectIds);
+      if (done.owners === null) {
+        return ok({ key, alreadyRevoked: true, send: () => Promise.resolve() });
+      }
+      quietInfo(
+        deps.logger,
+        'auth.api_key_revoked',
+        idFields({
+          ...ids,
+          membershipId: ['mem', done.membershipId],
+          userId: ['usr', a.userId],
+        }),
+      );
+      const notice: AuthSecurityNotice = {
+        kind: 'api_key_revoked',
+        organizationId,
+        keyId,
+        keyName: key.name,
+        displaySuffix: key.displaySuffix,
+        at: done.revokedAt,
       };
-      return ok({ key, secret: formatApiKey({ organizationId, keyId, secret }), send });
+      return ok({ key, alreadyRevoked: false, send: noticeSender(done.owners, notice, ids) });
     },
   } satisfies ApiKeys);
 }

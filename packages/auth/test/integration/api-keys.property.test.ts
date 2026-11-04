@@ -2,7 +2,14 @@ import { idOf, type ProjectId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { beforeAll, expect, it } from 'vitest';
 import { formatApiKey, parseApiKey, type ApiKeyVerifier } from '../../src/index.ts';
-import { addProjects, deleteProject, input, newOrg, type Org } from './support/api-keys.ts';
+import {
+  addProjects,
+  deleteProject,
+  input,
+  memberOf,
+  newOrg,
+  type Org,
+} from './support/api-keys.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
@@ -144,6 +151,54 @@ describeWithStack('a listed key never widens', () => {
       { seed: 134, numRuns: 15 },
     );
   });
+
+  it('a revoked key never verifies, in any order with demotion, promotion and removal', async () => {
+    type Step = 'revoke' | 'demote' | 'promote' | 'remove' | 'verify';
+    const step = fc.constantFrom<Step>('revoke', 'demote', 'promote', 'remove', 'verify');
+    await fc.assert(
+      fc.asyncProperty(fc.array(step, { minLength: 1, maxLength: 6 }), async (steps) => {
+        const org = await newOrg(h);
+        const { access: admin } = await memberOf(h, org, 'admin');
+        const made = await h.apiKeys().createApiKey(admin, input());
+        if (!made.ok) throw made.error;
+        const { keyId } = made.value.key;
+        const membership = idOf(
+          'mem',
+          await h.sql(
+            `select id from app.memberships
+              where organization_id = '${org.organizationId}' and user_id = '${admin.userId}';`,
+          ),
+        );
+        const proves = async () =>
+          (await verifier.verifyApiKey(`Bearer ${made.value.secret}`, IP)).ok;
+        // The oracle: only revoke, a demotion to member or a removal ends the key, and nothing
+        // brings it back. Once removed, the role steps have nobody left to act on.
+        let ended = false;
+        let inOrg = true;
+        for (const next of steps) {
+          if (next === 'revoke') {
+            const done = await h.apiKeys().revokeApiKey(org.owner, keyId);
+            if (!done.ok) throw done.error;
+            ended = true;
+          } else if (next === 'demote' && inOrg) {
+            const done = await h.roles().changeRole(org.owner, membership, 'member');
+            if (!done.ok) throw done.error;
+            ended = true;
+          } else if (next === 'promote' && inOrg) {
+            const done = await h.roles().changeRole(org.owner, membership, 'admin');
+            if (!done.ok) throw done.error;
+          } else if (next === 'remove' && inOrg) {
+            const done = await h.roles().removeMember(org.owner, membership);
+            if (!done.ok) throw done.error;
+            ended = true;
+            inOrg = false;
+          }
+          expect(await proves()).toBe(!ended);
+        }
+      }),
+      { numRuns: 20 },
+    );
+  }, 120_000);
 
   it('a listed key whose projects are all gone reaches none, never all', async () => {
     const org = await newOrg(h);
