@@ -117,6 +117,18 @@ describe('saveWelcome', () => {
     });
   });
 
+  it.each([
+    ['saved now', { ok: true, value: { send } }],
+    ['saved by an earlier try', refused('AUTH_FORBIDDEN')],
+  ])('never says nothing changed once a password is %s', async (_name, answer) => {
+    auth.passwordSignIn.setPassword.mockResolvedValue(answer);
+    auth.account.setDisplayName.mockResolvedValue(refused('AUTH_UNAVAILABLE'));
+    await expect(welcome(null, form({ name: 'Maya', password: 'x' }))).resolves.toMatchObject({
+      name: 'Maya',
+      notice: { kind: 'name_not_saved', reference: expect.stringMatching(/^ref_/) as string },
+    });
+  });
+
   it('goes on to where the person was heading, on this origin only', async () => {
     await expect(welcome(null, form({ name: 'M', next: '/acme' }))).rejects.toThrow(
       `${REDIRECT} /acme`,
