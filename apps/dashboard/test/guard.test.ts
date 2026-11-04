@@ -339,6 +339,25 @@ describe('guardSession', () => {
   });
 });
 
+describe('guardAccountHome', () => {
+  it('needs no organization, and says so with a null home', async () => {
+    listMyOrganizations.mockResolvedValue([]);
+    const { guardAccountHome } = await load();
+    await expect(guardAccountHome()).resolves.toMatchObject({
+      session: SESSION,
+      organizations: [],
+      home: null,
+    });
+  });
+
+  it('is off with the flag, signed in or not', async () => {
+    requireDashboardForVisitor.mockRejectedValue(NOT_FOUND);
+    const { guardAccountHome } = await load();
+    await expect(guardAccountHome()).rejects.toBe(NOT_FOUND);
+    expect(listMyOrganizations).not.toHaveBeenCalled();
+  });
+});
+
 describe('guardPublic', () => {
   it('runs the visitor check alone', async () => {
     const { guardPublic } = await load();

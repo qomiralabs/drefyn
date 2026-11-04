@@ -18,7 +18,7 @@ import {
   usedWords,
   type PersonRow,
 } from '../src/settings/models.ts';
-import { settle } from '../src/settings/results.ts';
+import { problemWords, settle } from '../src/settings/results.ts';
 
 const NOW = '2026-10-31T12:00:00.000Z';
 
@@ -282,5 +282,16 @@ describe('settle', () => {
       ok: false,
       problem: { kind: 'failed', reference: 'auth.origin_refused' },
     });
+  });
+});
+
+describe('problemWords', () => {
+  it('has plain words for each kind of failure', () => {
+    expect(problemWords({ kind: 'step_up' })).toContain('confirm it is you');
+    expect(problemWords({ kind: 'limited', minutes: 1 })).toContain('1 minute.');
+    expect(problemWords({ kind: 'limited', minutes: 3 })).toContain('3 minutes.');
+    expect(problemWords({ kind: 'failed', reference: 'ref_1' })).toContain('ref_1');
+    expect(problemWords({ kind: 'refused', code: 'AUTH_FORBIDDEN' })).toContain('cannot');
+    expect(problemWords({ kind: 'refused', code: 'AUTH_SESSION_INVALID' })).toContain('Sign in');
   });
 });
