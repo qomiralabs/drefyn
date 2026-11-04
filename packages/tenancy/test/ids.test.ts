@@ -59,9 +59,32 @@ describe('organizationId and projectId', () => {
   });
 });
 
+// Written out here, not read from support, because these strings are public ids in customers'
+// hands. New kinds go on the end; this block must never need an edit.
+const FIRST_KINDS = [
+  'org',
+  'prj',
+  'usr',
+  'mem',
+  'key',
+  'nod',
+  'ver',
+  'ast',
+  'cmp',
+  'inc',
+  'sub',
+  'whk',
+  'evt',
+  'crd',
+];
+
 describe('idOf', () => {
-  it('lists exactly the initial prefixes, in order', () => {
+  it('lists exactly the kinds the tests know, in order', () => {
     expect([...ID_KINDS]).toEqual([...PREFIXES]);
+  });
+
+  it('keeps the original 14 kinds as a fixed prefix', () => {
+    expect(ID_KINDS.slice(0, FIRST_KINDS.length)).toEqual(FIRST_KINDS);
   });
 
   it('keeps ID_KINDS frozen so no caller can add a kind at run time', () => {

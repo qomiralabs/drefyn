@@ -23,6 +23,14 @@ describe('isTyping', () => {
     ['nothing focused', null],
     ['a button', el('BUTTON')],
     ['a checkbox', el('INPUT', { type: 'checkbox' })],
+    ['a button input', el('INPUT', { type: 'button' })],
+    ['a radio', el('INPUT', { type: 'radio' })],
+    ['a submit input', el('INPUT', { type: 'submit' })],
+    ['a reset input', el('INPUT', { type: 'reset' })],
+    ['a range', el('INPUT', { type: 'range' })],
+    ['a colour input', el('INPUT', { type: 'color' })],
+    ['a file input', el('INPUT', { type: 'file' })],
+    ['an upper case type', el('INPUT', { type: 'RANGE' })],
     ['a link', el('A')],
   ])('is false with %s', (_label, target) => {
     expect(isTyping(target)).toBe(false);

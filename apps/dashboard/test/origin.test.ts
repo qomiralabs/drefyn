@@ -61,29 +61,36 @@ describe('appUrl', () => {
     expect(() => appUrl(path)).toThrow(RangeError);
   });
 
-  it('never leaves the origin for any input', () => {
-    vi.stubEnv('DREFYN_APP_ORIGIN', ORIGIN);
-    const hostile = fc.oneof(
-      fc.string(),
-      fc.webUrl(),
-      fc.webPath(),
-      fc
-        .array(fc.constantFrom('/', '\\', '.', '..', '//', '@', ':', '%2f', '\t', 'evil.test'), {
-          maxLength: 8,
-        })
-        .map((parts) => parts.join('')),
-    );
-    fc.assert(
-      fc.property(hostile, (path) => {
-        try {
-          expect(appUrl(path).origin).toBe(ORIGIN);
-        } catch (error) {
-          expect(error).toBeInstanceOf(RangeError);
-        }
-      }),
-      { seed: 141, numRuns: 100 },
-    );
-  }, 60_000);
+  // fc.webUrl and fc.webPath are slow to build and to draw from: 3.7 s at load 90 against the 5 s
+  // default, the same cost that needed a budget in guard.test.ts.
+  it(
+    'never leaves the origin for any input',
+    { timeout: 15_000 },
+    () => {
+      vi.stubEnv('DREFYN_APP_ORIGIN', ORIGIN);
+      const hostile = fc.oneof(
+        fc.string(),
+        fc.webUrl(),
+        fc.webPath(),
+        fc
+          .array(fc.constantFrom('/', '\\', '.', '..', '//', '@', ':', '%2f', '\t', 'evil.test'), {
+            maxLength: 8,
+          })
+          .map((parts) => parts.join('')),
+      );
+      fc.assert(
+        fc.property(hostile, (path) => {
+          try {
+            expect(appUrl(path).origin).toBe(ORIGIN);
+          } catch (error) {
+            expect(error).toBeInstanceOf(RangeError);
+          }
+        }),
+        { seed: 141, numRuns: 100 },
+      );
+    },
+    60_000,
+  );
 });
 
 describe('requestPath', () => {
