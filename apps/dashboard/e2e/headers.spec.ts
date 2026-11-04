@@ -291,7 +291,8 @@ test(`${NO_SHELL_PATH} loads with no CSP violation`, async ({ page }) => {
     expect(res?.status()).toBe(404);
     return;
   }
-  await expect(page.getByRole('button', { name: 'Create organization' })).toBeVisible();
+  // Where sign up is closed it moves an owner on, and the fixture reads whichever page drew.
+  await expect(page.getByRole('main')).toBeVisible();
 });
 
 test('a not found page loads with no CSP violation', async ({ page }) => {
