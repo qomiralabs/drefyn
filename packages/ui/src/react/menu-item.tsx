@@ -1,6 +1,7 @@
 'use client';
 import type { ReactNode } from 'react';
 import { Keyboard, MenuItem as AriaMenuItem, Text } from 'react-aria-components';
+import { IconCheck } from './icons/check.tsx';
 import { ROW } from './sheet.tsx';
 
 export interface MenuItemProps {
@@ -13,6 +14,8 @@ export interface MenuItemProps {
   reason?: string;
   shortcut?: string;
   icon?: ReactNode;
+  // A count beside the words, in tabular figures, such as how many rows a filter would keep.
+  meta?: string;
 }
 
 // Items sit flush in the panel, so the ring is drawn inside their edge. Focus and hover share
@@ -40,6 +43,7 @@ export function MenuItem({
   reason,
   shortcut,
   icon,
+  meta,
 }: MenuItemProps): ReactNode {
   const why = disabled && reason !== undefined && reason.trim() !== '' ? reason : undefined;
   return (
@@ -51,31 +55,47 @@ export function MenuItem({
       {...(typeof children === 'string' ? { textValue: children } : {})}
       className={`${BASE} ${why === undefined ? ROW : `${ROW} py-4`} ${disabled ? DISABLED : LIVE}`}
     >
-      {icon === undefined ? null : (
-        <span className={`inline-flex ${disabled ? 'text-disabled-text' : 'text-secondary'}`}>
-          {icon}
-        </span>
-      )}
-      {why === undefined ? (
-        <Text slot="label" className={shortcut === undefined ? undefined : 'flex-1 pe-16'}>
-          {children}
-        </Text>
-      ) : (
-        <span className="flex min-w-0 flex-1 flex-col pe-16">
-          <Text slot="label">{children}</Text>
-          {/* The reason is what a person needs to read, so it keeps the secondary colour;
+      {({ isSelected, selectionMode }) => (
+        <>
+          {/* The chosen item shows a tick in accent ink, and a menu of choices keeps its
+              column empty for the rest, so the words line up. */}
+          {selectionMode === 'none' ? null : (
+            <span className="inline-flex size-icon-sm text-accent-ink">
+              {isSelected ? <IconCheck /> : null}
+            </span>
+          )}
+          {icon === undefined ? null : (
+            <span className={`inline-flex ${disabled ? 'text-disabled-text' : 'text-secondary'}`}>
+              {icon}
+            </span>
+          )}
+          {why === undefined ? (
+            <Text slot="label" className={shortcut === undefined ? undefined : 'flex-1 pe-16'}>
+              {children}
+            </Text>
+          ) : (
+            <span className="flex min-w-0 flex-1 flex-col pe-16">
+              <Text slot="label">{children}</Text>
+              {/* The reason is what a person needs to read, so it keeps the secondary colour;
               only the label takes the disabled one. */}
-          <Text slot="description" className="text-caption text-secondary">
-            {why}
-          </Text>
-        </span>
-      )}
-      {shortcut === undefined ? null : (
-        // A hairline keycap on paper, as in the spike: decoration only, the key is announced
-        // through aria-keyshortcuts.
-        <Keyboard className="inline-flex items-center justify-center rounded-sm border border-rule-strong bg-ground px-4 text-label text-secondary">
-          {shortcut}
-        </Keyboard>
+              <Text slot="description" className="text-caption text-secondary">
+                {why}
+              </Text>
+            </span>
+          )}
+          {shortcut === undefined ? null : (
+            // A hairline keycap on paper, as in the spike: decoration only, the key is announced
+            // through aria-keyshortcuts.
+            <Keyboard className="inline-flex items-center justify-center rounded-sm border border-rule-strong bg-ground px-4 text-label text-secondary">
+              {shortcut}
+            </Keyboard>
+          )}
+          {meta === undefined ? null : (
+            <span data-numeric="" className="ms-auto ps-16 text-caption text-secondary">
+              {meta}
+            </span>
+          )}
+        </>
       )}
     </AriaMenuItem>
   );
