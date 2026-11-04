@@ -57,8 +57,13 @@ async function compileOnly(): Promise<void> {
     await tx.updateTable('organizations').set({ plan_tier: 'enterprise' }).execute();
     // @ts-expect-error nor lifts its own read only state
     await tx.updateTable('organizations').set({ read_only_since: null }).execute();
-    // @ts-expect-error nor changes a role
-    await tx.updateTable('memberships').set({ role: 'owner' }).execute();
+    // A role changes in organization work, through the guarded path only.
+    await tx.updateTable('memberships').set({ role: 'admin', updated_at: new Date() }).execute();
+    // @ts-expect-error nor moves a membership to another person
+    await tx.updateTable('memberships').set({ user_id: 'x' }).execute();
+    await tx.updateTable('project_roles').set({ role: 'editor', updated_at: new Date() }).execute();
+    // @ts-expect-error a project role is never repointed
+    await tx.updateTable('project_roles').set({ target_project_id: 'x' }).execute();
     // @ts-expect-error nor a project's read only state
     await tx.updateTable('projects').set({ read_only_since: null }).execute();
     await tx

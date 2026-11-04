@@ -97,13 +97,38 @@ export {
   type Invitations,
   type InviteOutcome,
 } from './invitations.ts';
+export {
+  createRoles,
+  type RemovalSummary,
+  type RoleChangeSummary,
+  type RoleStore,
+  type Roles,
+  type RolesDeps,
+} from './roles.ts';
 export { countSeats, type SeatHolder } from './seats.ts';
 export {
   RESERVED_SLUGS,
   SLUG_PATTERN,
   parseOrganizationName,
   parseSlug,
+  slugFromOrganizationName,
 } from './organization-rules.ts';
+export {
+  CLI_LINK_PATH,
+  checkCliLinkInput,
+  createCliLinks,
+  type CheckedCliLinkInput,
+  type CliLinkInput,
+  type CliLinkStore,
+  type CliLinks,
+  type CliLinksDeps,
+  type IssuedCliLink,
+} from './cli-links.ts';
+export {
+  createOperatorSessions,
+  type OperatorSessions,
+  type OperatorSessionsDeps,
+} from './operator-sessions.ts';
 export {
   type AuthMailer,
   type PasswordVerifier,
@@ -126,6 +151,7 @@ export {
   decodeSecret,
   encodeSecret,
   formatApiKey,
+  formatCliLinkToken,
   formatChallengeId,
   formatInvitationToken,
   formatSessionToken,
@@ -133,6 +159,7 @@ export {
   parseApiKey,
   parseBearer,
   parseChallengeId,
+  parseCliLinkToken,
   parseCode,
   parseInvitationToken,
   parseSessionToken,
@@ -207,6 +234,7 @@ export {
   type AuthLogger,
   type AuthMetricName,
   type AuthMetrics,
+  type CliLinkOutcome,
   type RateLimiter,
   type RateLimiterDeps,
 } from './rate-limiter.ts';
@@ -256,10 +284,13 @@ export {
   PERMISSIONS,
   PROJECT_ROLES,
   canAssign,
+  canChangeRole,
+  canRemove,
   permissionsFor,
   type OrgRole,
   type Permission,
   type ProjectRole,
+  type RoleActor,
 } from './permissions.ts';
 export { BREACH_CHECK_TIMEOUT_MS, type BreachedPasswordCheck } from './breach-check.ts';
 export {

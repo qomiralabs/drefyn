@@ -8,6 +8,7 @@ import type {
   InvitationsTable,
   MembershipsTable,
   OrganizationsTable,
+  ProjectRolesTable,
   ProjectsTable,
   Schema,
 } from './schema.generated.ts';
@@ -27,8 +28,9 @@ type UpdatableOnly<T, K extends keyof T> = {
   [C in keyof T]: ColumnType<SelectOf<T[C]>, InsertOf<T[C]>, C extends K ? UpdateOf<T[C]> : never>;
 };
 
-// Plan, read only state, roles and everything about an API key but its use time are set at
-// creation; organization work cannot change them. A resend rewrites an invitation in place but
+// Plan, read only state and everything about an API key but its use time are set at creation;
+// organization work cannot change them. A role changes only under the actor guards, and a
+// project role never moves to another person or project. A resend rewrites an invitation in place but
 // never its address; a block is never edited.
 type GrantedTables<S> = Omit<
   S,
@@ -39,9 +41,11 @@ type GrantedTables<S> = Omit<
   | 'invitation_blocks'
   | 'api_keys'
   | 'api_key_projects'
+  | 'project_roles'
 > & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
-  memberships: UpdatableOnly<MembershipsTable, 'default_project_role' | 'updated_at'>;
+  memberships: UpdatableOnly<MembershipsTable, 'role' | 'default_project_role' | 'updated_at'>;
+  project_roles: UpdatableOnly<ProjectRolesTable, 'role' | 'updated_at'>;
   projects: UpdatableOnly<ProjectsTable, 'slug' | 'name' | 'updated_at'>;
   api_keys: UpdatableOnly<ApiKeysTable, 'last_used_at'>;
   api_key_projects: UpdatableOnly<ApiKeyProjectsTable, never>;

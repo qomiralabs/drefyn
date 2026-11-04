@@ -82,6 +82,10 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
   },
   { name: 'app.oauth_states', reason: 'OAuth round trips exist before anyone is signed in' },
   {
+    name: 'app.cli_sign_in_links',
+    reason: 'pre sign in, operator issued, user id and hash only',
+  },
+  {
     name: 'app.auth_rate_limits',
     reason: 'sign in limits keyed by HMACs of addresses and IPs; holds no tenant data',
   },
@@ -140,6 +144,10 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
   { name: 'app.password_credentials', reason: 'password sign in reads the hash and rehashes it' },
   { name: 'app.email_challenges', reason: 'email codes are created and redeemed before sign in' },
   { name: 'app.oauth_states', reason: 'OAuth state is created and redeemed before sign in' },
+  {
+    name: 'app.cli_sign_in_links',
+    reason: 'the operator command writes links and redemption marks them used before sign in',
+  },
   { name: 'app.auth_rate_limits', reason: 'sign in limits are reserved before any work' },
   {
     name: 'app.known_devices',
@@ -153,6 +161,7 @@ const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limit
 export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
   { name: 'app.email_challenges', reason: AUTH_ONLY },
   { name: 'app.oauth_states', reason: AUTH_ONLY },
+  { name: 'app.cli_sign_in_links', reason: 'holds hashes of sign in links issued before sign in' },
   { name: 'app.auth_rate_limits', reason: AUTH_ONLY },
 ];
 
@@ -230,6 +239,10 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   selfAccess('password_credentials'),
   authAccess('email_challenges', 'codes are created and redeemed before sign in'),
   authAccess('oauth_states', 'OAuth state is created and redeemed before sign in'),
+  authAccess(
+    'cli_sign_in_links',
+    'operator links are written and redeemed before sign in; grants allow updating consumed_at only',
+  ),
   authAccess('auth_rate_limits', 'limits are reserved before sign in'),
   selfAccess('known_devices'),
   {
@@ -289,6 +302,18 @@ const MEMBERSHIP_ORIGIN =
 const KEY_CREATOR =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
+// The person acting holds an owner membership, or an admin one and the row is no owner's.
+const MEMBER_ACTOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = memberships.organization_id) AND (a.user_id = app.current_actor_id()) AND ((a.role = 'owner'::text) OR ((a.role = 'admin'::text) AND (memberships.role <> 'owner'::text))))))";
+
+// Another owner of the organization than this row.
+const OTHER_OWNER =
+  "(EXISTS ( SELECT\n   FROM app.memberships o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.role = 'owner'::text) AND (o.id <> memberships.id))))";
+
+// The person acting is an owner or admin of the row's organization.
+const PROJECT_ROLE_ACTOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = project_roles.organization_id) AND (a.user_id = app.current_actor_id()) AND (a.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
   {
     name: 'app.api_keys.api_key_insert_creator',
@@ -317,6 +342,15 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     reason: 'a resend or any other update cannot raise the role past what the inviter could grant',
   },
   {
+    name: 'app.memberships.membership_delete_actor',
+    command: 'delete',
+    roles: ['drefyn_app'],
+    using: `(${MEMBER_ACTOR} AND ((role <> 'owner'::text) OR ${OTHER_OWNER}))`,
+    withCheck: null,
+    reason:
+      'only an owner removes an owner and only an owner or admin removes anyone, and never the last owner',
+  },
+  {
     name: 'app.memberships.membership_insert_origin',
     command: 'insert',
     roles: ['drefyn_app'],
@@ -326,6 +360,15 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
       'a membership is born only for the person acting, as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
   },
   {
+    name: 'app.memberships.membership_update_actor',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: MEMBER_ACTOR,
+    withCheck: `(${MEMBER_ACTOR} AND ((role = 'owner'::text) OR ${OTHER_OWNER}))`,
+    reason:
+      'an owner sets any role; an admin never touches an owner row nor writes owner; a member changes nothing; no change leaves the organization without an owner',
+  },
+  {
     name: 'app.organizations.organization_insert_tier',
     command: 'insert',
     roles: ['drefyn_app'],
@@ -333,6 +376,30 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
     reason:
       'a new organization starts on the install tier and writable; only billing changes either later',
+  },
+  {
+    name: 'app.project_roles.project_role_delete_actor',
+    command: 'delete',
+    roles: ['drefyn_app'],
+    using: PROJECT_ROLE_ACTOR,
+    withCheck: null,
+    reason: 'only an owner or admin, acting in person, takes a project role away',
+  },
+  {
+    name: 'app.project_roles.project_role_insert_actor',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: PROJECT_ROLE_ACTOR,
+    reason: 'only an owner or admin, acting in person, grants a project role',
+  },
+  {
+    name: 'app.project_roles.project_role_update_actor',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: PROJECT_ROLE_ACTOR,
+    withCheck: PROJECT_ROLE_ACTOR,
+    reason: 'only an owner or admin, acting in person, changes a project role',
   },
 ];
 
@@ -393,6 +460,7 @@ export type AuthTableName =
   | 'password_credentials'
   | 'email_challenges'
   | 'oauth_states'
+  | 'cli_sign_in_links'
   | 'auth_rate_limits'
   | 'known_devices';
 // The organization tables a user context reads, through the person's own memberships.

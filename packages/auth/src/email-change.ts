@@ -70,6 +70,23 @@ export type AuthSecurityNotice =
       readonly displaySuffix: string;
       // Database time of the creation.
       readonly at: Date;
+    }
+  // To every owner after the change commits. memberName is the person's display name, or
+  // their address when they set none; it goes in the mail body only, never in a log.
+  | {
+      readonly kind: 'member_removed' | 'member_keys_revoked';
+      readonly organizationId: OrganizationId;
+      readonly membershipId: IdOf<'mem'>;
+      readonly memberName: string;
+      readonly revokedKeys: number;
+      readonly at: Date;
+    }
+  | {
+      readonly kind: 'owner_added';
+      readonly organizationId: OrganizationId;
+      readonly membershipId: IdOf<'mem'>;
+      readonly memberName: string;
+      readonly at: Date;
     };
 
 export interface AuthNoticeMailer {

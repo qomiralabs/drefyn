@@ -4,14 +4,32 @@ Identity, sessions, API keys, organizations and seats for Docs, Studio and Statu
 holds config parsing, key derivation, credential formats, input validators, the built in
 password rules, log redaction, the permission model, the rate limiters, database sessions
 with step up, organizations, and invitations with seats. Only the limiters, the session files,
-organizations and invitations reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
+organizations, invitations, CLI links, operator revoke and the command reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
 system.
 
 ## Entry points
 
 - `@drefyn/auth`: server only. Uses `node:crypto`.
 - `@drefyn/auth/command`: `runAuthCommand` and `AUTH_COMMAND_USAGE`, the `drefyn auth`
-  commands that `@drefyn/cli` dispatches to. Exit codes: 0 done, 2 bad input, 5 file system.
+  commands that `@drefyn/cli` dispatches to: `password-list build`, `link` and
+  `revoke-sessions`. Exit codes: 0 done, 2 bad input, 3 config, 4 database or role missing,
+  5 file system. `link` and `revoke-sessions` read the dashboard's own settings, open both
+  pools, and never send mail.
+
+## CLI links and operator revoke
+
+- `createCliLinks(config, deps)`: `issue({ email, organizationName? })` makes the person if
+  the sign up mode allows it, makes the organization through `createOrganizationFor` when a
+  name is given, deletes the person's unused links and stores the SHA-256 of a fresh 32 byte
+  secret for 15 minutes of database time. It returns
+  `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_<52 base32 characters>`. `redeem(browser, token)`
+  counts `cli_link_verify` on the client address first, parses strictly, then consumes the
+  row in one update keyed by the hash and starts a `cli_link` session. Every refusal is
+  `AUTH_CLI_LINK_INVALID`. It takes no mailer.
+- `createOperatorSessions(deps)`: `revokeForEmail` and `revokeAll` end sessions and forget
+  devices under each person's own user context; the auth role only finds the people.
+- `createOrganizations(...).createOrganizationFor(userId, { name, slug })` is
+  `createOrganization` for a person with no session yet: the same rules, limit and inserts.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).
@@ -171,7 +189,10 @@ and stack. `redactText(text)` applies the string rules alone.
 A product read permission (`docs.read`, `studio.read`, `status.read`) is granted for
 each product in `productReach`. `canAssign(actor, target)` lets owners assign any role,
 lets admins assign admin and member, and lets members assign nothing. `ORG_ROLES` and
-`PROJECT_ROLES` are frozen lists.
+`PROJECT_ROLES` are frozen lists. `canChangeRole({ role, self }, from, to)` lets owners set any
+role on anyone else, lets admins move admins and members between the two and never touch an
+owner, and lets nobody raise their own role. `canRemove({ role, self }, target)` lets owners
+remove anyone else and admins remove admins and members; nobody removes themselves.
 
 ## Errors
 
@@ -565,6 +586,35 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 
 - `pnpm --filter @drefyn/auth test:integration` runs the session tests against the compose
   stack named by `COMPOSE_PROJECT_NAME`, on databases of their own.
+
+## Roles and removal
+
+```ts
+const roles = createRoles({ db, logger, mailer }); // mailer has sendSecurityNotice
+```
+
+- `changeRole(access, membership, role)` and `removeMember(access, membership)` first need a
+  sign in within 15 minutes by database time (`AUTH_RECENT_AUTH_REQUIRED`, or
+  `AUTH_SESSION_INVALID` for a session that has gone), before any lock or write. They then lock
+  the organization row, read the target and the actor's stored role, decide with `canChangeRole`
+  or `canRemove`, then lock the target membership before writing. Lowering or removing the
+  last owner is `AUTH_LAST_OWNER`; no authority is `AUTH_FORBIDDEN`; an unknown membership is
+  `AUTH_NOT_FOUND`. The same role again is a no op.
+- Removal deletes every API key the person made, then the membership, which takes their
+  pending invitations and project roles with it. A change to member deletes every key they
+  made and all their pending invitations; owner to admin keeps keys and drops only owner
+  invitations. A member promoted loses their project role rows, so a later demotion brings
+  none back. There is no option to keep keys.
+- Every owner gets `member_removed`, `member_keys_revoked` (a demotion that revoked keys) or
+  `owner_added` after the commit. Each owner is tried on their own; a failed send is logged as
+  `auth.member_notice_failed` and neither stops the others nor undoes the change. Logs carry ids and roles only.
+- The database checks the same rules against the person acting (`app.current_actor_id()`).
+  A guarded write that touches no row after the code allowed it is `AUTH_FORBIDDEN` and
+  `auth.role_guard_refused`.
+- `setProjectRole(access, membership, project, role | null)` needs the same recent sign in, then
+  sets or clears a member's role on one project; owners and admins are project admins everywhere and take no row.
+  `projectRole(access, project)` is the role the person holds there now: `admin` for owners
+  and admins, otherwise the project row, else the default project role, else `null`.
 
 ## API keys
 
