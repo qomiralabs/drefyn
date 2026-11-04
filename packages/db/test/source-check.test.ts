@@ -10,6 +10,7 @@ import {
   repoSourceProblems,
   runCheckSources,
   sessionSettingProblems,
+  tenantSettingProblems,
 } from '../src/source-check.ts';
 
 const fixtures = join(import.meta.dirname, 'fixtures');
@@ -24,6 +25,9 @@ function files(dir: string): [string, string][] {
 const extensionBad = files(join(fixtures, 'extension-ddl', 'bad'));
 const extensionGood = files(join(fixtures, 'extension-ddl', 'good'));
 const settingsBad = files(join(fixtures, 'session-settings', 'bad'));
+// Transaction scoped, so the context code may use them; everyone else may not.
+const localBad = settingsBad.filter(([name]) => name.startsWith('local_'));
+const sessionBad = settingsBad.filter(([name]) => !name.startsWith('local_'));
 const settingsGood = files(join(fixtures, 'session-settings', 'good'));
 
 // The statement each bad extension fixture must be reported for, as the check prints it.
@@ -132,13 +136,26 @@ describe('extension DDL check', () => {
 });
 
 describe('session setting check', () => {
-  it.each(settingsBad)('fails on %s', (name, text) => {
+  it.each(sessionBad)('fails on %s', (name, text) => {
     const problems = sessionSettingProblems(name, text);
     expect(problems.length, name).toBeGreaterThan(0);
     for (const problem of problems) {
       expect(problem.file).toBe(name);
       expect(problem.statement).toMatch(/set|set_config/i);
     }
+  });
+
+  it('has a fixture for each transaction scoped spelling', () => {
+    expect(localBad.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(localBad)('fails on %s outside the db package', (name, text) => {
+    expect(tenantSettingProblems(`apps/api/src/${name}`, text).length, name).toBeGreaterThan(0);
+  });
+
+  it.each(localBad)('leaves %s to the context code', (name, text) => {
+    expect(tenantSettingProblems('packages/db/src/database.ts', text)).toEqual([]);
+    expect(tenantSettingProblems(`packages/db/test/${name}`, text)).toEqual([]);
   });
 
   it.each(settingsGood)('passes %s', (name, text) => {
