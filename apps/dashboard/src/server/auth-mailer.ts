@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto';
 import { isLinkShaped, normalizeEmailAddress, type NormalizedEmailAddress } from '@drefyn/address';
-import {
-  parseOrganizationName,
-  type AuthConfig,
-  type AuthInvitationMailer,
-  type AuthMailer,
-  type AuthNoticeMailer,
-  type AuthSecurityNotice,
-  type SessionMethod,
+import type {
+  AuthConfig,
+  AuthInvitationMailer,
+  AuthMailer,
+  AuthNoticeMailer,
+  AuthSecurityNotice,
+  SessionMethod,
 } from '@drefyn/auth';
 import type {
   EmailDeps,
@@ -23,7 +22,6 @@ import { firstEmailOff, forgetMailer, heldMailer, holdMailer } from './mail-hold
 
 const CODE_MINUTES = 10;
 const HASH_BYTES = 16;
-const UNNAMED_ORGANIZATION = 'Your organization';
 
 export type OrganizationName = (organizationId: OrganizationId) => Promise<string>;
 
@@ -74,16 +72,6 @@ function noticeKey(notice: AuthSecurityNotice, to: NormalizedEmailAddress): stri
   return `notice:${scope}:${digest(JSON.stringify(canonical(notice)))}:${digest(to)}`;
 }
 
-// Stored names can predate the rule the mail guard enforces, and a notice matters more than
-// the name in it.
-async function shownOrganization(
-  organizationName: OrganizationName,
-  organizationId: OrganizationId,
-): Promise<string> {
-  const stored = parseOrganizationName(await organizationName(organizationId));
-  return stored.ok ? stored.value : UNNAMED_ORGANIZATION;
-}
-
 // Notices carry ids, since auth never reads a name it does not need; the mail needs the name.
 async function noticeMail(
   notice: AuthSecurityNotice,
@@ -107,7 +95,7 @@ async function noticeMail(
       return {
         kind: notice.kind,
         at: notice.at,
-        organizationName: await shownOrganization(organizationName, notice.organizationId),
+        organizationName: await organizationName(notice.organizationId),
         keyName: notice.keyName,
         displaySuffix: notice.displaySuffix,
       };
@@ -116,7 +104,7 @@ async function noticeMail(
       return {
         kind: notice.kind,
         at: notice.at,
-        organizationName: await shownOrganization(organizationName, notice.organizationId),
+        organizationName: await organizationName(notice.organizationId),
         memberName: notice.memberName,
         revokedKeys: notice.revokedKeys,
       };
@@ -124,7 +112,7 @@ async function noticeMail(
       return {
         kind: notice.kind,
         at: notice.at,
-        organizationName: await shownOrganization(organizationName, notice.organizationId),
+        organizationName: await organizationName(notice.organizationId),
         memberName: notice.memberName,
       };
     default:

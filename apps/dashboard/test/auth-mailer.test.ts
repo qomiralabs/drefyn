@@ -9,6 +9,7 @@ import {
 import { idOf } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthMailer } from '../src/server/auth-mailer.ts';
+import { mailableOrganizationName } from '../src/server/organization-name.ts';
 
 const sent: SendResult = { ok: true, value: { messageId: 'm', attempts: 1 } };
 const ORG = idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070');
@@ -85,7 +86,7 @@ function guarded(name = 'Acme') {
   });
   const adapter = createAuthMailer(
     { configured: true, send, drain: () => Promise.resolve({ dropped: 0 }) },
-    () => Promise.resolve(name),
+    mailableOrganizationName(() => Promise.resolve(name)),
   );
   return { send, adapter };
 }
