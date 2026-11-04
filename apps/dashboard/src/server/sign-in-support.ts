@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { decodeSecret, formBindingField, safeReturnTo, type CookieSpec } from '@drefyn/auth';
+import {
+  decodeSecret,
+  encodeSecret,
+  formBindingField,
+  PRE_MAX_AGE_SECONDS,
+  safeReturnTo,
+  type CookieSpec,
+} from '@drefyn/auth';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { after } from 'next/server';
@@ -7,6 +14,8 @@ import { preRedirect } from '../auth/pre-target.ts';
 import { authConfig } from './auth.ts';
 import { logWarn } from './log.ts';
 import { appOrigin } from './origin.ts';
+
+const PRE_SECRET_BYTES = 32;
 
 export async function applyCookies(specs: readonly CookieSpec[]): Promise<void> {
   const jar = await cookies();
@@ -37,9 +46,18 @@ export interface Finished {
   readonly send?: () => Promise<void>;
 }
 
+// Sign in clears the pre sign in cookie, and the invitation page still posts a bound form. A
+// page cannot mint one in the middle of an action's redirect, so a new secret goes out now.
+// It is new, so nothing chosen before sign in survives.
+function freshBinding(returnTo: string): readonly CookieSpec[] {
+  if (!returnTo.startsWith('/invite')) return [];
+  const value = encodeSecret(randomBytes(PRE_SECRET_BYTES));
+  return [{ name: authConfig().cookies.pre, value, maxAgeSeconds: PRE_MAX_AGE_SECONDS }];
+}
+
 // Cookies, then the mail after the response, then the page. Throws the redirect.
 export async function finishSignIn(done: Finished): Promise<never> {
-  await applyCookies(done.setCookies);
+  await applyCookies([...done.setCookies, ...freshBinding(done.returnTo)]);
   const { send } = done;
   if (send !== undefined) after(send);
   redirect(safeReturnTo(done.returnTo, appOrigin()));

@@ -60,7 +60,12 @@ const ROOMY = {
 
 // Hops 1 with a non loopback origin, so the wrapper's start check stays on, and secure
 // cookies, which that origin needs. Only the specs in the auth-hop project reach this one.
-const HOPS = { DREFYN_TRUSTED_PROXY_HOPS: '1', DREFYN_AUTH_COOKIE_SECURE: 'true' };
+// The ceiling sits where four prefixes reach it, at three sends each, as in the auth tests.
+const HOPS = {
+  DREFYN_TRUSTED_PROXY_HOPS: '1',
+  DREFYN_AUTH_COOKIE_SECURE: 'true',
+  DREFYN_AUTH_RATE_EMAIL_SEND_ADDRESS_CEILING: '8/1d',
+};
 // Ready by port: this wrapper answers only the configured Host, and readiness sends none.
 const hopServer = server('on', HOP_SERVER_PORT, HOP_ORIGIN, HOPS, { port: HOP_SERVER_PORT });
 

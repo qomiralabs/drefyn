@@ -10,8 +10,8 @@ import { test } from './test.ts';
 test.use({ storageState: SIGNED_OUT });
 
 const VICTIM_IP = '2001:db8:a::1';
-// The default shared ceiling for one address in a day.
-const CEILING = 30;
+// The shared ceiling the auth-hop server runs with.
+const CEILING = 8;
 // Mail leaves after the response, so a mail that should not exist is given time to appear.
 const MAIL_SETTLE_MS = 1_000;
 

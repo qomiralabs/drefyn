@@ -2,7 +2,7 @@ import { encodeSecret } from '@drefyn/auth';
 import type * as Auth from '@drefyn/auth';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const set = vi.fn();
+const set = vi.fn<(spec: { name: string; value: string; maxAge: number }) => void>();
 const get = vi.fn<(n: string) => { value: string } | undefined>();
 const after = vi.fn();
 const redirect = vi.fn((to: string) => {
@@ -68,6 +68,29 @@ describe('finishSignIn', () => {
       'REDIRECT /acme',
     );
     expect(after).not.toHaveBeenCalled();
+  });
+});
+
+describe('finishSignIn on the way to an invitation', () => {
+  const secure = (name: string) => set.mock.calls.filter(([spec]) => spec.name === name);
+
+  it('sends a new binding after the one sign in cleared', async () => {
+    const cleared = { name: 'pre', value: '', maxAgeSeconds: 0 };
+    await expect(
+      support.finishSignIn({ setCookies: [cleared], returnTo: '/invite' }),
+    ).rejects.toThrow('REDIRECT /invite');
+    const [first, last] = secure('pre');
+    expect(first?.[0]).toMatchObject({ value: '', maxAge: 0 });
+    expect(last?.[0].value).toMatch(/^[0-9a-z]{52}$/);
+    expect(last?.[0].maxAge).toBeGreaterThan(0);
+  });
+
+  it('leaves the cookie cleared for every other page', async () => {
+    const cleared = { name: 'pre', value: '', maxAgeSeconds: 0 };
+    await expect(
+      support.finishSignIn({ setCookies: [cleared], returnTo: '/acme' }),
+    ).rejects.toThrow();
+    expect(secure('pre')).toHaveLength(1);
   });
 });
 
