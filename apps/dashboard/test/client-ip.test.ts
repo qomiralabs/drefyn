@@ -1,6 +1,5 @@
 import fc from 'fast-check';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
-import type { Duplex } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
   FORWARDING_HEADERS,
@@ -14,12 +13,7 @@ import {
   smallThreadPool,
   type WrapperConfig,
 } from '../src/server/client-ip.ts';
-import {
-  HEALTH_PATH,
-  createUpgradeWrapper,
-  createWrapper,
-  startWrapper,
-} from '../src/server/wrapper.ts';
+import { HEALTH_PATH, createWrapper, startWrapper } from '../src/server/wrapper.ts';
 
 const ORIGIN = 'https://app.drefyn.test';
 const config = (env: Record<string, string> = {}) =>
@@ -508,87 +502,5 @@ describe('request targets', () => {
     await vi.waitFor(() => {
       expect(handle).toHaveBeenCalledTimes(1);
     });
-  });
-});
-
-function fakeSocket() {
-  const written: string[] = [];
-  const end = vi.fn((text: string) => {
-    written.push(text);
-  });
-  const handlers = new Map<string, () => void>();
-  const destroy = vi.fn();
-  const socket = {
-    end,
-    destroy,
-    on(event: string, handler: () => void) {
-      handlers.set(event, handler);
-    },
-  } as unknown as Duplex;
-  return { socket, written, end, destroy, handlers };
-}
-
-describe('the upgrade wrapper', () => {
-  const HEAD = Buffer.alloc(0);
-
-  function upgrades(listeners = () => 1) {
-    const upgrade = vi.fn();
-    const warn = vi.fn();
-    const serve = createUpgradeWrapper({ config: config(), upgrade, warn, listeners });
-    return { serve, upgrade, warn };
-  }
-
-  it.each([
-    ['a forged Host', { host: 'evil.example' }, '/', '421'],
-    ['a loopback Host', { host: '127.0.0.1:3000' }, HEALTH_PATH, '421'],
-    ['an absolute form target', { host: 'app.drefyn.test' }, 'http://evil.example/', '400'],
-  ])('answers %s on the socket and never reaches Next', (_name, headers, url, status) => {
-    const { serve, upgrade } = upgrades();
-    const { socket, written } = fakeSocket();
-    serve(request(headers, url), socket, HEAD);
-    expect(written.join('')).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
-    expect(written.join('')).toContain('connection: close');
-    expect(upgrade).not.toHaveBeenCalled();
-  });
-
-  it('hands Next a checked upgrade with the rewritten headers', async () => {
-    const { serve, upgrade } = upgrades();
-    const { socket } = fakeSocket();
-    const req = request({ host: 'app.drefyn.test', 'x-forwarded-for': '6.6.6.6' });
-    serve(req, socket, HEAD);
-    await vi.waitFor(() => {
-      expect(upgrade).toHaveBeenCalledWith(req, socket, HEAD);
-    });
-    expect(req.headers['x-forwarded-for']).toBe('192.0.2.50');
-    expect(req.headers['x-forwarded-host']).toBe('app.drefyn.test');
-  });
-
-  it('closes the socket when Next fails on an upgrade', async () => {
-    const warn = vi.fn();
-    const serve = createUpgradeWrapper({
-      config: config(),
-      upgrade: () => Promise.reject(new Error('boom')),
-      warn,
-    });
-    const { socket, written } = fakeSocket();
-    serve(request({ host: 'app.drefyn.test' }), socket, HEAD);
-    await vi.waitFor(() => {
-      expect(written.join('')).toMatch(/^HTTP\/1\.1 500 /);
-    });
-    expect(warn).toHaveBeenCalledWith('dashboard.request_failed', {});
-  });
-
-  it('destroys a socket that errors, so a client reset cannot end the process', () => {
-    const { serve } = upgrades();
-    const { socket, handlers, destroy } = fakeSocket();
-    serve(request({ host: 'evil.example' }), socket, HEAD);
-    handlers.get('error')?.();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it('warns when something else listens for upgrades, because it would skip these checks', () => {
-    const { serve, warn } = upgrades(() => 2);
-    serve(request({ host: 'evil.example' }), fakeSocket().socket, HEAD);
-    expect(warn).toHaveBeenCalledWith('dashboard.upgrade_listener_extra', { listeners: 2 });
   });
 });

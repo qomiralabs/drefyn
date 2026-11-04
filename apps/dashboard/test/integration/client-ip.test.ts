@@ -110,7 +110,7 @@ interface Started {
   readonly child: ChildProcess;
   readonly port: number;
   // Everything the server has logged so far.
-  log(): string;
+  readonly log: () => string;
 }
 
 async function startBuilt(): Promise<Started> {
@@ -205,7 +205,6 @@ describe.runIf(runBuilt)('the built server behind server.ts', () => {
     expect((await curl(port, '/', [HOST])).status).toBeLessThan(500);
     const reply = await curl(port, '/', ['Host: evil.example', ...UPGRADE]);
     expect(reply.status).toBe(421);
-    expect(log()).not.toContain('dashboard.upgrade_listener_extra');
   });
 
   it('finishes a valid Host upgrade within a second, after a routed request', async () => {

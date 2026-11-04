@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Duplex } from 'node:stream';
 import {
   FORWARDING_HEADERS,
   THREAD_POOL_WANTED,
@@ -47,20 +46,13 @@ const badTarget = (req: IncomingMessage) => !ORIGIN_FORM.test(req.url ?? '');
 
 interface Refusal {
   readonly status: number;
-  readonly phrase: string;
   readonly body: string;
 }
 
-const BAD_REQUEST: Refusal = { status: 400, phrase: 'Bad Request', body: 'bad request\n' };
-const MISDIRECTED: Refusal = {
-  status: 421,
-  phrase: 'Misdirected Request',
-  body: 'misdirected request\n',
-};
-const FAILED: Refusal = { status: 500, phrase: 'Internal Server Error', body: 'internal error\n' };
+const BAD_REQUEST: Refusal = { status: 400, body: 'bad request\n' };
+const MISDIRECTED: Refusal = { status: 421, body: 'misdirected request\n' };
 
-// Every check a request or an upgrade passes before Next, and the header rewrite. Null means
-// it may go on.
+// Every check a request passes before Next, and the header rewrite. Null means it may go on.
 function createAdmission(config: WrapperConfig, warn: Warn, now: () => number) {
   const forwardedWarning = createThrottle(now);
   const chainWarning = createThrottle(now);
@@ -116,53 +108,6 @@ export function createWrapper(deps: WrapperDeps) {
         // Next answers its own errors; this only catches a handler that threw past them.
         warn('dashboard.request_failed', {});
         if (!res.headersSent) reply(res, 500, 'internal error\n');
-      });
-  };
-}
-
-export interface UpgradeWrapperDeps {
-  readonly config: WrapperConfig;
-  readonly upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => unknown;
-  readonly warn?: Warn;
-  readonly now?: () => number;
-  // How many upgrade listeners the server has; anything but this one skips every check.
-  readonly listeners?: () => number;
-}
-
-// There is no response object on an upgrade, so a refusal is written to the socket by hand.
-function refuseUpgrade(socket: Duplex, refusal: Refusal): void {
-  const length = Buffer.byteLength(refusal.body);
-  socket.end(
-    `HTTP/1.1 ${String(refusal.status)} ${refusal.phrase}\r\nconnection: close\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${String(length)}\r\n\r\n${refusal.body}`,
-  );
-}
-
-// Upgrades skip the request listener, so they get the same checks here. server.ts keeps
-// Next's own listener off the server; a second listener is logged, because it would see
-// requests these checks refused.
-export function createUpgradeWrapper(deps: UpgradeWrapperDeps) {
-  const { config, upgrade } = deps;
-  const warn = deps.warn ?? logWarn;
-  const admit = createAdmission(config, warn, deps.now ?? Date.now);
-
-  return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    // Node leaves an upgrade socket with no error listener, and an unhandled reset would end
-    // the process.
-    socket.on('error', () => {
-      socket.destroy();
-    });
-    const listeners = deps.listeners?.() ?? 1;
-    if (listeners !== 1) warn('dashboard.upgrade_listener_extra', { listeners });
-    const refusal = admit(req);
-    if (refusal !== null) {
-      refuseUpgrade(socket, refusal);
-      return;
-    }
-    Promise.resolve()
-      .then(() => upgrade(req, socket, head))
-      .catch(() => {
-        warn('dashboard.request_failed', {});
-        refuseUpgrade(socket, FAILED);
       });
   };
 }

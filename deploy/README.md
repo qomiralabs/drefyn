@@ -282,8 +282,8 @@ is `0.0.0.0`, because a container needs it, so a host port mapping or firewall h
 job.
 
 The wrapper takes only the origin form of a request, a path starting with one `/`. Anything
-else, such as an absolute `http://host/` target, gets 400. WebSocket upgrades pass the same
-Host and target checks as requests.
+else, such as an absolute `http://host/` target, gets 400. The dashboard has no WebSocket route,
+so an upgrade request is answered as an ordinary request, with the same checks.
 
 Set `UV_THREADPOOL_SIZE=16` in the dashboard's environment. Node sizes that pool when it starts,
 so it cannot be set from inside the dashboard. A smaller or missing value logs
