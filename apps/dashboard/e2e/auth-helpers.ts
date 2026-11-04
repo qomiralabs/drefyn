@@ -1,47 +1,66 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createPasswordHasher, parseAuthConfig } from '@drefyn/auth';
+import {
+  closeDatabase,
+  createAuthDatabase,
+  createDatabase,
+  parseAuthDatabaseConfig,
+  parseDatabaseConfig,
+  withAuth,
+  withOrganization,
+  withUser,
+  type Database,
+} from '@drefyn/db';
+import { idOf, userId } from '@drefyn/tenancy';
 import { expect, type Page } from '@playwright/test';
-import pg from 'pg';
+import { sql, type RawBuilder } from 'kysely';
 import { countTo, nextMail } from './mailpit.ts';
 import { ON_ORIGIN } from './fixtures.ts';
 import { MAYA } from './people.ts';
-import { roleUrl, serverEnv, stackFile } from './stack-env.ts';
+import { serverEnv } from './stack-env.ts';
 
-type Context = Readonly<Record<string, string>>;
+const env = serverEnv(ON_ORIGIN);
 
-// Rows, not a page, because the claims here are about rows. Direct, since Playwright runs in
-// a container with no docker command, and as the product's own roles and context, since
-// Postgres refuses the superuser over a network.
-async function asRole(role: string, passwordKey: string, statement: string, context: Context) {
-  const client = new pg.Client(roleUrl(stackFile(), role, passwordKey));
-  await client.connect();
+const text = (rows: readonly unknown[]): string =>
+  rows.map((row) => Object.values(row as object).join('|')).join('\n');
+
+// Rows, not a page, because the claims here are about rows. Through the product's own roles
+// and contexts: Postgres refuses the superuser over a network, and Playwright's container
+// has no docker command.
+export async function authSql(statement: string): Promise<string> {
+  const db = await createAuthDatabase(parseAuthDatabaseConfig(env));
   try {
-    await client.query('begin');
-    for (const [name, value] of Object.entries(context)) {
-      await client.query('select set_config($1, $2, true)', [name, value]);
-    }
-    const result = await client.query({ text: statement, rowMode: 'array' });
-    await client.query('commit');
-    return (result.rows as unknown[][]).map((row) => row.join('|')).join('\n');
+    return text((await withAuth(db, (tx) => sql.raw(statement).execute(tx))).rows);
   } finally {
-    await client.end();
+    await closeDatabase(db);
   }
 }
 
-export const authSql = (statement: string): Promise<string> =>
-  asRole('drefyn_auth', 'DREFYN_AUTH_PASSWORD', statement, {});
+async function appSql(
+  work: (db: Database, query: RawBuilder<unknown>) => Promise<{ rows: readonly unknown[] }>,
+  statement: string,
+): Promise<string> {
+  const db = await createDatabase(parseDatabaseConfig(env));
+  try {
+    return text((await work(db, sql.raw(statement))).rows);
+  } finally {
+    await closeDatabase(db);
+  }
+}
 
 export const organizationSql = (organizationId: string, statement: string): Promise<string> =>
-  asRole('drefyn_app', 'DREFYN_APP_PASSWORD', statement, {
-    'drefyn.organization_id': organizationId,
-    'drefyn.actor_user_id': MAYA.id,
-  });
+  appSql(
+    (db, query) =>
+      withOrganization(
+        db,
+        { organizationId: idOf('org', organizationId), actorUserId: userId(MAYA.id) },
+        (tx) => query.execute(tx),
+      ),
+    statement,
+  );
 
-const userSql = (userId: string, statement: string): Promise<string> =>
-  asRole('drefyn_app', 'DREFYN_APP_PASSWORD', statement, {
-    'drefyn.user_id': userId,
-    'drefyn.actor_user_id': userId,
-  });
+const userSql = (id: string, statement: string): Promise<string> =>
+  appSql((db, query) => withUser(db, { userId: userId(id) }, (tx) => query.execute(tx)), statement);
 
 export const uniqueAddress = (label: string): string =>
   `${label}-${randomBytes(5).toString('hex')}@example.dev`;

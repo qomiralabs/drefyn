@@ -19,8 +19,8 @@ async function invitation(email: string): Promise<string> {
   await organizationSql(
     ACME_ID,
     `insert into app.invitations
-       (id, organization_id, email, email_normalized, role, invited_by, secret_hash, expires_at)
-     values ('${id}', '${ACME_ID}', '${email}', '${email}', 'member', '${membership}',
+       (id, organization_id, email_normalized, role, invited_by, secret_hash, expires_at)
+     values ('${id}', '${ACME_ID}', '${email}', 'member', '${membership}',
        decode('${sha256(secret).toString('hex')}', 'hex'), now() + interval '7 days')`,
   );
   return formatInvitationToken({
