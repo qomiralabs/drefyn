@@ -240,6 +240,64 @@ describeWithStack('roles and removal against Postgres', () => {
     expect(sent.map((n) => n.notice.kind)).toEqual(['owner_added', 'owner_added']);
   });
 
+  it('refuses a stale sign in on every action, changes nothing, and passes a fresh one', async () => {
+    const org = await newOrg(h);
+    const member = await join(org, 'member');
+    const age = (minutes: number) =>
+      h.sql(
+        `update app.sessions set authenticated_at = now() - interval '${String(minutes)} minutes'
+          where id = '${org.owner.sessionId}';`,
+      );
+    await age(16);
+    const roles = h.roles();
+    for (const result of [
+      await roles.changeRole(org.owner, member.membership, 'admin'),
+      await roles.removeMember(org.owner, member.membership),
+    ]) {
+      expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    }
+    expect(await h.sql(`select role from app.memberships where id = '${member.membership}';`)).toBe(
+      'member',
+    );
+    await age(14);
+    expect((await roles.changeRole(org.owner, member.membership, 'admin')).ok).toBe(true);
+  });
+
+  it('refuses an action from a session that has gone', async () => {
+    const org = await newOrg(h);
+    const member = await join(org, 'member');
+    await h.sql(`delete from app.sessions where id = '${org.owner.sessionId}';`);
+    const result = await h.roles().removeMember(org.owner, member.membership);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_SESSION_INVALID');
+  });
+
+  it('does not bring a project role back after promotion and demotion', async () => {
+    const org = await newOrg(h);
+    const [project] = await addProjects(h, org.organizationId, 1);
+    if (project === undefined) throw new Error('no project');
+    const member = await join(org, 'member', 'viewer');
+    const roles = h.roles();
+    await roles.setProjectRole(org.owner, member.membership, project, 'admin');
+    expect((await roles.changeRole(org.owner, member.membership, 'admin')).ok).toBe(true);
+    expect(
+      await count(
+        `select count(*) from app.project_roles where membership_id = '${member.membership}';`,
+      ),
+    ).toBe(0);
+    expect((await roles.changeRole(org.owner, member.membership, 'member')).ok).toBe(true);
+    expect(await roles.projectRole(member.access, project)).toBe('viewer');
+  });
+
+  it('tells the other owners when one notice cannot be sent', async () => {
+    const org = await newOrg(h);
+    await join(org, 'owner');
+    const admin = await join(org, 'admin');
+    const before = h.mail.notices.length;
+    h.mail.failNext();
+    expect((await h.roles().removeMember(org.owner, admin.membership)).ok).toBe(true);
+    expect(h.mail.notices.slice(before).map((n) => n.notice.kind)).toEqual(['member_removed']);
+  });
+
   // A key created while its maker is being demoted waits on the membership lock, so it is
   // either revoked by the demotion or refused because the maker is now a member.
   it('never keeps a key made during a demotion of its maker', async () => {
