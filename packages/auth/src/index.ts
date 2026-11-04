@@ -97,6 +97,13 @@ export {
   type Invitations,
   type InviteOutcome,
 } from './invitations.ts';
+export {
+  createRoles,
+  type RemovalSummary,
+  type RoleChangeSummary,
+  type Roles,
+  type RolesDeps,
+} from './roles.ts';
 export { countSeats, type SeatHolder } from './seats.ts';
 export {
   RESERVED_SLUGS,
@@ -276,10 +283,13 @@ export {
   PERMISSIONS,
   PROJECT_ROLES,
   canAssign,
+  canChangeRole,
+  canRemove,
   permissionsFor,
   type OrgRole,
   type Permission,
   type ProjectRole,
+  type RoleActor,
 } from './permissions.ts';
 export { BREACH_CHECK_TIMEOUT_MS, type BreachedPasswordCheck } from './breach-check.ts';
 export {

@@ -473,6 +473,13 @@ const INVITER =
 const KEY_CREATOR =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
+const ACTOR_ON_MEMBERSHIP =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = memberships.organization_id) AND (a.user_id = app.current_actor_id()) AND ((a.role = 'owner'::text) OR ((a.role = 'admin'::text) AND (memberships.role <> 'owner'::text))))))";
+const ANOTHER_OWNER =
+  "(EXISTS ( SELECT\n   FROM app.memberships o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.role = 'owner'::text) AND (o.id <> memberships.id))))";
+const ACTOR_ON_PROJECT_ROLE =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = project_roles.organization_id) AND (a.user_id = app.current_actor_id()) AND (a.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 describe('restrictive policies', () => {
   it('are in ALLOW_LISTS', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
@@ -510,6 +517,13 @@ describe('restrictive policies', () => {
         withCheck: INVITER,
       },
       {
+        name: 'app.memberships.membership_delete_actor',
+        command: 'delete',
+        roles: ['drefyn_app'],
+        using: `(${ACTOR_ON_MEMBERSHIP} AND ((role <> 'owner'::text) OR ${ANOTHER_OWNER}))`,
+        withCheck: null,
+      },
+      {
         name: 'app.memberships.membership_insert_origin',
         command: 'insert',
         roles: ['drefyn_app'],
@@ -517,11 +531,39 @@ describe('restrictive policies', () => {
         withCheck: ORIGIN,
       },
       {
+        name: 'app.memberships.membership_update_actor',
+        command: 'update',
+        roles: ['drefyn_app'],
+        using: ACTOR_ON_MEMBERSHIP,
+        withCheck: `(${ACTOR_ON_MEMBERSHIP} AND ((role = 'owner'::text) OR ${ANOTHER_OWNER}))`,
+      },
+      {
         name: 'app.organizations.organization_insert_tier',
         command: 'insert',
         roles: ['drefyn_app'],
         using: null,
         withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+      },
+      {
+        name: 'app.project_roles.project_role_delete_actor',
+        command: 'delete',
+        roles: ['drefyn_app'],
+        using: ACTOR_ON_PROJECT_ROLE,
+        withCheck: null,
+      },
+      {
+        name: 'app.project_roles.project_role_insert_actor',
+        command: 'insert',
+        roles: ['drefyn_app'],
+        using: null,
+        withCheck: ACTOR_ON_PROJECT_ROLE,
+      },
+      {
+        name: 'app.project_roles.project_role_update_actor',
+        command: 'update',
+        roles: ['drefyn_app'],
+        using: ACTOR_ON_PROJECT_ROLE,
+        withCheck: ACTOR_ON_PROJECT_ROLE,
       },
     ]);
     for (const entry of RESTRICTIVE_POLICIES) expect(entry.reason.trim(), entry.name).not.toBe('');
@@ -566,6 +608,19 @@ describe('restrictive policies', () => {
     ]) {
       expect(arm, part).toContain(part);
     }
+  });
+
+  // An admin must never reach an owner row, nor write owner; nothing may leave no owner.
+  it('keep an admin off owner rows and every organization with an owner', () => {
+    const byName = new Map(RESTRICTIVE_POLICIES.map((p) => [p.name, p]));
+    const update = byName.get('app.memberships.membership_update_actor');
+    const remove = byName.get('app.memberships.membership_delete_actor');
+    for (const text of [update?.using, update?.withCheck, remove?.using]) {
+      expect(text).toContain("(a.role = 'admin'::text) AND (memberships.role <> 'owner'::text)");
+      expect(text).toContain('a.user_id = app.current_actor_id()');
+    }
+    expect(update?.withCheck).toContain('o.id <> memberships.id');
+    expect(remove?.using).toContain('o.id <> memberships.id');
   });
 
   it('pass with an entry that is clean', () => {

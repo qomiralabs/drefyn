@@ -178,6 +178,16 @@ export interface PasswordCredentialsTable {
   updated_at: Generated<Date>;
 }
 
+// app.project_roles
+export interface ProjectRolesTable {
+  organization_id: string;
+  membership_id: string;
+  target_project_id: string;
+  role: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.projects
 export interface ProjectsTable {
   id: Generated<string>;
@@ -232,6 +242,7 @@ export interface Schema {
   organization_slugs: OrganizationSlugsTable;
   organizations: OrganizationsTable;
   password_credentials: PasswordCredentialsTable;
+  project_roles: ProjectRolesTable;
   projects: ProjectsTable;
   sessions: SessionsTable;
   users: UsersTable;

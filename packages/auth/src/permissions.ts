@@ -76,3 +76,29 @@ export function canAssign(actor: OrgRole, target: OrgRole): boolean {
   if (actor === 'member') return false;
   return ORG_ROLES.indexOf(actor) <= ORG_ROLES.indexOf(target);
 }
+
+// The person acting, and whether the membership they act on is their own.
+export interface RoleActor {
+  readonly role: OrgRole;
+  readonly self: boolean;
+}
+
+const rank = (role: OrgRole) => ORG_ROLES.length - ORG_ROLES.indexOf(role);
+
+// Owners set any role on anyone else; admins move admins and members between the two and
+// never touch an owner; members change nothing. Nobody raises their own role.
+export function canChangeRole(actor: RoleActor, from: OrgRole, to: OrgRole): boolean {
+  if (!isRole(actor.role) || !isRole(from) || !isRole(to)) return false;
+  if (actor.role === 'member') return false;
+  if (actor.self && rank(to) > rank(from)) return false;
+  if (actor.role === 'admin' && (from === 'owner' || to === 'owner')) return false;
+  return true;
+}
+
+// Owners remove anyone else; admins remove admins and members. Leaving is its own flow, so
+// nobody removes themselves here.
+export function canRemove(actor: RoleActor, target: OrgRole): boolean {
+  if (!isRole(actor.role) || !isRole(target)) return false;
+  if (actor.self || actor.role === 'member') return false;
+  return actor.role === 'owner' || target !== 'owner';
+}

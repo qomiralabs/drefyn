@@ -25,16 +25,25 @@ const TABLES = ['organizations', 'organization_slugs', 'memberships', 'projects'
 let db: TestDatabase;
 const sessions: pg.Client[] = [];
 
+// One session per role and database, reused by every case: each case rolls back, and other
+// files run beside this one, so a session per case runs the server out of connection slots.
+const shared = new Map<string, pg.Client>();
+
 async function as(role: 'app' | 'auth'): Promise<pg.Client> {
+  const key = `${role}:${db.name}`;
+  const held = shared.get(key);
+  if (held !== undefined) return held;
   const client = await rawSession(role, db.name);
   // The harness drops each database after its file and ends what is still connected.
   client.on('error', () => undefined);
   sessions.push(client);
+  shared.set(key, client);
   return client;
 }
 
-// Every block opens its own sessions, so they are closed once, after the whole file.
+// Blocks share the sessions, so they are closed once, after the whole file.
 afterAll(async () => {
+  shared.clear();
   for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
 });
 
@@ -278,7 +287,6 @@ describeWithStack('organization tables', () => {
       ['organizations', "plan_tier = 'enterprise'"],
       ['organizations', 'read_only_since = null'],
       ['organizations', 'organization_id = organization_id'],
-      ['memberships', "role = 'owner'"],
       ['memberships', 'user_id = user_id'],
       ['projects', 'read_only_since = null'],
     ])('refuses an update of %s set %s with permission denied', async (table, assignment) => {
@@ -296,7 +304,8 @@ describeWithStack('organization tables', () => {
       ['organization_slugs', "slug = 'acme-renamed'"],
     ])('still lets organization work update %s set %s', async (table, assignment) => {
       const app = await as('app');
-      const result = await within(app, { org: ORG_A }, () =>
+      // The owner acts: a membership changes only through the person acting.
+      const result = await within(app, { org: ORG_A, actor: USER_A }, () =>
         app.query(`update app.${table} set ${assignment}`),
       );
       expect(result.rowCount).toBe(1);

@@ -28,14 +28,23 @@ const TABLES = ['api_keys', 'api_key_projects'];
 let db: TestDatabase;
 const sessions: pg.Client[] = [];
 
+// One session per role and database, reused by every case: each case rolls back, and other
+// files run beside this one, so a session per case runs the server out of connection slots.
+const shared = new Map<string, pg.Client>();
+
 async function as(role: 'app' | 'auth'): Promise<pg.Client> {
+  const key = `${role}:${db.name}`;
+  const held = shared.get(key);
+  if (held !== undefined) return held;
   const client = await rawSession(role, db.name);
   client.on('error', () => undefined);
   sessions.push(client);
+  shared.set(key, client);
   return client;
 }
 
 afterAll(async () => {
+  shared.clear();
   for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
 });
 
@@ -231,16 +240,26 @@ describeWithStack('API key tables', () => {
     expect(seen).toEqual({ scope: 'listed', listed: 0 });
   });
 
+  // Made an admin, the plain member creates a key, and the owner then removes them.
   it("clear only the creator when the creator's membership goes", async () => {
     const app = await as('app');
-    const seen = await within(app, ORG_A, async () => {
-      await app.query(`delete from app.memberships where id = '${MEMBER_A}'`);
-      const row = await app.query<{ organization_id: string; created_by: string | null }>(
-        `select organization_id, created_by from app.api_keys where id = '${KEY_A}'`,
-      );
-      return row.rows[0];
-    });
-    expect(seen).toEqual({ organization_id: ORG_A, created_by: null });
+    const seen = await within(
+      app,
+      ORG_A,
+      async () => {
+        await app.query(`update app.memberships set role = 'admin' where id = '${PLAIN_A}'`);
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_C]);
+        await app.query(keyInsert(ORG_A, KEY_D, PLAIN_A));
+        await app.query("select set_config('drefyn.actor_user_id', $1, true)", [USER_A]);
+        const removed = await app.query(`delete from app.memberships where id = '${PLAIN_A}'`);
+        const row = await app.query<{ organization_id: string; created_by: string | null }>(
+          `select organization_id, created_by from app.api_keys where id = '${KEY_D}'`,
+        );
+        return { removed: removed.rowCount, row: row.rows[0] };
+      },
+      USER_A,
+    );
+    expect(seen).toEqual({ removed: 1, row: { organization_id: ORG_A, created_by: null } });
   });
 
   it('give drefyn_auth no grant on either table', async () => {

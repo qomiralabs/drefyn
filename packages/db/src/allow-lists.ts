@@ -302,6 +302,18 @@ const MEMBERSHIP_ORIGIN =
 const KEY_CREATOR =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
+// The person acting holds an owner membership, or an admin one and the row is no owner's.
+const MEMBER_ACTOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = memberships.organization_id) AND (a.user_id = app.current_actor_id()) AND ((a.role = 'owner'::text) OR ((a.role = 'admin'::text) AND (memberships.role <> 'owner'::text))))))";
+
+// Another owner of the organization than this row.
+const OTHER_OWNER =
+  "(EXISTS ( SELECT\n   FROM app.memberships o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.role = 'owner'::text) AND (o.id <> memberships.id))))";
+
+// The person acting is an owner or admin of the row's organization.
+const PROJECT_ROLE_ACTOR =
+  "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = project_roles.organization_id) AND (a.user_id = app.current_actor_id()) AND (a.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
+
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
   {
     name: 'app.api_keys.api_key_insert_creator',
@@ -330,6 +342,15 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     reason: 'a resend or any other update cannot raise the role past what the inviter could grant',
   },
   {
+    name: 'app.memberships.membership_delete_actor',
+    command: 'delete',
+    roles: ['drefyn_app'],
+    using: `(${MEMBER_ACTOR} AND ((role <> 'owner'::text) OR ${OTHER_OWNER}))`,
+    withCheck: null,
+    reason:
+      'only an owner removes an owner and only an owner or admin removes anyone, and never the last owner',
+  },
+  {
     name: 'app.memberships.membership_insert_origin',
     command: 'insert',
     roles: ['drefyn_app'],
@@ -339,6 +360,15 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
       'a membership is born only for the person acting, as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
   },
   {
+    name: 'app.memberships.membership_update_actor',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: MEMBER_ACTOR,
+    withCheck: `(${MEMBER_ACTOR} AND ((role = 'owner'::text) OR ${OTHER_OWNER}))`,
+    reason:
+      'an owner sets any role; an admin never touches an owner row nor writes owner; a member changes nothing; no change leaves the organization without an owner',
+  },
+  {
     name: 'app.organizations.organization_insert_tier',
     command: 'insert',
     roles: ['drefyn_app'],
@@ -346,6 +376,30 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
     reason:
       'a new organization starts on the install tier and writable; only billing changes either later',
+  },
+  {
+    name: 'app.project_roles.project_role_delete_actor',
+    command: 'delete',
+    roles: ['drefyn_app'],
+    using: PROJECT_ROLE_ACTOR,
+    withCheck: null,
+    reason: 'only an owner or admin, acting in person, takes a project role away',
+  },
+  {
+    name: 'app.project_roles.project_role_insert_actor',
+    command: 'insert',
+    roles: ['drefyn_app'],
+    using: null,
+    withCheck: PROJECT_ROLE_ACTOR,
+    reason: 'only an owner or admin, acting in person, grants a project role',
+  },
+  {
+    name: 'app.project_roles.project_role_update_actor',
+    command: 'update',
+    roles: ['drefyn_app'],
+    using: PROJECT_ROLE_ACTOR,
+    withCheck: PROJECT_ROLE_ACTOR,
+    reason: 'only an owner or admin, acting in person, changes a project role',
   },
 ];
 
