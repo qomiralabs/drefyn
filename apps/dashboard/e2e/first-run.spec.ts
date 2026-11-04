@@ -41,11 +41,13 @@ test('a new person goes from the code through Welcome and an organization to the
 
 test('a name and a password on Welcome both stick', async ({ page }) => {
   await signUp(page);
-  await page.getByLabel('Password (optional)').fill('short');
+  await page.getByLabel('Password (optional)', { exact: true }).fill('short');
   await nameYourself(page);
   await expect(page.getByText('Use at least 15 characters.')).toBeVisible();
   await expect(page.getByLabel('Your name')).toHaveValue('Maya Okafor');
-  await page.getByLabel('Password (optional)').fill('a sentence that is long enough');
+  await page
+    .getByLabel('Password (optional)', { exact: true })
+    .fill('a sentence that is long enough');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/organizations\/new$/);
 });

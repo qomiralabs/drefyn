@@ -286,9 +286,9 @@ test.describe('signed out pages', () => {
     await page.goto('/auth-states/welcome/ready');
     await expect(page.getByLabel('Your name')).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(page.getByLabel('Password (optional)')).toBeFocused();
+    await expect(page.getByLabel('Password (optional)', { exact: true })).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
-    await expect(page.getByRole('button', { name: /^Show password/ })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Show password' })).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
     await expect(page.getByRole('button', { name: 'Continue' })).toBeFocused();
     await page.keyboard.press(tabKey(browserName));

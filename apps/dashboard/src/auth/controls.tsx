@@ -60,7 +60,7 @@ export function SecretField({
     <div className="auth-reveal">
       <TextField
         id={id}
-        label={label}
+        label={optional ? `${label} (optional)` : label}
         name={name}
         type={shown ? 'text' : 'password'}
         size="lg"

@@ -90,7 +90,7 @@ export function WelcomeScreen({
         {passwordOn ? (
           <SecretField
             id="welcome-password"
-            label="Password (optional)"
+            label="Password"
             name="password"
             autoComplete="new-password"
             optional
