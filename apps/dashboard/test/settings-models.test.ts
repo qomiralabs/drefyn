@@ -6,6 +6,7 @@ import {
   invitePermit,
   keyFiltersFrom,
   keyFilterSearch,
+  keyListInput,
   methodsFrom,
   needsTypedName,
   projectAccessWords,
@@ -132,6 +133,32 @@ describe('API key filters', () => {
       }),
     ).toBe('?q=ci&can=docs&by=former&used=never');
     expect(keyFilterSearch({ products: [], createdBy: [], lastUsed: 'any' })).toBe('');
+  });
+});
+
+describe('the list input', () => {
+  it('sends no filter that is not set, since the list refuses an empty one', () => {
+    expect(keyListInput({ products: [], createdBy: [], lastUsed: 'any' })).toEqual({
+      lastUsed: 'any',
+    });
+  });
+
+  it('passes every filter that is set', () => {
+    expect(
+      keyListInput({
+        search: 'ci',
+        products: ['docs'],
+        createdBy: ['former'],
+        lastUsed: '7d',
+        cursor: 'abc',
+      }),
+    ).toEqual({
+      search: 'ci',
+      products: ['docs'],
+      createdBy: ['former'],
+      lastUsed: '7d',
+      cursor: 'abc',
+    });
   });
 });
 

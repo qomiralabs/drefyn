@@ -37,6 +37,9 @@ export const LEAK_PATHS = [
   '/organizations/new',
 ] as const;
 
+// Signed in, but drawn outside the shell.
+export const NO_SHELL_PATH = '/organizations/new';
+
 export const UNKNOWN_ORG_PATHS = [
   '/nope',
   '/ACME',

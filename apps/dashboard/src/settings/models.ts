@@ -158,6 +158,24 @@ export function firstPage(filters: KeyFilters): KeyFilters {
   };
 }
 
+// The list refuses an empty filter rather than reading it as none, so unset ones stay out.
+export function keyListInput(filters: KeyFilters): {
+  readonly search?: string;
+  readonly products?: readonly Product[];
+  readonly createdBy?: readonly KeyCreator[];
+  readonly lastUsed: LastUsed;
+  readonly cursor?: string;
+} {
+  const { search, products, createdBy, lastUsed, cursor } = filters;
+  return {
+    ...(search === undefined ? {} : { search }),
+    ...(products.length === 0 ? {} : { products }),
+    ...(createdBy.length === 0 ? {} : { createdBy }),
+    lastUsed,
+    ...(cursor === undefined ? {} : { cursor }),
+  };
+}
+
 export function keyFilterSearch(filters: KeyFilters): string {
   const query = new URLSearchParams();
   if (filters.search !== undefined && filters.search !== '') query.set('q', filters.search);

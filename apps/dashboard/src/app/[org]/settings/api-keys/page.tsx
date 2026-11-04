@@ -7,7 +7,7 @@ import { appOrigin } from '../../../../server/origin.ts';
 import { keyRows } from '../../../../server/settings-views.ts';
 import { failureReference, hosted } from '../../../../server/sign-in-support.ts';
 import { KeysScreen } from '../../../../settings/api-keys.tsx';
-import { firstPage, keyFiltersFrom } from '../../../../settings/models.ts';
+import { firstPage, keyFiltersFrom, keyListInput } from '../../../../settings/models.ts';
 import { LoadProblem } from '../../../../settings/parts.tsx';
 
 interface Params {
@@ -28,18 +28,20 @@ export default async function ApiKeysPage({ params, searchParams }: Params) {
   const filters = keyFiltersFrom(await searchParams);
   const auth = await dashboardAuth();
   const manage = access.permissions.includes('org.manage_api_keys');
-  const base = {
-    ...firstPage(filters),
-    createdBy: filters.createdBy as readonly (IdOf<'mem'> | 'former')[],
+  const asInput = (from: typeof filters) => {
+    const { createdBy, ...input } = keyListInput(from);
+    return {
+      ...input,
+      ...(createdBy === undefined
+        ? {}
+        : { createdBy: createdBy as readonly (IdOf<'mem'> | 'former')[] }),
+    };
   };
-  const first = await auth.apiKeys.listApiKeys(
-    access,
-    filters.cursor === undefined ? base : { ...base, cursor: filters.cursor },
-  );
+  const first = await auth.apiKeys.listApiKeys(access, asInput(filters));
   // A cursor is opaque and a URL can hold anything, so a bad one is the first page.
   const page =
     !first.ok && first.error.code === 'AUTH_INPUT_INVALID'
-      ? await auth.apiKeys.listApiKeys(access, base)
+      ? await auth.apiKeys.listApiKeys(access, asInput(firstPage(filters)))
       : first;
   const projects = manage ? await auth.members.listProjects(access) : null;
   if (!page.ok || projects?.ok === false) {

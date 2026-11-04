@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { test } from './csp.ts';
 import { banner, commandBar, DESKTOP, MOBILE } from './fixtures.ts';
-import { LEAK_PATHS, UNKNOWN_ORG_PATHS } from './leaks.ts';
+import { LEAK_PATHS, NO_SHELL_PATH, UNKNOWN_ORG_PATHS } from './leaks.ts';
 
 // Runs in the shell engine projects against the flag on server, and in flag-off against
 // the server with the release flag off, where every one of these routes is a 404.
@@ -178,7 +178,7 @@ async function openOverlays(page: Page): Promise<void> {
   }
 }
 
-for (const path of LEAK_PATHS) {
+for (const path of LEAK_PATHS.filter((p) => p !== NO_SHELL_PATH)) {
   test(`${path} loads with no CSP violation, overlays and drawer open`, async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     if (!flagOn()) {
@@ -196,6 +196,15 @@ for (const path of LEAK_PATHS) {
     await page.getByRole('button', { name: 'Close navigation' }).click();
   });
 }
+
+test(`${NO_SHELL_PATH} loads with no CSP violation`, async ({ page }) => {
+  const res = await page.goto(NO_SHELL_PATH);
+  if (!flagOn()) {
+    expect(res?.status()).toBe(404);
+    return;
+  }
+  await expect(page.getByRole('button', { name: 'Create organization' })).toBeVisible();
+});
 
 test('a not found page loads with no CSP violation', async ({ page }) => {
   const res = await page.goto('/nope');
