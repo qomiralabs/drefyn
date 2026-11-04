@@ -11,6 +11,7 @@ export const RATE_BUCKETS = Object.freeze([
   'invite_send',
   'password_fail',
   'password_fail_ip',
+  'cli_link_verify',
 ] as const);
 
 export type RateBucket = (typeof RATE_BUCKETS)[number];

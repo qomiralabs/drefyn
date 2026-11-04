@@ -11,6 +11,8 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   'email-sign-in.ts': ['insert'],
   'email-change.ts': ['update'],
   'oauth.ts': ['insert'],
+  // The operator's sign up: the address the person running the box vouches for.
+  'cli-links.ts': ['insert'],
 };
 
 const QUOTED_TABLE = String.raw`\(\s*(['"\x60])(?:app\.)?users(?:\s+as\s+\w+)?\1\s*\)`;

@@ -22,4 +22,16 @@ export const egressAllowList = [
       'OAuth token, user and JWKS calls to four provider hosts fixed in code; https only, no redirects, 5 s and 1 MiB caps; no customer input reaches the URL',
     only: [{ global: 'fetch' }],
   },
+  {
+    path: 'apps/dashboard/server.ts',
+    reason:
+      'inbound server in front of the Next handler; it accepts connections and never opens one',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
+    path: 'apps/dashboard/test/integration/support/echo.ts',
+    reason:
+      'loopback test server that stands in for Next behind the real wrapper; it accepts connections on 127.0.0.1 and never opens one',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
 ] as const satisfies readonly EgressAllowEntry[];

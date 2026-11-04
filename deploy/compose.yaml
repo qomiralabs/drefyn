@@ -62,6 +62,37 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
+  # Test only, so it never starts with the stack: docker compose --profile test up mailpit.
+  # Catches the dashboard's mail for the auth flows and e2e specs over plain SMTP on loopback.
+  # MIT licensed; the digest is the multi arch index (amd64 and arm64) of v1.32.0, the same
+  # image scripts/email-integration pins.
+  mailpit:
+    profiles: [test]
+    image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    # Both ports are above 1024 and messages live in /tmp, so it needs no root at all.
+    user: '65534:65534'
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 128
+    mem_limit: 256m
+    environment:
+      # Old messages are dropped past this, so a long run cannot fill memory.
+      MP_MAX_MESSAGES: '500'
+      # The API answers only to loopback names, which closes DNS rebinding.
+      MP_ALLOWED_HOSTS: localhost,127.0.0.1
+    ports:
+      - 127.0.0.1:${DREFYN_MAILPIT_SMTP_PORT:-51025}:1025
+      - 127.0.0.1:${DREFYN_MAILPIT_WEB_PORT:-58025}:8025
+    healthcheck:
+      test: [CMD, /mailpit, readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+      start_interval: 1s
+
 secrets:
   postgres_password:
     environment: DREFYN_POSTGRES_PASSWORD

@@ -63,6 +63,7 @@ describe('parseAuthConfig defaults', () => {
       invite_send: [{ count: 50, windowSeconds: 3600 }],
       password_fail: [{ count: 10, windowSeconds: 900 }],
       password_fail_ip: [{ count: 30, windowSeconds: 600 }],
+      cli_link_verify: [{ count: 20, windowSeconds: 900 }],
     });
     expect(Object.keys(config.rateLimits)).toEqual([...RATE_BUCKETS]);
   });

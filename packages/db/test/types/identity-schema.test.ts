@@ -94,6 +94,7 @@ describe('identity schema types', () => {
       | 'password_credentials'
       | 'email_challenges'
       | 'oauth_states'
+      | 'cli_sign_in_links'
       | 'auth_rate_limits'
       | 'known_devices'
     >();

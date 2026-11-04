@@ -9,3 +9,7 @@ export interface LogContext {
 export function logWarn(event: string, context: LogContext = {}): void {
   console.warn(JSON.stringify({ level: 'warn', event, service: 'dashboard', ...context }));
 }
+
+export function logInfo(event: string, context: LogContext = {}): void {
+  console.info(JSON.stringify({ level: 'info', event, service: 'dashboard', ...context }));
+}

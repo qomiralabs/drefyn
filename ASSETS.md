@@ -37,3 +37,12 @@ Tarball integrity as the registry publishes it, to check a download before unpac
 | File                              | Source                                                                                  | Licence                  |
 | --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------ |
 | `apps/dashboard/src/app/icon.svg` | Our own drawing of the Drefyn mark on its 100 unit grid, ink in light and paper in dark | Apache-2.0 with the repo |
+
+## Container images
+
+Images the repository pulls by digest and never ships. Each digest is the multi arch index
+(amd64 and arm64).
+
+| Image                     | Used by                                                                      | Source                               | Licence |
+| ------------------------- | ---------------------------------------------------------------------------- | ------------------------------------ | ------- |
+| `axllent/mailpit:v1.32.0` | `deploy/compose.yaml` test profile, `scripts/email-integration` (tests only) | `https://github.com/axllent/mailpit` | MIT     |

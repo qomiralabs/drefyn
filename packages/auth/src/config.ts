@@ -79,6 +79,8 @@ const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
   invite_send: '50/1h',
   password_fail: '10/15m',
   password_fail_ip: '30/10m',
+  // A link carries 256 random bits, so this only caps the work a flood of guesses costs.
+  cli_link_verify: '20/15m',
 };
 
 // Every reason is fixed text: a value may be a secret pasted into the wrong key.

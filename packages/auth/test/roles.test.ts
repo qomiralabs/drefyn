@@ -2,7 +2,7 @@ import { idOf, type IdOf, type ProjectId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
 import { createRoles, type OrgRole } from '../src/index.ts';
 import { createTestAuthMailer } from '../src/testing.ts';
-import { ORG, access } from './api-key-fixtures.ts';
+import { ORG, access, isRecentRead } from './api-key-fixtures.ts';
 import { scriptedStore, type Statement } from './scripted-store.ts';
 import { USER, capturingLogger } from './session-fixtures.ts';
 
@@ -54,11 +54,14 @@ interface World {
   readonly owners?: readonly string[];
   readonly project?: boolean;
   readonly projectRole?: string | null;
+  readonly recent?: boolean;
+  readonly sessionFound?: boolean;
 }
 
 function respond(w: World) {
   return (s: Statement): readonly Record<string, unknown>[] => {
     const target = w.target === undefined ? { role: 'admin' as OrgRole } : w.target;
+    if (isRecentRead(s)) return w.sessionFound === false ? [] : [{ recent: w.recent ?? true }];
     if (isOrgLock(s)) return [{ organization_id: ORG }];
     if (isTargetRead(s)) {
       return target === null
@@ -111,6 +114,7 @@ function setup(w: World = {}) {
 const kinds = (statements: readonly Statement[]) =>
   statements.map((s) => {
     for (const [name, test] of [
+      ['recent', isRecentRead],
       ['lock', isOrgLock],
       ['target', isTargetRead],
       ['owners', isOwnersRead],
@@ -122,6 +126,7 @@ const kinds = (statements: readonly Statement[]) =>
       ['invitation_count', isInvitationCount],
       ['update', isRoleUpdate],
       ['remove', isMemberDelete],
+      ['project_roles', isProjectRoleDelete],
     ] as const) {
       if (test(s)) return name;
     }
@@ -157,6 +162,7 @@ describe('changeRole', () => {
       deletedInvitations: 2,
     });
     expect(kinds(scripted.statements())).toEqual([
+      'recent',
       'lock',
       'target',
       'actor',
@@ -166,12 +172,10 @@ describe('changeRole', () => {
       'update',
       'owners',
     ]);
-    expect(scripted.events[0]).toEqual({
-      kind: 'begin',
-      scope: 'organization',
-      organizationId: ORG,
-      actorUserId: USER,
-    });
+    expect(scripted.events.filter((e) => e.kind === 'begin')).toEqual([
+      { kind: 'begin', scope: 'user', userId: USER },
+      { kind: 'begin', scope: 'organization', organizationId: ORG, actorUserId: USER },
+    ]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'commit' });
   });
 
@@ -180,6 +184,7 @@ describe('changeRole', () => {
     const result = await roles.changeRole(access('owner'), TARGET, 'admin');
     expect(result.ok).toBe(true);
     expect(kinds(scripted.statements())).toEqual([
+      'recent',
       'lock',
       'target',
       'actor',
@@ -329,7 +334,8 @@ describe('changeRole', () => {
         },
       },
     ]);
-    expect(scripted.events.filter((e) => e.kind === 'commit')).toHaveLength(1);
+    // One for the recent sign in read, one for the change.
+    expect(scripted.events.filter((e) => e.kind === 'commit')).toHaveLength(2);
   });
 
   it('tells every owner when a demotion revoked keys, and nobody when it revoked none', async () => {
@@ -379,6 +385,7 @@ describe('removeMember', () => {
     if (!result.ok) throw result.error;
     expect(result.value).toEqual({ revokedKeyIds: [idOf('key', KEY_1)], deletedInvitations: 3 });
     expect(kinds(scripted.statements())).toEqual([
+      'recent',
       'lock',
       'target',
       'actor',
@@ -388,7 +395,9 @@ describe('removeMember', () => {
       'remove',
       'owners',
     ]);
-    expect(scripted.events[0]).toMatchObject({ actorUserId: USER });
+    expect(
+      scripted.events.find((e) => e.kind === 'begin' && e.scope === 'organization'),
+    ).toMatchObject({ actorUserId: USER });
     expect(mail.notices).toEqual([
       {
         to: 'one@example.com',
@@ -442,6 +451,115 @@ describe('removeMember', () => {
   });
 });
 
+// A stolen or unattended session must not be able to add an owner or revoke someone's keys.
+describe('a recent sign in', () => {
+  const actions: readonly [string, (r: ReturnType<typeof createRoles>) => Promise<unknown>][] = [
+    ['a role change', (r) => r.changeRole(access('owner'), TARGET, 'owner')],
+    ['a demotion', (r) => r.changeRole(access('owner'), TARGET, 'member')],
+    ['the same role again', (r) => r.changeRole(access('owner'), TARGET, 'admin')],
+    ['a removal', (r) => r.removeMember(access('owner'), TARGET)],
+    ['a project role', (r) => r.setProjectRole(access('owner'), TARGET, PROJECT, 'editor')],
+    ['clearing a project role', (r) => r.setProjectRole(access('owner'), TARGET, PROJECT, null)],
+  ];
+
+  it.each(actions)('stops %s before any lock, with one read', async (_label, act) => {
+    const { roles, scripted, mail, lines } = setup({ recent: false });
+    const result = (await act(roles)) as Parameters<typeof failed>[0];
+    expect(failed(result).code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    expect(kinds(scripted.statements())).toEqual(['recent']);
+    expect(scripted.events.some((e) => e.kind === 'begin' && e.scope === 'organization')).toBe(
+      false,
+    );
+    expect(mail.notices).toEqual([]);
+    expect(JSON.stringify(lines)).toContain('AUTH_RECENT_AUTH_REQUIRED');
+  });
+
+  it.each(actions)('stops %s when the session is gone', async (_label, act) => {
+    const { roles, scripted } = setup({ sessionFound: false });
+    const result = (await act(roles)) as Parameters<typeof failed>[0];
+    expect(failed(result).code).toBe('AUTH_SESSION_INVALID');
+    expect(kinds(scripted.statements())).toEqual(['recent']);
+  });
+
+  it('is read by database time, for this session and person', async () => {
+    const { roles, scripted } = setup({ target: { role: 'member' } });
+    await roles.removeMember(access('owner'), TARGET);
+    const read = scripted.statements().find(isRecentRead);
+    expect(read?.sql).toContain("authenticated_at > now() - interval '15 minutes'");
+    expect(read?.sql).toContain('app.current_user_id()');
+  });
+
+  it('comes first for someone removing themselves too', async () => {
+    const self = { target: { role: 'admin' as OrgRole, userId: USER } };
+    const stale = setup({ ...self, recent: false });
+    expect(failed(await stale.roles.removeMember(access('admin'), TARGET)).code).toBe(
+      'AUTH_RECENT_AUTH_REQUIRED',
+    );
+    const fresh = setup(self);
+    expect(failed(await fresh.roles.removeMember(access('admin'), TARGET)).code).toBe(
+      'AUTH_FORBIDDEN',
+    );
+  });
+
+  it('answers AUTH_UNAVAILABLE when the check itself fails', async () => {
+    const { roles, scripted } = setup();
+    scripted.respondWith(() => {
+      throw new Error('connection lost');
+    });
+    expect(failed(await roles.removeMember(access('owner'), TARGET)).code).toBe('AUTH_UNAVAILABLE');
+  });
+});
+
+describe('a notice that cannot be sent', () => {
+  const owners = ['one@example.com', 'two@example.com', 'three@example.com'];
+
+  it.each<[string, World, (r: ReturnType<typeof createRoles>) => Promise<{ ok: boolean }>]>([
+    [
+      'a new owner',
+      { target: { role: 'admin' } },
+      (r) => r.changeRole(access('owner'), TARGET, 'owner'),
+    ],
+    [
+      'a demotion that revoked keys',
+      { target: { role: 'admin' }, keys: [KEY_1] },
+      (r) => r.changeRole(access('owner'), TARGET, 'member'),
+    ],
+    ['a removal', { target: { role: 'member' } }, (r) => r.removeMember(access('owner'), TARGET)],
+  ])('stops only that owner hearing about %s', async (_label, w, act) => {
+    const { roles, mail, lines } = setup({ ...w, owners });
+    mail.failNext();
+    expect((await act(roles)).ok).toBe(true);
+    expect(mail.notices.map((n) => n.to)).toEqual(owners.slice(1));
+    const failures = lines.filter((l) => l.event === 'auth.member_notice_failed');
+    expect(failures).toHaveLength(1);
+    expect(JSON.stringify(failures)).not.toContain('@example.com');
+  });
+});
+
+describe('project roles and promotion', () => {
+  // setProjectRole keeps rows to members. One left behind would come back on a later
+  // demotion, as a grant nobody chose.
+  it.each<[OrgRole]>([['admin'], ['owner']])('clears the rows of a member made %s', async (to) => {
+    const { roles, scripted } = setup({ target: { role: 'member' } });
+    expect((await roles.changeRole(access('owner'), TARGET, to)).ok).toBe(true);
+    const deleted = scripted.statements().find(isProjectRoleDelete);
+    expect(deleted?.parameters).toContain(TARGET);
+    const order = kinds(scripted.statements());
+    expect(order.indexOf('target_lock')).toBeLessThan(order.indexOf('project_roles'));
+    expect(order.indexOf('project_roles')).toBeLessThan(order.indexOf('update'));
+  });
+
+  it.each<[OrgRole, OrgRole]>([
+    ['admin', 'owner'],
+    ['owner', 'admin'],
+    ['admin', 'member'],
+  ])('leaves them alone from %s to %s', async (from, to) => {
+    const { roles, scripted } = setup({ target: { role: from } });
+    await roles.changeRole(access('owner'), TARGET, to);
+    expect(scripted.statements().some(isProjectRoleDelete)).toBe(false);
+  });
+});
+
 describe('setProjectRole', () => {
   it('upserts the row for a member, naming the actor', async () => {
     const { roles, scripted } = setup({ target: { role: 'member' } });
@@ -450,7 +568,9 @@ describe('setProjectRole', () => {
     const upsert = scripted.statements().find(isProjectRoleUpsert);
     expect(upsert?.parameters).toEqual(expect.arrayContaining([ORG, TARGET, PROJECT, 'editor']));
     expect(upsert?.sql).toContain('on conflict');
-    expect(scripted.events[0]).toMatchObject({ actorUserId: USER });
+    expect(
+      scripted.events.find((e) => e.kind === 'begin' && e.scope === 'organization'),
+    ).toMatchObject({ actorUserId: USER });
   });
 
   it('deletes the row for null, so the default applies again', async () => {

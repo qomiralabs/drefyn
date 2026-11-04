@@ -344,3 +344,23 @@ describe('listMyOrganizations', () => {
     }
   });
 });
+
+describe('createOrganizationFor', () => {
+  it('takes the same path as createOrganization, with the person as actor and owner', async () => {
+    const viaSession = setup();
+    await viaSession.orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
+    const forUser = setup();
+    const result = await forUser.orgs.createOrganizationFor(USER, { name: NAME, slug: SLUG });
+    expect(result).toEqual({ ok: true, value: { organizationId: ORG, slug: SLUG } });
+    expect(forUser.limiter.calls).toEqual([['org_create', [USER]]]);
+    expect(forUser.scripted.events).toEqual(viaSession.scripted.events);
+  });
+
+  it('refuses a bad slug and a taken one the same way', async () => {
+    const bad = await setup().orgs.createOrganizationFor(USER, { name: NAME, slug: 'Bad Slug' });
+    expect(failed(bad).code).toBe('AUTH_SLUG_INVALID');
+    const taken = setup((s) => (isSlugInsert(s) ? [] : happy(s)));
+    const result = await taken.orgs.createOrganizationFor(USER, { name: NAME, slug: SLUG });
+    expect(failed(result).code).toBe('AUTH_SLUG_TAKEN');
+  });
+});
