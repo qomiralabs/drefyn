@@ -111,5 +111,6 @@ describe('setDisplayName', () => {
     await account.setDisplayName(sessionInfo(), { name: 'Maya' });
     const update = store.statements().find((s) => s.sql.startsWith('update "users"'));
     expect(update?.parameters).toContain(USER);
+    expect(update?.sql).not.toContain('email');
   });
 });
