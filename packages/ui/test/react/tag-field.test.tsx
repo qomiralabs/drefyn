@@ -280,6 +280,7 @@ describe('a disabled TagField', () => {
     render(<Addresses disabled defaultValue={['kai@acme.dev']} />);
     const row = screen.getByRole('row', { name: 'kai@acme.dev' });
     expect(within(row).queryByRole('button')).toBeNull();
+    expect(row.getAttribute('aria-disabled')).toBe('true');
     expect(classesOf(row)).toEqual(
       expect.arrayContaining(['border-disabled-edge', 'bg-disabled-fill', 'text-disabled-text']),
     );

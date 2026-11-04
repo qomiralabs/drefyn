@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, type ReactNode, type Ref, type RefObject } from 'react';
 import { Button, Tag, TagGroup, TagList } from 'react-aria-components';
+import { markDisabled } from './field-parts.tsx';
 import { alertShape } from './icons/alert.tsx';
 import { IconCross } from './icons/cross.tsx';
 import { Icon } from './icons/icon.tsx';
@@ -123,6 +124,9 @@ export function TagBox({
                   key={tag.id}
                   id={tag.id}
                   textValue={chipName(tag)}
+                  // React Aria's own disabled chip leaves the keyboard, and it has to stay
+                  // reachable so the value can be read.
+                  ref={markDisabled(disabled)}
                   className={`inline-flex max-w-full min-w-0 items-center gap-4 rounded-xs border ps-8 text-body-s outline-none data-focus-visible:focus-ring ${tag.bad === true ? 'ps-4' : ''} ${chipPaint(disabled, tag.bad === true)}`}
                 >
                   {tag.bad === true ? (
