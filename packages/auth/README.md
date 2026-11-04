@@ -19,7 +19,7 @@ system.
 ## CLI links and operator revoke
 
 - `createCliLinks(config, deps)`: `issue({ email, organizationName? })` makes the person if
-  the sign up mode allows it, makes the organization through `createOrganizationFor` when a
+  the sign up mode allows it, gets the organization through `ensureOrganizationFor` when a
   name is given, deletes the person's unused links and stores the SHA-256 of a fresh 32 byte
   secret for 15 minutes of database time. It returns
   `<DREFYN_APP_ORIGIN>/sign-in/cli#drf_cl_<52 base32 characters>`. `redeem(browser, token)`
@@ -28,8 +28,11 @@ system.
   `AUTH_CLI_LINK_INVALID`. It takes no mailer.
 - `createOperatorSessions(deps)`: `revokeForEmail` and `revokeAll` end sessions and forget
   devices under each person's own user context; the auth role only finds the people.
-- `createOrganizations(...).createOrganizationFor(userId, { name })` is
-  `createOrganization` for a person with no session yet: the same rules, limit and inserts.
+- `createOrganizations(...).ensureOrganizationFor(userId, { name })` is for a person with no
+  session yet. It answers `{ organizationId, slug, reused }`. When the person is owner of an
+  organization with exactly that name, it reuses the oldest and spends no limit; any other
+  role does not count. Otherwise it is `createOrganization`: the same rules, limit and inserts.
+  A lock per person keeps parallel runs to one organization. The app pool needs two connections.
 - `@drefyn/auth/permissions`: pure, safe in client components. It imports types only,
   and `check:packages` refuses any Node built in or runtime package import anywhere in
   its module graph (the `drefyn.pureEntries` field in `package.json`).

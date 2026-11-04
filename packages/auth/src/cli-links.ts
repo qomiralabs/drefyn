@@ -63,6 +63,8 @@ export interface IssuedCliLink {
   readonly link: string;
   readonly userId: UserId;
   readonly organizationId: OrganizationId | null;
+  // True when the person already owned an organization of that name, so nothing was made.
+  readonly organizationReused: boolean;
 }
 
 export interface CliLinks {
@@ -163,10 +165,12 @@ export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks
         if (!user.ok) return user;
         const userId = user.value;
         let organizationId: OrganizationId | null = null;
+        let organizationReused = false;
         if (organization !== null) {
-          const made = await organizations().createOrganizationFor(userId, organization);
+          const made = await organizations().ensureOrganizationFor(userId, organization);
           if (!made.ok) return made;
           organizationId = made.value.organizationId;
+          organizationReused = made.value.reused;
         }
         const secret = random(SECRET_BYTES);
         await store.auth(async (tx) => {
@@ -186,6 +190,7 @@ export function createCliLinks(config: AuthConfig, deps: CliLinksDeps): CliLinks
           link: `${config.appOrigin}${CLI_LINK_PATH}#${formatCliLinkToken(secret)}`,
           userId,
           organizationId,
+          organizationReused,
         });
       } catch (error) {
         return fail(unavailable(error));

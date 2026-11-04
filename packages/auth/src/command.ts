@@ -215,6 +215,9 @@ async function runLink(
     if (!issued.ok) return report('link', issued.error, stderr);
     // The link alone on stdout, so it can be piped; the rule goes to stderr.
     stdout.write(`${issued.value.link}\n`);
+    if (issued.value.organizationReused) {
+      stderr.write('Reusing the organization this person owns with that name.\n');
+    }
     stderr.write('Valid once, for 15 minutes.\n');
     return EXIT_DONE;
   });

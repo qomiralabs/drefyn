@@ -86,6 +86,7 @@ export {
 export {
   createOrganizations,
   type CreatedOrganization,
+  type EnsuredOrganization,
   type InitialTier,
   type OrganizationStore,
   type OrganizationSummary,

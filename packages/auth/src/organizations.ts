@@ -82,18 +82,25 @@ export interface CreatedOrganization {
   readonly slug: string;
 }
 
+export interface EnsuredOrganization {
+  readonly organizationId: OrganizationId;
+  readonly slug: string;
+  readonly reused: boolean;
+}
+
 export interface Organizations {
   createOrganization(
     s: SessionInfo,
     input: { readonly name: string },
   ): Promise<Result<CreatedOrganization, AuthError>>;
   listMyOrganizations(s: SessionInfo): Promise<readonly OrganizationSummary[]>;
-  // For the operator command, which has a person but no session yet. The same rules, limit
-  // and insert path as createOrganization.
-  createOrganizationFor(
+  // For the operator command, which has a person but no session yet and is often run twice:
+  // the organization this person already owns under this exact name, or a new one by the
+  // same rules, limit and insert path as createOrganization.
+  ensureOrganizationFor(
     userId: UserId,
     input: { readonly name: string },
-  ): Promise<Result<{ readonly organizationId: OrganizationId; readonly slug: string }, AuthError>>;
+  ): Promise<Result<EnsuredOrganization, AuthError>>;
 }
 
 class SlugTaken extends Error {}
@@ -134,26 +141,17 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
 
   // The one way an organization is made. Its first owner is the acting user, so the
   // database's insert rules see the same person in every write.
-  async function insert(
+  async function write(
     userId: UserId,
-    input: unknown,
+    name: string,
   ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
-    const name = parseOrganizationName((input as { name?: unknown } | undefined)?.name);
-    if (!name.ok) return name;
-    // Counted before the work and in its own transaction, so a refused or failed attempt
-    // still counts and parallel attempts cannot all pass.
-    try {
-      await limiter.reserve('org_create', [userId]);
-    } catch (error) {
-      return fail(error);
-    }
     const organizationId = nextId();
     const ids = { organizationId: ['org', organizationId], userId: ['usr', userId] } as const;
     const writeWith = (slug: string) =>
       store.organizationAs(organizationId, userId, async (tx) => {
         await tx
           .insertInto('organizations')
-          .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
+          .values({ organization_id: organizationId, name, plan_tier: initialTier })
           .execute();
         // No row back means another organization holds it; the throw rolls the
         // organization back with it.
@@ -174,7 +172,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
     try {
       for (let attempt = 0; attempt < SLUG_TRIES; attempt += 1) {
         if (attempt > 0) await sleep(randomInt(RETRY_WAIT_MS * 2 ** attempt));
-        const slug = slugCandidate(name.value, nextSuffix(), attempt);
+        const slug = slugCandidate(name, nextSuffix(), attempt);
         try {
           const membershipId = await writeWith(slug);
           quietInfo(
@@ -190,6 +188,82 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
       throw TAKEN;
     } catch (error) {
       quietWarn(deps.logger, 'auth.organization_create_failed', idFields(ids));
+      return fail(error);
+    }
+  }
+
+  const nameIn = (input: unknown) =>
+    parseOrganizationName((input as { name?: unknown } | undefined)?.name);
+
+  async function insert(
+    userId: UserId,
+    input: unknown,
+  ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
+    const name = nameIn(input);
+    if (!name.ok) return name;
+    // Counted before the work and in its own transaction, so a refused or failed attempt
+    // still counts and parallel attempts cannot all pass.
+    try {
+      await limiter.reserve('org_create', [userId]);
+    } catch (error) {
+      return fail(error);
+    }
+    return write(userId, name.value);
+  }
+
+  // Only owner counts: being an admin of a company's organization is no reason to hand a
+  // new first run someone else's tenant. The oldest wins, since the form can make twins.
+  const ownedWithName = (tx: Transaction<UserSchema>, name: string) =>
+    tx
+      .selectFrom('memberships as m')
+      .innerJoin('organizations as o', 'o.organization_id', 'm.organization_id')
+      .innerJoin('organization_slugs as sl', 'sl.organization_id', 'm.organization_id')
+      .select(['o.organization_id', 'sl.slug'])
+      .where('m.user_id', '=', sql<string>`app.current_user_id()`)
+      .where('m.role', '=', 'owner')
+      .where('o.name', '=', name)
+      .orderBy('o.organization_id')
+      .limit(1)
+      .executeTakeFirst();
+
+  function reused(
+    userId: UserId,
+    row: { readonly organization_id: string; readonly slug: string },
+  ): Result<EnsuredOrganization, AuthError> {
+    const organizationId = idOf('org', row.organization_id);
+    quietInfo(
+      deps.logger,
+      'auth.organization_reused',
+      idFields({ organizationId: ['org', organizationId], userId: ['usr', userId] }),
+    );
+    return ok({ organizationId, slug: row.slug, reused: true });
+  }
+
+  async function ensure(
+    userId: UserId,
+    input: unknown,
+  ): Promise<Result<EnsuredOrganization, AuthError>> {
+    const name = nameIn(input);
+    if (!name.ok) return name;
+    try {
+      // Read first, so a rerun for a fresh link spends no limit and takes no lock.
+      const owned = await store.user(userId, (tx) => ownedWithName(tx, name.value));
+      if (owned !== undefined) return reused(userId, owned);
+      await limiter.reserve('org_create', [userId]);
+      // A row cannot be unique on owner and name, since the form may make twins, so a lock
+      // per person stands in. It lives in this transaction and the write runs on a second
+      // connection, because only a user context can see what the person owns. That needs a
+      // pool of two; a smaller one times out and refuses instead of duplicating.
+      return await store.user(userId, async (tx) => {
+        await sql`select pg_advisory_xact_lock(hashtextextended(${`org_ensure:${userId}`}, 0))`.execute(
+          tx,
+        );
+        const again = await ownedWithName(tx, name.value);
+        if (again !== undefined) return reused(userId, again);
+        const made = await write(userId, name.value);
+        return made.ok ? ok({ ...made.value, reused: false }) : made;
+      });
+    } catch (error) {
       return fail(error);
     }
   }
@@ -212,7 +286,7 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
       });
     },
 
-    createOrganizationFor: insert,
+    ensureOrganizationFor: ensure,
 
     async listMyOrganizations(s) {
       try {

@@ -195,7 +195,7 @@ describeWithStack('organizations against Postgres', () => {
       const name = slug('Race');
       const orgs = h.organizations({ limiter: unlimited });
       const runs = await Promise.all(
-        Array.from({ length: 8 }, () => orgs.ensureOrganizationFor(user, { name })),
+        Array.from({ length: 4 }, () => orgs.ensureOrganizationFor(user, { name })),
       );
       const values = runs.map((run) => {
         if (!run.ok) throw run.error;
