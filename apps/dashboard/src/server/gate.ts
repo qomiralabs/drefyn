@@ -1,8 +1,9 @@
 import { connection } from 'next/server';
 import { notFound } from 'next/navigation';
-import { createFlagClient, loadFlagConfig, type FlagClient } from '@drefyn/flags';
-import { dashboardEnabled } from '../shell/release.ts';
-import { logWarn } from './log.ts';
+import { createFlagClient, loadFlagConfig, type FlagClient, type FlagContext } from '@drefyn/flags';
+import type { OrganizationId, UserId } from '@drefyn/tenancy';
+import { dashboardEnabled, mailDelivery, VISITOR_FLAG_ORGANIZATION } from '../shell/release.ts';
+import { logWarn, type LogContext } from './log.ts';
 
 let client: Promise<FlagClient> | undefined;
 
@@ -24,15 +25,40 @@ function flagClient(): Promise<FlagClient> {
   return client;
 }
 
-// Every dashboard route calls this first. Off, or any failure, is a 404 that says nothing
-// about the dashboard. The flag is read per request, never at build time.
-export async function requireDashboard(organizationId: string): Promise<void> {
+async function check(
+  context: Pick<FlagContext, 'organizationId' | 'userId'>,
+  logged: LogContext,
+): Promise<void> {
   await connection();
   let enabled = false;
   try {
-    enabled = await dashboardEnabled(await flagClient(), organizationId);
+    enabled = await dashboardEnabled(await flagClient(), context);
   } catch {
-    logWarn('dashboard.flag_client_failed', { organizationId });
+    logWarn('dashboard.flag_client_failed', logged);
   }
   if (!enabled) notFound();
+}
+
+// Off, or any failure, is a 404 that says nothing about the dashboard. The flag is read per
+// request, never at build time.
+export function requireDashboard(organizationId: OrganizationId, userId: UserId): Promise<void> {
+  return check({ organizationId, userId }, { organizationId });
+}
+
+// For a request with no person behind it. Flag off wins over the sign in redirect, so a
+// dashboard the flag says does not exist never announces itself. No organization in the log
+// context: the reserved id is not a tenant.
+export function requireDashboardForVisitor(): Promise<void> {
+  return check({ organizationId: VISITOR_FLAG_ORGANIZATION }, {});
+}
+
+// Asked once per process, about nobody in particular: mail is a server setting. Any failure
+// is off, the safe value, and a change applies on restart.
+export async function mailDeliveryEnabled(): Promise<boolean> {
+  try {
+    return await mailDelivery(await flagClient(), { organizationId: VISITOR_FLAG_ORGANIZATION });
+  } catch {
+    logWarn('dashboard.flag_client_failed', {});
+    return false;
+  }
 }

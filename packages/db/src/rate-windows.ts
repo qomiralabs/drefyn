@@ -51,17 +51,20 @@ function invalid(reason: string): DbError {
 }
 
 function checkWindows(windows: readonly number[]): number[] {
-  if (windows.length === 0 || windows.length > MAX_WINDOWS) {
+  // One read of the caller's list. Checking it and then reading it again would let a list
+  // that changes between reads write something the checks never saw.
+  const list = [...windows];
+  if (list.length === 0 || list.length > MAX_WINDOWS) {
     throw invalid(`needs 1 to ${String(MAX_WINDOWS)} windows`);
   }
-  for (const w of windows) {
+  for (const w of list) {
     if (!Number.isSafeInteger(w) || w < 1 || w > MAX_WINDOW_SECONDS) {
       throw invalid(`windows must be whole seconds from 1 to ${String(MAX_WINDOW_SECONDS)}`);
     }
   }
   // Two equal windows would be one row twice in one upsert, which Postgres refuses.
-  if (new Set(windows).size !== windows.length) throw invalid('lists a window twice');
-  return [...windows];
+  if (new Set(list).size !== list.length) throw invalid('lists a window twice');
+  return list;
 }
 
 // The statement goes over the simple protocol, which has no parameters, so values are
@@ -72,8 +75,11 @@ function keyLiteral(key: Uint8Array): string {
   return `decode('${Buffer.from(key).toString('hex')}', 'hex')`;
 }
 
-function bucketLiteral(bucket: string): string {
-  if (!BUCKET.test(bucket)) throw invalid('has a bucket that is not a short identifier');
+function bucketLiteral(bucket: unknown): string {
+  // RegExp.test coerces, so ['a'] would pass the pattern without being a string.
+  if (typeof bucket !== 'string' || !BUCKET.test(bucket)) {
+    throw invalid('has a bucket that is not a short identifier');
+  }
   return `'${bucket}'`;
 }
 
@@ -83,15 +89,24 @@ interface Row {
   retry_after: number;
 }
 
-// In the order the windows were asked for.
-const toCounts = (rows: readonly Row[], order: readonly number[]): WindowCount[] =>
-  rows
-    .map((row) => ({
-      windowSeconds: row.window_seconds,
-      count: row.count,
-      retryAfterSeconds: row.retry_after,
-    }))
-    .sort((a, b) => order.indexOf(a.windowSeconds) - order.indexOf(b.windowSeconds));
+const isPositive = (value: number) => Number.isSafeInteger(value) && value > 0;
+
+// In the order the windows were asked for, one for each. A window with no row would have its
+// limit skipped, so an answer that does not name each window exactly once is a failure.
+function toCounts(rows: readonly Row[], order: readonly number[]): WindowCount[] {
+  const incomplete = () =>
+    new DbError('DB_CONFIG_INVALID', 'a rate window reservation did not count each window once');
+  if (rows.length !== order.length) throw incomplete();
+  return order.map((windowSeconds) => {
+    const [row, repeat] = rows.filter((r) => r.window_seconds === windowSeconds);
+    if (row === undefined || repeat !== undefined) throw incomplete();
+    // The statement cannot return these, so one here means the numbers cannot be trusted.
+    if (!isPositive(row.count) || !isPositive(row.retry_after)) {
+      throw new DbError('DB_CONFIG_INVALID', 'a rate window reservation returned a bad number');
+    }
+    return { windowSeconds, count: row.count, retryAfterSeconds: row.retry_after };
+  });
+}
 
 // Windows start on multiples of their length since the epoch, by the database clock, so
 // every app host agrees on them whatever its own clock says.

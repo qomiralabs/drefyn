@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -106,6 +107,15 @@ const root = join(import.meta.dirname, '..', '..');
 const built = existsSync(join(root, '.next', 'BUILD_ID'));
 const runBuilt = built || process.env['CI'] === 'true';
 
+// Boot parses these and connects to nothing, so no database runs behind this job.
+const AUTH_ENV = {
+  DREFYN_AUTH_SECRET: randomBytes(32).toString('base64url'),
+  DREFYN_AUTH_INVITATION_BLOCK_KEY: randomBytes(32).toString('base64url'),
+  DREFYN_DATABASE_URL: 'postgres://app:app@127.0.0.1:1/drefyn',
+  DREFYN_AUTH_DATABASE_URL: 'postgres://auth:auth@127.0.0.1:1/drefyn',
+  DREFYN_DATABASE_SSL: 'disable',
+};
+
 interface Started {
   readonly child: ChildProcess;
   readonly port: number;
@@ -126,6 +136,7 @@ async function startBuilt(): Promise<Started> {
       DREFYN_APP_ORIGIN: ORIGIN,
       DREFYN_FLAGS_SOURCE: 'file',
       DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+      ...AUTH_ENV,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -249,4 +260,103 @@ describe.runIf(runBuilt)('stopping the built server', () => {
       child.kill('SIGKILL');
     }
   }, 90_000);
+});
+
+describe.runIf(runBuilt)('next start on the production build', () => {
+  it('exits 1 with the marker absent, and logs why', async () => {
+    const child = spawn(
+      process.execPath,
+      [join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--port', '0'],
+      {
+        cwd: root,
+        env: {
+          PATH: process.env['PATH'],
+          NODE_ENV: 'production',
+          NEXT_TELEMETRY_DISABLED: '1',
+          DREFYN_APP_ORIGIN: ORIGIN,
+          DREFYN_FLAGS_SOURCE: 'file',
+          DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+          ...AUTH_ENV,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    const code = await new Promise<number | null>((done, fail) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        fail(new Error(`next start stayed up: ${output}`));
+      }, 30_000);
+      child.on('exit', (exit) => {
+        clearTimeout(timer);
+        done(exit);
+      });
+    });
+    expect(code).toBe(1);
+    expect(output).toContain('"event":"dashboard.wrapper_missing"');
+  });
+});
+
+describe.runIf(runBuilt)('mail through the built server', () => {
+  const TRANSPORT = {
+    DREFYN_EMAIL_TRANSPORT: 'smtp',
+    DREFYN_EMAIL_FROM: 'drefyn@example.dev',
+    DREFYN_SMTP_HOST: '127.0.0.1',
+    DREFYN_SMTP_PORT: '51025',
+    DREFYN_SMTP_TLS: 'none',
+    DREFYN_SMTP_ALLOW_PLAINTEXT: 'true',
+  };
+
+  async function bootLog(nodeArgs: readonly string[], extra: Record<string, string>) {
+    const child = spawn(process.execPath, [...nodeArgs, 'server.ts'], {
+      cwd: root,
+      env: {
+        PATH: process.env['PATH'],
+        NODE_ENV: 'production',
+        HOSTNAME: '127.0.0.1',
+        PORT: '0',
+        UV_THREADPOOL_SIZE: '16',
+        NEXT_TELEMETRY_DISABLED: '1',
+        DREFYN_APP_ORIGIN: ORIGIN,
+        DREFYN_FLAGS_SOURCE: 'file',
+        DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+        ...AUTH_ENV,
+        ...extra,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    const exited = new Promise<void>((done) => {
+      child.once('exit', () => {
+        done();
+      });
+    });
+    const settled = /dashboard\.email_(ready|load_failed)/;
+    const started = Date.now();
+    while (!settled.test(output) && child.exitCode === null && Date.now() - started < 30_000) {
+      await new Promise((wake) => setTimeout(wake, 100));
+    }
+    const stayedUp = child.exitCode === null;
+    child.kill('SIGTERM');
+    await exited;
+    return { output, stayedUp };
+  }
+
+  it('loads the mail package through Node with the flag on and a transport set', async () => {
+    const { output, stayedUp } = await bootLog([], TRANSPORT);
+    expect(output).toContain('"event":"dashboard.email_ready"');
+    expect(stayedUp).toBe(true);
+  }, 60_000);
+
+  it('keeps serving when the package fails to load, and says so without detail', async () => {
+    const breaker = join(root, 'test', 'integration', 'support', 'break-email.ts');
+    const { output, stayedUp } = await bootLog(['--import', breaker], TRANSPORT);
+    expect(output).toContain('"event":"dashboard.email_load_failed"');
+    expect(output).not.toContain('Cannot find package');
+    expect(stayedUp).toBe(true);
+  }, 60_000);
 });

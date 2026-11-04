@@ -258,11 +258,11 @@ describe('the test mailer', () => {
     const mail = createTestAuthMailer({ delayMs: 20 });
     const link = new URL('https://app.drefyn.test/sign-in/verify#x');
     const before = performance.now();
-    await mail.mailer.sendSignInCode(ADDRESS, '12345678', link, 'sign_in');
+    await mail.mailer.sendSignInCode(ADDRESS, '12345678', link, 'sign_in', CHALLENGE);
     expect(performance.now() - before).toBeGreaterThanOrEqual(15);
     mail.failNext();
     await expect(
-      mail.mailer.sendSignInCode(ADDRESS, '12345678', link, 'sign_in'),
+      mail.mailer.sendSignInCode(ADDRESS, '12345678', link, 'sign_in', CHALLENGE),
     ).rejects.toThrow();
     expect(mail.sent).toHaveLength(1);
   });
@@ -391,5 +391,13 @@ describe('start does the same work for every address', () => {
       expect(holding.transactions).toBe(without.transactions + 1);
       expect(holding.statements).toBe(without.statements + 1);
     }
+  });
+});
+
+describe('the challenge id on a mail', () => {
+  it('reaches the mailer, so a retry of one code keeps its idempotency key', async () => {
+    const { mail } = await started();
+    const fragment = parseVerifyFragment(mail.sent[0]?.link.hash.slice(1));
+    expect(mail.sent[0]?.challengeId).toBe(fragment?.challengeId);
   });
 });

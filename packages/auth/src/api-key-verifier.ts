@@ -86,7 +86,7 @@ async function prove(
       'scopes',
       'project_scope',
       // Database time only, so a skewed app clock cannot stretch a key.
-      sql<boolean>`expires_at is null or expires_at > now()`.as('live'),
+      sql<boolean>`(expires_at is null or expires_at > now()) and revoked_at is null`.as('live'),
       sql<boolean>`last_used_at is null or last_used_at < now() - interval '1 hour'`.as('use_due'),
     ])
     .where('id', '=', parts.keyId)
@@ -186,6 +186,8 @@ export function createApiKeyVerifier(env: Env, deps: ApiKeyVerifierDeps): ApiKey
     async verifyApiRequest(request: ApiRequest) {
       let search: URLSearchParams;
       try {
+        // Only the query is read, to refuse a key put in a URL. Nothing absolute is built.
+        // eslint-disable-next-line no-restricted-syntax -- ApiRequest is not a Next request
         search = (typeof request.url === 'string' ? new URL(request.url) : request.url)
           .searchParams;
       } catch {

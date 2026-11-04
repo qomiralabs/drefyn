@@ -13,3 +13,7 @@ export function logWarn(event: string, context: LogContext = {}): void {
 export function logInfo(event: string, context: LogContext = {}): void {
   console.info(JSON.stringify({ level: 'info', event, service: 'dashboard', ...context }));
 }
+
+export function logError(event: string, context: LogContext = {}): void {
+  console.error(JSON.stringify({ level: 'error', event, service: 'dashboard', ...context }));
+}

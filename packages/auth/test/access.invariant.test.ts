@@ -26,6 +26,10 @@ const membership = (over: Record<string, unknown> = {}) => ({
   role: 'owner',
   default_project_role: null,
   plan_tier: 'growth',
+  organization_slug: SLUG,
+  organization_name: 'Acme',
+  email: 'maya@acme.dev',
+  display_name: 'Maya Okafor',
   ...over,
 });
 
@@ -96,6 +100,41 @@ describe('resolveAccess proves the credential before any membership read', () =>
     expect(read?.sql).toContain('app.current_user_id()');
     expect(read?.parameters).toContain(SLUG);
     expect(scripted.writes()).toEqual([]);
+  });
+
+  it('returns the view beside the access, from the same statement', async () => {
+    const { sessions, scripted } = setup(accessResponder([sessionRow()]));
+    const result = await sessions.resolveAccess(tokenFor(), SLUG);
+    expect(result).toMatchObject({
+      kind: 'ok',
+      view: {
+        organizationSlug: SLUG,
+        organizationName: 'Acme',
+        email: 'maya@acme.dev',
+        displayName: 'Maya Okafor',
+      },
+    });
+    expect(scripted.statements()).toHaveLength(2);
+    expect(scripted.statements()[1]?.sql).toContain('"users"');
+    expect(scripted.statements()[0]?.sql).not.toContain('"users"');
+  });
+
+  it('keeps a person with no display name as null', async () => {
+    const rows = [membership({ display_name: null })];
+    const { sessions } = setup(accessResponder([sessionRow()], rows));
+    expect(await sessions.resolveAccess(tokenFor(), SLUG)).toMatchObject({
+      view: { displayName: null },
+    });
+  });
+
+  it('keeps personal data out of the access context', async () => {
+    const { sessions } = setup(accessResponder([sessionRow()]));
+    const result = await sessions.resolveAccess(tokenFor(), SLUG);
+    expect(result.kind).toBe('ok');
+    const access = result.kind === 'ok' ? JSON.stringify(result.access) : '';
+    expect(access).not.toContain('maya@acme.dev');
+    expect(access).not.toContain('Maya');
+    expect(access).not.toContain('Acme');
   });
 
   it('never opens a transaction for a cookie that does not parse', async () => {

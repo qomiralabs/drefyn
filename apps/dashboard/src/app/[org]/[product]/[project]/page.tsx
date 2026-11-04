@@ -17,10 +17,10 @@ interface Params {
 
 async function projectFrom(params: Params['params']): Promise<PlaceholderProject> {
   const { org, product, project } = await params;
-  await guardOrganization(org);
+  const { access } = await guardOrganization(org);
   const location = parseShellPath(`/${org}/${product}/${project}`);
   const found =
-    location?.project === undefined ? undefined : findProject(product, location.project);
+    location?.project === undefined ? undefined : findProject(access, product, location.project);
   if (found === undefined) notFound();
   return found;
 }

@@ -153,7 +153,7 @@ describeWithStack('roles and removal against Postgres', () => {
     expect(await roles.projectRole(member.access, one)).toBe('viewer');
   });
 
-  it('removes a member with every key they made, its project rows and their invitations, and tells every owner', async () => {
+  it('revokes every key a removed member made, keeps the rows and clears the creator, and drops their invitations and tells every owner', async () => {
     const org = await newOrg(h);
     const [project] = await addProjects(h, org.organizationId, 1);
     if (project === undefined) throw new Error('no project');
@@ -167,8 +167,14 @@ describeWithStack('roles and removal against Postgres', () => {
     expect([...result.value.revokedKeyIds].sort()).toEqual([...keys].sort());
     expect(result.value.deletedInvitations).toBe(1);
     const scope = `organization_id = '${org.organizationId}'`;
-    expect(await count(`select count(*) from app.api_keys where ${scope};`)).toBe(0);
-    expect(await count(`select count(*) from app.api_key_projects where ${scope};`)).toBe(0);
+    expect(await count(`select count(*) from app.api_keys where ${scope};`)).toBe(2);
+    expect(
+      await count(
+        `select count(*) from app.api_keys
+          where ${scope} and revoked_at is not null and created_by is null;`,
+      ),
+    ).toBe(2);
+    expect(await count(`select count(*) from app.api_key_projects where ${scope};`)).toBe(1);
     expect(await count(`select count(*) from app.invitations where ${scope};`)).toBe(0);
     const sent = h.mail.notices.slice(before).filter((n) => n.notice.kind === 'member_removed');
     expect(sent.map((n) => n.to).sort()).toEqual(
@@ -193,7 +199,7 @@ describeWithStack('roles and removal against Postgres', () => {
     ['an admin', 'admin'],
     ['an owner', 'owner'],
   ])(
-    'demotes %s to member with every key they made and their invitations gone',
+    'demotes %s to member with every key they made revoked and their invitations gone',
     async (_l, role) => {
       const org = await newOrg(h);
       const person = await join(org, role);
@@ -206,7 +212,10 @@ describeWithStack('roles and removal against Postgres', () => {
       expect(result.value).toMatchObject({ from: role, to: 'member', revokedKeyIds: keys });
       expect(result.value.deletedInvitations).toBe(role === 'owner' ? 2 : 1);
       const scope = `organization_id = '${org.organizationId}'`;
-      expect(await count(`select count(*) from app.api_keys where ${scope};`)).toBe(0);
+      expect(await count(`select count(*) from app.api_keys where ${scope};`)).toBe(1);
+      expect(
+        await count(`select count(*) from app.api_keys where ${scope} and revoked_at is null;`),
+      ).toBe(0);
       expect(await count(`select count(*) from app.invitations where ${scope};`)).toBe(0);
       const sent = h.mail.notices.slice(before);
       expect(sent.map((n) => [n.to, n.notice.kind])).toEqual([
@@ -214,6 +223,50 @@ describeWithStack('roles and removal against Postgres', () => {
       ]);
     },
   );
+
+  it('counts only the keys a removal revoked, not one already revoked', async () => {
+    const org = await newOrg(h);
+    const admin = await join(org, 'admin');
+    const gone = await keyOf(admin.access);
+    const live = await keyOf(admin.access);
+    const first = await h.apiKeys().revokeApiKey(org.owner, gone);
+    if (!first.ok) throw first.error;
+    const stamp = () => h.sql(`select revoked_at::text from app.api_keys where id = '${gone}';`);
+    const stamped = await stamp();
+    const before = h.mail.notices.length;
+    const result = await h.roles().removeMember(org.owner, admin.membership);
+    if (!result.ok) throw result.error;
+    expect(result.value.revokedKeyIds).toEqual([live]);
+    expect(h.mail.notices.slice(before)[0]?.notice).toMatchObject({ revokedKeys: 1 });
+    expect(await stamp()).toBe(stamped);
+  });
+
+  it('counts only the keys a demotion revoked, and sends no notice when it revoked none', async () => {
+    const org = await newOrg(h);
+    const admin = await join(org, 'admin');
+    const key = await keyOf(admin.access);
+    const first = await h.apiKeys().revokeApiKey(org.owner, key);
+    if (!first.ok) throw first.error;
+    const before = h.mail.notices.length;
+    const result = await h.roles().changeRole(org.owner, admin.membership, 'member');
+    if (!result.ok) throw result.error;
+    expect(result.value.revokedKeyIds).toEqual([]);
+    expect(h.mail.notices.slice(before)).toEqual([]);
+  });
+
+  it('leaves a key revoked by demotion revoked after a promotion back', async () => {
+    const org = await newOrg(h);
+    const admin = await join(org, 'admin');
+    await keyOf(admin.access);
+    expect((await h.roles().changeRole(org.owner, admin.membership, 'member')).ok).toBe(true);
+    expect((await h.roles().changeRole(org.owner, admin.membership, 'admin')).ok).toBe(true);
+    expect(
+      await count(
+        `select count(*) from app.api_keys
+          where organization_id = '${org.organizationId}' and revoked_at is null;`,
+      ),
+    ).toBe(0);
+  });
 
   it('keeps the keys of an owner made admin, and drops only their owner invitations', async () => {
     const org = await newOrg(h);
@@ -322,7 +375,8 @@ describeWithStack('roles and removal against Postgres', () => {
       ]);
       expect(demoted.ok).toBe(true);
       const left = await count(
-        `select count(*) from app.api_keys where organization_id = '${org.organizationId}';`,
+        `select count(*) from app.api_keys
+          where organization_id = '${org.organizationId}' and revoked_at is null;`,
       );
       expect(left, `round ${String(round)}, key ${made.ok ? 'made' : made.error.code}`).toBe(0);
     }

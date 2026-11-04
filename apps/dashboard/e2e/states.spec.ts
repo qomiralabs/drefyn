@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { ANSWERS, main, openShell, products, ROUTES } from './fixtures.ts';
+import { test } from './test.ts';
 
 test('loading: the shell renders at once and main holds skeletons, busy and named', async ({
   page,

@@ -12,22 +12,32 @@ import {
 import { createTestAuthMailer } from '../src/testing.ts';
 import {
   CREATED_AT,
+  FIRST_REVOKED_AT,
   KEY,
   MEMBERSHIP,
   ORG,
+  OTHER_KEY,
   OWNER_USER,
   PROJECT_A,
   PROJECT_B,
+  REVOKED_AT,
   SCOPES,
   access,
   createResponder,
   isEmailsRead,
   isKeyInsert,
+  isKeyProof,
+  isKeyProjects,
   isMemberRead,
+  isOwnerRead,
   isProjectInsert,
   isRecentRead,
+  isRevokeWrite,
+  revokeResponder,
   sha,
+  storedKey,
   type CreateShape,
+  type RevokeShape,
 } from './api-key-fixtures.ts';
 import { scriptedStore, type Statement } from './scripted-store.ts';
 import { SESSION, USER, capturingLogger } from './session-fixtures.ts';
@@ -98,6 +108,7 @@ describe('createApiKey', () => {
       createdAt: CREATED_AT,
       expiresAt: null,
       lastUsedAt: null,
+      revokedAt: null,
     });
   });
 
@@ -309,6 +320,31 @@ describe('createApiKey', () => {
     });
   });
 
+  it('shows a replay of a revoked key as revoked, so no caller takes it for a live one', async () => {
+    const replay = {
+      id: KEY,
+      name: INPUT.name,
+      display_suffix: 'abcd',
+      scopes: ['docs:read'],
+      project_scope: 'all',
+      created_by: MEMBERSHIP,
+      created_at: CREATED_AT,
+      expires_at: null,
+      last_used_at: null,
+      revoked_at: REVOKED_AT,
+    };
+    const first = await created();
+    const hash = insertOf(first.scripted.statements()).parameters.filter((p) =>
+      Buffer.isBuffer(p),
+    )[1];
+    const { error } = await refused(INPUT, {
+      inserted: false,
+      replay: { ...replay, request_hash: hash },
+    });
+    expect(error).toBeInstanceOf(ApiKeyReplayError);
+    expect((error as ApiKeyReplayError).existing.revokedAt).toEqual(REVOKED_AT);
+  });
+
   it('refuses the same idempotency key with a different request', async () => {
     const replay = {
       id: KEY,
@@ -449,5 +485,246 @@ describe('createApiKey', () => {
     expect(() =>
       createApiKeys({ ...base, db: {} as Database, authDb: {} as AuthDatabase }),
     ).not.toThrow();
+  });
+});
+
+describe('revokeApiKey', () => {
+  function revoker(shape: RevokeShape = {}) {
+    const scripted = scriptedStore(revokeResponder(shape));
+    const { logger, lines } = capturingLogger();
+    const mail = createTestAuthMailer();
+    const keys = createApiKeys({
+      store: scripted.store,
+      scopes: SCOPES,
+      logger,
+      mailer: mail.mailer,
+    });
+    return { keys, scripted, lines, mail };
+  }
+
+  async function revoked(shape: RevokeShape = {}) {
+    const t = revoker(shape);
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    if (!result.ok) throw result.error;
+    return { ...t, value: result.value };
+  }
+
+  it('answers with the key, stamped by the database, and an unsent notice', async () => {
+    const { value, mail } = await revoked();
+    expect(value.alreadyRevoked).toBe(false);
+    expect(value.key).toEqual({
+      keyId: KEY,
+      organizationId: ORG,
+      name: 'Deploy from CI',
+      displaySuffix: 'x7qa',
+      scopes: ['docs:read'],
+      projectScope: 'all',
+      projectIds: [],
+      createdBy: MEMBERSHIP,
+      createdAt: CREATED_AT,
+      expiresAt: null,
+      lastUsedAt: null,
+      revokedAt: REVOKED_AT,
+    });
+    expect(mail.notices).toEqual([]);
+  });
+
+  it('checks step up, then the stored role, then writes, in one transaction naming the actor', async () => {
+    const { scripted } = await revoked();
+    const statements = scripted.statements();
+    expect(statements[0] !== undefined && isRecentRead(statements[0])).toBe(true);
+    expect(statements[1] !== undefined && isMemberRead(statements[1])).toBe(true);
+    expect(statements[1]?.sql).toMatch(/for share$/);
+    expect(statements[2] !== undefined && isRevokeWrite(statements[2])).toBe(true);
+    expect(scripted.events.filter((e) => e.kind === 'begin' && e.scope === 'organization')).toEqual(
+      [{ kind: 'begin', scope: 'organization', organizationId: ORG, actorUserId: USER }],
+    );
+    expect(scripted.events.at(-1)).toEqual({ kind: 'commit' });
+  });
+
+  it('writes only a live key of this organization, by database time', async () => {
+    const { scripted } = await revoked();
+    const write = scripted.statements().find(isRevokeWrite);
+    expect(write?.sql).toContain('"revoked_at" = now()');
+    expect(write?.sql).toContain('"revoked_at" is null');
+    expect(write?.parameters).toEqual(expect.arrayContaining([ORG, KEY]));
+  });
+
+  it('never reads a hash or an idempotency key', async () => {
+    const { scripted } = await revoked();
+    const text = scripted
+      .statements()
+      .filter((s) => isRevokeWrite(s) || isKeyProof(s))
+      .map((s) => s.sql)
+      .join(' ');
+    expect(text).not.toMatch(/secret_hash|request_hash|idempotency_key/);
+  });
+
+  it('reads the listed projects of a listed key', async () => {
+    const t = revoker({ projectScope: 'listed', replayProjects: [PROJECT_A] });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    if (!result.ok) throw result.error;
+    expect(result.value.key.projectIds).toEqual([PROJECT_A]);
+  });
+
+  it('reads no project rows for a key on every project', async () => {
+    const { scripted } = await revoked();
+    expect(scripted.statements().some(isKeyProjects)).toBe(false);
+  });
+
+  it.each(['not an id', '', 7, null, undefined])(
+    'refuses %j as an id, before any statement',
+    async (id) => {
+      const t = revoker();
+      const result = await t.keys.revokeApiKey(access(), id as never);
+      expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_INPUT_INVALID');
+      expect(t.scripted.events).toEqual([]);
+    },
+  );
+
+  it('refuses a member by the guard context, before any statement', async () => {
+    const t = revoker();
+    const result = await t.keys.revokeApiKey(access('member'), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_FORBIDDEN');
+    expect(t.scripted.events).toEqual([]);
+  });
+
+  it('refuses a stale sign in before any organization work', async () => {
+    const t = revoker({ recent: false });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    expect(t.scripted.events.some((e) => e.kind === 'begin' && e.scope === 'organization')).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ['demoted since the guard ran', 'member'],
+    ['removed since the guard ran', null],
+  ])('refuses someone %s, with no write', async (_name, role) => {
+    const t = revoker({ role });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_FORBIDDEN');
+    expect(t.scripted.statements().some(isRevokeWrite)).toBe(false);
+    expect(t.scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+  });
+
+  it('answers AUTH_NOT_FOUND for a key this organization cannot see, and tells nobody', async () => {
+    const t = revoker({ state: 'absent' });
+    const result = await t.keys.revokeApiKey(access(), OTHER_KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_NOT_FOUND');
+    expect(t.scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+    expect(t.lines).toEqual([]);
+    expect(t.mail.notices).toEqual([]);
+  });
+
+  it('never calls a key revoked unless the row says so', async () => {
+    const t = revoker();
+    t.scripted.respondWith((s) => {
+      if (isRevokeWrite(s)) return [];
+      if (isKeyProof(s)) return [storedKey()];
+      return revokeResponder()(s);
+    });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_NOT_FOUND');
+  });
+
+  it('answers a second revoke with the first time, and sends and logs nothing', async () => {
+    const { value, mail, lines, scripted } = await revoked({ state: 'revoked' });
+    expect(value.alreadyRevoked).toBe(true);
+    expect(value.key.revokedAt).toEqual(FIRST_REVOKED_AT);
+    await value.send();
+    expect(mail.notices).toEqual([]);
+    expect(lines).toEqual([]);
+    expect(scripted.statements().some(isOwnerRead)).toBe(false);
+    expect(scripted.statements().some(isEmailsRead)).toBe(false);
+  });
+
+  it('holds the same step up and role checks on a key already revoked', async () => {
+    const t = revoker({ state: 'revoked', recent: false });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+  });
+
+  it('sends every owner the key, how it ends and when it was revoked, after the response', async () => {
+    const emails = ['one@example.com', 'two@example.com'];
+    const { value, mail } = await revoked({ emails });
+    await value.send();
+    expect(mail.notices).toEqual(
+      emails.map((to) => ({
+        to,
+        notice: {
+          kind: 'api_key_revoked',
+          organizationId: ORG,
+          keyId: KEY,
+          keyName: 'Deploy from CI',
+          displaySuffix: 'x7qa',
+          at: REVOKED_AT,
+        },
+      })),
+    );
+  });
+
+  it('still tells the other owners when one send fails, with one line per miss', async () => {
+    const emails = ['one@example.com', 'two@example.com', 'three@example.com'];
+    const { value, mail, lines } = await revoked({ emails });
+    mail.failNext();
+    await value.send();
+    expect(mail.notices.map((n) => n.to)).toEqual(emails.slice(1));
+    expect(lines.filter((l) => l.event === 'auth.api_key_notice_failed')).toEqual([
+      {
+        event: 'auth.api_key_notice_failed',
+        fields: { organizationId: toPublicId('org', ORG), keyId: toPublicId('key', KEY) },
+      },
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('@example.com');
+  });
+
+  it('send never throws when the addresses cannot be read, and logs by id', async () => {
+    const t = await revoked();
+    t.scripted.respondWith((s) => {
+      if (isEmailsRead(s)) throw new Error('connection lost');
+      return [];
+    });
+    await expect(t.value.send()).resolves.toBeUndefined();
+    expect(t.lines.at(-1)?.event).toBe('auth.api_key_notice_failed');
+  });
+
+  it('has nobody to tell in an organization with no owner row', async () => {
+    const { value, mail, scripted } = await revoked({ owners: [] });
+    await value.send();
+    expect(mail.notices).toEqual([]);
+    expect(scripted.statements().some(isEmailsRead)).toBe(false);
+  });
+
+  it('logs the revoke by ids only, never the name', async () => {
+    const { lines } = await revoked();
+    expect(lines).toEqual([
+      {
+        event: 'auth.api_key_revoked',
+        fields: {
+          organizationId: toPublicId('org', ORG),
+          keyId: toPublicId('key', KEY),
+          membershipId: toPublicId('mem', MEMBERSHIP),
+          userId: toPublicId('usr', USER),
+        },
+      },
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('Deploy');
+  });
+
+  it('answers AUTH_UNAVAILABLE and logs when the database fails, with the key still live', async () => {
+    const t = revoker();
+    t.scripted.respondWith((s) => {
+      if (isRevokeWrite(s)) throw new Error('connection lost');
+      return revokeResponder()(s);
+    });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_UNAVAILABLE');
+    expect(t.scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+    expect(t.lines.at(-1)).toEqual({
+      event: 'auth.api_key_revoke_failed',
+      fields: { organizationId: toPublicId('org', ORG), keyId: toPublicId('key', KEY) },
+    });
   });
 });

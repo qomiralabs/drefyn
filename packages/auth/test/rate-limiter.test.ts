@@ -316,3 +316,165 @@ describe('createApiKeyFailureLimiter', () => {
     await at.reserve('ip4:203.0.113.7');
   });
 });
+
+describe('a reservation that does not count every window', () => {
+  const apiConfig = parseApiAuthConfig({
+    DREFYN_API_RATE_LIMIT_KEY: base64url(new Uint8Array(32).fill(9)),
+    DREFYN_AUTH_RATE_API_KEY_FAIL: '5/1m,20/1h',
+  });
+  const missing =
+    (keep: (windowSeconds: number) => boolean) =>
+    (_db: unknown, request: { readonly windowSeconds: readonly number[] }) =>
+      Promise.resolve<readonly WindowCount[]>(
+        request.windowSeconds
+          .filter(keep)
+          .map((windowSeconds) => ({ windowSeconds, count: 1, retryAfterSeconds: 9 })),
+      );
+
+  it.each<[string, (windowSeconds: number) => boolean]>([
+    ['no window', () => false],
+    ['the first window alone', (w) => w === 600],
+    ['the last window alone', (w) => w === 86_400],
+  ])('refuses a sign in limiter answered with %s', async (_label, keep) => {
+    const limiter = createRateLimiter({
+      db,
+      keys,
+      limits: rateLimits,
+      reserve: missing(keep),
+    });
+    const work = vi.fn<() => void>();
+    const error = await limiter
+      .reserve('email_send', ['a@example.com'])
+      .then(work)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error).toMatchObject({ code: 'AUTH_UNAVAILABLE' });
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, (windowSeconds: number) => boolean]>([
+    ['no window', () => false],
+    ['the first window alone', (w) => w === 60],
+    ['the last window alone', (w) => w === 3600],
+  ])('refuses an API key failure limiter answered with %s', async (_label, keep) => {
+    const limiter = createApiKeyFailureLimiter({
+      db: appDb,
+      config: apiConfig,
+      reserve: missing(keep),
+    });
+    const work = vi.fn<() => void>();
+    const error = await limiter
+      .reserve('client')
+      .then(work)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error).toMatchObject({ code: 'AUTH_UNAVAILABLE' });
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it('prefers the failure to a limit, since a missing window says the count is not known', async () => {
+    const limiter = createRateLimiter({
+      db,
+      keys,
+      limits: rateLimits,
+      reserve: (_db, request) =>
+        Promise.resolve(
+          request.windowSeconds.slice(0, 1).map((windowSeconds) => ({
+            windowSeconds,
+            count: 999,
+            retryAfterSeconds: 9,
+          })),
+        ),
+    });
+    await expect(limiter.reserve('email_send', ['a@example.com'])).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
+  });
+});
+
+describe('a reservation with a bad count or retry', () => {
+  const apiConfig = parseApiAuthConfig({
+    DREFYN_API_RATE_LIMIT_KEY: base64url(new Uint8Array(32).fill(9)),
+    DREFYN_AUTH_RATE_API_KEY_FAIL: '5/1m,20/1h',
+  });
+  const answering =
+    (count: unknown, retry: unknown) =>
+    (_db: unknown, request: { readonly windowSeconds: readonly number[] }) =>
+      Promise.resolve(
+        request.windowSeconds.map((windowSeconds) => ({
+          windowSeconds,
+          count,
+          retryAfterSeconds: retry,
+        })) as WindowCount[],
+      );
+
+  const bothRefuse = async (reserve: ReturnType<typeof answering>) => {
+    const signIn = createRateLimiter({ db, keys, limits: rateLimits, reserve });
+    await expect(signIn.reserve('email_send', ['a@example.com'])).rejects.toMatchObject({
+      name: 'AuthError',
+      code: 'AUTH_UNAVAILABLE',
+    });
+    const api = createApiKeyFailureLimiter({ db: appDb, config: apiConfig, reserve });
+    await expect(api.reserve('client')).rejects.toMatchObject({
+      name: 'AuthError',
+      code: 'AUTH_UNAVAILABLE',
+    });
+  };
+
+  it('answers AUTH_UNAVAILABLE for a count of 999 with a retry of 0', async () => {
+    await bothRefuse(answering(999, 0));
+  });
+
+  describe.each<[string, unknown]>([
+    ['null', null],
+    ['NaN', Number.NaN],
+    ['0', 0],
+    ['a negative', -1],
+    ['a fraction', 1.5],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['2 ** 53', 2 ** 53],
+  ])('with %s', (_label, bad) => {
+    it('answers AUTH_UNAVAILABLE as the count', async () => {
+      await bothRefuse(answering(bad, 9));
+    });
+
+    it('answers AUTH_UNAVAILABLE as the retry, under the limit or over it', async () => {
+      await bothRefuse(answering(1, bad));
+      await bothRefuse(answering(999, bad));
+    });
+  });
+
+  it('answers AUTH_UNAVAILABLE for a window repeated with a higher count', async () => {
+    const limiter = createRateLimiter({
+      db,
+      keys,
+      limits: rateLimits,
+      reserve: () =>
+        Promise.resolve([
+          { windowSeconds: 600, count: 1, retryAfterSeconds: 9 },
+          { windowSeconds: 600, count: 999, retryAfterSeconds: 9 },
+          { windowSeconds: 86_400, count: 1, retryAfterSeconds: 9 },
+        ]),
+    });
+    await expect(limiter.reserve('email_send', ['a'])).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
+  });
+
+  it('answers AUTH_UNAVAILABLE for a window nobody asked about', async () => {
+    const limiter = createRateLimiter({
+      db,
+      keys,
+      limits: rateLimits,
+      reserve: () =>
+        Promise.resolve([
+          { windowSeconds: 600, count: 1, retryAfterSeconds: 9 },
+          { windowSeconds: 86_400, count: 1, retryAfterSeconds: 9 },
+          { windowSeconds: 3600, count: 999, retryAfterSeconds: 9 },
+        ]),
+    });
+    await expect(limiter.reserve('email_send', ['a'])).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
+  });
+});

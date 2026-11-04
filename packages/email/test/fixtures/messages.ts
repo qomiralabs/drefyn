@@ -43,6 +43,7 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
       case 'email_changed':
         return { ...facts, kind, newAddress: 'new.person@example.com' as NormalizedEmailAddress };
       case 'api_key_created':
+      case 'api_key_revoked':
         return {
           ...facts,
           kind,
@@ -90,9 +91,9 @@ const LONG_DEVICE =
 const LONG_ACCOUNT = `${'very.long.account.name.'.repeat(10)}@example.com`;
 const LONG_WORD = 'W'.repeat(100);
 
-// Markup, quotes, a linkable address and a name that tries to read as an instruction, so a
-// render shows what a hostile name can and cannot do.
-const HOSTILE = '<script>alert(1)</script> & "quotes" \'single\' evil.example/login';
+// Markup and quotes, so a render shows what a hostile name can and cannot do. Link shapes
+// never get this far: the guard refuses them.
+const HOSTILE = '<script>alert(1)</script> & "quotes" \'single\'';
 const HOSTILE_ACCOUNT = '<img src=x onerror=alert(1)>@evil.example';
 
 // Everything the preview writes and the budgets measure.

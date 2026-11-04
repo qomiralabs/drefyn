@@ -2,7 +2,32 @@
   "flags": {
     "dashboard.shell": {
       "state": "ENABLED",
-      "variants": { "on": true, "off": false },
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "on",
+      "targeting": {
+        "if": [
+          {
+            "==": [
+              {
+                "var": "organizationId"
+              },
+              "01900000-0000-7000-8000-000000000b01"
+            ]
+          },
+          "off",
+          "on"
+        ]
+      }
+    },
+    "email.smtp_delivery": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
       "defaultVariant": "on"
     }
   }

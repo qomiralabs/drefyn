@@ -36,10 +36,12 @@ const loadCommandBar = () => import('./command-bar.tsx').then((mod) => mod.Comma
 export function ShellFrame({
   org,
   orgName,
+  permissions,
   children,
 }: {
   org: string;
   orgName: string;
+  permissions: readonly string[];
   children: ReactNode;
 }): ReactNode {
   const router = useRouter();
@@ -127,7 +129,13 @@ export function ShellFrame({
     <ShellContext value={state}>
       {children}
       {CommandBar === null ? null : (
-        <CommandBar org={org} orgName={orgName} open={commandOpen} onOpenChange={setCommandOpen} />
+        <CommandBar
+          org={org}
+          orgName={orgName}
+          permissions={permissions}
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+        />
       )}
       <ToastRegion />
     </ShellContext>

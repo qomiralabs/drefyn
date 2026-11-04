@@ -90,6 +90,23 @@ describe('facts per kind', () => {
     expect(mail.text).toMatch(/^Ends in: +x7qa$/m);
   });
 
+  it('api_key_revoked says the key has stopped working, and names it', async () => {
+    const mail = await rendered(
+      notice({
+        kind: 'api_key_revoked',
+        at: AT,
+        organizationName: 'Acme',
+        keyName: 'deploy',
+        displaySuffix: 'x7qa',
+      }),
+    );
+    expect(mail.subject).toBe('An API key was revoked in your Drefyn organization');
+    expect(mail.text).toContain('Anything using it has stopped working.');
+    expect(mail.text).toMatch(/^Organization: +Acme$/m);
+    expect(mail.text).toMatch(/^API key: +deploy$/m);
+    expect(mail.text).toMatch(/^Ends in: +x7qa$/m);
+  });
+
   it.each(['x7q', 'x7qa9', 'x7Qa', 'drf_ak_secret', 'x7 a'])(
     'refuses a key suffix that is not the last four characters: %s',
     async (displaySuffix) => {

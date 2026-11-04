@@ -27,10 +27,10 @@ const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
 
 // Skips comments, keeps strings and dollar quoted bodies whole, so a semicolon or keyword
 // inside either never splits a statement or counts as SQL. Never throws: an unterminated
-// string or comment runs to the end of the text.
-function tokenize(sql: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
+// string or comment runs to the end of the text. Lazy, so a check can read a few tokens from
+// the middle of a source file without walking the rest of it.
+function* scan(sql: string, from = 0): Generator<Token> {
+  let i = from;
   const n = sql.length;
   while (i < n) {
     const c = sql.charAt(i);
@@ -57,7 +57,7 @@ function tokenize(sql: string): Token[] {
     } else if (c === "'") {
       const start = i;
       i = endOfString(sql, i + 1, false);
-      tokens.push({ kind: 'string', value: sql.slice(start + 1, i - 1), start, end: i });
+      yield { kind: 'string', value: sql.slice(start + 1, i - 1), start, end: i };
     } else if (c === '"') {
       const start = i;
       i += 1;
@@ -70,19 +70,19 @@ function tokenize(sql: string): Token[] {
         }
       }
       i = Math.min(i + 1, n);
-      tokens.push({
+      yield {
         kind: 'quoted',
         value: sql.slice(start + 1, i - 1).replace(/""/g, '"'),
         start,
         end: i,
-      });
+      };
     } else if (c === '$' && DOLLAR_TAG.test(sql.slice(i, i + 66))) {
       const tag = sql.slice(i, sql.indexOf('$', i + 1) + 1);
       const start = i;
       const close = sql.indexOf(tag, i + tag.length);
       const valueEnd = close === -1 ? n : close;
       const end = Math.min(valueEnd + tag.length, n);
-      tokens.push({ kind: 'body', value: sql.slice(i + tag.length, valueEnd), start, end });
+      yield { kind: 'body', value: sql.slice(i + tag.length, valueEnd), start, end };
       i = end;
     } else if (WORD_START.test(c)) {
       const start = i;
@@ -91,17 +91,19 @@ function tokenize(sql: string): Token[] {
       // E'...' strings take backslash escapes.
       if (word.toLowerCase() === 'e' && sql.charAt(i) === "'") {
         i = endOfString(sql, i + 1, true);
-        tokens.push({ kind: 'string', value: sql.slice(start + 2, i - 1), start, end: i });
+        yield { kind: 'string', value: sql.slice(start + 2, i - 1), start, end: i };
       } else {
-        tokens.push({ kind: 'word', value: word.toLowerCase(), start, end: i });
+        yield { kind: 'word', value: word.toLowerCase(), start, end: i };
       }
     } else {
-      tokens.push({ kind: 'punct', value: c, start: i, end: i + 1 });
+      const start = i;
       i += 1;
+      yield { kind: 'punct', value: c, start, end: i };
     }
   }
-  return tokens;
 }
+
+const tokenize = (sql: string): Token[] => [...scan(sql)];
 
 function endOfString(sql: string, from: number, backslash: boolean): number {
   let i = from;
@@ -387,9 +389,8 @@ export function migrationDirProblems(dir: string): readonly SourceProblem[] {
 
 // Postgres reads these as false for a boolean argument.
 const FALSE_VALUES = new Set(['false', 'f', 'fa', 'fal', 'fals', 'off', 'of', 'no', 'n', '0']);
-const SET_CONFIG = /(?<![A-Za-z0-9_$])set_config\s*\(/gi;
-// A session level SET of a drefyn setting: SET and SET SESSION, never SET LOCAL.
-const SESSION_SET = /(?<![A-Za-z0-9_$])set\s+(?:session\s+)?"?drefyn\./gi;
+const SET_CONFIG = /(?<![A-Za-z0-9_$])(?:"set_config\\?"|set_config)(?![A-Za-z0-9_$])/gi;
+const SET_WORD = /(?<![A-Za-z0-9_$])set(?![A-Za-z0-9_$])/gi;
 
 // Top level arguments of a call whose opening parenthesis ends at from, and where it closes.
 function callArguments(text: string, from: number): { args: string[]; end: number } {
@@ -434,28 +435,100 @@ function isFalse(argument: string): boolean {
   return FALSE_VALUES.has(bare);
 }
 
+// The SQL often sits in a JavaScript string, where its quotes may be escaped. A backslash is
+// never SQL outside a string, so it is skipped, and one left at the end of a name goes too.
+function tokensAfter(text: string, from: number, count: number): Token[] {
+  const found: Token[] = [];
+  for (const token of scan(text, from)) {
+    if (isPunct(token, '\\')) continue;
+    found.push(token);
+    if (found.length === count) break;
+  }
+  return found;
+}
+
+const plainName = (value: string) => value.replace(/\\$/, '').toLowerCase();
+
+// Setting names ignore case in Postgres, quoted or not. A whole quoted name holds its own dot.
+function namesDrefyn(tokens: readonly (Token | undefined)[]): boolean {
+  const [first, second] = tokens;
+  // U& quoting can spell any name in escapes, so it cannot be shown to be safe.
+  if (isWord(first, 'u') && isPunct(second, '&')) return true;
+  const part = ident(first);
+  if (part === undefined) return false;
+  const name = plainName(part);
+  return name.startsWith('drefyn.') || (name === 'drefyn' && isPunct(second, '.'));
+}
+
+interface SettingCall {
+  readonly index: number;
+  // The first token after the opening parenthesis, and the one after it.
+  readonly first: Token | undefined;
+  readonly second: Token | undefined;
+  readonly argumentsStart: number;
+}
+
+// Every call of set_config, quoted or not, whatever sits between the name and its parenthesis.
+function settingCalls(text: string): SettingCall[] {
+  const calls: SettingCall[] = [];
+  for (const match of text.matchAll(SET_CONFIG)) {
+    const [open, first, second] = tokensAfter(text, match.index + match[0].length, 3);
+    if (open === undefined || !isPunct(open, '(')) continue;
+    calls.push({ index: match.index, first, second, argumentsStart: open.end });
+  }
+  return calls;
+}
+
+interface SettingSet {
+  readonly index: number;
+  readonly local: boolean;
+  // Where the setting's name starts, so the reported statement can stop at the end of its line.
+  readonly nameStart: number;
+}
+
+// Every SET of a drefyn setting. SESSION and LOCAL are the only words SQL takes before the name.
+function drefynSets(text: string): SettingSet[] {
+  const sets: SettingSet[] = [];
+  for (const match of text.matchAll(SET_WORD)) {
+    const tokens = tokensAfter(text, match.index + match[0].length, 3);
+    const scoped = isWord(tokens[0], 'local', 'session');
+    const name = scoped ? tokens.slice(1) : tokens;
+    if (!namesDrefyn(name)) continue;
+    sets.push({
+      index: match.index,
+      local: isWord(tokens[0], 'local'),
+      nameStart: name[0]?.start ?? match.index,
+    });
+  }
+  return sets;
+}
+
+function setStatement(text: string, set: SettingSet): string {
+  const stop = text.slice(set.nameStart).search(/[;\n]/);
+  return oneLine(text.slice(set.index, stop === -1 ? text.length : set.nameStart + stop));
+}
+
 // Session scoped tenant settings: a session level SET of a drefyn setting, and set_config
 // with is_local false.
 export function sessionSettingProblems(file: string, text: string): readonly SourceProblem[] {
   const problems: SourceProblem[] = [];
-  for (const match of text.matchAll(SET_CONFIG)) {
-    const { args, end } = callArguments(text, match.index + match[0].length);
+  for (const call of settingCalls(text)) {
+    const { args, end } = callArguments(text, call.argumentsStart);
     const local = args[2];
     if (local === undefined || !isFalse(local)) continue;
     problems.push({
       file,
-      line: lineAt(text, match.index),
-      statement: oneLine(text.slice(match.index, Math.min(end, match.index + 400))),
+      line: lineAt(text, call.index),
+      statement: oneLine(text.slice(call.index, Math.min(end, call.index + 400))),
       message: 'set_config with is_local false keeps the setting for the whole session',
     });
   }
-  for (const match of text.matchAll(SESSION_SET)) {
-    const rest = text.slice(match.index);
-    const stop = rest.search(/[;\n]/);
+  for (const set of drefynSets(text)) {
+    if (set.local) continue;
     problems.push({
       file,
-      line: lineAt(text, match.index),
-      statement: oneLine(stop === -1 ? rest : rest.slice(0, stop)),
+      line: lineAt(text, set.index),
+      statement: setStatement(text, set),
       message:
         'a session level SET of a drefyn setting outlives the transaction on a pooled connection',
     });
@@ -470,10 +543,19 @@ const CONTEXT_OWNERS = ['packages/db/src/database.ts', 'packages/db/test/'];
 const ownsContext = (file: string) =>
   CONTEXT_OWNERS.some((owner) => (owner.endsWith('/') ? file.startsWith(owner) : file === owner));
 
-const ANY_SET_CONFIG = /(?<![A-Za-z0-9_$])set_config\s*\(/gi;
-const LOCAL_SET = /(?<![A-Za-z0-9_$])set\s+local\s+"?drefyn\./gi;
-const TENANT_NAME = /^\s*(['"])drefyn\./i;
-const LITERAL_NAME = /^\s*(['"])[^'"]*\1\s*$/;
+const PLAIN_SETTING = /^[a-z0-9_.]+$/;
+
+// Safe only as one plain literal naming something else. An expression, an escape string or a
+// parameter could name a drefyn setting at run time.
+function namesOtherSetting(call: SettingCall): boolean {
+  const { first, second } = call;
+  if (first?.kind !== 'string' && first?.kind !== 'quoted') return false;
+  if (!isPunct(second, ',') && !isPunct(second, ')')) return false;
+  const name = plainName(first.value);
+  return PLAIN_SETTING.test(name) && !name.startsWith('drefyn.');
+}
+
+const TENANT_MESSAGE = 'only the db package sets the tenant settings; work must not switch tenant';
 
 // Work runs inside the tenant's transaction and could switch tenant with a local setting, so
 // only the context code may set a drefyn setting at all, whatever is_local says. A name that
@@ -481,23 +563,23 @@ const LITERAL_NAME = /^\s*(['"])[^'"]*\1\s*$/;
 export function tenantSettingProblems(file: string, text: string): readonly SourceProblem[] {
   if (ownsContext(file)) return [];
   const problems: SourceProblem[] = [];
-  for (const match of text.matchAll(ANY_SET_CONFIG)) {
-    const { args, end } = callArguments(text, match.index + match[0].length);
-    const name = args[0] ?? '';
-    if (!TENANT_NAME.test(name) && LITERAL_NAME.test(name)) continue;
+  for (const call of settingCalls(text)) {
+    if (namesOtherSetting(call)) continue;
+    const { end } = callArguments(text, call.argumentsStart);
     problems.push({
       file,
-      line: lineAt(text, match.index),
-      statement: oneLine(text.slice(match.index, Math.min(end, match.index + 400))),
-      message: 'only the db package sets the tenant settings; work must not switch tenant',
+      line: lineAt(text, call.index),
+      statement: oneLine(text.slice(call.index, Math.min(end, call.index + 400))),
+      message: TENANT_MESSAGE,
     });
   }
-  for (const match of text.matchAll(LOCAL_SET)) {
+  for (const set of drefynSets(text)) {
+    if (!set.local) continue;
     problems.push({
       file,
-      line: lineAt(text, match.index),
-      statement: oneLine(text.slice(match.index).split(/[;\n]/)[0] ?? ''),
-      message: 'only the db package sets the tenant settings; work must not switch tenant',
+      line: lineAt(text, set.index),
+      statement: setStatement(text, set),
+      message: TENANT_MESSAGE,
     });
   }
   return problems;

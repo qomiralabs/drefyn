@@ -46,7 +46,7 @@ export {
   type StartedSession,
   type StepUpMethod,
 } from './sessions.ts';
-export { type AccessContext, type AccessResult } from './access.ts';
+export { type AccessContext, type AccessResult, type AccessView } from './access.ts';
 export {
   ApiKeyReplayError,
   createApiKeys,
@@ -56,6 +56,7 @@ export {
   type ApiKeysDeps,
   type CreateApiKeyInput,
   type CreatedApiKey,
+  type RevokedApiKey,
   type ProjectScope,
 } from './api-keys.ts';
 export {
@@ -171,6 +172,7 @@ export {
   type VerifyFragment,
 } from './tokens.ts';
 export { safeReturnTo } from './return-to.ts';
+export { checkFormBinding, formBindingField } from './form-binding.ts';
 export {
   SIGN_IN_CODE_PURPOSES,
   createCodeIssuer,

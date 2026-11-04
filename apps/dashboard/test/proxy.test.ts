@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { REQUEST_PATH_HEADER } from '../src/server/origin.ts';
 import { contentSecurityPolicy, NONCE_HEADER } from '../src/server/security-headers.ts';
 
 const SOURCE = readFileSync(new URL('../src/proxy.ts', import.meta.url), 'utf8');
@@ -51,6 +52,13 @@ describe('proxy', () => {
     expect((await run('/invite')).headers.get('referrer-policy')).toBe('no-referrer');
     expect((await run('/acme')).headers.get('referrer-policy')).toBe(
       'strict-origin-when-cross-origin',
+    );
+  });
+
+  it('overwrites the request path header, whatever the client sent', async () => {
+    const response = await run('/acme/docs?tab=a', { [REQUEST_PATH_HEADER]: '//evil.test' });
+    expect(response.headers.get(`x-middleware-request-${REQUEST_PATH_HEADER}`)).toBe(
+      '/acme/docs?tab=a',
     );
   });
 
