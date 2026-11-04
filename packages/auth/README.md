@@ -654,6 +654,19 @@ const verifier = createApiKeyVerifier(process.env, { db, logger }); // API servi
   An unknown id and another organization's key both answer `AUTH_NOT_FOUND`. A second revoke is
   `ok` with `alreadyRevoked: true` and the first time. `send` tells every owner `api_key_revoked`,
   never throws, and does nothing on a repeat.
+- `listApiKeys(access, { search?, products?, createdBy?, lastUsed?, cursor?, limit? })` needs
+  `org.read` and no step up, so a member sees the table. Filters run in SQL and combine with
+  and. `search` is 1 to 100 characters after NFKC, a literal substring of the name in any
+  case. `createdBy` takes up to 50 membership ids and `'former'`, for keys whose creator has
+  left. `lastUsed` is `any`, `7d`, `30d` or `never`, by database time. Empty lists, a bad cursor
+  and anything else out of shape are `AUTH_INPUT_INVALID`, before any statement. Items are newest
+  first with `state` (`live`, `expired`, `revoked`, and revoked wins) and `creatorName`, null once
+  the creator has left. `nextCursor` is opaque, and a walk returns each row once while keys are
+  revoked. `matched` counts across pages after the filters; `total`, `live`, `creators`,
+  `formerKeys` and `products` count before them. Never logged on success.
+- A revoked key's row goes 90 days after `revoked_at`, with its project rows, through
+  `AUTH_EXPIRY_RULES` in `@drefyn/db`. A key that expired but was never revoked stays listed
+  until someone revokes it.
 - A key cannot outlive its creator: `created_by` clearing on a live key fails the
   `api_keys_ownerless_is_revoked` check, and `drefyn_app` cannot delete a key or change a revoked
   one.

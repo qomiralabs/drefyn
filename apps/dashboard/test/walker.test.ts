@@ -2,6 +2,8 @@ import { posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkSource, checkTree, sourceFiles } from './support/walker.ts';
 
+// It parses every source file, which takes seconds on a loaded runner.
+const TREE_TIMEOUT_MS = 30_000;
 const PAGE = 'src/app/[org]/page.tsx';
 const ACTIONS = 'src/server/thing-actions.ts';
 const ROUTE = 'src/app/api/thing/route.ts';
@@ -575,9 +577,13 @@ describe('a finding', () => {
 });
 
 describe('the real tree', () => {
-  it('holds to every rule', () => {
-    expect(checkTree(new URL('..', import.meta.url))).toEqual([]);
-  });
+  it(
+    'holds to every rule',
+    () => {
+      expect(checkTree(new URL('..', import.meta.url))).toEqual([]);
+    },
+    TREE_TIMEOUT_MS,
+  );
 
   it('read files, so a walker that reads nothing cannot pass', () => {
     expect(sourceFiles(new URL('..', import.meta.url)).length).toBeGreaterThan(30);

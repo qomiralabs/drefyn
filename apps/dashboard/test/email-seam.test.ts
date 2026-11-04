@@ -64,11 +64,14 @@ describe('the mail seam', () => {
 
   it('is out of reach of every client file', () => {
     const clients = files.filter((f) => /^['"]use client['"]/m.test(read(f)));
+    // A client file gets only a reference to a 'use server' module, never its code, so the
+    // walk stops there. The bundle spec proves the chunks themselves hold no mail.
+    const server = new Set(files.filter((f) => /^['"]use server['"]/m.test(read(f))));
     const reached = new Set<string>(clients);
     for (let grew = true; grew;) {
       grew = false;
       for (const { from, to } of edges) {
-        if (reached.has(from) && !reached.has(to)) {
+        if (reached.has(from) && !server.has(to) && !reached.has(to)) {
           reached.add(to);
           grew = true;
         }

@@ -100,6 +100,17 @@ export const guardSignedIn = cache(
   },
 );
 
+// Who a signed out page is talking to, for the pages that change with it. An outage reads as
+// nobody, so the page still offers its form.
+export const currentSession = cache(async (): Promise<SessionInfo | null> => {
+  try {
+    const held = await credential();
+    return held === null ? null : await held.auth.sessions.resolveSession(held.cookie);
+  } catch {
+    return null;
+  }
+});
+
 // For pages that hold no data. The walker keeps an exact list of them.
 export const guardPublic = cache(async (): Promise<void> => {
   await connection();

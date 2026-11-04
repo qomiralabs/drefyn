@@ -35,6 +35,10 @@ export function requestPathname(request: PathRequest): string {
   return request.nextUrl.pathname;
 }
 
+export function requestQuery(request: PathRequest): URLSearchParams {
+  return new URLSearchParams(request.nextUrl.search);
+}
+
 export function requestPath(request: PathRequest): string {
   const { pathname, search } = request.nextUrl;
   return `${pathname}${search}`;

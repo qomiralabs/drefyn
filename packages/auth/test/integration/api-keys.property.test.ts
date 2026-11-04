@@ -1,7 +1,18 @@
-import { idOf, type ProjectId } from '@drefyn/tenancy';
+import type { Result } from '@drefyn/address';
+import { PRODUCTS, type Product } from '@drefyn/entitlements';
+import { idOf, type IdOf, type ProjectId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { beforeAll, expect, it } from 'vitest';
-import { formatApiKey, parseApiKey, type ApiKeyVerifier } from '../../src/index.ts';
+import { newId } from '@drefyn/db';
+import {
+  formatApiKey,
+  parseApiKey,
+  type ApiKeyPage,
+  type ApiKeyLastUsed,
+  type ApiKeyVerifier,
+  type AuthError,
+  type ListApiKeysInput,
+} from '../../src/index.ts';
 import {
   addProjects,
   deleteProject,
@@ -220,4 +231,185 @@ describeWithStack('a listed key never widens', () => {
     if (!later.ok) throw later.error;
     expect(later.value.projectIds).toEqual([]);
   });
+});
+
+type Maker = 'owner' | 'admin' | 'gone';
+
+interface KeyFacts {
+  readonly name: string;
+  readonly products: readonly Product[];
+  readonly maker: Maker;
+  readonly usedDaysAgo: number | null;
+  readonly revoked: boolean;
+  readonly expired: boolean;
+}
+
+interface Stored extends KeyFacts {
+  readonly id: string;
+}
+
+// Used a day, 10 days or 40 days ago, each well clear of the 7 and 30 day lines.
+const keyFacts: fc.Arbitrary<KeyFacts> = fc
+  .record({
+    name: fc.constantFrom('Deploy', 'deploy bot', 'CI', 'ci runner', 'Status sync', 'Release'),
+    products: fc.subarray([...PRODUCTS], { minLength: 1 }),
+    maker: fc.constantFrom<Maker>('owner', 'admin', 'gone'),
+    usedDaysAgo: fc.constantFrom(null, 1, 10, 40),
+    revoked: fc.boolean(),
+    expired: fc.boolean(),
+  })
+  // A key with no creator is always revoked, as the table demands.
+  .map((k) => (k.maker === 'gone' ? { ...k, revoked: true } : k));
+
+describeWithStack('the API key list against an oracle', () => {
+  let org: Org;
+  let rows: readonly Stored[];
+  let owner: IdOf<'mem'>;
+  let admin: IdOf<'mem'>;
+
+  const makerId = (maker: Maker) => {
+    if (maker === 'gone') return 'null';
+    return `'${maker === 'owner' ? owner : admin}'`;
+  };
+
+  const seed = async (facts: readonly KeyFacts[]) => {
+    const stored = facts.map((f) => ({ ...f, id: newId('key') }));
+    await h.sql(`
+      insert into app.api_keys (id, organization_id, name, secret_hash, display_suffix, scopes,
+          project_scope, created_by, idempotency_key, request_hash, created_at, expires_at,
+          last_used_at, revoked_at)
+      values ${stored
+        .map(
+          (k) => `('${k.id}', '${org.organizationId}', '${k.name}', decode(repeat('ab', 32), 'hex'),
+            'a1b2', array[${k.products.map((p) => `'${p}:read'`).join(',')}], 'all',
+            ${makerId(k.maker)}, 'k-${k.id}', decode(repeat('cd', 32), 'hex'),
+            now() - interval '100 days',
+            ${k.expired ? `now() - interval '1 hour'` : `now() + interval '1 hour'`},
+            ${k.usedDaysAgo === null ? 'null' : `now() - interval '${String(k.usedDaysAgo)} days'`},
+            ${k.revoked ? 'now()' : 'null'})`,
+        )
+        .join(',')};`);
+    return stored;
+  };
+
+  const walk = async (query: ListApiKeysInput) => {
+    const items: ApiKeyPage['items'][number][] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const page: Result<ApiKeyPage, AuthError> = await h
+        .apiKeys()
+        .listApiKeys(org.owner, { ...query, ...(cursor === undefined ? {} : { cursor }) });
+      if (!page.ok) throw page.error;
+      items.push(...page.value.items);
+      if (page.value.nextCursor === null) return { items, last: page.value };
+      cursor = page.value.nextCursor;
+    }
+  };
+
+  const matches = (query: ListApiKeysInput) => (k: Stored) => {
+    if (query.search !== undefined && !k.name.toLowerCase().includes(query.search.toLowerCase())) {
+      return false;
+    }
+    if (query.products !== undefined && !query.products.some((p) => k.products.includes(p))) {
+      return false;
+    }
+    if (query.createdBy !== undefined) {
+      const named = k.maker === 'gone' ? 'former' : k.maker === 'owner' ? owner : admin;
+      if (!query.createdBy.includes(named)) return false;
+    }
+    switch (query.lastUsed) {
+      case '7d':
+        return k.usedDaysAgo !== null && k.usedDaysAgo <= 7;
+      case '30d':
+        return k.usedDaysAgo !== null && k.usedDaysAgo <= 30;
+      case 'never':
+        return k.usedDaysAgo === null;
+      default:
+        return true;
+    }
+  };
+
+  const stateOf = (k: Stored) => (k.revoked ? 'revoked' : k.expired ? 'expired' : 'live');
+
+  const agrees = async (query: ListApiKeysInput) => {
+    const { items, last } = await walk(query);
+    const expected = rows
+      .filter(matches(query))
+      .map((k) => k.id)
+      .sort()
+      .reverse();
+    expect(items.map((i) => i.keyId)).toEqual(expected);
+    expect(last.matched).toBe(expected.length);
+    for (const item of items) {
+      const facts = rows.find((k) => k.id === item.keyId);
+      if (facts === undefined) throw new Error('a row nobody seeded');
+      expect(item.state).toBe(stateOf(facts));
+      expect(item.name).toBe(facts.name);
+    }
+    expect(last.total).toBe(rows.length);
+    expect(last.live).toBe(rows.filter((k) => stateOf(k) === 'live').length);
+    expect(last.formerKeys).toBe(rows.filter((k) => k.maker === 'gone').length);
+    for (const product of PRODUCTS) {
+      expect(last.products[product]).toBe(rows.filter((k) => k.products.includes(product)).length);
+    }
+    const held = (maker: Maker) => rows.filter((k) => k.maker === maker).length;
+    expect(Object.fromEntries(last.creators.map((c) => [c.membershipId, c.keys]))).toEqual({
+      ...(held('owner') > 0 ? { [owner]: held('owner') } : {}),
+      ...(held('admin') > 0 ? { [admin]: held('admin') } : {}),
+    });
+  };
+
+  beforeAll(async () => {
+    h = await fresh();
+    org = await newOrg(h);
+    const member = await memberOf(h, org, 'admin');
+    const idFor = async (userId: string) =>
+      idOf(
+        'mem',
+        await h.sql(
+          `select id from app.memberships
+            where organization_id = '${org.organizationId}' and user_id = '${userId}';`,
+        ),
+      );
+    owner = await idFor(org.owner.userId);
+    admin = await idFor(member.session.userId);
+    const [sampled] = fc.sample(fc.array(keyFacts, { minLength: 60, maxLength: 60 }), {
+      seed: 256,
+      numRuns: 1,
+    });
+    if (sampled === undefined) throw new Error('no rows');
+    rows = await seed(sampled);
+  });
+
+  it('every filter alone and in every combination matches', async () => {
+    const options: readonly ListApiKeysInput[] = [
+      { search: 'deploy' },
+      { products: ['status'] },
+      { createdBy: [owner, 'former'] },
+      { lastUsed: 'never' },
+    ];
+    for (let mask = 0; mask < 2 ** options.length; mask += 1) {
+      const query = Object.assign(
+        {},
+        ...options.filter((_, bit) => (mask & (1 << bit)) !== 0),
+      ) as ListApiKeysInput;
+      await agrees(query);
+    }
+  }, 60_000);
+
+  it('any random filter, at any page size, matches', async () => {
+    const filters: fc.Arbitrary<ListApiKeysInput> = fc.record(
+      {
+        search: fc.constantFrom('deploy', 'CI', 'c', 'S', 'zzz', 'BOT'),
+        products: fc.subarray([...PRODUCTS], { minLength: 1 }),
+        createdBy: fc.subarray<IdOf<'mem'> | 'former'>([owner, admin, 'former'], {
+          minLength: 1,
+        }),
+        lastUsed: fc.constantFrom<ApiKeyLastUsed>('any', '7d', '30d', 'never'),
+        limit: fc.integer({ min: 1, max: 100 }),
+      },
+      { requiredKeys: [] },
+    );
+    await fc.assert(fc.asyncProperty(filters, agrees), { seed: 257, numRuns: 60 });
+  }, 120_000);
 });

@@ -1,4 +1,5 @@
 import type { Result } from '@drefyn/address';
+import { PRODUCTS, type Product } from '@drefyn/entitlements';
 import {
   newId,
   withAuth,
@@ -9,7 +10,7 @@ import {
   type OrganizationSchema,
 } from '@drefyn/db';
 import { idOf, type IdOf, type OrganizationId, type ProjectId, type UserId } from '@drefyn/tenancy';
-import { sql, type Transaction } from 'kysely';
+import { sql, type RawBuilder, type SqlBool, type Transaction } from 'kysely';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { storedPermissions, type AccessContext } from './access.ts';
@@ -17,7 +18,7 @@ import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, lengthPrefixed, sha256 } from './keys.ts';
 import { parseOrganizationName } from './organization-rules.ts';
-import { noticeEach } from './notices.ts';
+import { memberName, noticeEach, storedKeyName } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
 import type { Permission } from './permissions.ts';
 import type { AuthLogger } from './rate-limiter.ts';
@@ -81,6 +82,50 @@ export interface RevokedApiKey {
   readonly send: () => Promise<void>;
 }
 
+export type ApiKeyState = 'live' | 'expired' | 'revoked';
+export type ApiKeyLastUsed = 'any' | '7d' | '30d' | 'never';
+
+export interface ListApiKeysInput {
+  // 1 to 100 characters after NFKC. Matches the name only.
+  readonly search?: string;
+  // A key with any scope of these.
+  readonly products?: readonly Product[];
+  // 'former' stands for people no longer in the organization. At most 50.
+  readonly createdBy?: readonly (IdOf<'mem'> | 'former')[];
+  // Default 'any'.
+  readonly lastUsed?: ApiKeyLastUsed;
+  // Opaque, from nextCursor.
+  readonly cursor?: string;
+  // 1 to 100, default 50.
+  readonly limit?: number;
+}
+
+export interface ListedApiKey extends ApiKeySummary {
+  // By database time. Revoked wins over expired.
+  readonly state: ApiKeyState;
+  // Personal data, so never logged. Null when createdBy is null.
+  readonly creatorName: string | null;
+}
+
+export interface ApiKeyPage {
+  // Newest first.
+  readonly items: readonly ListedApiKey[];
+  readonly nextCursor: string | null;
+  // After the filters, across all pages.
+  readonly matched: number;
+  // The rest are counts before any filter, for the page heading and the filter menus.
+  readonly total: number;
+  readonly live: number;
+  readonly creators: readonly {
+    readonly membershipId: IdOf<'mem'>;
+    readonly name: string;
+    readonly keys: number;
+  }[];
+  // Keys of people no longer in the organization.
+  readonly formerKeys: number;
+  readonly products: Readonly<Record<Product, number>>;
+}
+
 // A repeat of a request already made: the key it made, without the secret, which was shown
 // once and is gone. A set revokedAt means the key is dead.
 export class ApiKeyReplayError extends AuthError {
@@ -111,12 +156,14 @@ export interface ApiKeys {
     input: CreateApiKeyInput,
   ): Promise<Result<CreatedApiKey, AuthError>>;
   revokeApiKey(a: AccessContext, id: IdOf<'key'>): Promise<Result<RevokedApiKey, AuthError>>;
+  listApiKeys(a: AccessContext, input: ListApiKeysInput): Promise<Result<ApiKeyPage, AuthError>>;
 }
 
 const MAX_KEY_SCOPES = 32;
 const MAX_PROJECTS = 100;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,200}$/;
 const MANAGE: Permission = 'org.manage_api_keys';
+const READ: Permission = 'org.read';
 
 const INPUT = z.strictObject({
   name: z.unknown(),
@@ -125,6 +172,25 @@ const INPUT = z.strictObject({
   projectIds: z.array(z.string()).max(MAX_PROJECTS).optional(),
   expiresAt: z.date().optional(),
   idempotencyKey: z.string().regex(IDEMPOTENCY_KEY),
+});
+
+const MAX_SEARCH = 100;
+// Bounds the NFKC work on input that has not been measured yet.
+const MAX_RAW_SEARCH = 1_000;
+const MAX_CREATOR_FILTER = 50;
+const MAX_PAGE = 100;
+const DEFAULT_PAGE = 50;
+const MAX_CURSOR = 128;
+const CURSOR_VERSION = 'k1.';
+
+// An empty list could mean no filter or no match, so a caller leaves the field out instead.
+const LIST_INPUT = z.strictObject({
+  search: z.string().max(MAX_RAW_SEARCH).optional(),
+  products: z.array(z.enum(PRODUCTS)).min(1).max(PRODUCTS.length).optional(),
+  createdBy: z.array(z.string()).min(1).max(MAX_CREATOR_FILTER).optional(),
+  lastUsed: z.enum(['any', '7d', '30d', 'never']).optional(),
+  cursor: z.string().max(MAX_CURSOR).optional(),
+  limit: z.number().int().min(1).max(MAX_PAGE).optional(),
 });
 
 interface Parsed {
@@ -174,6 +240,65 @@ function parse(raw: unknown, registry: ScopeRegistry): Parsed | null {
   };
 }
 
+function parseSearch(raw: string | undefined): string | null | undefined {
+  if (raw === undefined) return null;
+  const search = raw.normalize('NFKC');
+  // Postgres counts code points in a name, and a NUL or half a surrogate pair cannot be bound.
+  const length = Array.from(search).length;
+  if (length < 1 || length > MAX_SEARCH) return undefined;
+  return search.isWellFormed() && !search.includes('\0') ? search : undefined;
+}
+
+const encodeCursor = (id: string) => Buffer.from(CURSOR_VERSION + id).toString('base64url');
+
+// The encoding is checked by going back, so one position has exactly one cursor.
+function parseCursor(raw: string | undefined): IdOf<'key'> | null | undefined {
+  if (raw === undefined) return null;
+  const text = Buffer.from(raw, 'base64url').toString('utf8');
+  if (!text.startsWith(CURSOR_VERSION)) return undefined;
+  const id = asId('key', text.slice(CURSOR_VERSION.length));
+  return id !== null && encodeCursor(id) === raw ? id : undefined;
+}
+
+interface ListQuery {
+  readonly search: string | null;
+  readonly products: readonly Product[] | null;
+  readonly creators: readonly IdOf<'mem'>[];
+  readonly former: boolean;
+  readonly lastUsed: ApiKeyLastUsed;
+  readonly after: IdOf<'key'> | null;
+  readonly limit: number;
+}
+
+function parseList(raw: unknown): ListQuery | null {
+  const input = LIST_INPUT.safeParse(raw);
+  if (!input.success) return null;
+  const v = input.data;
+  const search = parseSearch(v.search);
+  const after = parseCursor(v.cursor);
+  if (search === undefined || after === undefined) return null;
+  const creators: IdOf<'mem'>[] = [];
+  let former = false;
+  for (const value of v.createdBy ?? []) {
+    if (value === 'former') {
+      former = true;
+      continue;
+    }
+    const id = asId('mem', value);
+    if (id === null) return null;
+    creators.push(id);
+  }
+  return {
+    search,
+    products: v.products ?? null,
+    creators,
+    former,
+    lastUsed: v.lastUsed ?? 'any',
+    after,
+    limit: v.limit ?? DEFAULT_PAGE,
+  };
+}
+
 const holdsAll = (held: readonly Permission[], needs: readonly Permission[]) =>
   held.includes(MANAGE) && needs.every((p) => held.includes(p));
 
@@ -218,6 +343,55 @@ const KEY_COLUMNS = [
   'last_used_at',
   'revoked_at',
 ] as const;
+
+const STATES: ReadonlyMap<unknown, ApiKeyState> = new Map([
+  ['live', 'live'],
+  ['expired', 'expired'],
+  ['revoked', 'revoked'],
+]);
+
+function storedState(value: unknown): ApiKeyState {
+  const state = STATES.get(value);
+  if (state === undefined) throw new Error('stored key state is unknown');
+  return state;
+}
+
+// The verifier's own test of a live key, so the list cannot show as live a key it refuses.
+const IS_LIVE = sql<SqlBool>`k.revoked_at is null and (k.expires_at is null or k.expires_at > now())`;
+
+const STATE = sql<string>`case
+  when k.revoked_at is not null then 'revoked'
+  when ${IS_LIVE} then 'live'
+  else 'expired' end`;
+
+const hasProduct = (products: readonly Product[]) =>
+  sql<SqlBool>`exists (select from unnest(k.scopes) s where split_part(s, ':', 1) = any(${[...products]}::text[]))`;
+
+const LAST_USED: Readonly<Record<ApiKeyLastUsed, RawBuilder<SqlBool> | null>> = {
+  any: null,
+  '7d': sql<SqlBool>`k.last_used_at >= now() - interval '7 days'`,
+  '30d': sql<SqlBool>`k.last_used_at >= now() - interval '30 days'`,
+  never: sql<SqlBool>`k.last_used_at is null`,
+};
+
+function creatorFilter(q: ListQuery): RawBuilder<SqlBool> | null {
+  const named = sql<SqlBool>`k.created_by = any(${[...q.creators]}::uuid[])`;
+  const former = sql<SqlBool>`k.created_by is null`;
+  if (q.creators.length === 0) return q.former ? former : null;
+  return q.former ? sql<SqlBool>`(${named} or ${former})` : named;
+}
+
+// The page and its match count share this, so they can never disagree. Search is a plain
+// substring test: strpos has no pattern characters to escape.
+function matching(q: ListQuery): RawBuilder<SqlBool> {
+  const clauses = [
+    q.search === null ? null : sql<SqlBool>`strpos(lower(k.name), lower(${q.search})) > 0`,
+    q.products === null ? null : hasProduct(q.products),
+    creatorFilter(q),
+    LAST_USED[q.lastUsed],
+  ].filter((clause) => clause !== null);
+  return clauses.length === 0 ? sql<SqlBool>`true` : sql<SqlBool>`${sql.join(clauses, sql` and `)}`;
+}
 
 type Tx = Transaction<OrganizationSchema>;
 
@@ -287,6 +461,81 @@ async function listedProjects(
     .orderBy('target_project_id')
     .execute();
   return rows.map((r) => idOf('prj', r.target_project_id));
+}
+
+const listColumns = KEY_COLUMNS.map((column) => `k.${column}` as const);
+
+async function readPage(tx: Tx, organizationId: OrganizationId, q: ListQuery) {
+  let page = tx
+    .selectFrom('api_keys as k')
+    .leftJoin('memberships as m', (join) =>
+      join.onRef('m.organization_id', '=', 'k.organization_id').onRef('m.id', '=', 'k.created_by'),
+    )
+    .leftJoin('users as u', 'u.id', 'm.user_id')
+    .select(listColumns)
+    .select(['u.display_name', 'u.email', STATE.as('state')])
+    .where('k.organization_id', '=', organizationId)
+    .where(matching(q));
+  if (q.after !== null) page = page.where('k.id', '<', q.after);
+  // One more than asked for says whether another page exists, with no second count.
+  return page
+    .orderBy('k.id', 'desc')
+    .limit(q.limit + 1)
+    .execute();
+}
+
+async function readPageProjects(
+  tx: Tx,
+  organizationId: OrganizationId,
+  keys: readonly Pick<StoredKey, 'id' | 'project_scope'>[],
+): Promise<ReadonlyMap<string, readonly ProjectId[]>> {
+  const out = new Map<string, ProjectId[]>();
+  const listed = keys.filter((k) => k.project_scope === 'listed').map((k) => k.id);
+  if (listed.length === 0) return out;
+  const rows = await tx
+    .selectFrom('api_key_projects')
+    .select(['api_key_id', 'target_project_id'])
+    .where('organization_id', '=', organizationId)
+    .where('api_key_id', 'in', listed)
+    .orderBy('target_project_id')
+    .execute();
+  for (const row of rows) {
+    const projects = out.get(row.api_key_id) ?? [];
+    projects.push(idOf('prj', row.target_project_id));
+    out.set(row.api_key_id, projects);
+  }
+  return out;
+}
+
+// One scan of the organization's keys for every count on the page.
+function readCounts(tx: Tx, organizationId: OrganizationId, q: ListQuery) {
+  return tx
+    .selectFrom('api_keys as k')
+    .select([
+      sql<number>`count(*)::int`.as('total'),
+      sql<number>`(count(*) filter (where ${matching(q)}))::int`.as('matched'),
+      sql<number>`(count(*) filter (where ${IS_LIVE}))::int`.as('live'),
+      sql<number>`(count(*) filter (where k.created_by is null))::int`.as('former_keys'),
+      ...PRODUCTS.map((product) =>
+        sql<number>`(count(*) filter (where ${hasProduct([product])}))::int`.as(product),
+      ),
+    ])
+    .where('k.organization_id', '=', organizationId)
+    .executeTakeFirstOrThrow();
+}
+
+function readCreators(tx: Tx, organizationId: OrganizationId) {
+  return tx
+    .selectFrom('api_keys as k')
+    .innerJoin('memberships as m', (join) =>
+      join.onRef('m.organization_id', '=', 'k.organization_id').onRef('m.id', '=', 'k.created_by'),
+    )
+    .innerJoin('users as u', 'u.id', 'm.user_id')
+    .select(['m.id', 'u.display_name', 'u.email', sql<number>`count(*)::int`.as('keys')])
+    .where('k.organization_id', '=', organizationId)
+    .groupBy(['m.id', 'u.display_name', 'u.email'])
+    .orderBy('m.id')
+    .execute();
 }
 
 async function ownerIds(tx: Tx): Promise<string[]> {
@@ -552,11 +801,77 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
         kind: 'api_key_revoked',
         organizationId,
         keyId,
-        keyName: key.name,
+        keyName: storedKeyName(key.name),
         displaySuffix: key.displaySuffix,
         at: done.revokedAt,
       };
       return ok({ key, alreadyRevoked: false, send: noticeSender(done.owners, notice, ids) });
+    },
+
+    async listApiKeys(a, raw) {
+      const q = parseList(raw);
+      if (q === null) return fail(INVALID());
+      if (!a.permissions.includes(READ)) return fail(FORBIDDEN());
+
+      const organizationId = a.organizationId;
+      try {
+        const page = await store.organization(organizationId, async (tx) => {
+          const rows = await readPage(tx, organizationId, q);
+          const shown = rows.slice(0, q.limit);
+          return {
+            shown,
+            more: rows.length > q.limit,
+            projects: await readPageProjects(tx, organizationId, shown),
+            counts: await readCounts(tx, organizationId, q),
+            creators: await readCreators(tx, organizationId),
+          };
+        });
+        const items = page.shown.map((row) =>
+          Object.freeze({
+            ...summaryOf(organizationId, row, page.projects.get(row.id) ?? []),
+            state: storedState(row.state),
+            creatorName:
+              row.created_by === null || row.email === null
+                ? null
+                : memberName(row.display_name, row.email),
+          }),
+        );
+        const { counts } = page;
+        return ok(
+          Object.freeze({
+            items: Object.freeze(items),
+            nextCursor: page.more ? encodeCursor(page.shown[q.limit - 1]?.id ?? '') : null,
+            matched: counts.matched,
+            total: counts.total,
+            live: counts.live,
+            creators: Object.freeze(
+              page.creators.map((c) =>
+                Object.freeze({
+                  membershipId: idOf('mem', c.id),
+                  name: memberName(c.display_name, c.email),
+                  keys: c.keys,
+                }),
+              ),
+            ),
+            formerKeys: counts.former_keys,
+            products: Object.freeze(
+              Object.fromEntries(PRODUCTS.map((product) => [product, counts[product]])) as Record<
+                Product,
+                number
+              >,
+            ),
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof AuthError)) {
+          quietWarn(
+            deps.logger,
+            'auth.api_key_list_failed',
+            idFields({ organizationId: ['org', organizationId], userId: ['usr', a.userId] }),
+          );
+        }
+        return fail(error);
+      }
     },
   } satisfies ApiKeys);
 }

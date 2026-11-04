@@ -7,7 +7,11 @@ const LINK = /\b(?:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>
 
 // Fixed text in the product, never built from a request. Exact, so another path or a look
 // alike host on it still fails.
-const OUR_OWN_LINKS: ReadonlySet<string> = new Set(['https://status.drefyn.com']);
+const OUR_OWN_LINKS: ReadonlySet<string> = new Set([
+  'https://status.drefyn.com',
+  'https://drefyn.com/terms',
+  'https://drefyn.com/privacy',
+]);
 
 function onOrigin(value: string, origin: string): boolean {
   return value === origin || value.startsWith(`${origin}/`);

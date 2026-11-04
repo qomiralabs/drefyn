@@ -170,6 +170,8 @@ export type RevokeState = 'live' | 'revoked' | 'absent';
 export interface RevokeShape extends CreateShape {
   readonly state?: RevokeState;
   readonly projectScope?: 'all' | 'listed';
+  // A name kept from before a rule tightened.
+  readonly storedName?: string;
 }
 
 export function storedKey(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -191,7 +193,10 @@ export function storedKey(over: Record<string, unknown> = {}): Record<string, un
 // Every statement revokeApiKey sends, answered as the database would for a key in that state.
 export function revokeResponder(shape: RevokeShape = {}): Responder {
   const state = shape.state ?? 'live';
-  const row = { project_scope: shape.projectScope ?? 'all' };
+  const row = {
+    project_scope: shape.projectScope ?? 'all',
+    ...(shape.storedName === undefined ? {} : { name: shape.storedName }),
+  };
   const members = createResponder(shape);
   return (s) => {
     if (isRevokeWrite(s)) {
@@ -203,6 +208,51 @@ export function revokeResponder(shape: RevokeShape = {}): Responder {
     return members(s);
   };
 }
+
+export interface ListShape {
+  readonly keys?: readonly Record<string, unknown>[];
+  readonly projects?: readonly { api_key_id: string; target_project_id: string }[];
+  readonly counts?: Record<string, unknown>;
+  readonly creators?: readonly Record<string, unknown>[];
+}
+
+export const isPageRead = (s: Statement) =>
+  /^select\b/i.test(s.sql) &&
+  s.sql.includes('"api_keys" as "k"') &&
+  s.sql.includes('"m"."id" = "k"."created_by"') &&
+  s.sql.includes(' limit ');
+export const isCountsRead = (s: Statement) =>
+  /^select\b/i.test(s.sql) && s.sql.includes('as "total"');
+export const isCreatorsRead = (s: Statement) =>
+  /^select\b/i.test(s.sql) && s.sql.includes('group by');
+
+// Every statement listApiKeys sends, answered as the database would. The page row carries the
+// joined person and the state, as the statement selects them.
+export function listResponder(shape: ListShape = {}): Responder {
+  return (s) => {
+    if (isCountsRead(s)) {
+      return [
+        {
+          total: 0,
+          matched: 0,
+          live: 0,
+          former_keys: 0,
+          docs: 0,
+          studio: 0,
+          status: 0,
+          ...shape.counts,
+        },
+      ];
+    }
+    if (isCreatorsRead(s)) return shape.creators ?? [];
+    if (isPageRead(s)) return shape.keys ?? [];
+    if (isKeyProjects(s)) return shape.projects ?? [];
+    return [];
+  };
+}
+
+export const listedRow = (over: Record<string, unknown> = {}): Record<string, unknown> =>
+  storedKey({ state: 'live', display_name: 'Nia Reed', email: 'nia@example.com', ...over });
 
 export const API_ENV = { DREFYN_API_RATE_LIMIT_KEY: base64url(new Uint8Array(32).fill(4)) };
 

@@ -91,7 +91,7 @@ describe('securityHeaders', () => {
 
   it('sends no referrer from the verify and invitation pages, whose links carry secrets', () => {
     for (const path of ['/sign-in/verify', '/invite', '/invite/block']) {
-      expect(build(path)['Referrer-Policy'], path).toBe('no-referrer');
+      expect(build(path)['Referrer-Policy'], path).toBe('same-origin');
     }
   });
 
@@ -160,4 +160,15 @@ describe('withSignOutHeaders', () => {
     expect(response.headers.get('Clear-Site-Data')).toBe('"cookies"');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
+});
+
+describe('the sign in link pages', () => {
+  it.each(['/sign-in/verify', '/sign-in/cli', '/invite', '/invite/block'])(
+    '%s sends no referrer off the site, and still posts its Origin',
+    (pathname) => {
+      const headers = securityHeaders({ nonce: 'abc', pathname, https: true, development: false });
+      expect(headers['Referrer-Policy']).toBe('same-origin');
+      expect(headers['Cache-Control']).toBe('no-store');
+    },
+  );
 });

@@ -13,6 +13,7 @@ import { MAYA, SIGNED_OUT, stateFile } from './people.ts';
 import { test } from './test.ts';
 
 const BASELINE_ROUTE = '/bundle-baseline';
+const SIGN_IN_BUDGET_BYTES = 30 * KB;
 const recorded = JSON.parse(
   readFileSync(new URL('../bundle-baseline.json', import.meta.url), 'utf8'),
 ) as { gzipBytes: number };
@@ -74,6 +75,14 @@ test('the framework baseline has not grown more than 5 percent', async ({ browse
     `baseline ${kb(measured)}, recorded ${kb(recorded.gzipBytes)}, growth ${(report.growth * 100).toFixed(1)} percent`,
   );
   expect(report.ok).toBe(true);
+});
+
+test('sign in stays under 30 KB beyond the framework baseline', async ({ browser }) => {
+  const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
+  const report = routeReport('/sign-in', await coldLoad(browser, '/sign-in', SIGNED_OUT), baseline);
+  console.log(`/sign-in: ${kb(report.beyondBaselineBytes)} beyond baseline`);
+  expect(report.beyondBaselineBytes).toBeGreaterThan(0);
+  expect(report.beyondBaselineBytes).toBeLessThan(SIGN_IN_BUDGET_BYTES);
 });
 
 // Mail loads through Node at run time, so a browser must never be sent a byte of it.

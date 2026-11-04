@@ -1,6 +1,6 @@
 import type pg from 'pg';
-import { afterAll, beforeAll, expect, it } from 'vitest';
-import { ALLOW_LISTS, RESTRICTIVE_POLICIES } from '../../src/allow-lists.ts';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ALLOW_LISTS, RESTRICTIVE_POLICIES, USER_POLICIES } from '../../src/allow-lists.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
 import { superuser } from './support/stack.ts';
@@ -317,11 +317,110 @@ describeWithStack('API key tables', () => {
     expect(seen).toEqual({ removed: 1, row: { organization_id: ORG_A, created_by: null } });
   });
 
-  it('give drefyn_auth no grant on either table', async () => {
+  it('give drefyn_auth no grant on the project rows of a key', async () => {
     const auth = await as('auth');
-    for (const table of TABLES) {
-      expect(await sqlState(auth.query(`select 1 from app.${table}`)), table).toBe('42501');
-    }
+    expect(await sqlState(auth.query('select 1 from app.api_key_projects'))).toBe('42501');
+  });
+
+  it.each([
+    'id',
+    'organization_id',
+    'name',
+    'secret_hash',
+    'display_suffix',
+    'scopes',
+    'project_scope',
+    'created_by',
+    'created_at',
+    'expires_at',
+    'last_used_at',
+    'idempotency_key',
+    'request_hash',
+  ])('refuse drefyn_auth reading %s', async (column) => {
+    const auth = await as('auth');
+    expect(await sqlState(auth.query(`select ${column} from app.api_keys`))).toBe('42501');
+  });
+
+  it.each([
+    ['insert', keyInsert(ORG_A, KEY_D, MEMBER_A)],
+    ['update', 'update app.api_keys set revoked_at = null'],
+    ['truncate', 'truncate app.api_keys'],
+  ])('refuse drefyn_auth a %s', async (_name, text) => {
+    const auth = await as('auth');
+    expect(await sqlState(auth.query(text))).toBe('42501');
+  });
+
+  describe('as the expiry cleanup sees them', () => {
+    const REVOKED_LONG_AGO = '01a14984-4476-77ce-9335-1280000005a1';
+    const REVOKED_LATELY = '01a14984-4476-77ce-9335-1280000005a2';
+
+    // Row dates are the database's to set, so these go in as the superuser. Each key sits on
+    // one side of the 90 day line, beside the live key the seed made.
+    beforeAll(async () => {
+      await superuser(
+        `insert into app.api_keys (id, organization_id, name, secret_hash, display_suffix, scopes,
+           project_scope, created_by, idempotency_key, request_hash, created_at, revoked_at)
+         select v.id::uuid, '${ORG_A}', 'CI', decode(repeat('ab', 32), 'hex'), 'a1b2',
+                array['docs:read'], 'all', '${MEMBER_A}', 'k-' || v.id,
+                decode(repeat('cd', 32), 'hex'), now() - interval '200 days', v.revoked_at
+           from (values
+             ('${REVOKED_LONG_AGO}', now() - interval '91 days'),
+             ('${REVOKED_LATELY}', now() - interval '89 days')) v(id, revoked_at);`,
+        db.name,
+      );
+    });
+
+    afterAll(async () => {
+      await superuser(
+        `delete from app.api_keys where id in ('${REVOKED_LONG_AGO}', '${REVOKED_LATELY}');`,
+        db.name,
+      );
+    });
+
+    const asAuth = async <T>(work: (auth: pg.Client) => Promise<T>): Promise<T> => {
+      const auth = await as('auth');
+      await auth.query('begin');
+      try {
+        return await work(auth);
+      } finally {
+        await auth.query('rollback');
+      }
+    };
+
+    it('show drefyn_auth only the rows past the limit', async () => {
+      const count = await asAuth(
+        async (auth) => (await auth.query('select revoked_at from app.api_keys')).rowCount,
+      );
+      expect(count).toBe(1);
+    });
+
+    it('let a delete as drefyn_auth with no filter remove only the rows past the limit', async () => {
+      const seen = await asAuth(async (auth) => {
+        const gone = await auth.query('delete from app.api_keys');
+        return gone.rowCount;
+      });
+      expect(seen).toBe(1);
+    });
+
+    it('stop a delete as drefyn_auth aimed inside the limit or at a live key', async () => {
+      const seen = await asAuth(async (auth) => {
+        const lately = await auth.query(
+          `delete from app.api_keys where revoked_at > now() - interval '90 days'`,
+        );
+        const live = await auth.query('delete from app.api_keys where revoked_at is null');
+        return [lately.rowCount, live.rowCount];
+      });
+      expect(seen).toEqual([0, 0]);
+    });
+
+    it('keep drefyn_app from deleting a key past the limit', async () => {
+      const app = await as('app');
+      expect(
+        await within(app, ORG_A, () =>
+          sqlState(app.query(`delete from app.api_keys where id = '${REVOKED_LONG_AGO}'`)),
+        ),
+      ).toBe('42501');
+    });
   });
 
   // Each case has the named person acting, so only the rule under test can refuse it.
@@ -428,6 +527,20 @@ describeWithStack('API key tables', () => {
     );
     expect(text.trim()).toBe(`${String(entry?.using)}|${String(entry?.withCheck)}`);
   });
+
+  it.each(['auth_expire', 'auth_expire_read'])(
+    'carry %s with the exact text the allow list reviews',
+    async (name) => {
+      const text = await superuser(
+        `set search_path = pg_catalog;
+         select pg_get_expr(polqual, polrelid) from pg_policy
+          where polname = '${name}' and polrelid = 'app.api_keys'::regclass and polpermissive;`,
+        db.name,
+      );
+      const entry = USER_POLICIES.find((p) => p.name === `app.api_keys.${name}`);
+      expect(text.trim()).toBe(entry?.using);
+    },
+  );
 
   it('pass check:catalog', async () => {
     expect(await catalogProblems(db.owner, ALLOW_LISTS)).toEqual([]);

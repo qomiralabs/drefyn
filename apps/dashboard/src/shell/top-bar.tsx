@@ -110,7 +110,12 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
         Profile and security
       </MenuItem>
       <MenuSeparator />
-      <MenuItem id="sign-out" onAction={notYet('Signing out')}>
+      <MenuItem
+        id="sign-out"
+        onAction={() => {
+          document.querySelector<HTMLFormElement>('#sign-out-form')?.requestSubmit();
+        }}
+      >
         Sign out
       </MenuItem>
     </Menu>
@@ -203,6 +208,8 @@ export function TopBar({ data }: { data: ShellData }): ReactNode {
         <Inbox items={data.inbox} />
         <AccountMenu data={data} />
       </div>
+      {/* A real post, so signing out needs no client state and carries Origin. */}
+      <form id="sign-out-form" method="post" action="/sign-out" hidden />
     </header>
   );
 }

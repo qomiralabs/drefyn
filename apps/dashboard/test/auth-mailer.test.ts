@@ -1,7 +1,15 @@
-import type { Mailer, MailMessage, SendResult } from '@drefyn/email';
+import type { AuthSecurityNotice } from '@drefyn/auth';
+import {
+  SECURITY_NOTICE_KINDS,
+  renderMail,
+  type Mailer,
+  type MailMessage,
+  type SendResult,
+} from '@drefyn/email';
 import { idOf } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthMailer } from '../src/server/auth-mailer.ts';
+import { mailableOrganizationName } from '../src/server/organization-name.ts';
 
 const sent: SendResult = { ok: true, value: { messageId: 'm', attempts: 1 } };
 const ORG = idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070');
@@ -37,6 +45,84 @@ const deviceNotice = (device: string) =>
     at: AT,
     sessionsLink: SESSIONS,
   }) as const;
+
+const KEY = idOf('key', MEMBER.slice(0, -2) + '74');
+const ORIGIN = new URL('https://app.drefyn.test');
+const NEW_ADDRESS = 'new.person@example.com';
+
+type Notice<K> = AuthSecurityNotice extends infer Union
+  ? Union extends { readonly kind: infer Kinds }
+    ? K extends Kinds
+      ? Union
+      : never
+    : never
+  : never;
+
+const keyNotice = { organizationId: ORG, keyId: KEY, keyName: 'Deploy', displaySuffix: 'x7qa' };
+const memberNotice = { organizationId: ORG, membershipId: MEMBER, memberName: 'Ada' };
+
+// Keyed by kind, so a kind added to auth fails to compile until it is proved here.
+const EVERY_NOTICE: { readonly [K in AuthSecurityNotice['kind']]: Notice<K> } = {
+  email_changed: { kind: 'email_changed', newAddress: NEW_ADDRESS, at: AT },
+  identity_linked: { kind: 'identity_linked', provider: 'github', account: 'ada-l', at: AT },
+  identity_unlinked: { kind: 'identity_unlinked', provider: 'google', account: 'a@b.test', at: AT },
+  password_set: { kind: 'password_set', at: AT },
+  password_changed: { kind: 'password_changed', at: AT },
+  password_reset: { kind: 'password_reset', at: AT },
+  password_removed: { kind: 'password_removed', at: AT },
+  new_device_sign_in: deviceNotice('Firefox on Linux'),
+  api_key_created: { ...keyNotice, kind: 'api_key_created', at: AT },
+  api_key_revoked: { ...keyNotice, kind: 'api_key_revoked', at: AT },
+  member_removed: { ...memberNotice, kind: 'member_removed', revokedKeys: 0, at: AT },
+  member_keys_revoked: { ...memberNotice, kind: 'member_keys_revoked', revokedKeys: 2, at: AT },
+  owner_added: { ...memberNotice, kind: 'owner_added', at: AT },
+};
+
+// A mailer that answers the way the real one does: anything the guard refuses never sends.
+function guarded(name = 'Acme') {
+  const send = vi.fn<Mailer['send']>(async (_to, message) => {
+    const rendered = await renderMail(message, { linkOrigin: ORIGIN });
+    return rendered.ok ? sent : rendered;
+  });
+  const adapter = createAuthMailer(
+    { configured: true, send, drain: () => Promise.resolve({ dropped: 0 }) },
+    mailableOrganizationName(() => Promise.resolve(name)),
+  );
+  return { send, adapter };
+}
+
+describe('every notice auth can send', () => {
+  it('covers each kind the mail package knows', () => {
+    expect(Object.keys(EVERY_NOTICE).sort()).toEqual([...SECURITY_NOTICE_KINDS].sort());
+  });
+
+  it.each(Object.values(EVERY_NOTICE))('passes the real guard: $kind', async (notice) => {
+    const { send, adapter } = guarded();
+    await adapter.sendSecurityNotice('owner@example.com', notice);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await send.mock.results[0]?.value).toEqual(sent);
+  });
+
+  it.each(['evil.example', 'Acme\u202eInc', 'Acme\nInc', 'www.evil.example', ''])(
+    'still goes out for the stored organization name %j, with no name of its own',
+    async (stored) => {
+      const { adapter, send } = guarded(stored);
+      await adapter.sendSecurityNotice('owner@example.com', EVERY_NOTICE.api_key_revoked);
+      expect(await send.mock.results[0]?.value).toEqual(sent);
+      expect(firstMessage(send)).toMatchObject({
+        notice: { organizationName: 'Your organization' },
+      });
+    },
+  );
+
+  it('rejects with only the code when the guard refuses', async () => {
+    const { adapter } = guarded();
+    const notice = { ...EVERY_NOTICE.api_key_revoked, keyName: 'evil.example' };
+    await expect(adapter.sendSecurityNotice('owner@example.com', notice)).rejects.toThrow(
+      /^email\.input_invalid$/,
+    );
+  });
+});
 
 describe('sign in codes', () => {
   it('sends the code with its link', async () => {
@@ -124,7 +210,7 @@ describe('security notices', () => {
     const { send, adapter } = mailer();
     await adapter.sendSecurityNotice('a@example.com', owner);
     expect(firstMessage(send)).toMatchObject({
-      notice: { kind: 'owner_added', organizationName: 'Acme', ownerName: 'Ada' },
+      notice: { kind: 'owner_added', organizationName: 'Acme', memberName: 'Ada' },
     });
   });
 
