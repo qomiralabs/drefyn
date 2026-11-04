@@ -1,6 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { test } from './csp.ts';
-import { banner, commandBar, DESKTOP, MOBILE } from './fixtures.ts';
+import { test, type Violation } from './csp.ts';
+import { withoutWebKitSelectArtefact } from './csp-webkit-select.ts';
+import { banner, commandBar, DESKTOP, MOBILE, openShell } from './fixtures.ts';
 import { LEAK_PATHS, NO_SHELL_PATH, UNKNOWN_ORG_PATHS } from './leaks.ts';
 
 // Runs in the shell engine projects against the flag on server, and in flag-off against
@@ -151,6 +152,93 @@ test('an inline script without the nonce does not run, one with it does', async 
     .poll(() => cspViolations.some((v) => v.directive.startsWith('script-src')))
     .toBe(true);
   cspViolations.length = 0;
+});
+
+// The rule in the fixture may only ever take away the one thing WebKit does on its own. Each
+// of these runs on a real page under the real policy, and every one ends on a real violation:
+// that is also how a test knows the browser has finished reporting, so none proves an absence
+// by looking too early. The first is the canary: the day it fails, the rule comes out.
+test.describe('the WebKit select rule', () => {
+  const PAGE = '/settings-states/profile/ready';
+  const STYLE = 'color: red';
+
+  const countOf = (list: readonly Violation[]) => ({
+    events: list.filter((v) => v.directive === 'style-src-attr').length,
+    lines: list.filter((v) => v.directive === 'console').length,
+  });
+
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name === 'flag-off', 'needs a page, and the flag off has none');
+  });
+
+  test('a bare select makes one pair on WebKit, none elsewhere, and balances out', async ({
+    page,
+    browserName,
+    cspViolations,
+    selectsCreated,
+  }) => {
+    await openShell(page, PAGE);
+    await page.evaluate((style) => {
+      document.createElement('select');
+      document.createElement('div').setAttribute('style', style);
+    }, STYLE);
+    const pairs = browserName === 'webkit' ? 2 : 1;
+    await expect.poll(() => cspViolations.length).toBe(pairs * 2);
+    expect(countOf(cspViolations)).toEqual({ events: pairs, lines: pairs });
+    expect(selectsCreated.count).toBe(browserName === 'webkit' ? 1 : 0);
+    const left = withoutWebKitSelectArtefact(browserName, cspViolations, selectsCreated.count);
+    expect(countOf(left)).toEqual({ events: 1, lines: 1 });
+    cspViolations.length = 0;
+  });
+
+  test('a style attribute on a div stays a violation', async ({
+    page,
+    browserName,
+    cspViolations,
+    selectsCreated,
+  }) => {
+    await openShell(page, PAGE);
+    await page.evaluate((style) => {
+      document.createElement('div').setAttribute('style', style);
+    }, STYLE);
+    await expect.poll(() => cspViolations.length).toBe(2);
+    const left = withoutWebKitSelectArtefact(browserName, cspViolations, selectsCreated.count);
+    expect(countOf(left)).toEqual({ events: 1, lines: 1 });
+    cspViolations.length = 0;
+  });
+
+  // The row a filter on the event's target would get wrong.
+  test('a style attribute on a select stays a violation', async ({
+    page,
+    browserName,
+    cspViolations,
+    selectsCreated,
+  }) => {
+    await openShell(page, PAGE);
+    await page.evaluate((style) => {
+      document.createElement('select').setAttribute('style', style);
+    }, STYLE);
+    await expect.poll(() => cspViolations.length).toBe(browserName === 'webkit' ? 4 : 2);
+    const left = withoutWebKitSelectArtefact(browserName, cspViolations, selectsCreated.count);
+    expect(countOf(left)).toEqual({ events: 1, lines: 1 });
+    cspViolations.length = 0;
+  });
+
+  test('a style attribute through innerHTML stays a violation', async ({
+    page,
+    browserName,
+    cspViolations,
+    selectsCreated,
+  }) => {
+    await openShell(page, PAGE);
+    await page.evaluate((style) => {
+      document.createElement('div').innerHTML = `<p style="${style}"></p>`;
+    }, STYLE);
+    await expect.poll(() => cspViolations.length).toBe(2);
+    const left = withoutWebKitSelectArtefact(browserName, cspViolations, selectsCreated.count);
+    expect(countOf(left)).toEqual({ events: 1, lines: 1 });
+    cspViolations.length = 0;
+  });
 });
 
 // Opens everything that draws on top of the page, so any style or script React Aria injects
