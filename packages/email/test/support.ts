@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import { isLinkShaped } from '@drefyn/address';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import {
   LINK_PROVIDERS,
@@ -109,10 +110,10 @@ export function recorder(): {
   };
 }
 
-// Printable text with no control characters, the shape a cleaned display name has.
+// Printable text with nothing the name guard refuses, the shape a cleaned display name has.
 export const safeName: fc.Arbitrary<string> = fc
   .string({ unit: 'grapheme', minLength: 1, maxLength: 140 })
-  .filter((s) => !/[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(s) && s.trim() !== '');
+  .filter((s) => !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(s) && s.trim() !== '' && !isLinkShaped(s));
 
 // One control character somewhere in an otherwise ordinary name.
 export const hostileName: fc.Arbitrary<string> = fc

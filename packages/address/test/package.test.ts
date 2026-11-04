@@ -40,6 +40,11 @@ describe('package layout', () => {
   });
 
   it('exports exactly the public API', () => {
-    expect(Object.keys(main).sort()).toEqual(['isNormalizedEmailAddress', 'normalizeEmailAddress']);
+    expect(Object.keys(main).sort()).toEqual([
+      'isLinkShaped',
+      'isNormalizedEmailAddress',
+      'isPlainAddress',
+      'normalizeEmailAddress',
+    ]);
   });
 });
