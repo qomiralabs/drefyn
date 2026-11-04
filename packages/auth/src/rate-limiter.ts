@@ -62,21 +62,41 @@ interface Refusal {
   readonly first: boolean;
 }
 
+const isPositive = (value: number) => Number.isSafeInteger(value) && value > 0;
+
+// The one sound count for a limit. A missing, repeated or impossible answer says nothing
+// about that window, and a limiter that cannot tell has to refuse. This repeats the check in
+// the database package because reserve can be injected.
+function countFor(counts: readonly WindowCount[], limit: RateLimit): WindowCount {
+  const [window, repeat] = counts.filter((c) => c.windowSeconds === limit.windowSeconds);
+  if (
+    window === undefined ||
+    repeat !== undefined ||
+    !isPositive(window.count) ||
+    !isPositive(window.retryAfterSeconds)
+  ) {
+    throw new AuthError('AUTH_UNAVAILABLE');
+  }
+  return window;
+}
+
 // The refusal when any window is past its limit, or null. The retry is the longest of the
-// windows that refused, since every one of them has to reopen. Throws for a limit with no
-// count: nothing is known about that window, and a limiter that cannot tell has to refuse.
+// windows that refused, since every one of them has to reopen. Throws unless each limit has
+// a sound count and nothing else came back.
 function refusal(counts: readonly WindowCount[], limits: readonly RateLimit[]): Refusal | null {
+  if (counts.length !== limits.length) throw new AuthError('AUTH_UNAVAILABLE');
+  let refused = false;
   let retry = 0;
   let first = false;
   for (const limit of limits) {
-    const window = counts.find((c) => c.windowSeconds === limit.windowSeconds);
-    if (window === undefined) throw new AuthError('AUTH_UNAVAILABLE');
+    const window = countFor(counts, limit);
     if (window.count > limit.count) {
+      refused = true;
       retry = Math.max(retry, window.retryAfterSeconds);
       first ||= window.count === limit.count + 1;
     }
   }
-  if (retry === 0) return null;
+  if (!refused) return null;
   return { error: new AuthError('AUTH_RATE_LIMITED', { retryAfterSeconds: retry }), first };
 }
 
