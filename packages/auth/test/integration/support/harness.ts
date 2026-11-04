@@ -163,6 +163,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
           authDb,
           logger,
           mailer: {
+            sendSecurityNotice: (to, notice) => mail.mailer.sendSecurityNotice(to, notice),
             sendInvitation(to, invitation) {
               invitationMail.push({ to, invitation });
               return Promise.resolve();

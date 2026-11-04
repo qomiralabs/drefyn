@@ -327,4 +327,55 @@ describeWithStack('invitations against Postgres', () => {
     const shouting: SessionInfo = { ...guest.session, email: guest.email.toUpperCase() };
     expect((await h.invitations().acceptInvitation(shouting, token)).ok).toBe(true);
   });
+
+  it('refuses an owner invitation from a stale or missing sign in, and leaves others alone', async () => {
+    const { org, access } = await organization();
+    const email = address();
+    const age = (minutes: number) =>
+      h.sql(
+        `update app.sessions set authenticated_at = now() - interval '${String(minutes)} minutes'
+          where id = '${access.sessionId}';`,
+      );
+    const invite = (role: OrgRole) =>
+      h
+        .invitations({ limiter: unlimited })
+        .invite(access, { email, role, defaultProjectRole: null });
+    await age(16);
+    const stale = await invite('owner');
+    expect(stale.ok ? 'ok' : stale.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    expect(await count('invitations', `organization_id = '${org}'`)).toBe('0');
+    expect((await invite('member')).ok).toBe(true);
+    await age(14);
+    expect((await invite('owner')).ok).toBe(true);
+    await h.sql(`delete from app.sessions where id = '${access.sessionId}';`);
+    const gone = await invite('owner');
+    expect(gone.ok ? 'ok' : gone.error.code).toBe('AUTH_SESSION_INVALID');
+  });
+
+  it('tells every existing owner when an owner invitation is accepted, past a failed send', async () => {
+    const { owner, access } = await organization();
+    const second = await person();
+    const first = await invited(access, second.email, 'owner');
+    const joined = await h.invitations().acceptInvitation(second.session, first.token);
+    if (!joined.ok) throw joined.error;
+    const third = await person();
+    const { token } = await invited(access, third.email, 'owner');
+    const before = h.mail.notices.length;
+    h.mail.failNext();
+    const accepted = await h.invitations().acceptInvitation(third.session, token);
+    expect(accepted.ok).toBe(true);
+    const sent = h.mail.notices.slice(before);
+    expect(sent.map((n) => n.notice.kind)).toEqual(['owner_added']);
+    expect([owner.email, second.email]).toContain(sent[0]?.to);
+    expect(sent.map((n) => n.to)).not.toContain(third.email);
+  });
+
+  it('tells nobody when a member accepts', async () => {
+    const { access } = await organization();
+    const member = await person();
+    const { token } = await invited(access, member.email, 'member');
+    const before = h.mail.notices.length;
+    expect((await h.invitations().acceptInvitation(member.session, token)).ok).toBe(true);
+    expect(h.mail.notices.length).toBe(before);
+  });
 });
