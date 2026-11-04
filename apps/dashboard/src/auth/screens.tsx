@@ -128,11 +128,7 @@ export function SignInScreen(props: SignInProps): ReactNode {
     );
   }
   return (
-    <AuthFrame
-      hosted={hosted}
-      label="Sign in"
-      steps={[{ name: 'Address', current: true }, { name: 'Code' }]}
-    >
+    <AuthFrame hosted={hosted} label="Sign in">
       <Head>
         <Answer claim="Sign in to Drefyn." rest="One account for Docs, Studio and Status." />
       </Head>
@@ -234,16 +230,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
     );
   }
   return (
-    <AuthFrame
-      hosted={hosted}
-      label="Sign up"
-      steps={[
-        { name: 'Address', current: true },
-        { name: 'Code' },
-        { name: 'Your name' },
-        { name: 'Organization' },
-      ]}
-    >
+    <AuthFrame hosted={hosted} label="Sign up">
       <Head>
         <Answer
           claim="Create your Drefyn account."
@@ -291,11 +278,6 @@ export interface TypedCodeProps extends Shared {
   readonly problem?: 'wrong' | 'expired' | 'closed' | undefined;
   readonly notice?: FormNotice | undefined;
 }
-
-const SIGN_IN_STEPS: readonly { name: string; current?: boolean }[] = [
-  { name: 'Address' },
-  { name: 'Code', current: true },
-];
 
 export function TypedCode(props: TypedCodeProps): ReactNode {
   const { problem, email, fromSignUp } = props;
@@ -366,7 +348,6 @@ export function TypedCode(props: TypedCodeProps): ReactNode {
 }
 
 export const VERIFY_LABEL = 'Sign in';
-export const VERIFY_STEPS = SIGN_IN_STEPS;
 
 export function ContinueAs({
   action,
@@ -590,16 +571,8 @@ export interface ResetProps extends Shared {
 }
 
 export function ResetScreen({ hosted, csrf, action, state }: ResetProps): ReactNode {
-  const steps = ['Address', 'Code', 'New password'].map((name, index) => ({
-    name,
-    current: index === ['ask', 'code', 'choose'].indexOf(state.step),
-  }));
   return (
-    <AuthFrame
-      hosted={hosted}
-      label="Reset password"
-      {...(state.step === 'saved' ? {} : { steps })}
-    >
+    <AuthFrame hosted={hosted} label="Reset password">
       {state.step === 'ask' ? (
         <>
           <Head>
@@ -706,11 +679,7 @@ export function LinkScreen(props: LinkProps): ReactNode {
   const { provider, email } = props;
   const who = email ?? 'your address';
   return (
-    <AuthFrame
-      hosted={props.hosted}
-      label={`Link ${provider}`}
-      steps={[{ name: provider }, { name: 'Confirm address', current: true }]}
-    >
+    <AuthFrame hosted={props.hosted} label={`Link ${provider}`}>
       <Head>
         <Answer claim="Confirm it is your account." rest={`${who} already has a Drefyn account.`} />
       </Head>

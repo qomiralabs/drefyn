@@ -11,22 +11,16 @@ import './auth.css';
 
 export { Answer, Head };
 
-export interface Step {
-  readonly name: string;
-  readonly current?: boolean;
-}
-
 interface FrameProps {
   readonly hosted: boolean;
   readonly label: string;
-  readonly steps?: readonly Step[];
   readonly busy?: boolean;
   readonly children: ReactNode;
 }
 
 // The brand half sits after main in the DOM and takes the left by grid area, so it never
 // changes the reading order, and it holds nothing focusable. A self hosted server has none.
-export function AuthFrame({ hosted, label, steps, busy, children }: FrameProps): ReactNode {
+export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactNode {
   return (
     <div className="auth" data-hosted={hosted ? '' : undefined}>
       <header className="auth-head">
@@ -46,15 +40,6 @@ export function AuthFrame({ hosted, label, steps, busy, children }: FrameProps):
       >
         <div className="auth-margin">
           <Eyebrow>{label}</Eyebrow>
-          {steps === undefined ? null : (
-            <ol className="auth-steps" aria-label="Steps">
-              {steps.map((step) => (
-                <li key={step.name} aria-current={step.current === true ? 'step' : undefined}>
-                  {step.name}
-                </li>
-              ))}
-            </ol>
-          )}
         </div>
         <div className="auth-content">{children}</div>
       </main>

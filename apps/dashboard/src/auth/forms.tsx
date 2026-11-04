@@ -29,7 +29,6 @@ import {
   SignUpScreen,
   TypedCode,
   VERIFY_LABEL,
-  VERIFY_STEPS,
   type Shared,
 } from './screens.tsx';
 import type {
@@ -155,7 +154,7 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
   }
   return (
     <div ref={focus} className="contents">
-      <AuthFrame hosted={hosted} label={VERIFY_LABEL} steps={VERIFY_STEPS} busy={reading}>
+      <AuthFrame hosted={hosted} label={VERIFY_LABEL} busy={reading}>
         <div className="auth-reading contents">
           <Reading title="Signing you in" />
         </div>
@@ -377,13 +376,8 @@ export function InviteForm({ hosted, csrf }: Shared): ReactNode {
   });
   const idle = !isRefusal(joined) && joined.kind === 'reading';
   const { view, notice } = noticed<InviteState>(idle ? state : joined, { kind: 'invalid' });
-  const steps = [
-    { name: 'Invitation', current: view.kind === 'signed_out' },
-    { name: 'Sign in' },
-    { name: 'Join', current: view.kind === 'match' },
-  ];
   return (
-    <AuthFrame hosted={hosted} label="Invitation" steps={steps} busy={view.kind === 'reading'}>
+    <AuthFrame hosted={hosted} label="Invitation" busy={view.kind === 'reading'}>
       {view.kind === 'reading' ? (
         <>
           <div className="auth-needs-script contents">
