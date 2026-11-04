@@ -106,45 +106,60 @@ const root = join(import.meta.dirname, '..', '..');
 const built = existsSync(join(root, '.next', 'BUILD_ID'));
 const runBuilt = built || process.env['CI'] === 'true';
 
+interface Started {
+  readonly child: ChildProcess;
+  readonly port: number;
+  // Everything the server has logged so far.
+  log(): string;
+}
+
+async function startBuilt(): Promise<Started> {
+  const child = spawn(process.execPath, ['server.ts'], {
+    cwd: root,
+    env: {
+      PATH: process.env['PATH'],
+      NODE_ENV: 'production',
+      NEXT_TELEMETRY_DISABLED: '1',
+      PORT: '0',
+      HOSTNAME: '127.0.0.1',
+      UV_THREADPOOL_SIZE: '16',
+      DREFYN_APP_ORIGIN: ORIGIN,
+      DREFYN_FLAGS_SOURCE: 'file',
+      DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  const port = await new Promise<number>((done, fail) => {
+    const timer = setTimeout(() => {
+      fail(new Error(`server did not start: ${output}`));
+    }, 60_000);
+    const read = (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+      const match = /"event":"dashboard\.listening"[^}]*"port":(\d+)/.exec(output);
+      if (match?.[1] !== undefined) {
+        clearTimeout(timer);
+        done(Number(match[1]));
+      }
+    };
+    child.stdout.on('data', read);
+    child.stderr.on('data', read);
+    child.on('exit', (code) => {
+      fail(new Error(`server exited ${String(code)}: ${output}`));
+    });
+  });
+  return { child, port, log: () => output };
+}
+
+const UPGRADE = ['Connection: Upgrade', 'Upgrade: websocket'];
+
 describe.runIf(runBuilt)('the built server behind server.ts', () => {
   let child: ChildProcess;
   let port = 0;
-  let output = '';
+  let log: () => string;
 
   beforeAll(async () => {
-    child = spawn(process.execPath, ['server.ts'], {
-      cwd: root,
-      env: {
-        PATH: process.env['PATH'],
-        NODE_ENV: 'production',
-        NEXT_TELEMETRY_DISABLED: '1',
-        PORT: '0',
-        HOSTNAME: '127.0.0.1',
-        UV_THREADPOOL_SIZE: '16',
-        DREFYN_APP_ORIGIN: ORIGIN,
-        DREFYN_FLAGS_SOURCE: 'file',
-        DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    port = await new Promise<number>((done, fail) => {
-      const timer = setTimeout(() => {
-        fail(new Error(`server did not start: ${output}`));
-      }, 60_000);
-      const read = (chunk: Buffer) => {
-        output += chunk.toString('utf8');
-        const match = /"event":"dashboard\.listening"[^}]*"port":(\d+)/.exec(output);
-        if (match?.[1] !== undefined) {
-          clearTimeout(timer);
-          done(Number(match[1]));
-        }
-      };
-      child.stdout?.on('data', read);
-      child.stderr?.on('data', read);
-      child.on('exit', (code) => {
-        fail(new Error(`server exited ${String(code)}: ${output}`));
-      });
-    });
+    ({ child, port, log } = await startBuilt());
   }, 90_000);
 
   afterAll(() => {
@@ -186,15 +201,53 @@ describe.runIf(runBuilt)('the built server behind server.ts', () => {
   );
 
   it('answers a forged Host upgrade with 421, also after a routed request', async () => {
-    const upgrade = ['Connection: Upgrade', 'Upgrade: websocket'];
     // Next attaches its own listener on the first routed request, so this must come first.
     expect((await curl(port, '/', [HOST])).status).toBeLessThan(500);
-    const reply = await curl(port, '/', ['Host: evil.example', ...upgrade]);
+    const reply = await curl(port, '/', ['Host: evil.example', ...UPGRADE]);
     expect(reply.status).toBe(421);
-    expect(output).not.toContain('dashboard.upgrade_listener_extra');
+    expect(log()).not.toContain('dashboard.upgrade_listener_extra');
+  });
+
+  it('finishes a valid Host upgrade within a second, after a routed request', async () => {
+    // Next's listener only exists after one, and it would leave this socket open.
+    await curl(port, '/', [HOST]);
+    const started = Date.now();
+    const reply = await curl(port, '/', [HOST, ...UPGRADE]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(reply.status).toBeLessThan(500);
   });
 
   it('logs auth.threadpool_small never when the pool is 16', () => {
-    expect(output).not.toContain('auth.threadpool_small');
+    expect(log()).not.toContain('auth.threadpool_small');
   });
+});
+
+describe.runIf(runBuilt)('stopping the built server', () => {
+  it('exits on SIGTERM within 2 s after an upgrade attempt', async () => {
+    const { child, port } = await startBuilt();
+    try {
+      await curl(port, '/', [HOST]);
+      // Not awaited: on a socket left open this would hold the connection for its 5 s.
+      const attempt = curl(port, '/', [HOST, ...UPGRADE], undefined, 5).catch(() => undefined);
+      await new Promise((done) => setTimeout(done, 300));
+      const exited = new Promise<number | null>((done) => {
+        child.once('exit', done);
+      });
+      const started = Date.now();
+      child.kill('SIGTERM');
+      const code = await Promise.race([
+        exited,
+        new Promise<'still running'>((done) => {
+          setTimeout(() => {
+            done('still running');
+          }, 2_000);
+        }),
+      ]);
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      await attempt;
+    } finally {
+      child.kill('SIGKILL');
+    }
+  }, 90_000);
 });

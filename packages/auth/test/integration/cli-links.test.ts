@@ -313,6 +313,8 @@ describeWithStack('drefyn auth revoke-sessions', () => {
     const before = (await r.sql('select count(*) from app.sessions;')).trim();
     const result = await revoke(['--email', 'nobody-here@example.com']);
     expect(result.code).toBe(2);
+    // The old command also exits 2 on an unknown subcommand, so the code alone proves nothing.
+    expect(result.stderr).toContain('AUTH_NOT_FOUND');
     expect(result.stderr).not.toContain('nobody-here');
     expect((await r.sql('select count(*) from app.sessions;')).trim()).toBe(before);
   });

@@ -14,8 +14,10 @@ export function curl(
   headers: readonly string[],
   // Sent as the request line as is, which the URL could not express.
   requestTarget?: string,
+  maxSeconds = 10,
 ): Promise<Reply> {
-  const args = ['--silent', '--show-error', '--http1.1', '--include', '--max-time', '10'];
+  const seconds = String(maxSeconds);
+  const args = ['--silent', '--show-error', '--http1.1', '--include', '--max-time', seconds];
   args.push('--noproxy', '*');
   for (const header of headers) args.push('--header', header);
   if (requestTarget !== undefined) args.push('--request-target', requestTarget);
