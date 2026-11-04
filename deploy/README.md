@@ -236,7 +236,10 @@ link makes the older unused one worthless. It never sends mail and writes the li
 your terminal; treat the scrollback like a password until you have used it. The person is made
 if the address is new, unless `DREFYN_AUTH_SIGNUP=closed`, which only lets existing people in.
 `--create-organization` makes an organization with that person as owner, and its URL name
-from the name: `Acme Docs` becomes `acme-docs`.
+from the name: `Acme Docs` becomes `acme-docs`. A URL name already in use gets four random
+characters on the end, as does one the dashboard keeps for itself. If that person already owns
+an organization with exactly that name, the command reuses it, makes nothing new and says so on
+stderr, so running it twice for a fresh link is safe. Only owning counts, not another role.
 
 To sign someone out everywhere, for example after a lost laptop:
 

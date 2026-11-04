@@ -27,7 +27,6 @@ export type AuthErrorCode =
   | 'AUTH_INVITATION_INVALID'
   | 'AUTH_INVITATION_EMAIL_MISMATCH'
   | 'AUTH_SLUG_INVALID'
-  | 'AUTH_SLUG_TAKEN'
   | 'AUTH_CREDENTIALS_INVALID'
   | 'AUTH_PASSWORD_WEAK'
   | 'AUTH_PASSWORD_BREACHED'
@@ -65,7 +64,6 @@ const MESSAGES: Readonly<Record<AuthErrorCode, string>> = {
   AUTH_INVITATION_INVALID: 'invitation is not valid',
   AUTH_INVITATION_EMAIL_MISMATCH: 'invitation is for another address',
   AUTH_SLUG_INVALID: 'organization URL name is not valid',
-  AUTH_SLUG_TAKEN: 'organization URL name is taken',
   AUTH_CREDENTIALS_INVALID: 'address and password do not match',
   AUTH_PASSWORD_WEAK: 'password is too weak',
   AUTH_PASSWORD_BREACHED: 'password is known to be breached',

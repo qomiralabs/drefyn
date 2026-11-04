@@ -81,8 +81,6 @@ const refuse = <T>(code: 'AUTH_SLUG_INVALID' | 'AUTH_INPUT_INVALID'): Result<T, 
   error: new AuthError(code),
 });
 
-// Taken exactly as typed: a slug that needs changing to fit is refused, so the URL a person
-// sees after creation is the one they chose.
 export function parseSlug(value: unknown): Result<string, AuthError> {
   if (typeof value !== 'string' || !SLUG_PATTERN.test(value) || RESERVED.has(value)) {
     return refuse('AUTH_SLUG_INVALID');
@@ -110,16 +108,48 @@ export function parseOrganizationName(value: unknown): Result<string, AuthError>
 const NOT_SLUG = /[^a-z0-9]+/g;
 const EDGE_HYPHENS = /^-+|-+$/g;
 const SLUG_MAX = 40;
+// Letters with no decomposed form, so stripping marks would turn them into hyphens.
+const UNMARKED = /[æœøßłđðþı]/g;
+const UNMARKED_LETTERS: Readonly<Record<string, string>> = {
+  æ: 'ae',
+  œ: 'oe',
+  ø: 'o',
+  ß: 'ss',
+  ł: 'l',
+  đ: 'd',
+  ð: 'd',
+  þ: 'th',
+  ı: 'i',
+};
 
-// The URL name the operator command derives from the organization name it was given, so the
-// first admin types one thing. Accents fold to their base letter, anything else becomes a
-// hyphen. Null when nothing usable is left; the slug rule still runs on the result.
+// The URL name an organization name gives. Accents fold to their base letter, anything else
+// becomes a hyphen. Null when nothing usable is left; the slug rule still runs on the result.
 export function slugFromOrganizationName(name: string): string | null {
-  const folded = name.normalize('NFKD').replace(MARKS, '').toLowerCase();
+  const folded = name
+    .normalize('NFKD')
+    .replace(MARKS, '')
+    .toLowerCase()
+    .replace(UNMARKED, (letter) => UNMARKED_LETTERS[letter] ?? letter);
   const slug = folded
     .replace(NOT_SLUG, '-')
     .replace(EDGE_HYPHENS, '')
     .slice(0, SLUG_MAX)
     .replace(EDGE_HYPHENS, '');
   return slug === '' ? null : slug;
+}
+
+// No vowels, so a suffix cannot spell a word, and none of l, 0 or 1, so it reads back cleanly.
+export const SLUG_SUFFIX_ALPHABET = 'bcdfghjkmnpqrstvwxz23456789';
+export const SLUG_SUFFIX_LENGTH = 4;
+// Reserved itself, so it can only appear with a suffix.
+const FALLBACK_STEM = 'org';
+
+// The slug to try for a name: the plain one first when it is allowed, then the name with a
+// suffix. A name with no usable slug skips straight to the suffix, so every name can be saved.
+export function slugCandidate(name: string, suffix: string, attempt: number): string {
+  const plain = slugFromOrganizationName(name);
+  if (attempt === 0 && plain !== null && parseSlug(plain).ok) return plain;
+  const room = SLUG_MAX - suffix.length - 1;
+  const stem = (plain ?? FALLBACK_STEM).slice(0, room).replace(EDGE_HYPHENS, '');
+  return `${stem}-${suffix}`;
 }

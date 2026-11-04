@@ -56,7 +56,6 @@ function organization(overrides: Partial<Parameters<typeof OrganizationScreen>[0
     <OrganizationScreen
       hosted={hosted}
       email={EMAIL}
-      host="app.drefyn.com"
       member={false}
       invitation={null}
       {...overrides}
@@ -65,7 +64,7 @@ function organization(overrides: Partial<Parameters<typeof OrganizationScreen>[0
   return Page;
 }
 
-const TYPED_ORG = { name: 'Acme', slug: 'acme' };
+const TYPED_ORG = { name: 'Acme' };
 
 function signIn(overrides: Partial<Parameters<typeof SignInScreen>[0]> = {}): Screen {
   const Page = (hosted: boolean) => (
@@ -179,9 +178,7 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
   },
   organization: {
     ready: organization(),
-    taken: organization({ state: { ...TYPED_ORG, problem: 'taken' } }),
-    address: organization({ state: { name: 'Acme', slug: 'Acme Inc', problem: 'address' } }),
-    name: organization({ state: { name: 'acme.dev', slug: 'acme', problem: 'name' } }),
+    name: organization({ state: { name: 'acme.dev', problem: 'name' } }),
     limited: organization({ state: { ...TYPED_ORG, limited: true } }),
     failed: organization({ state: { ...TYPED_ORG, notice: NOT_SAVED } }),
     invited: organization({ invitation: INVITED }),

@@ -37,6 +37,16 @@ const happy: Responder = (s) => {
   return [];
 };
 
+const slugOf = (s: Statement): unknown => s.parameters[0];
+const triedSlugs = (scripted: { statements(): readonly Statement[] }) =>
+  scripted.statements().filter(isSlugInsert).map(slugOf);
+
+// Answers as the database does when these slugs already belong to someone: no row back.
+const heldFor =
+  (held: readonly string[]): Responder =>
+  (s) =>
+    isSlugInsert(s) && held.includes(String(slugOf(s))) ? [] : happy(s);
+
 function loggers() {
   const lines: {
     level: 'info' | 'warn';
@@ -79,7 +89,7 @@ const failed = (result: { ok: true; value: unknown } | { ok: false; error: AuthE
 describe('createOrganization', () => {
   it('writes the organization, its slug and the owner membership in one organization transaction', async () => {
     const { orgs, scripted, limiter } = setup();
-    const result = await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
+    const result = await orgs.createOrganization(sessionInfo(), { name: NAME });
     expect(result.ok).toBe(true);
     expect(limiter.calls).toEqual([['org_create', [USER]]]);
     // The first owner must be the person acting, which the database checks.
@@ -103,9 +113,9 @@ describe('createOrganization', () => {
 
   it('returns the owner access context with every permission', async () => {
     const { orgs } = setup();
-    const result = await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
+    const result = await orgs.createOrganization(sessionInfo(), { name: NAME });
     if (!result.ok) throw result.error;
-    expect(result.value).toMatchObject({
+    expect(result.value.access).toMatchObject({
       organizationId: ORG,
       userId: USER,
       sessionId: SESSION,
@@ -113,14 +123,14 @@ describe('createOrganization', () => {
       tier: 'self_hosted',
       authenticatedAt: AUTHENTICATED_AT,
     });
-    expect(result.value.permissions).toEqual(permissionsFor('owner', new Set(PRODUCTS)));
-    expect(Object.isFrozen(result.value)).toBe(true);
+    expect(result.value.access.permissions).toEqual(permissionsFor('owner', new Set(PRODUCTS)));
+    expect(Object.isFrozen(result.value.access)).toBe(true);
   });
 
   it('writes free when the hosted signup builds it', async () => {
     const { orgs, scripted } = setup(happy, { initialTier: 'free' });
-    const result = await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
-    expect(result.ok && result.value.tier).toBe('free');
+    const result = await orgs.createOrganization(sessionInfo(), { name: NAME });
+    expect(result.ok && result.value.access.tier).toBe('free');
     expect(scripted.statements()[0]?.parameters).toContain('free');
   });
 
@@ -134,15 +144,13 @@ describe('createOrganization', () => {
 
   it('stores the normalised name', async () => {
     const { orgs, scripted } = setup();
-    await orgs.createOrganization(sessionInfo(), { name: '  Ａｃｍｅ  ', slug: SLUG });
+    await orgs.createOrganization(sessionInfo(), { name: '  Ａｃｍｅ  ' });
     expect(scripted.statements()[0]?.parameters).toContain('Acme');
   });
 
   it.each([
-    ['a domain like name', { name: 'acme.com', slug: SLUG }, 'AUTH_INPUT_INVALID'],
-    ['a scheme in the name', { name: 'see https://x', slug: SLUG }, 'AUTH_INPUT_INVALID'],
-    ['a reserved slug', { name: NAME, slug: 'settings' }, 'AUTH_SLUG_INVALID'],
-    ['a slug outside the pattern', { name: NAME, slug: 'Acme' }, 'AUTH_SLUG_INVALID'],
+    ['a domain like name', { name: 'acme.com' }, 'AUTH_INPUT_INVALID'],
+    ['a scheme in the name', { name: 'see https://x' }, 'AUTH_INPUT_INVALID'],
   ])('refuses %s before counting or opening anything', async (_label, input, code) => {
     const { orgs, scripted, limiter } = setup();
     const error = failed(await orgs.createOrganization(sessionInfo(), input));
@@ -153,7 +161,7 @@ describe('createOrganization', () => {
 
   it('refuses a non string input without throwing', async () => {
     const { orgs } = setup();
-    const input = { name: 7, slug: null } as unknown as { name: string; slug: string };
+    const input = { name: 7 } as unknown as { name: string };
     expect(failed(await orgs.createOrganization(sessionInfo(), input)).code).toBe(
       'AUTH_INPUT_INVALID',
     );
@@ -166,19 +174,102 @@ describe('createOrganization', () => {
         Promise.reject(new AuthError('AUTH_RATE_LIMITED', { retryAfterSeconds: 3600 })),
     };
     const { orgs, scripted } = setup(happy, { limiter });
-    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG }));
+    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME }));
     expect(error.code).toBe('AUTH_RATE_LIMITED');
     expect(error.retryAfterSeconds).toBe(3600);
     expect(scripted.events).toEqual([]);
   });
 
-  it('answers AUTH_SLUG_TAKEN and rolls back before the membership when the slug is held', async () => {
-    const { orgs, scripted, lines } = setup((s) => (isSlugInsert(s) ? [] : happy(s)));
-    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG }));
-    expect(error.code).toBe('AUTH_SLUG_TAKEN');
+  it('takes the slug from the name and returns it', async () => {
+    const { orgs, scripted } = setup();
+    const result = await orgs.createOrganization(sessionInfo(), { name: 'Acme Inc' });
+    if (!result.ok) throw result.error;
+    expect(result.value.slug).toBe('acme-inc');
+    expect(triedSlugs(scripted)).toEqual(['acme-inc']);
+  });
+
+  it('never takes a slug from the caller', async () => {
+    const { orgs, scripted } = setup();
+    const input = { name: 'Acme Inc', slug: 'chosen-by-client' } as { name: string };
+    const result = await orgs.createOrganization(sessionInfo(), input);
+    expect(result.ok && result.value.slug).toBe('acme-inc');
+    expect(triedSlugs(scripted)).toEqual(['acme-inc']);
+  });
+
+  it.each([
+    ['a reserved word', 'Settings', 'settings-b2c3'],
+    ['an app route', 'Sign In', 'sign-in-b2c3'],
+    ['no Latin letters', '\u5317\u4eac', 'org-b2c3'],
+  ])('adds a suffix straight away for %s', async (_label, name, slug) => {
+    const { orgs, scripted } = setup(happy, { newSlugSuffix: () => 'b2c3' });
+    const result = await orgs.createOrganization(sessionInfo(), { name });
+    expect(result.ok && result.value.slug).toBe(slug);
+    expect(triedSlugs(scripted)).toEqual([slug]);
+  });
+
+  it('tries again with a suffix when the slug is held, from a clean transaction', async () => {
+    const { orgs, scripted, limiter } = setup(heldFor(['acme-widgets']), {
+      newSlugSuffix: () => 'b2c3',
+    });
+    const result = await orgs.createOrganization(sessionInfo(), { name: NAME });
+    if (!result.ok) throw result.error;
+    expect(result.value.slug).toBe('acme-widgets-b2c3');
+    expect(triedSlugs(scripted)).toEqual(['acme-widgets', 'acme-widgets-b2c3']);
+    const ends = scripted.events.filter((e) => e.kind !== 'statement').map((e) => e.kind);
+    expect(ends).toEqual(['begin', 'rollback', 'begin', 'commit']);
+    expect(scripted.statements().filter(isMemberInsert)).toHaveLength(1);
+    expect(limiter.calls).toEqual([['org_create', [USER]]]);
+  });
+
+  it('takes a new suffix on each try and keeps one organization id', async () => {
+    const suffixes = ['b2c3', 'd4f5', 'g6h7'];
+    const { orgs, scripted } = setup(heldFor(['acme-widgets', 'acme-widgets-b2c3']), {
+      newSlugSuffix: () => suffixes.shift() ?? 'none',
+    });
+    const result = await orgs.createOrganization(sessionInfo(), { name: NAME });
+    expect(result.ok && result.value.slug).toBe('acme-widgets-d4f5');
+    const ids = new Set(
+      scripted
+        .statements()
+        .filter(isOrgInsert)
+        .map((s) => s.parameters[0]),
+    );
+    expect(ids).toEqual(new Set([ORG]));
+  });
+
+  it('gives up after five tries with the same failure as any other, naming no slug', async () => {
+    const { orgs, scripted, lines } = setup((s) => (isSlugInsert(s) ? [] : happy(s)), {
+      newSlugSuffix: () => 'b2c3',
+    });
+    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME }));
+    expect(error.code).toBe('AUTH_UNAVAILABLE');
+    expect(triedSlugs(scripted)).toHaveLength(5);
     expect(scripted.statements().some(isMemberInsert)).toBe(false);
-    expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
-    expect(lines.filter((l) => l.event === 'auth.organization_created')).toEqual([]);
+    expect(lines).toEqual([
+      {
+        level: 'warn',
+        event: 'auth.organization_create_failed',
+        fields: { organizationId: toPublicId('org', ORG), userId: toPublicId('usr', USER) },
+      },
+    ]);
+    expect(JSON.stringify(lines)).not.toContain(SLUG);
+  });
+
+  it('retries only a held slug, never another failure', async () => {
+    const { orgs, scripted } = setup((s) => {
+      if (isSlugInsert(s)) throw Object.assign(new Error('down'), { code: '57P01' });
+      return happy(s);
+    });
+    expect(failed(await orgs.createOrganization(sessionInfo(), { name: NAME })).code).toBe(
+      'AUTH_UNAVAILABLE',
+    );
+    expect(triedSlugs(scripted)).toHaveLength(1);
+  });
+
+  it('makes suffixes of four unambiguous characters by default', async () => {
+    const { orgs, scripted } = setup(heldFor(['acme-widgets']));
+    await orgs.createOrganization(sessionInfo(), { name: NAME });
+    expect(triedSlugs(scripted)[1]).toMatch(/^acme-widgets-[b-df-hj-km-np-tv-xz2-9]{4}$/);
   });
 
   it('rolls back and answers AUTH_UNAVAILABLE when the membership insert fails', async () => {
@@ -186,7 +277,7 @@ describe('createOrganization', () => {
       if (isMemberInsert(s)) throw Object.assign(new Error('fk'), { code: '23503' });
       return happy(s);
     });
-    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG }));
+    const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME }));
     expect(error.code).toBe('AUTH_UNAVAILABLE');
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     expect(lines).toEqual([
@@ -211,9 +302,7 @@ describe('createOrganization', () => {
         }
         return happy(s);
       });
-      const error = failed(
-        await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG }),
-      );
+      const error = failed(await orgs.createOrganization(sessionInfo(), { name: NAME }));
       expect(error.code).toBe('AUTH_UNAVAILABLE');
       expect(error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
       expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
@@ -231,7 +320,7 @@ describe('createOrganization', () => {
 
   it('logs the created organization by id, never by name or slug', async () => {
     const { orgs, lines } = setup();
-    await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
+    await orgs.createOrganization(sessionInfo(), { name: NAME });
     expect(lines).toEqual([
       {
         level: 'info',
@@ -259,14 +348,10 @@ describe('createOrganization', () => {
       },
     };
     const first = setup(happy, { logger: throwing });
-    expect(
-      (await first.orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG })).ok,
-    ).toBe(true);
+    expect((await first.orgs.createOrganization(sessionInfo(), { name: NAME })).ok).toBe(true);
     const warnOnly: AuthLogger = { warn: () => undefined };
     const second = setup(happy, { logger: warnOnly });
-    expect(
-      (await second.orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG })).ok,
-    ).toBe(true);
+    expect((await second.orgs.createOrganization(sessionInfo(), { name: NAME })).ok).toBe(true);
   });
 
   it('makes a fresh organization id per call by default', async () => {
@@ -283,8 +368,8 @@ describe('createOrganization', () => {
       store: scripted.store,
       initialTier: 'self_hosted',
     });
-    await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
-    await orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
+    await orgs.createOrganization(sessionInfo(), { name: NAME });
+    await orgs.createOrganization(sessionInfo(), { name: NAME });
     expect(new Set(ids).size).toBe(2);
   });
 });
@@ -345,22 +430,105 @@ describe('listMyOrganizations', () => {
   });
 });
 
-describe('createOrganizationFor', () => {
-  it('takes the same path as createOrganization, with the person as actor and owner', async () => {
-    const viaSession = setup();
-    await viaSession.orgs.createOrganization(sessionInfo(), { name: NAME, slug: SLUG });
-    const forUser = setup();
-    const result = await forUser.orgs.createOrganizationFor(USER, { name: NAME, slug: SLUG });
-    expect(result).toEqual({ ok: true, value: { organizationId: ORG, slug: SLUG } });
-    expect(forUser.limiter.calls).toEqual([['org_create', [USER]]]);
-    expect(forUser.scripted.events).toEqual(viaSession.scripted.events);
+describe('ensureOrganizationFor', () => {
+  const isOwnedRead = (s: Statement) =>
+    s.sql.startsWith('select') && s.sql.includes('"organization_slugs"');
+  const isLock = (s: Statement) => s.sql.includes('pg_advisory_xact_lock');
+  const OWNED = { organization_id: ORG, slug: 'acme-widgets' };
+
+  it('makes the organization on the same path, under a lock, when the person owns none', async () => {
+    const { orgs, scripted, limiter } = setup((s) => (isOwnedRead(s) ? [] : happy(s)));
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result).toEqual({
+      ok: true,
+      value: { organizationId: ORG, slug: SLUG, reused: false },
+    });
+    expect(limiter.calls).toEqual([['org_create', [USER]]]);
+    const order = scripted.statements().map((s) => {
+      if (isLock(s)) return 'lock';
+      if (isOwnedRead(s)) return 'read';
+      return isOrgInsert(s) ? 'insert' : 'other';
+    });
+    expect(order.slice(0, 4)).toEqual(['read', 'lock', 'read', 'insert']);
   });
 
-  it('refuses a bad slug and a taken one the same way', async () => {
-    const bad = await setup().orgs.createOrganizationFor(USER, { name: NAME, slug: 'Bad Slug' });
-    expect(failed(bad).code).toBe('AUTH_SLUG_INVALID');
-    const taken = setup((s) => (isSlugInsert(s) ? [] : happy(s)));
-    const result = await taken.orgs.createOrganizationFor(USER, { name: NAME, slug: SLUG });
-    expect(failed(result).code).toBe('AUTH_SLUG_TAKEN');
+  it('reuses what the person owns, writing nothing and spending no limit', async () => {
+    const { orgs, scripted, limiter } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result).toEqual({
+      ok: true,
+      value: { organizationId: ORG, slug: SLUG, reused: true },
+    });
+    expect(scripted.writes()).toEqual([]);
+    expect(limiter.calls).toEqual([]);
+  });
+
+  it('asks only for an exact name the person owns, oldest first', async () => {
+    const { orgs, scripted } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    await orgs.ensureOrganizationFor(USER, { name: '  Ａｃｍｅ  ' });
+    const read = scripted.statements().find(isOwnedRead);
+    expect(read?.sql).toContain('app.current_user_id()');
+    expect(read?.sql).toContain('order by "o"."organization_id"');
+    expect(read?.parameters).toEqual(expect.arrayContaining(['Acme', 'owner']));
+    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
+  });
+
+  it('reuses when a parallel run made it while this one waited for the lock', async () => {
+    let reads = 0;
+    const { orgs, scripted, limiter } = setup((s) => {
+      if (!isOwnedRead(s)) return happy(s);
+      reads += 1;
+      return reads === 1 ? [] : [OWNED];
+    });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result.ok && result.value.reused).toBe(true);
+    expect(scripted.writes()).toEqual([]);
+    expect(limiter.calls).toEqual([['org_create', [USER]]]);
+  });
+
+  it('logs a reuse by id, with no name or slug', async () => {
+    const { orgs, lines } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(lines).toEqual([
+      {
+        level: 'info',
+        event: 'auth.organization_reused',
+        fields: { organizationId: toPublicId('org', ORG), userId: toPublicId('usr', USER) },
+      },
+    ]);
+  });
+
+  it('refuses a bad name before any transaction', async () => {
+    const { orgs, scripted } = setup();
+    const result = await orgs.ensureOrganizationFor(USER, { name: 'acme.com' });
+    expect(failed(result).code).toBe('AUTH_INPUT_INVALID');
+    expect(scripted.events).toEqual([]);
+  });
+
+  it('answers the limit when one is hit', async () => {
+    const limiter: RateLimiter = {
+      keyFor: () => Buffer.alloc(32),
+      reserve: () => Promise.reject(new AuthError('AUTH_RATE_LIMITED')),
+    };
+    const { orgs, scripted } = setup((s) => (isOwnedRead(s) ? [] : happy(s)), { limiter });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(failed(result).code).toBe('AUTH_RATE_LIMITED');
+    expect(scripted.writes()).toEqual([]);
+  });
+
+  it('answers AUTH_UNAVAILABLE when the read fails', async () => {
+    const { orgs } = setup(() => {
+      throw new Error('down');
+    });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(failed(result).code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('carries a suffix like any other new organization', async () => {
+    const taken = setup((s) => (isOwnedRead(s) ? [] : heldFor(['acme-widgets'])(s)), {
+      newSlugSuffix: () => 'b2c3',
+    });
+    const result = await taken.orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result.ok && result.value.slug).toBe('acme-widgets-b2c3');
   });
 });

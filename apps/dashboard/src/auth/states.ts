@@ -63,8 +63,7 @@ export interface WelcomeState {
 
 export interface OrganizationState {
   readonly name?: string;
-  readonly slug?: string;
-  readonly problem?: 'name' | 'address' | 'taken';
+  readonly problem?: 'name';
   readonly limited?: boolean;
   // Sign up closed since the page was drawn, or a post that never came from it.
   readonly closed?: boolean;

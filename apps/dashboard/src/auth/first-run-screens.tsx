@@ -1,7 +1,7 @@
 import { TextField } from '@drefyn/ui/react';
 import type { ReactNode } from 'react';
 import { SecretField, Submit } from './controls.tsx';
-import { Answer, AuthFrame, FieldError, Head, Notice } from './parts.tsx';
+import { Answer, AuthFrame, Head, Notice } from './parts.tsx';
 import { passwordProblem, type FormAction } from './screens.tsx';
 import type { OrganizationState, WelcomeState } from './states.ts';
 
@@ -111,8 +111,6 @@ export function WelcomeScreen({
 export interface OrganizationProps {
   readonly hosted: boolean;
   readonly email: string;
-  // The host part of this server's own address, the start of every organization's URL.
-  readonly host: string;
   // Already in an organization, so this is a second one and there is a way back.
   readonly member: boolean;
   readonly invitation: Invitation | null;
@@ -121,62 +119,10 @@ export interface OrganizationProps {
 }
 
 const NAME_HINT = 'Your company or team. Web addresses are not allowed in names.';
-const SLUG_HINT =
-  'Lowercase letters, numbers and hyphens. Anyone can see whether an address is taken, and nothing else.';
-const SLUG_MAX = 40;
-const SUGGESTIONS = ['labs', 'hq'] as const;
-
-function slugProblem({ problem, slug }: OrganizationState, host: string): string | undefined {
-  if (problem === 'address') {
-    return 'Use lowercase letters, numbers and hyphens, starting and ending with a letter or number. Some words are kept for Drefyn itself.';
-  }
-  if (problem !== 'taken' || slug === undefined) return undefined;
-  const tries = SUGGESTIONS.map((word) => `${slug}-${word}`);
-  const fits = tries.every((word) => word.length <= SLUG_MAX);
-  return fits
-    ? `${host}/${slug} is taken. Try ${tries.join(' or ')}.`
-    : `${host}/${slug} is taken. Try another.`;
-}
-
-function AddressField({ host, state }: { host: string; state: OrganizationState }): ReactNode {
-  const error = slugProblem(state, host);
-  return (
-    <div className="flex flex-col gap-4">
-      <label htmlFor="organization-slug" className="text-body-s font-medium text-body">
-        Address
-      </label>
-      <span id="organization-slug-hint" className="max-w-measure text-caption text-secondary">
-        {SLUG_HINT}
-      </span>
-      <div className="auth-affix" data-invalid={error === undefined ? undefined : ''}>
-        <span aria-hidden="true">{host}/</span>
-        <input
-          id="organization-slug"
-          name="slug"
-          defaultValue={state.slug}
-          maxLength={SLUG_MAX}
-          spellCheck={false}
-          autoCapitalize="none"
-          autoComplete="off"
-          required
-          autoFocus={error !== undefined}
-          aria-invalid={error === undefined ? undefined : true}
-          aria-describedby={
-            error === undefined
-              ? 'organization-slug-hint'
-              : 'organization-slug-hint organization-slug-error'
-          }
-        />
-      </div>
-      {error === undefined ? null : <FieldError id="organization-slug-error">{error}</FieldError>}
-    </div>
-  );
-}
 
 export function OrganizationScreen({
   hosted,
   email,
-  host,
   member,
   invitation,
   action,
@@ -203,10 +149,9 @@ export function OrganizationScreen({
           description={NAME_HINT}
           defaultValue={state.name}
           required
-          autoFocus={state.problem === undefined || state.problem === 'name'}
+          autoFocus
           {...(state.problem === 'name' ? { error: NAME_HINT } : {})}
         />
-        <AddressField host={host} state={state} />
         <Submit
           label="Create organization"
           busyLabel="Creating"

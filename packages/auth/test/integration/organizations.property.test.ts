@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { withUser } from '@drefyn/db';
 import type { OrganizationId, UserId } from '@drefyn/tenancy';
 import fc from 'fast-check';
@@ -64,19 +63,18 @@ describeWithStack('cross tenant reads under a user context', () => {
         for (const [index, org] of plan.entries()) {
           const owner = persons[org.owner];
           if (owner === undefined) throw new Error('no owner');
-          const slug = `p-${randomBytes(6).toString('hex')}`;
           const result = await orgs.createOrganization(owner.session, {
             name: `Org ${String(index)}`,
-            slug,
           });
           if (!result.ok) throw result.error;
+          const { access, slug } = result.value;
           const members = new Set([org.owner]);
           for (const m of org.members.filter((m) => m !== org.owner)) {
             const person = persons[m];
             if (person === undefined) throw new Error('no member');
             // The real path: the owner invites, the person accepts with the mailed token.
             const email = await h.sql(`select email from app.users where id = '${person.user}';`);
-            const sent = await invitations.invite(result.value, {
+            const sent = await invitations.invite(access, {
               email,
               role: 'member',
               defaultProjectRole: null,
@@ -93,7 +91,7 @@ describeWithStack('cross tenant reads under a user context', () => {
             if (!accepted.ok) throw accepted.error;
             members.add(m);
           }
-          made.push({ id: result.value.organizationId, slug, members });
+          made.push({ id: access.organizationId, slug, members });
         }
 
         for (const [index, person] of persons.entries()) {
