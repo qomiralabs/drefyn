@@ -58,13 +58,19 @@ const PUBLIC_PAGES: ReadonlySet<string> = new Set([
 ]);
 // A person's own pages, which no organization in the URL can guard.
 const ACCOUNT_PATH = 'src/app/account/';
-const NO_ORGANIZATION_PAGE = 'src/app/organizations/new/page.tsx';
 // Signed out GET handlers, such as an OAuth callback. Each new one is a reviewed line too.
 const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([
   'src/app/auth/oauth/[provider]/callback/route.ts',
   'src/app/auth/oauth/[provider]/start/route.ts',
   'src/app/auth/pre/route.ts',
   'src/app/settings-states/whoami/route.ts',
+]);
+
+// Pages for a person who may belong to no organization yet.
+const SIGNED_IN_PAGES: ReadonlySet<string> = new Set([
+  'src/app/page.tsx',
+  'src/app/organizations/new/page.tsx',
+  'src/app/welcome/page.tsx',
 ]);
 
 // Groups and slots change no URL, so a path is judged as if they were not there.
@@ -74,8 +80,7 @@ const routePath = (path: string) => path.replace(/\/(?:\([^/]*\)|@[^/]*)(?=\/)/g
 function acceptedGuards(path: string): readonly Guard[] {
   if (PUBLIC_PAGES.has(path) || PUBLIC_GET_ROUTES.has(path)) return ['guardPublic'];
   if (path.startsWith(ACCOUNT_PATH)) return ['guardAccountHome'];
-  if (path === NO_ORGANIZATION_PAGE) return ['guardSession'];
-  return routePath(path) === 'src/app/page.tsx' ? ['guardSignedIn'] : ['guardOrganization'];
+  return SIGNED_IN_PAGES.has(routePath(path)) ? ['guardSignedIn'] : ['guardOrganization'];
 }
 
 type FunctionNode =

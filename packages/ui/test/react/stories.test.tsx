@@ -130,6 +130,10 @@ const BUSY: Record<string, string[]> = {
   dialog: ['Submitting'],
 };
 
+// Rendering every story of a file in jsdom: 1.1 s at most over two runs at load 70 to 88, and past
+// the 5 s default under heavier load. Three times the 5 s seen, so a real slowdown still fails.
+const RENDER_ALL_TIMEOUT_MS = 15_000;
+
 describe('the component stories', () => {
   for (const [file, names] of Object.entries(REQUIRED)) {
     it(`${file} has a story for every state that applies`, () => {
@@ -152,7 +156,7 @@ describe('the component stories', () => {
       expect(tagged).toEqual(BUSY[file] ?? []);
     });
 
-    it(`${file} renders every story`, () => {
+    it(`${file} renders every story`, { timeout: RENDER_ALL_TIMEOUT_MS }, () => {
       for (const [name, story] of Object.entries(storiesOf(file))) {
         expect(story.render, name).toBeTypeOf('function');
         const { container } = render(<>{story.render?.()}</>);

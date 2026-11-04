@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, extname, isAbsolute, relative, sep } from 'node:path';
 import type { AST, Rule, Scope } from 'eslint';
 import {
+  ALLOW_PATH_PATTERN,
   allowListProblems,
   type EgressAllowance,
   type EgressAllowEntry,
@@ -218,8 +219,6 @@ function resolveRelative(file: string, spec: string): string | undefined {
   }
 }
 
-// createRequire(...) under any local name, or <x>.createRequire(...); both return a
-// working require.
 // import { createServer } from 'node:http' when that module allows createServer: every
 // value specifier is a named import the allowance lists. Default, namespace, side
 // effect and any other name fall through to the usual report.
@@ -245,13 +244,21 @@ function isAllowedImport(node: unknown, allowances: readonly EgressAllowance[]):
 }
 
 // fetch(...) with the identifier itself as the callee. Passing it, binding it to
-// another name, wrapping it or reading a member of it is not a direct call.
+// another name, wrapping it or reading a member of it is not a direct call, and nor is
+// fetch?.(...), which only makes sense where the global may be replaced or missing.
 function isDirectCall(identifier: unknown): boolean {
   if (!isRecord(identifier)) return false;
   const parent = identifier['parent'];
-  return isRecord(parent) && parent['type'] === 'CallExpression' && parent['callee'] === identifier;
+  return (
+    isRecord(parent) &&
+    parent['type'] === 'CallExpression' &&
+    parent['callee'] === identifier &&
+    parent['optional'] !== true
+  );
 }
 
+// createRequire(...) under any local name, or <x>.createRequire(...); both return a
+// working require.
 function isCreateRequireCall(node: unknown, names: ReadonlySet<string>): boolean {
   if (!isRecord(node) || node['type'] !== 'CallExpression') return false;
   const callee = unwrap(node['callee']);
@@ -282,7 +289,7 @@ export const noRawEgress: Rule.RuleModule = {
               required: ['path', 'reason'],
               properties: {
                 // Relative to the workspace root. A trailing slash allows a directory.
-                path: { type: 'string', pattern: '^(?![/\\\\])(?!.*(^|/)\\.\\.(/|$)).+$' },
+                path: { type: 'string', pattern: ALLOW_PATH_PATTERN },
                 // Every entry is a security exception, so it has to say why.
                 reason: { type: 'string', pattern: '\\S' },
                 // The raw forms this file may use; every other form is still reported.

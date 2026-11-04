@@ -54,6 +54,23 @@ export type ResetState =
     }
   | { readonly step: 'saved'; readonly email: string; readonly returnTo: string };
 
+export interface WelcomeState {
+  readonly name?: string;
+  readonly problem?: 'name' | 'password' | 'breached' | 'late';
+  readonly rules?: readonly string[];
+  readonly notice?: FormNotice;
+}
+
+export interface OrganizationState {
+  readonly name?: string;
+  readonly slug?: string;
+  readonly problem?: 'name' | 'address' | 'taken';
+  readonly limited?: boolean;
+  // Sign up closed since the page was drawn, or a post that never came from it.
+  readonly closed?: boolean;
+  readonly notice?: FormNotice;
+}
+
 export type CliState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'invalid' }

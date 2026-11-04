@@ -23,7 +23,6 @@ const auth = {
     startStepUpCode: vi.fn(),
     verifyStepUpCode: vi.fn(),
   },
-  organizations: { createOrganization: vi.fn() },
   invitations: { invite: vi.fn() },
   members: { withdrawInvitation: vi.fn(), setDefaultProjectRole: vi.fn() },
   roles: { changeRole: vi.fn(), removeMember: vi.fn(), setProjectRole: vi.fn() },
@@ -87,10 +86,10 @@ describe('what a refusal becomes', () => {
   });
 
   it('passes a rule by its code', async () => {
-    auth.organizations.createOrganization.mockResolvedValue(no('AUTH_SLUG_TAKEN'));
-    expect(await actions.makeOrganization({ name: 'Acme', slug: 'acme' })).toEqual({
+    auth.oauth.unlinkIdentity.mockResolvedValue(no('AUTH_FORBIDDEN'));
+    expect(await actions.unlinkProvider('github')).toEqual({
       ok: false,
-      problem: { kind: 'refused', code: 'AUTH_SLUG_TAKEN' },
+      problem: { kind: 'refused', code: 'AUTH_FORBIDDEN' },
     });
   });
 });

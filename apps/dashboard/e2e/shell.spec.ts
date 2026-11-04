@@ -27,6 +27,9 @@ test.describe('flag on', () => {
     ['/acme/blog', 404],
     ['/acme/docs/missing', 404],
     ['/Acme', 404],
+    ['/acme/docs/payments-api/nope', 404],
+    ['/acme/status/payments-api', 404],
+    ['/acme/settings/nope', 404],
   ] as const) {
     test(`${path} is ${status}`, async ({ request }) => {
       expect((await request.get(path, { maxRedirects: 0 })).status()).toBe(status);

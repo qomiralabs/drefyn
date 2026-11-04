@@ -1,5 +1,5 @@
 // @ts-check
-// Config for the guard step only. It holds nothing but the two boundary rules and a
+// Config for the guard step only. It holds nothing but the boundary rules and a
 // parser, and is passed with config lookup, inline config and ignores all off, so no
 // file, comment or package script in the tree can turn the rules off for itself.
 import process from 'node:process';
@@ -18,6 +18,10 @@ export default [
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
     },
+  },
+  {
+    files: ['apps/**'],
+    rules: { 'drefyn/no-operator-auth': 'error' },
   },
   {
     files: ['**/*.{jsx,tsx}'],

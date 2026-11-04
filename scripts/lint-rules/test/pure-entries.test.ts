@@ -98,6 +98,107 @@ describe('pure entries', () => {
     ]);
   });
 
+  it('read a template with no placeholder as a string, and refuse one with a placeholder', () => {
+    purePackage(
+      'export const a = () => import(`node:fs`);\nconst n = 1;\nexport const b = () => import(`./${n}.ts`);\n',
+    );
+    expect(check()).toEqual([
+      `${where}: src/pure.ts:1: pure entry './pure' imports Node built in 'node:fs'`,
+      `${where}: src/pure.ts:3: pure entry './pure' loads a computed specifier`,
+    ]);
+  });
+
+  it('refuse a directory import by name instead of crashing', () => {
+    purePackage("import './dir';\n", { 'dir/index.ts': 'export {};\n' });
+    expect(check()).toEqual([
+      `${where}: src/pure.ts:1: pure entry './pure' imports './dir', which is a directory; name the file`,
+    ]);
+  });
+
+  it('refuse an exports target that does not exist', () => {
+    ws.manifest(
+      'packages/a',
+      goodPackage('a', {
+        exports: { '.': './src/index.ts', './pure': './src/gone.ts' },
+        drefyn: { pureEntries: ['./pure'] },
+      }),
+    );
+    ws.write('packages/a/src/index.ts', 'export {};\n');
+    expect(check()).toContainEqual(
+      `${where}: drefyn.pureEntries: pure entry './pure' points at src/gone.ts, which does not exist`,
+    );
+  });
+
+  it('refuse an exports target that is a directory', () => {
+    ws.manifest(
+      'packages/a',
+      goodPackage('a', {
+        exports: { '.': './src/index.ts', './pure': './src/dir' },
+        drefyn: { pureEntries: ['./pure'] },
+      }),
+    );
+    ws.write('packages/a/src/index.ts', 'export {};\n');
+    ws.write('packages/a/src/dir/index.ts', 'export {};\n');
+    expect(check()).toContainEqual(
+      `${where}: drefyn.pureEntries: pure entry './pure' points at src/dir, which is a directory`,
+    );
+  });
+
+  it.each([
+    ["process.getBuiltinModule('fs');", "'getBuiltinModule'"],
+    ["const p = process;\np.getBuiltinModule('fs');", "'getBuiltinModule'"],
+    ["const { getBuiltinModule } = process;\ngetBuiltinModule('fs');", "'getBuiltinModule'"],
+    ["globalThis.require('fs');", "'require'"],
+    ["globalThis['require']('fs');", "'require'"],
+    ["window.require('fs');", "'require'"],
+    ["globalThis['req' + 'uire']('fs');", 'a computed name'],
+    ['self[name];', 'a computed name'],
+  ])('refuse the Node escape in %s', (source, how) => {
+    purePackage(`export {};\n${source}\n`);
+    const found = check();
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain(`pure entry './pure' reaches past the import graph through ${how}`);
+  });
+
+  it('leave ordinary global reads and a local require key alone', () => {
+    purePackage(
+      'export const a = globalThis.location;\nexport const b = { require: 1 }.require;\n',
+    );
+    expect(check()).toEqual([]);
+  });
+
+  it('check an import type by its specifier: a package is fine, a built in is not', () => {
+    purePackage(
+      "export type A = import('zod').ZodType;\nexport type B = import('node:fs').Stats;\n",
+    );
+    expect(check()).toEqual([
+      `${where}: src/pure.ts:2: pure entry './pure' imports Node built in 'node:fs'`,
+    ]);
+  });
+
+  it('follow an import type into a relative file', () => {
+    purePackage("export type A = import('./inner.ts').B;\n", {
+      'inner.ts': "import 'node:os';\nexport type B = 1;\n",
+    });
+    expect(check()).toEqual([
+      `${where}: src/inner.ts:1: pure entry './pure' imports Node built in 'node:os'`,
+    ]);
+  });
+
+  it('refuse import equals of a package and of a built in', () => {
+    purePackage("import fs = require('node:fs');\nimport z = require('zod');\nexport { fs, z };\n");
+    expect(check()).toEqual([
+      `${where}: src/pure.ts:1: pure entry './pure' imports Node built in 'node:fs'`,
+      `${where}: src/pure.ts:2: pure entry './pure' loads package 'zod' at runtime; only 'import type' is allowed`,
+    ]);
+  });
+
+  it('refuse a pureEntries value that is not a list', () => {
+    ws.manifest('packages/a', goodPackage('a', { drefyn: { pureEntries: './pure' } }));
+    ws.write('packages/a/src/index.ts', 'export {};\n');
+    expect(check()).toEqual([`${where}: drefyn.pureEntries: must be a list of export keys`]);
+  });
+
   it('refuse an entry that is not in the exports map, and a list that is not strings', () => {
     ws.manifest('packages/a', goodPackage('a', { drefyn: { pureEntries: ['./nope', 3] } }));
     ws.write('packages/a/src/index.ts', 'export {};\n');

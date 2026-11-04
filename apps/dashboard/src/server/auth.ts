@@ -69,6 +69,7 @@ export interface DashboardAuth {
     | 'verifyStepUpCode'
   >;
   readonly organizations: Pick<Organizations, 'listMyOrganizations' | 'createOrganization'>;
+  readonly account: Pick<Account, 'readAccount' | 'setDisplayName'>;
   readonly emailSignIn: EmailSignIn;
   readonly emailChange: EmailChange;
   readonly passwordSignIn: Pick<PasswordSignIn, 'signInWithPassword' | 'setPassword'>;
@@ -88,7 +89,6 @@ export interface DashboardAuth {
     | 'seatUsage'
   >;
   readonly cliLinks: Pick<CliLinks, 'redeem'>;
-  readonly account: Account;
   readonly members: Members;
   readonly roles: Pick<Roles, 'changeRole' | 'removeMember' | 'setProjectRole'>;
   readonly apiKeys: Pick<ApiKeys, 'createApiKey' | 'revokeApiKey' | 'listApiKeys'>;
@@ -177,6 +177,7 @@ async function compose(): Promise<DashboardAuth> {
     db,
     authDb,
     logger,
+    limiter,
     initialTier: 'self_hosted',
   });
   const invitations = createInvitations(parsed, { db, authDb, logger, mailer, limiter });
@@ -229,6 +230,10 @@ async function compose(): Promise<DashboardAuth> {
       listMyOrganizations: (session) => organizations.listMyOrganizations(session),
       createOrganization: (session, input) => organizations.createOrganization(session, input),
     },
+    account: {
+      readAccount: (session) => account.readAccount(session),
+      setDisplayName: (session, input) => account.setDisplayName(session, input),
+    },
     emailSignIn,
     emailChange,
     passwordSignIn: {
@@ -256,7 +261,6 @@ async function compose(): Promise<DashboardAuth> {
       seatUsage: (access) => invitations.seatUsage(access),
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
-    account,
     members,
     roles: {
       changeRole: (access, member, role) => roles.changeRole(access, member, role),

@@ -131,6 +131,22 @@ function noticeWords(notice: FormNotice, others: string): readonly [string, Reac
           server: <code>{notice.reference}</code>
         </>,
       ];
+    case 'not_saved':
+      return [
+        'That did not save.',
+        <>
+          Nothing changed. Try again in a minute. If it keeps happening, give this reference to
+          whoever runs this server: <code>{notice.reference}</code>
+        </>,
+      ];
+    case 'name_not_saved':
+      return [
+        'Your password is saved, but your name is not.',
+        <>
+          Press Continue again in a minute, and leave the password empty. If it keeps happening,
+          give this reference to whoever runs this server: <code>{notice.reference}</code>
+        </>,
+      ];
     case 'limited':
       return [
         'Too many tries from here.',
@@ -138,6 +154,12 @@ function noticeWords(notice: FormNotice, others: string): readonly [string, Reac
           You can try again in <span className="tabular-nums">{notice.minutes}</span>{' '}
           {notice.minutes === 1 ? 'minute' : 'minutes'}.{others}
         </>,
+      ];
+    // The limit counts refused tries too, so the words never claim how many were created.
+    case 'day_limit':
+      return [
+        'That is the most tries for one day.',
+        'New organizations are limited per day, and addresses that were taken count. You can try again tomorrow.',
       ];
     case 'expired':
       return [
@@ -169,6 +191,9 @@ function noticeWords(notice: FormNotice, others: string): readonly [string, Reac
   }
 }
 
+// Not a failure of ours, so these get the clock and no broken gutter.
+const NEUTRAL: ReadonlySet<FormNotice['kind']> = new Set(['limited', 'day_limit', 'expired']);
+
 // Takes focus when it appears, so a failure is read at once and fields stay quiet.
 export function Notice({
   notice,
@@ -178,7 +203,7 @@ export function Notice({
   others?: string;
 }): ReactNode {
   const [title, detail] = noticeWords(notice, others);
-  const neutral = notice.kind === 'limited' || notice.kind === 'expired';
+  const neutral = NEUTRAL.has(notice.kind);
   return (
     <div
       className={neutral ? 'auth-notice' : 'auth-notice auth-notice-broken'}

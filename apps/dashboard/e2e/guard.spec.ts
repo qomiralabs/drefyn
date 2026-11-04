@@ -80,8 +80,37 @@ test.describe('an owner', () => {
 test.describe('a person with no organization', () => {
   test.use({ storageState: stateFile(ZARA) });
 
-  test('/ is a 404', async ({ request }) => {
-    expect((await request.get('/', { maxRedirects: 0 })).status()).toBe(404);
+  test('/ goes to a page of their own, not a 404', async ({ request }) => {
+    const response = await request.get('/', { maxRedirects: 0 });
+    expect(response.status()).toBe(307);
+    expect(response.headers()['location']).toBe('/organizations/new');
+  });
+
+  test('sign in and sign up lead there too, with no loop', async ({ page }) => {
+    for (const path of ['/sign-in', '/sign-up', '/']) {
+      await page.goto(path);
+      await expect(page).toHaveURL(/\/organizations\/new$/);
+    }
+  });
+
+  test('sign up is not open here, so the page offers no form and a way out', async ({ page }) => {
+    await page.goto('/organizations/new');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(
+      'You are not in an organization yet.',
+    );
+    await expect(page.getByRole('button', { name: 'Create organization' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  });
+
+  test('sign out refuses another origin', async ({ request }) => {
+    const response = await request.post('/sign-out', { headers: { origin: 'https://evil.test' } });
+    expect(response.status()).toBe(403);
+  });
+
+  test('an organization they are not in is a 404 with a way back', async ({ page }) => {
+    await page.goto('/acme');
+    await page.getByRole('link', { name: 'Go to the start page' }).click();
+    await expect(page).toHaveURL(/\/organizations\/new$/);
   });
 });
 

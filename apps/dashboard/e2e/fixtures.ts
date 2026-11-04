@@ -11,6 +11,10 @@ export const HOP_SERVER_PORT = 3103;
 export const HOP_HOST = 'drefyn.test';
 export const HOP_ORIGIN = `https://${HOP_HOST}:${HOP_PORT}`;
 
+// A server with sign up open, which is the only way a person gets to create an organization.
+export const OPEN_PORT = 3104;
+export const OPEN_ORIGIN = `http://127.0.0.1:${OPEN_PORT}`;
+
 export const MOBILE = { width: 390, height: 844 };
 export const TABLET = { width: 834, height: 1112 };
 export const DESKTOP = { width: 1440, height: 900 };

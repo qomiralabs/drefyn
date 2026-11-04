@@ -3,6 +3,7 @@ import {
   expect,
   FOUNDATIONS,
   MANAGER_READY_MS,
+  ORIGIN,
   openStory,
   storyIds,
   sweepTimeout,
@@ -14,6 +15,9 @@ import {
 // for the last thing its page draws, then for every request it started to end, so a
 // request made while loading is caught before the fixture checks.
 test('the manager loads only from the static build', async ({ page, drained }) => {
+  // Two manager waits, the default drain poll and the base test time: the 30 s default was
+  // smaller than the 35 s these waits may add up to.
+  test.setTimeout(30_000 + 2 * MANAGER_READY_MS);
   await page.goto(`/index.html?path=/story/${FOUNDATIONS}`);
   const sidebar = page.locator('#storybook-explorer-tree');
   await expect(
@@ -21,12 +25,49 @@ test('the manager loads only from the static build', async ({ page, drained }) =
   ).toBeVisible({ timeout: MANAGER_READY_MS });
   const story = page.frameLocator('#storybook-preview-iframe');
   await expect(story.locator('#storybook-root h1')).toBeVisible({ timeout: MANAGER_READY_MS });
-  for (const frame of [page.locator('html'), story.locator('html')]) {
+  // Every frame, so a font in a frame added later is waited for as well.
+  for (const frame of page.frames()) {
     await frame.evaluate(async () => {
       await document.fonts.ready;
     });
   }
   await drained();
+});
+
+// A drain that returned at once would let a late request slip past the outside check. The
+// request is held by the test, so the order here does not depend on timing.
+test('drained waits for a request still on its way', async ({ page, drained }) => {
+  const url = `${ORIGIN}/drained-probe.txt`;
+  await openStory(page, FOUNDATIONS, 'light');
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(url, async (route) => {
+    await held;
+    await route.fulfill({ status: 200, contentType: 'text/plain', body: 'ok' });
+  });
+  const started = page.waitForRequest(url);
+  const answered = page.waitForResponse(url);
+  await page.evaluate((target) => {
+    const image = new Image();
+    image.src = target;
+    document.body.append(image);
+  }, url);
+  await started;
+
+  let finished = false;
+  const drain = drained().then(() => {
+    finished = true;
+  });
+  // Round trips to the browser give a drain that does not wait every chance to finish.
+  for (let turn = 0; turn < 5; turn += 1) await page.evaluate(() => document.title);
+  expect(finished).toBe(false);
+
+  release();
+  await answered;
+  await drain;
+  expect(finished).toBe(true);
 });
 
 test('a docs page loads only from the static build', async ({ page, drained }) => {

@@ -38,10 +38,45 @@ describe('checkAppTheme', () => {
       '--height-x',
     ],
     ['a reset', '@theme inline {\n  --*: initial;\n}\n', '--*'],
+    [
+      'a raw length in calc',
+      '@theme inline {\n  --height-x: calc(var(--dr-shell-bar) + 3rem);\n}\n',
+      '--height-x',
+    ],
+    [
+      'a raw pixel length in min',
+      '@theme inline {\n  --width-x: min(var(--dr-shell-bar), 640px);\n}\n',
+      '--width-x',
+    ],
+    [
+      'a partial viewport length',
+      '@theme inline {\n  --height-x: calc(40dvh - var(--dr-shell-bar));\n}\n',
+      '--height-x',
+    ],
+    [
+      'a raw length as a var fallback',
+      '@theme inline {\n  --spacing-x: var(--dr-space-8, 3rem);\n}\n',
+      '--spacing-x',
+    ],
+    [
+      'a keyword as a var fallback',
+      '@theme inline {\n  --color-x: var(--dr-ink, red);\n}\n',
+      '--color-x',
+    ],
   ])('refuses %s', (_label, css, name) => {
     const findings = checkAppTheme(css);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.detail).toContain(name);
+  });
+
+  it.each([
+    'calc(var(--dr-space-8) * 2)',
+    'calc(100% - var(--dr-shell-bar))',
+    'calc(100vw - var(--dr-shell-bar))',
+    'var(--dr-space-8, var(--dr-space-4))',
+    'var(--dr-text-2xl)',
+  ])('accepts %s, which adds no raw length', (value) => {
+    expect(checkAppTheme(`@theme inline {\n  --x: ${value};\n}\n`)).toEqual([]);
   });
 
   it('refuses a plain @theme block, which is where raw values go', () => {

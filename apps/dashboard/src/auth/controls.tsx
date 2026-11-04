@@ -5,8 +5,29 @@ import { useFormStatus } from 'react-dom';
 import { TextField } from '@drefyn/ui/react';
 
 // Busy comes from the form itself, so no form can forget to show it.
-export function Submit({ label, busyLabel }: { label: string; busyLabel: string }): ReactNode {
+export function Submit({
+  label,
+  busyLabel,
+  stopped,
+}: {
+  label: string;
+  busyLabel: string;
+  // Why it cannot be pressed right now, read with the button.
+  stopped?: string | undefined;
+}): ReactNode {
   const { pending } = useFormStatus();
+  if (stopped !== undefined) {
+    return (
+      <span className="grid">
+        <Button variant="primary" size="lg" disabled aria-describedby="submit-stopped">
+          {label}
+        </Button>
+        <span className="sr-only" id="submit-stopped">
+          {stopped}
+        </span>
+      </span>
+    );
+  }
   return (
     <span className="grid">
       <Button type="submit" variant="primary" size="lg" busy={pending} busyLabel={busyLabel}>
@@ -24,6 +45,7 @@ export function SecretField({
   autoComplete,
   error,
   description,
+  optional = false,
 }: {
   id: string;
   label: string;
@@ -31,18 +53,19 @@ export function SecretField({
   autoComplete: 'current-password' | 'new-password';
   error?: string | undefined;
   description?: string;
+  optional?: boolean;
 }): ReactNode {
   const [shown, setShown] = useState(false);
   return (
     <div className="auth-reveal">
       <TextField
         id={id}
-        label={label}
+        label={optional ? `${label} (optional)` : label}
         name={name}
         type={shown ? 'text' : 'password'}
         size="lg"
         autoComplete={autoComplete}
-        required
+        required={!optional}
         {...(error === undefined ? {} : { error })}
         {...(description === undefined ? {} : { description })}
       />

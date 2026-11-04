@@ -57,6 +57,11 @@ test('an invited newcomer signs up by code in the same browser and lands inside'
   await expect.poll(() => new URL(page.url()).hash).toBe('');
   await page.getByRole('link', { name: `Sign in as ${address} to join` }).click();
   await signInFromForm(page, address);
+  await expect(page).toHaveURL(/\/welcome/);
+  await expect(page.getByText('You have an invitation to Acme')).toBeVisible();
+  await page.getByLabel('Your name').fill('Jordan Lee');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/invite/);
   await page.getByRole('button', { name: 'Join Acme' }).click();
   await expect(page).toHaveURL(/\/acme$/);
 });
@@ -68,7 +73,6 @@ async function signInFromForm(page: Page, address: string) {
   const { code } = await nextMail(address, seen);
   await page.getByLabel('8 digit code').fill(code);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/invite/);
 }
 
 test('invite only sign up needs a live invitation for the proved address', async ({ page }) => {

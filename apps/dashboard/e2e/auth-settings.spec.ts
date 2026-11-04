@@ -7,6 +7,7 @@ import {
   uniqueAddress,
   userSql,
 } from './auth-helpers.ts';
+import { OPEN_ORIGIN } from './fixtures.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { OMAR, RAFA, SIGNED_OUT, stateFile, TESS, type Person } from './people.ts';
 import { test } from './test.ts';
@@ -46,8 +47,8 @@ async function signedIn(page: Page, address: string): Promise<void> {
   await expect(page).not.toHaveURL(/\/sign-in/);
 }
 
-// A new person who owns a new organization, signed in by code, so their session is their own
-// to rotate and no other test leans on it.
+// A new person who owns a new organization, in through Welcome as anyone is, so their session
+// is their own to rotate and no other test leans on it.
 async function freshOwner(
   page: Page,
   password?: string,
@@ -55,14 +56,13 @@ async function freshOwner(
   const address = uniqueAddress('settings');
   const id = await seedPerson(address, password);
   await signedIn(page, address);
-  await page.goto('/organizations/new');
-  const name = `Team ${id.slice(-6)}`;
+  await expect(page).toHaveURL(/\/welcome/);
+  await page.getByLabel('Your name').fill('Noa Lind');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/organizations\/new$/);
   const slug = `team-${id.slice(-6)}`;
-  // Typing before hydration is lost, and the address filling in proves it was not.
-  await expect(async () => {
-    await page.getByLabel('Name').fill(name);
-    await expect(page.getByLabel('Address')).toHaveValue(slug, { timeout: 500 });
-  }).toPass();
+  await page.getByLabel('Name', { exact: true }).fill(`Team ${id.slice(-6)}`);
+  await page.getByLabel('Address').fill(slug);
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page).toHaveURL(new RegExp(`/${slug}$`));
   return { id, address, slug };
@@ -182,93 +182,100 @@ test('an invitation can be sent and withdrawn, and Undo sends it again', async (
   await page.context().close();
 });
 
-test('a stale session is asked to confirm, by password, and the action then runs', async ({
-  browser,
-}) => {
-  const context = await browser.newContext({ storageState: SIGNED_OUT });
-  const page = await context.newPage();
-  const { id } = await freshOwner(page, PASSWORD);
-  await page.goto('/account/sign-in');
-  await makeStale(id);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  await page
-    .getByRole('dialog', { name: 'Remove your password?' })
-    .getByRole('button', { name: 'Remove password' })
-    .click();
-  const prompt = page.getByRole('dialog', { name: 'Confirm it is you' });
-  await prompt.getByLabel('Your password').fill('not the password at all, sorry');
-  await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
-  await expect(prompt.getByText('That password is not right.')).toBeVisible();
-  await prompt.getByLabel('Your password').fill(PASSWORD);
-  await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
-  await expect(prompt).toHaveCount(0);
-  // After a removal the page offers to end every other session.
-  await expect(page.getByRole('status').filter({ hasText: 'Password removed.' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign out everywhere else' })).toBeVisible();
-  await context.close();
-});
+test.describe('as a new owner', () => {
+  // A new organization needs sign up open, so these run on that server.
+  test.use({ baseURL: OPEN_ORIGIN });
 
-test('with no password the prompt mails a code, and creating the key then runs', async ({
-  browser,
-}) => {
-  const context = await browser.newContext({ storageState: SIGNED_OUT });
-  const page = await context.newPage();
-  const { id, address, slug } = await freshOwner(page);
-  await page.goto(`/${slug}/settings/api-keys`);
-  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
-  await makeStale(id);
-  const seen = await countTo(address);
-  await page.getByRole('button', { name: 'Create key' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Create an API key' });
-  await dialog.getByLabel('Name').fill('after-step-up');
-  await dialog.getByText('Read pages', { exact: true }).click();
-  await dialog.getByRole('button', { name: 'Create key' }).click();
-  const prompt = page.getByRole('dialog', { name: 'Confirm it is you' });
-  const { code } = await nextMail(address, seen);
-  await prompt.getByLabel(/Code sent to/).fill(code);
-  await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
-  await expect(page.getByRole('dialog', { name: 'Copy your new key now' })).toBeVisible();
-  await context.close();
-});
+  test('a stale session is asked to confirm, by password, and the action then runs', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ storageState: SIGNED_OUT });
+    const page = await context.newPage();
+    const { id } = await freshOwner(page, PASSWORD);
+    await page.goto('/account/sign-in');
+    await makeStale(id);
+    await page.getByRole('button', { name: 'Remove', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'Remove your password?' })
+      .getByRole('button', { name: 'Remove password' })
+      .click();
+    const prompt = page.getByRole('dialog', { name: 'Confirm it is you' });
+    await prompt.getByLabel('Your password').fill('not the password at all, sorry');
+    await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
+    await expect(prompt.getByText('That password is not right.')).toBeVisible();
+    await prompt.getByLabel('Your password').fill(PASSWORD);
+    await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
+    await expect(prompt).toHaveCount(0);
+    // After a removal the page offers to end every other session.
+    await expect(page.getByRole('status').filter({ hasText: 'Password removed.' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out everywhere else' })).toBeVisible();
+    await context.close();
+  });
 
-test('sign out everywhere else takes effect on the next request elsewhere', async ({ browser }) => {
-  const here = await browser.newContext({ storageState: SIGNED_OUT });
-  const elsewhere = await browser.newContext({ storageState: SIGNED_OUT });
-  const page = await here.newPage();
-  const other = await elsewhere.newPage();
-  const { address } = await freshOwner(page);
-  await signedIn(other, address);
-  await other.goto('/account/sessions');
-  await expect(other.locator('html')).toHaveAttribute('data-shell', 'ready');
-  await page.goto('/account/sessions');
-  await page.getByRole('button', { name: 'Sign out everywhere else' }).click();
-  await page.getByRole('button', { name: 'Sign out 1 session' }).click();
-  await expect(page.getByText('Signed out 1 other session.')).toBeVisible();
-  await other.reload();
-  await expect(other).toHaveURL(/\/sign-in/);
-  await page.reload();
-  await expect(page).toHaveURL(/\/account\/sessions/);
-  await here.close();
-  await elsewhere.close();
-});
+  test('with no password the prompt mails a code, and creating the key then runs', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ storageState: SIGNED_OUT });
+    const page = await context.newPage();
+    const { id, address, slug } = await freshOwner(page);
+    await page.goto(`/${slug}/settings/api-keys`);
+    await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+    await makeStale(id);
+    const seen = await countTo(address);
+    await page.getByRole('button', { name: 'Create key' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Create an API key' });
+    await dialog.getByLabel('Name').fill('after-step-up');
+    await dialog.getByText('Read pages', { exact: true }).click();
+    await dialog.getByRole('button', { name: 'Create key' }).click();
+    const prompt = page.getByRole('dialog', { name: 'Confirm it is you' });
+    const { code } = await nextMail(address, seen);
+    await prompt.getByLabel(/Code sent to/).fill(code);
+    await prompt.getByRole('button', { name: 'Confirm and continue' }).click();
+    await expect(page.getByRole('dialog', { name: 'Copy your new key now' })).toBeVisible();
+    await context.close();
+  });
 
-test('changing the address needs a code and tells the old one', async ({ browser }) => {
-  const context = await browser.newContext({ storageState: SIGNED_OUT });
-  const page = await context.newPage();
-  const { address, id } = await freshOwner(page);
-  await page.goto('/account');
-  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
-  const next = uniqueAddress('moved');
-  const seen = await countTo(next);
-  const oldSeen = await countTo(address);
-  await page.getByRole('button', { name: 'Change email' }).click();
-  await page.getByLabel('New address').fill(next);
-  await page.getByRole('button', { name: 'Send code' }).click();
-  const { code } = await nextMail(next, seen);
-  await page.getByLabel('8 digit code').fill(code);
-  await page.getByRole('button', { name: 'Change address' }).click();
-  await expect(page.getByText(`Your address is now ${next}.`)).toBeVisible();
-  await expect.poll(() => countTo(address)).toBeGreaterThan(oldSeen);
-  expect(await userSql(id, 'select email from app.users')).toContain(next);
-  await context.close();
+  test('sign out everywhere else takes effect on the next request elsewhere', async ({
+    browser,
+  }) => {
+    const here = await browser.newContext({ storageState: SIGNED_OUT });
+    const elsewhere = await browser.newContext({ storageState: SIGNED_OUT });
+    const page = await here.newPage();
+    const other = await elsewhere.newPage();
+    const { address } = await freshOwner(page);
+    await signedIn(other, address);
+    await other.goto('/account/sessions');
+    await expect(other.locator('html')).toHaveAttribute('data-shell', 'ready');
+    await page.goto('/account/sessions');
+    await page.getByRole('button', { name: 'Sign out everywhere else' }).click();
+    await page.getByRole('button', { name: 'Sign out 1 session' }).click();
+    await expect(page.getByText('Signed out 1 other session.')).toBeVisible();
+    await other.reload();
+    await expect(other).toHaveURL(/\/sign-in/);
+    await page.reload();
+    await expect(page).toHaveURL(/\/account\/sessions/);
+    await here.close();
+    await elsewhere.close();
+  });
+
+  test('changing the address needs a code and tells the old one', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: SIGNED_OUT });
+    const page = await context.newPage();
+    const { address, id } = await freshOwner(page);
+    await page.goto('/account');
+    await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+    const next = uniqueAddress('moved');
+    const seen = await countTo(next);
+    const oldSeen = await countTo(address);
+    await page.getByRole('button', { name: 'Change email' }).click();
+    await page.getByLabel('New address').fill(next);
+    await page.getByRole('button', { name: 'Send code' }).click();
+    const { code } = await nextMail(next, seen);
+    await page.getByLabel('8 digit code').fill(code);
+    await page.getByRole('button', { name: 'Change address' }).click();
+    await expect(page.getByText(`Your address is now ${next}.`)).toBeVisible();
+    await expect.poll(() => countTo(address)).toBeGreaterThan(oldSeen);
+    expect(await userSql(id, 'select email from app.users')).toContain(next);
+    await context.close();
+  });
 });

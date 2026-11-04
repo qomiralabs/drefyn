@@ -55,12 +55,15 @@ describe('parseShellPath', () => {
     ['/acme?x=1', 'query is not part of a pathname'],
     [`/${'a'.repeat(64)}`, 'slug longer than 63'],
     ['/bundle-baseline', 'reserved slug'],
+    ['/api', 'reserved slug'],
+    ['/api/docs', 'reserved slug with a product'],
   ])('refuses %j (%s)', (path) => {
     expect(parseShellPath(path)).toBeNull();
   });
 
   it('reserves the bundle baseline route so no organization can shadow it', () => {
     expect(RESERVED_SLUGS).toContain('bundle-baseline');
+    expect(RESERVED_SLUGS).toContain('api');
   });
 
   const slug = fc
@@ -109,6 +112,12 @@ describe('productHref', () => {
     expect(productHref(here, 'studio')).toBe('/acme/studio');
     expect(productHref(here, 'status')).toBe('/acme/status');
     expect(productHref({ org: 'northwind' }, 'status')).toBe('/northwind/status');
+  });
+});
+
+describe('paths the first run pages own', () => {
+  it.each(['/welcome', '/organizations', '/organizations/new'])('%s is no shell path', (path) => {
+    expect(parseShellPath(path)).toBeNull();
   });
 });
 

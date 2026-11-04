@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
+import { NoOrganizationScreen, OrganizationScreen, WelcomeScreen } from './first-run-screens.tsx';
 import { BlockScreen, CliScreen, InviteScreen } from './outcome-screens.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
-import { NewOrganizationScreen } from '../settings/new-organization.tsx';
 import { AuthFrame } from './parts.tsx';
 import {
   ChoosePassword,
@@ -29,10 +29,43 @@ const FACTS: InvitationFacts = {
   blockHref: '/invite/block#token',
 };
 const UNAVAILABLE: FormNotice = { kind: 'unavailable', reference: 'ref_0a1b2c3d4e5f' };
+const NOT_SAVED = { kind: 'not_saved', reference: 'ref_0a1b2c3d4e5f' } as const;
 const LIMITED: FormNotice = { kind: 'limited', minutes: 14 };
 const shared = (hosted: boolean) => ({ hosted, csrf: '' });
 
+const INVITED = { organizationName: 'Acme', inviterName: 'Priya Shah' };
+
 type Screen = (hosted: boolean) => ReactNode;
+
+function welcome(overrides: Partial<Parameters<typeof WelcomeScreen>[0]> = {}): Screen {
+  const Page = (hosted: boolean) => (
+    <WelcomeScreen
+      hosted={hosted}
+      email={EMAIL}
+      next=""
+      passwordOn
+      invitation={null}
+      {...overrides}
+    />
+  );
+  return Page;
+}
+
+function organization(overrides: Partial<Parameters<typeof OrganizationScreen>[0]> = {}): Screen {
+  const Page = (hosted: boolean) => (
+    <OrganizationScreen
+      hosted={hosted}
+      email={EMAIL}
+      host="app.drefyn.com"
+      member={false}
+      invitation={null}
+      {...overrides}
+    />
+  );
+  return Page;
+}
+
+const TYPED_ORG = { name: 'Acme', slug: 'acme' };
 
 function signIn(overrides: Partial<Parameters<typeof SignInScreen>[0]> = {}): Screen {
   const Page = (hosted: boolean) => (
@@ -60,15 +93,6 @@ function verify(child: ReactNode): Screen {
 const typed = (extra: Partial<Parameters<typeof TypedCode>[0]> = {}) => (
   <TypedCode {...shared(true)} email={EMAIL} fromSignUp={false} {...extra} />
 );
-
-function newOrganization(props: { limited?: boolean; taken?: string }): Screen {
-  const Page = (hosted: boolean) => (
-    <AuthFrame hosted={hosted} label="New organization">
-      <NewOrganizationScreen origin="https://app.drefyn.com" {...props} />
-    </AuthFrame>
-  );
-  return Page;
-}
 
 const CHOOSE = { step: 'choose', code: '48210937', challenge: '' } as const;
 
@@ -140,6 +164,31 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
     invalid: (h) => <CliScreen {...shared(h)} view={{ kind: 'invalid' }} />,
     failed: (h) => <CliScreen {...shared(h)} view={{ kind: 'failed', notice: UNAVAILABLE }} />,
   },
+  welcome: {
+    ready: welcome(),
+    invited: welcome({ invitation: INVITED }),
+    'email-only': welcome({ passwordOn: false }),
+    name: welcome({ state: { problem: 'name', name: 'acme.dev' } }),
+    password: welcome({ state: { problem: 'password', rules: ['too_short'], name: 'Maya' } }),
+    breached: welcome({ state: { problem: 'breached', name: 'Maya' } }),
+    late: welcome({ state: { problem: 'late', name: 'Maya' } }),
+    failed: welcome({ state: { notice: NOT_SAVED, name: 'Maya' } }),
+    'half-saved': welcome({
+      state: { notice: { ...NOT_SAVED, kind: 'name_not_saved' }, name: 'Maya' },
+    }),
+  },
+  organization: {
+    ready: organization(),
+    taken: organization({ state: { ...TYPED_ORG, problem: 'taken' } }),
+    address: organization({ state: { name: 'Acme', slug: 'Acme Inc', problem: 'address' } }),
+    name: organization({ state: { name: 'acme.dev', slug: 'acme', problem: 'name' } }),
+    limited: organization({ state: { ...TYPED_ORG, limited: true } }),
+    failed: organization({ state: { ...TYPED_ORG, notice: NOT_SAVED } }),
+    invited: organization({ invitation: INVITED }),
+    another: organization({ member: true }),
+    none: (h) => <NoOrganizationScreen hosted={h} email={EMAIL} invitation={null} />,
+    'none-invited': (h) => <NoOrganizationScreen hosted={h} email={EMAIL} invitation={INVITED} />,
+  },
   invite: {
     reading: (h) => <InviteScreen {...shared(h)} view={{ kind: 'reading' }} />,
     'signed-out': (h) => <InviteScreen {...shared(h)} view={{ kind: 'signed_out', ...FACTS }} />,
@@ -153,17 +202,13 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
     ),
     invalid: (h) => <InviteScreen {...shared(h)} view={{ kind: 'invalid' }} />,
   },
-  'new-organization': {
-    ready: newOrganization({}),
-    taken: newOrganization({ taken: 'acme' }),
-    limited: newOrganization({ limited: true }),
-  },
   block: {
     reading: (h) => <BlockScreen {...shared(h)} view={{ kind: 'reading' }} />,
     ask: (h) => (
       <BlockScreen {...shared(h)} view={{ kind: 'ask', organizationName: 'Acme', token: 't' }} />
     ),
     done: (h) => <BlockScreen {...shared(h)} view={{ kind: 'done', organizationName: 'Acme' }} />,
+    failed: (h) => <BlockScreen {...shared(h)} view={{ kind: 'failed', notice: UNAVAILABLE }} />,
     invalid: (h) => <BlockScreen {...shared(h)} view={{ kind: 'invalid' }} />,
   },
 };

@@ -7,6 +7,8 @@ import {
   OFF_PORT,
   ON_ORIGIN,
   ON_PORT,
+  OPEN_ORIGIN,
+  OPEN_PORT,
 } from './e2e/fixtures.ts';
 import { MAYA, SIGNED_OUT, stateFile } from './e2e/people.ts';
 import { serverEnv } from './e2e/stack-env.ts';
@@ -96,6 +98,7 @@ export default defineConfig({
   webServer: [
     server('on', ON_PORT, ON_ORIGIN, ROOMY),
     server('off', OFF_PORT, OFF_ORIGIN),
+    server('on', OPEN_PORT, OPEN_ORIGIN, { ...ROOMY, DREFYN_AUTH_SIGNUP: 'open' }),
     hopServer,
   ],
   projects: [
@@ -127,14 +130,14 @@ export default defineConfig({
     },
     {
       name: 'auth',
-      testMatch: /auth-(email|csrf|invite|cli-link|settings)\.spec\.ts$/,
+      testMatch: /(auth-(email|csrf|invite|cli-link|settings)|first-run)\.spec\.ts$/,
       // These count rows across the whole server, and read one inbox.
       workers: 1,
       use: { ...chromium, storageState: SIGNED_OUT },
     },
     {
       name: 'auth-no-js',
-      testMatch: /no-script\.spec\.ts$/,
+      testMatch: /(no-script|first-run-no-script)\.spec\.ts$/,
       use: { ...chromium, storageState: SIGNED_OUT, javaScriptEnabled: false },
     },
     {

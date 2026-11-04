@@ -180,16 +180,6 @@ export const stepUpWithCode = signedInAction(
   },
 );
 
-// Create organization
-
-export const makeOrganization = signedInAction(
-  async ({ session }, input: { readonly name: string; readonly slug: string }) => {
-    const auth = await dashboardAuth();
-    const made = await auth.organizations.createOrganization(session, input);
-    return made.ok ? done(input.slug) : refused(made.error, 'settings.organization_failed');
-  },
-);
-
 // Members
 
 export const sendInvitations = orgAction(
