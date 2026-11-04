@@ -151,6 +151,11 @@ export default defineConfig({
       },
     },
     { name: 'bundle', testMatch: /bundle\.spec\.ts$/, use: { ...chromium } },
-    { name: 'visual', testMatch: /visual\.spec\.ts$/, use: { ...chromium } },
+    {
+      name: 'visual',
+      testMatch: /visual\.spec\.ts$/,
+      // Without it overlays differ by a few raster pixels between captures of one frame.
+      use: { ...chromium, launchOptions: { args: ['--disable-partial-raster'] } },
+    },
   ],
 });
