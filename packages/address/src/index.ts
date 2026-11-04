@@ -1,3 +1,4 @@
+export { isLinkShaped, isPlainAddress } from './link-shape.ts';
 export {
   isNormalizedEmailAddress,
   normalizeEmailAddress,

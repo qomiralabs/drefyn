@@ -370,6 +370,22 @@ describeWithStack('invitations against Postgres', () => {
     expect(sent.map((n) => n.to)).not.toContain(third.email);
   });
 
+  it('names a new owner by address when their stored name reads as a link', async () => {
+    const { owner, access } = await organization();
+    const newcomer = await person();
+    await h.sql(
+      `update app.users set display_name = 'Acme Security http://evil.example/login'
+        where id = '${newcomer.user}';`,
+    );
+    const { token } = await invited(access, newcomer.email, 'owner');
+    const before = h.mail.notices.length;
+    const accepted = await h.invitations().acceptInvitation(newcomer.session, token);
+    expect(accepted.ok).toBe(true);
+    const sent = h.mail.notices.slice(before);
+    expect(sent.map((n) => n.to)).toEqual([owner.email]);
+    expect(sent[0]?.notice).toMatchObject({ kind: 'owner_added', memberName: newcomer.email });
+  });
+
   it('tells nobody when a member accepts', async () => {
     const { access } = await organization();
     const member = await person();
