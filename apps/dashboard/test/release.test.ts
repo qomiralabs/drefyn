@@ -1,9 +1,10 @@
+import { idOf } from '@drefyn/tenancy';
 import { flags, type FlagClient, type FlagDefinition } from '@drefyn/flags';
 import { createTestFlagClient } from '@drefyn/flags/testing';
 import { describe, expect, it } from 'vitest';
 import { DASHBOARD_FLAG, dashboardEnabled } from '../src/index.ts';
 
-const ORG = 'org_acme';
+const CONTEXT = { organizationId: idOf('org', '01890a5d-ac96-774b-bcce-b302099a8070') };
 const registry: readonly FlagDefinition[] = flags;
 
 describe('the dashboard release flag', () => {
@@ -15,13 +16,13 @@ describe('the dashboard release flag', () => {
 
   it('is off with the production defaults', async () => {
     const client = createTestFlagClient({}, { env: {} });
-    await expect(dashboardEnabled(client, ORG)).resolves.toBe(false);
+    await expect(dashboardEnabled(client, CONTEXT)).resolves.toBe(false);
     await client.close();
   });
 
   it('is on when the flag is on', async () => {
     const client = createTestFlagClient({}, { env: { DREFYN_RELEASE_FLAGS: 'on' } });
-    await expect(dashboardEnabled(client, ORG)).resolves.toBe(true);
+    await expect(dashboardEnabled(client, CONTEXT)).resolves.toBe(true);
     await client.close();
   });
 
@@ -31,7 +32,7 @@ describe('the dashboard release flag', () => {
       evaluate: () => Promise.reject(new Error('provider gone')),
       close: () => Promise.resolve(),
     } as unknown as FlagClient;
-    await expect(dashboardEnabled(broken, ORG)).resolves.toBe(false);
+    await expect(dashboardEnabled(broken, CONTEXT)).resolves.toBe(false);
   });
 
   it('asks about the organization it was given', async () => {
@@ -47,7 +48,7 @@ describe('the dashboard release flag', () => {
       },
       close: () => Promise.resolve(),
     } as unknown as FlagClient;
-    await dashboardEnabled(spy, ORG);
+    await dashboardEnabled(spy, CONTEXT);
     expect(seen).toEqual([[DASHBOARD_FLAG, expect.objectContaining({ organizationId: ORG })]]);
   });
 });

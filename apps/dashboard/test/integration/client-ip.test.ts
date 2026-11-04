@@ -106,6 +106,15 @@ const root = join(import.meta.dirname, '..', '..');
 const built = existsSync(join(root, '.next', 'BUILD_ID'));
 const runBuilt = built || process.env['CI'] === 'true';
 
+// Boot parses these and connects to nothing, so no database runs behind this job.
+const AUTH_ENV = {
+  DREFYN_AUTH_SECRET: 'a'.repeat(43),
+  DREFYN_AUTH_INVITATION_BLOCK_KEY: 'b'.repeat(43),
+  DREFYN_DATABASE_URL: 'postgres://app:app@127.0.0.1:1/drefyn',
+  DREFYN_AUTH_DATABASE_URL: 'postgres://auth:auth@127.0.0.1:1/drefyn',
+  DREFYN_DATABASE_SSL: 'disable',
+};
+
 interface Started {
   readonly child: ChildProcess;
   readonly port: number;
@@ -126,6 +135,7 @@ async function startBuilt(): Promise<Started> {
       DREFYN_APP_ORIGIN: ORIGIN,
       DREFYN_FLAGS_SOURCE: 'file',
       DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+      ...AUTH_ENV,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -249,4 +259,41 @@ describe.runIf(runBuilt)('stopping the built server', () => {
       child.kill('SIGKILL');
     }
   }, 90_000);
+});
+
+describe.runIf(runBuilt)('next start on the production build', () => {
+  it('exits 1 with the marker absent, and logs why', async () => {
+    const child = spawn(
+      process.execPath,
+      [join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--port', '0'],
+      {
+        cwd: root,
+        env: {
+          PATH: process.env['PATH'],
+          NODE_ENV: 'production',
+          NEXT_TELEMETRY_DISABLED: '1',
+          DREFYN_APP_ORIGIN: ORIGIN,
+          DREFYN_FLAGS_SOURCE: 'file',
+          DREFYN_FLAGS_FILE: join(root, 'e2e', 'flags', 'on.json'),
+          ...AUTH_ENV,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+    const code = await new Promise<number | null>((done, fail) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        fail(new Error(`next start stayed up: ${output}`));
+      }, 30_000);
+      child.on('exit', (exit) => {
+        clearTimeout(timer);
+        done(exit);
+      });
+    });
+    expect(code).toBe(1);
+    expect(output).toContain('"event":"dashboard.wrapper_missing"');
+  });
 });

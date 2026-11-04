@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkSource } from './support/walker.ts';
+import { checkSource, checkTree } from './support/walker.ts';
 
 const PAGE = 'src/app/[org]/page.tsx';
 const ACTIONS = 'src/server/thing-actions.ts';
@@ -328,5 +328,23 @@ describe('a finding', () => {
     expect(
       checkSource(ACTIONS, "'use server';\n\nexport async function send() { return 1; }"),
     ).toEqual([{ path: ACTIONS, line: 3, name: 'send', problem: 'action_unwrapped' }]);
+  });
+});
+
+describe('the real tree', () => {
+  it('holds to every rule', () => {
+    expect(checkTree(new URL('..', import.meta.url))).toEqual([]);
+  });
+
+  it('read files, so a walker that reads nothing cannot pass', () => {
+    expect(checkTree.filesRead(new URL('..', import.meta.url))).toBeGreaterThan(30);
+  });
+});
+
+describe('the session guard', () => {
+  it('is refused on pages: it is for account level actions', () => {
+    const text = `import { guardSession } from '../server/guard.ts';
+      export default async function P() { await guardSession(); }`;
+    expect(problems('src/app/page.tsx', text)).toEqual(['guard_missing']);
   });
 });

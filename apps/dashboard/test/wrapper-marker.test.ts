@@ -27,6 +27,6 @@ describe('the client IP wrapper marker', () => {
     const callers = hits.filter(
       (path) => path !== 'src/server/wrapper-marker.ts' && path !== 'test/wrapper-marker.test.ts',
     );
-    expect(callers.filter((path) => path !== 'server.ts')).toEqual([]);
+    expect(callers).toEqual(['server.ts']);
   });
 });
