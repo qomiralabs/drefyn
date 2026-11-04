@@ -35,12 +35,9 @@ describeWithStack('the SQL seat count', () => {
           .startSession(browser, { userId: owner, method: 'email' });
         const made = await h
           .organizations({ limiter: unlimited })
-          .createOrganization(started.session, {
-            name: 'Seat Co',
-            slug: `s-${randomBytes(6).toString('hex')}`,
-          });
+          .createOrganization(started.session, { name: 'Seat Co' });
         if (!made.ok) throw made.error;
-        const org = made.value.organizationId;
+        const org = made.value.access.organizationId;
         const holders: SeatHolder[] = [{ kind: 'member', userId: owner }];
         for (let i = 0; i < members; i += 1) {
           const user = await h.user();
@@ -61,7 +58,7 @@ describeWithStack('the SQL seat count', () => {
           );
           if (live) holders.push({ kind: 'invitation', email });
         }
-        const usage = await h.invitations().seatUsage(made.value);
+        const usage = await h.invitations().seatUsage(made.value.access);
         expect(usage.used).toBe(countSeats(holders));
       }),
       { seed: 134, numRuns: 15 },

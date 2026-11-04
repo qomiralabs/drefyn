@@ -43,13 +43,12 @@ export interface Org {
 export async function newOrg(h: Harness): Promise<Org> {
   const ownerEmail = `o${randomBytes(4).toString('hex')}@example.com`;
   const { session } = await signIn(h, ownerEmail);
-  const s = slug();
-  const made = await h.organizations().createOrganization(session, { name: 'Acme', slug: s });
+  const made = await h.organizations().createOrganization(session, { name: 'Acme' });
   if (!made.ok) throw made.error;
   return {
-    organizationId: made.value.organizationId,
-    slug: s,
-    owner: made.value,
+    organizationId: made.value.access.organizationId,
+    slug: made.value.slug,
+    owner: made.value.access,
     ownerEmail,
     ownerSessionId: session.sessionId,
   };

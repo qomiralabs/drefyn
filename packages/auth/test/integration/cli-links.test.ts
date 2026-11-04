@@ -223,8 +223,8 @@ describeWithStack('drefyn auth link and its redemption', () => {
     );
     expect(row.trim()).toBe(`${name}|${name.toLowerCase().replace(' ', '-')}|owner|self_hosted`);
     expect((await links().redeem(browser(), token)).ok).toBe(true);
-    // The same name again holds the same slug, so it is refused and no link is printed.
-    const taken = await drefyn([
+    // The same name again gets its own slug, as it would from the dashboard.
+    const second = await drefyn([
       'auth',
       'link',
       '--email',
@@ -232,9 +232,9 @@ describeWithStack('drefyn auth link and its redemption', () => {
       '--create-organization',
       name,
     ]);
-    expect(taken.code).toBe(2);
-    expect(taken.stdout).toBe('');
-    expect(taken.stderr).toContain('AUTH_SLUG_TAKEN');
+    expect(second.code).toBe(0);
+    expect(second.stdout).toContain('/sign-in/cli#');
+    expect(await h.sql(`select count(*) from app.organizations where name = '${name}';`)).toBe('2');
   });
 
   it('exits 4 when the auth role is not the one the URL logs in as', async () => {

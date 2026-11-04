@@ -18,10 +18,9 @@ test('the whole first run works with scripts off', async ({ page }) => {
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/organizations\/new$/);
   const slug = (address.split('@')[0] ?? '').replace(/[^a-z0-9]/g, '').slice(-20);
-  await page.getByLabel('Name', { exact: true }).fill('No Script');
-  await page.getByLabel('Address').fill(slug);
+  await page.getByLabel('Name', { exact: true }).fill(`Team ${slug}`);
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page).toHaveURL(new RegExp(`/${slug}$`));
+  await expect(page).toHaveURL(new RegExp(`/team-${slug}$`));
 });
 
 test('Sign out works with scripts off', async ({ page }) => {

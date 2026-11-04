@@ -30,8 +30,6 @@ export const AUTH_STATES: Readonly<Record<string, readonly string[]>> = {
   ],
   organization: [
     'ready',
-    'taken',
-    'address',
     'name',
     'limited',
     'failed',

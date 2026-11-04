@@ -150,12 +150,19 @@ describe('saveWelcome', () => {
 });
 
 describe('makeOrganization', () => {
-  const FIELDS = { name: 'Acme', slug: 'acme' };
-  const MADE = { ok: true, value: {} };
+  const FIELDS = { name: 'Acme' };
+  const MADE = { ok: true, value: { slug: 'acme-b2c3', access: {} } };
 
-  it('creates the organization and opens it', async () => {
+  it('creates the organization and opens the slug the server chose', async () => {
     auth.organizations.createOrganization.mockResolvedValue(MADE);
-    await expect(create(null, form(FIELDS))).rejects.toThrow(`${REDIRECT} /acme`);
+    await expect(create(null, form(FIELDS))).rejects.toThrow(`${REDIRECT} /acme-b2c3`);
+    expect(auth.organizations.createOrganization).toHaveBeenCalledWith(SESSION, FIELDS);
+  });
+
+  it('drops any slug a client posts', async () => {
+    auth.organizations.createOrganization.mockResolvedValue(MADE);
+    const posted = form({ ...FIELDS, slug: 'chosen-by-client' });
+    await expect(create(null, posted)).rejects.toThrow(`${REDIRECT} /acme-b2c3`);
     expect(auth.organizations.createOrganization).toHaveBeenCalledWith(SESSION, FIELDS);
   });
 
@@ -166,8 +173,6 @@ describe('makeOrganization', () => {
   });
 
   it.each([
-    ['AUTH_SLUG_TAKEN', { problem: 'taken' }],
-    ['AUTH_SLUG_INVALID', { problem: 'address' }],
     ['AUTH_INPUT_INVALID', { problem: 'name' }],
     ['AUTH_RATE_LIMITED', { limited: true }],
   ] as const)('keeps what was typed on %s', async (code, state) => {

@@ -42,17 +42,19 @@ describeWithStack('organizations against Postgres', () => {
   it('creates the organization, its slug and the owner membership together', async () => {
     const { session } = await signIn();
     const name = slug('Name');
-    const s = slug();
-    const result = await h.organizations().createOrganization(session, { name, slug: s });
+    const result = await h.organizations().createOrganization(session, { name });
     if (!result.ok) throw result.error;
-    const org = result.value.organizationId;
+    const org = result.value.access.organizationId;
+    expect(result.value.slug).toBe(name.toLowerCase());
     expect(
       await h.sql(
         `select name || '|' || plan_tier from app.organizations where organization_id = '${org}';`,
       ),
     ).toBe(`${name}|self_hosted`);
     expect(
-      await h.sql(`select organization_id from app.organization_slugs where slug = '${s}';`),
+      await h.sql(
+        `select organization_id from app.organization_slugs where slug = '${result.value.slug}';`,
+      ),
     ).toBe(org);
     expect(
       await h.sql(
@@ -67,12 +69,11 @@ describeWithStack('organizations against Postgres', () => {
     const { session } = await signIn();
     const ghost: SessionInfo = { ...session, userId: newId('usr') };
     const name = slug('Ghost');
-    const s = slug();
-    const result = await h.organizations().createOrganization(ghost, { name, slug: s });
+    const result = await h.organizations().createOrganization(ghost, { name });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('AUTH_UNAVAILABLE');
     expect(await count('organizations', `name = '${name}'`)).toBe('0');
-    expect(await count('organization_slugs', `slug = '${s}'`)).toBe('0');
+    expect(await count('organization_slugs', `slug = '${name.toLowerCase()}'`)).toBe('0');
     expect(await count('memberships', `user_id = '${ghost.userId}'`)).toBe('0');
     expect(h.logs.at(-1)).toMatchObject({
       level: 'warn',
@@ -84,13 +85,10 @@ describeWithStack('organizations against Postgres', () => {
     const { session } = await signIn();
     const orgs = h.organizations();
     for (let i = 0; i < 3; i += 1) {
-      const made = await orgs.createOrganization(session, {
-        name: `Team ${String(i)}`,
-        slug: slug(),
-      });
+      const made = await orgs.createOrganization(session, { name: slug('Team') });
       expect(made.ok, `organization ${String(i + 1)}`).toBe(true);
     }
-    const fourth = await orgs.createOrganization(session, { name: 'Team 4', slug: slug() });
+    const fourth = await orgs.createOrganization(session, { name: slug('Team') });
     expect(fourth.ok).toBe(false);
     if (!fourth.ok) {
       expect(fourth.error.code).toBe('AUTH_RATE_LIMITED');
@@ -99,54 +97,69 @@ describeWithStack('organizations against Postgres', () => {
     expect(await count('memberships', `user_id = '${session.userId}'`)).toBe('3');
     // Another person is not held to the first one's count.
     const other = await signIn();
-    expect((await orgs.createOrganization(other.session, { name: 'Other', slug: slug() })).ok).toBe(
-      true,
-    );
+    expect((await orgs.createOrganization(other.session, { name: slug('Other') })).ok).toBe(true);
   });
 
-  it('answers AUTH_SLUG_TAKEN for a slug another organization holds and keeps nothing', async () => {
+  it('gives a second organization of the same name a suffix', async () => {
     const first = await signIn();
     const second = await signIn();
-    const s = slug();
+    const name = slug('Twin');
     const orgs = h.organizations();
-    expect((await orgs.createOrganization(first.session, { name: 'First', slug: s })).ok).toBe(
-      true,
-    );
-    const taken = await orgs.createOrganization(second.session, { name: 'Second Co', slug: s });
-    expect(taken.ok).toBe(false);
-    if (!taken.ok) expect(taken.error.code).toBe('AUTH_SLUG_TAKEN');
-    expect(await count('organizations', `name = 'Second Co'`)).toBe('0');
-    expect(await count('memberships', `user_id = '${second.session.userId}'`)).toBe('0');
+    const one = await orgs.createOrganization(first.session, { name });
+    const two = await orgs.createOrganization(second.session, { name });
+    if (!one.ok) throw one.error;
+    if (!two.ok) throw two.error;
+    expect(one.value.slug).toBe(name.toLowerCase());
+    expect(two.value.slug).toMatch(new RegExp(`^${one.value.slug}-[a-z0-9]{4}$`));
+    expect(await count('organizations', `name = '${name}'`)).toBe('2');
   });
 
-  it.each(['settings', 'sign-in', 'Acme', 'acme.com'])(
-    'refuses the slug %j with AUTH_SLUG_INVALID',
-    async (value) => {
-      const { session } = await signIn();
-      const result = await h
-        .organizations()
-        .createOrganization(session, { name: 'X', slug: value });
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error.code).toBe('AUTH_SLUG_INVALID');
-    },
-  );
+  it('lets everyone through when many people create the same name at once', async () => {
+    const people = await Promise.all(Array.from({ length: 12 }, () => signIn()));
+    const name = slug('Crowd');
+    const orgs = h.organizations();
+    const made = await Promise.all(
+      people.map((person) => orgs.createOrganization(person.session, { name })),
+    );
+    const slugs = made.map((result) => {
+      if (!result.ok) throw result.error;
+      return result.value.slug;
+    });
+    expect(new Set(slugs).size).toBe(people.length);
+    expect(slugs).toContain(name.toLowerCase());
+    expect(await count('organizations', `name = '${name}'`)).toBe(String(people.length));
+    for (const [index, person] of people.entries()) {
+      const resolved = await person.sessions.resolveAccess(person.cookie, slugs[index] ?? '');
+      expect(resolved.kind).toBe('ok');
+    }
+  });
+
+  it.each([
+    ['settings', /^settings-[a-z0-9]{4}$/],
+    ['Sign In', /^sign-in-[a-z0-9]{4}$/],
+    ['\u5317\u4eac', /^org-[a-z0-9]{4}$/],
+  ])('makes a valid slug for the name %j', async (name, shape) => {
+    const { session } = await signIn();
+    const result = await h.organizations().createOrganization(session, { name });
+    if (!result.ok) throw result.error;
+    expect(result.value.slug).toMatch(shape);
+  });
 
   // The database holds the install tier, so a build that passes the wrong one fails closed.
   it('refuses free on a self host database, keeps nothing and logs ids only', async () => {
     const { session } = await signIn();
     const name = slug('Hosted');
-    const s = slug();
     const before = h.logs.length;
-    const result = await h
-      .organizations({ initialTier: 'free' })
-      .createOrganization(session, { name, slug: s });
+    const result = await h.organizations({ initialTier: 'free' }).createOrganization(session, {
+      name,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe('AUTH_UNAVAILABLE');
       expect(result.error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
     }
     expect(await count('organizations', `name = '${name}'`)).toBe('0');
-    expect(await count('organization_slugs', `slug = '${s}'`)).toBe('0');
+    expect(await count('organization_slugs', `slug = '${name.toLowerCase()}'`)).toBe('0');
     expect(await count('memberships', `user_id = '${session.userId}'`)).toBe('0');
     const lines = h.logs.slice(before);
     expect(lines).toEqual([
@@ -160,21 +173,20 @@ describeWithStack('organizations against Postgres', () => {
       },
     ]);
     expect(JSON.stringify(lines)).not.toContain(name);
-    expect(JSON.stringify(lines)).not.toContain(s);
+    expect(JSON.stringify(lines)).not.toContain(name.toLowerCase());
   });
 
   it('lists only the organizations the person belongs to', async () => {
     const a = await signIn();
     const b = await signIn();
     const orgs = h.organizations();
-    const mine = slug();
-    const theirs = slug();
-    await orgs.createOrganization(a.session, { name: 'Mine', slug: mine });
-    await orgs.createOrganization(b.session, { name: 'Theirs', slug: theirs });
+    const name = slug('Mine');
+    await orgs.createOrganization(a.session, { name });
+    await orgs.createOrganization(b.session, { name: slug('Theirs') });
     const listed = await orgs.listMyOrganizations(a.session);
-    expect(listed.map((o) => o.slug)).toEqual([mine]);
+    expect(listed.map((o) => o.slug)).toEqual([name.toLowerCase()]);
     expect(listed[0]).toMatchObject({
-      name: 'Mine',
+      name,
       role: 'owner',
       tier: 'self_hosted',
       readOnlySince: null,
@@ -184,16 +196,18 @@ describeWithStack('organizations against Postgres', () => {
   it('resolves access for a member and nothing for anyone else', async () => {
     const owner = await signIn();
     const stranger = await signIn();
-    const s = slug();
-    const made = await h
-      .organizations()
-      .createOrganization(owner.session, { name: 'Guarded', slug: s });
+    const made = await h.organizations().createOrganization(owner.session, { name: 'Guarded' });
     if (!made.ok) throw made.error;
+    const s = made.value.slug;
     const ok = await owner.sessions.resolveAccess(owner.cookie, s);
     expect(ok).toMatchObject({
       kind: 'ok',
       touchDue: false,
-      access: { organizationId: made.value.organizationId, role: 'owner', tier: 'self_hosted' },
+      access: {
+        organizationId: made.value.access.organizationId,
+        role: 'owner',
+        tier: 'self_hosted',
+      },
     });
     expect(await stranger.sessions.resolveAccess(stranger.cookie, s)).toEqual({
       kind: 'not_member',
@@ -212,19 +226,18 @@ describeWithStack('organizations against Postgres', () => {
   it('logs created organizations by id, with no name or slug', async () => {
     const { session } = await signIn();
     const name = slug('Secret Name');
-    const s = slug();
     const before = h.logs.length;
-    const made = await h.organizations().createOrganization(session, { name, slug: s });
+    const made = await h.organizations().createOrganization(session, { name });
     if (!made.ok) throw made.error;
     const lines = h.logs.slice(before);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({
       level: 'info',
       event: 'auth.organization_created',
-      fields: { organizationId: toPublicId('org', made.value.organizationId) },
+      fields: { organizationId: toPublicId('org', made.value.access.organizationId) },
     });
     expect(JSON.stringify(lines)).not.toContain(name);
-    expect(JSON.stringify(lines)).not.toContain(s);
+    expect(JSON.stringify(lines)).not.toContain(made.value.slug);
   });
 
   describe('plan_tier', () => {
@@ -292,11 +305,11 @@ describeWithStack('organizations against Postgres', () => {
       const { session } = await signIn();
       const result = await h
         .organizations({ initialTier: 'free' })
-        .createOrganization(session, { name: 'Hosted', slug: slug() });
+        .createOrganization(session, { name: 'Hosted' });
       if (!result.ok) throw result.error;
       expect(
         await h.sql(
-          `select plan_tier from app.organizations where organization_id = '${result.value.organizationId}';`,
+          `select plan_tier from app.organizations where organization_id = '${result.value.access.organizationId}';`,
         ),
       ).toBe('free');
     });
@@ -305,7 +318,7 @@ describeWithStack('organizations against Postgres', () => {
       const { session } = await signIn();
       const result = await h
         .organizations({ initialTier: 'self_hosted' })
-        .createOrganization(session, { name: 'Self', slug: slug() });
+        .createOrganization(session, { name: 'Self' });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.cause).toMatchObject({ code: 'DB_RLS_VIOLATION' });
     });
