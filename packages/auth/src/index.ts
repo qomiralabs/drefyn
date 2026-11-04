@@ -101,6 +101,7 @@ export {
   createRoles,
   type RemovalSummary,
   type RoleChangeSummary,
+  type RoleStore,
   type Roles,
   type RolesDeps,
 } from './roles.ts';
