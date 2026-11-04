@@ -145,6 +145,11 @@ const OPENED: {
     open: (page) => page.getByRole('button', { name: /Region$/ }).click(),
   },
   {
+    id: 'components-multi-combobox--default',
+    role: 'listbox',
+    open: (page) => page.getByRole('combobox', { name: 'Projects' }).click(),
+  },
+  {
     id: 'components-tabs--default',
     role: 'tabpanel',
     open: (page) => page.getByRole('tab', { name: 'History' }).click(),
@@ -205,6 +210,10 @@ const SHEETS: { id: string; open: (page: Page) => Promise<void> }[] = [
   {
     id: 'components-menu--default',
     open: (page) => page.getByRole('button', { name: 'Payments API' }).click(),
+  },
+  {
+    id: 'components-multi-combobox--default',
+    open: (page) => page.getByRole('button', { name: /^Projects/ }).click(),
   },
   {
     id: 'components-popover--default',
