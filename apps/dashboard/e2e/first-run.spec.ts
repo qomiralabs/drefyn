@@ -7,8 +7,10 @@ import { test } from './test.ts';
 // Runs against the server with sign up open, as a person with no account yet.
 test.use({ baseURL: OPEN_ORIGIN, storageState: SIGNED_OUT });
 
-const slugFor = (address: string): string =>
-  (address.split('@')[0] ?? '').replace(/[^a-z0-9]/g, '').slice(-20);
+// A name of its own for each run, since a repeat would pick up a suffix.
+const nameFor = (address: string): string =>
+  `Team ${(address.split('@')[0] ?? '').replace(/[^a-z0-9]/g, '').slice(-20)}`;
+const SUFFIX = '-[a-z0-9]{4}';
 
 async function signUp(page: Page): Promise<string> {
   const address = uniqueAddress('firstrun');
@@ -30,11 +32,11 @@ test('a new person goes from the code through Welcome and an organization to the
   await expect(page.getByRole('main').getByRole('list')).toHaveCount(0);
   await nameYourself(page);
   await expect(page).toHaveURL(/\/organizations\/new$/);
-  await page.getByLabel('Name', { exact: true }).fill('First Run');
-  const slug = slugFor(address);
-  await page.getByLabel('Address').fill(slug);
+  const name = nameFor(address);
+  await expect(page.locator('main input:not([type=hidden])')).toHaveCount(1);
+  await page.getByLabel('Name', { exact: true }).fill(name);
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page).toHaveURL(new RegExp(`/${slug}$`));
+  await expect(page).toHaveURL(new RegExp(`/${name.toLowerCase().replace(' ', '-')}$`));
   await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
   await expect(page.getByRole('button', { name: /account for Maya Okafor/ })).toBeVisible();
 });
@@ -80,22 +82,28 @@ test('Sign out works from Create organization', async ({ page }) => {
   await expect(page).toHaveURL(/\/sign-in$/);
 });
 
-test('an address someone holds says so and keeps what was typed', async ({ page }) => {
+test('a name someone holds still makes an organization and opens it', async ({ page }) => {
   await signUp(page);
   await nameYourself(page);
-  await page.getByLabel('Name', { exact: true }).fill('Acme Two');
-  await page.getByLabel('Address').fill('acme');
+  await page.getByLabel('Name', { exact: true }).fill('Acme');
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByText(/acme is taken/)).toBeVisible();
-  await expect(page.getByLabel('Address')).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Acme Two');
+  await expect(page).toHaveURL(new RegExp(`/acme${SUFFIX}$`));
+  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
 });
 
-test('a slug the app needs for its own pages is refused', async ({ page }) => {
+test('a name matching one of the app pages still makes an organization', async ({ page }) => {
   await signUp(page);
   await nameYourself(page);
-  await page.getByLabel('Name', { exact: true }).fill('Welcome Inc');
-  await page.getByLabel('Address').fill('welcome');
+  await page.getByLabel('Name', { exact: true }).fill('Welcome');
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByLabel('Address')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page).toHaveURL(new RegExp(`/welcome${SUFFIX}$`));
+  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+});
+
+test('a name with no Latin letters still makes an organization', async ({ page }) => {
+  await signUp(page);
+  await nameYourself(page);
+  await page.getByLabel('Name', { exact: true }).fill('北京');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page).toHaveURL(new RegExp(`/org${SUFFIX}$`));
 });

@@ -38,15 +38,14 @@ async function person(email = address()) {
 
 async function organization(tier = 'self_hosted') {
   const owner = await person();
-  const slug = `inv-${randomBytes(5).toString('hex')}`;
   const made = await h.organizations({ limiter: unlimited }).createOrganization(owner.session, {
     name: 'Invite Co',
-    slug,
   });
   if (!made.ok) throw made.error;
-  const org = made.value.organizationId;
+  const { access, slug } = made.value;
+  const org = access.organizationId;
   if (tier !== 'self_hosted') await setTier(org, tier);
-  return { owner, org, slug, access: made.value };
+  return { owner, org, slug, access };
 }
 
 const setTier = (org: string, tier: string) =>

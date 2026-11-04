@@ -295,15 +295,10 @@ test.describe('signed out pages', () => {
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeFocused();
   });
 
-  test('Create organization goes name, address, Create, Sign out', async ({
-    page,
-    browserName,
-  }) => {
+  test('Create organization goes name, Create, Sign out', async ({ page, browserName }) => {
     await page.goto('/auth-states/organization/ready');
     await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(page.getByLabel('Address')).toBeFocused();
-    await page.keyboard.press(tabKey(browserName));
     await expect(page.getByRole('button', { name: 'Create organization' })).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeFocused();

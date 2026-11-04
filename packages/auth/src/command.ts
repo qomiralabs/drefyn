@@ -128,8 +128,6 @@ const INPUT_FLAG: Partial<Record<string, string>> = {
   AUTH_INPUT_INVALID: '--email',
   AUTH_NOT_FOUND: '--email',
   AUTH_SIGNUP_CLOSED: '--email',
-  AUTH_SLUG_INVALID: '--create-organization',
-  AUTH_SLUG_TAKEN: '--create-organization',
 };
 
 const BAD_INPUT: ReadonlySet<string> = new Set(Object.keys(INPUT_FLAG));
@@ -217,6 +215,9 @@ async function runLink(
     if (!issued.ok) return report('link', issued.error, stderr);
     // The link alone on stdout, so it can be piped; the rule goes to stderr.
     stdout.write(`${issued.value.link}\n`);
+    if (issued.value.organizationReused) {
+      stderr.write('Reusing the organization this person owns with that name.\n');
+    }
     stderr.write('Valid once, for 15 minutes.\n');
     return EXIT_DONE;
   });

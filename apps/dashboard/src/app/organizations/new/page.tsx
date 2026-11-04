@@ -10,7 +10,6 @@ import {
   NEW_ORGANIZATION,
 } from '../../../server/first-run.ts';
 import { guardSignedIn } from '../../../server/guard.ts';
-import { appOrigin } from '../../../server/origin.ts';
 import { hosted } from '../../../server/sign-in-support.ts';
 
 // Answers first, so with the flag off the title is the 404's and not the product's.
@@ -33,7 +32,6 @@ export default async function NewOrganization() {
     <OrganizationForm
       hosted={hosted()}
       email={session.email}
-      host={new URL(appOrigin()).host}
       member={organizations.length > 0}
       invitation={invitation}
     />

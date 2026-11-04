@@ -53,7 +53,7 @@ const sessions = {
 };
 const organizations = {
   listMyOrganizations: vi.fn(),
-  createOrganizationFor: vi.fn(),
+  ensureOrganizationFor: vi.fn(),
 };
 
 beforeEach(() => {

@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Result } from '@drefyn/address';
 import {
   newId,
@@ -14,7 +16,12 @@ import { sql, type Transaction } from 'kysely';
 import { grantAccess, storedRole, storedTier, type AccessContext } from './access.ts';
 import type { AuthConfig } from './config.ts';
 import { AuthError } from './errors.ts';
-import { parseOrganizationName, parseSlug } from './organization-rules.ts';
+import {
+  SLUG_SUFFIX_ALPHABET,
+  SLUG_SUFFIX_LENGTH,
+  parseOrganizationName,
+  slugCandidate,
+} from './organization-rules.ts';
 import type { OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
@@ -66,24 +73,49 @@ export interface OrganizationsDeps {
   readonly limiter?: RateLimiter;
   readonly store?: OrganizationStore;
   readonly newOrganizationId?: () => OrganizationId;
+  readonly newSlugSuffix?: () => string;
+}
+
+export interface CreatedOrganization {
+  readonly access: AccessContext;
+  // The server's choice, and the only place a caller learns it.
+  readonly slug: string;
+}
+
+export interface EnsuredOrganization {
+  readonly organizationId: OrganizationId;
+  readonly slug: string;
+  readonly reused: boolean;
 }
 
 export interface Organizations {
   createOrganization(
     s: SessionInfo,
-    input: { readonly name: string; readonly slug: string },
-  ): Promise<Result<AccessContext, AuthError>>;
+    input: { readonly name: string },
+  ): Promise<Result<CreatedOrganization, AuthError>>;
   listMyOrganizations(s: SessionInfo): Promise<readonly OrganizationSummary[]>;
-  // For the operator command, which has a person but no session yet. The same rules, limit
-  // and insert path as createOrganization.
-  createOrganizationFor(
+  // For the operator command, which has a person but no session yet and is often run twice:
+  // the organization this person already owns under this exact name, or a new one by the
+  // same rules, limit and insert path as createOrganization.
+  ensureOrganizationFor(
     userId: UserId,
-    input: { readonly name: string; readonly slug: string },
-  ): Promise<Result<{ readonly organizationId: OrganizationId; readonly slug: string }, AuthError>>;
+    input: { readonly name: string },
+  ): Promise<Result<EnsuredOrganization, AuthError>>;
 }
 
 class SlugTaken extends Error {}
 const TAKEN = new SlugTaken('slug taken');
+
+// With about 530,000 suffixes, five misses means something is wrong, not that a name is
+// popular. Each retry rolls back first, so nothing is left to double up.
+const SLUG_TRIES = 5;
+const RETRY_WAIT_MS = 20;
+
+function randomSlugSuffix(): string {
+  return Array.from({ length: SLUG_SUFFIX_LENGTH }, () =>
+    SLUG_SUFFIX_ALPHABET.charAt(randomInt(SLUG_SUFFIX_ALPHABET.length)),
+  ).join('');
+}
 
 export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps): Organizations {
   if (!INITIAL_TIERS.has(deps.initialTier)) {
@@ -105,38 +137,27 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
       logger: deps.logger,
     });
   const nextId = deps.newOrganizationId ?? (() => newId('org'));
+  const nextSuffix = deps.newSlugSuffix ?? randomSlugSuffix;
 
   // The one way an organization is made. Its first owner is the acting user, so the
   // database's insert rules see the same person in every write.
-  async function insert(
+  async function write(
     userId: UserId,
-    input: unknown,
+    name: string,
   ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
-    const name = parseOrganizationName((input as { name?: unknown } | undefined)?.name);
-    if (!name.ok) return name;
-    const slug = parseSlug((input as { slug?: unknown } | undefined)?.slug);
-    if (!slug.ok) return slug;
-    // Counted before the work and in its own transaction, so a refused or failed attempt
-    // still counts and parallel attempts cannot all pass.
-    try {
-      await limiter.reserve('org_create', [userId]);
-    } catch (error) {
-      return fail(error);
-    }
     const organizationId = nextId();
     const ids = { organizationId: ['org', organizationId], userId: ['usr', userId] } as const;
-    let membershipId: string;
-    try {
-      membershipId = await store.organizationAs(organizationId, userId, async (tx) => {
+    const writeWith = (slug: string) =>
+      store.organizationAs(organizationId, userId, async (tx) => {
         await tx
           .insertInto('organizations')
-          .values({ organization_id: organizationId, name: name.value, plan_tier: initialTier })
+          .values({ organization_id: organizationId, name, plan_tier: initialTier })
           .execute();
         // No row back means another organization holds it; the throw rolls the
         // organization back with it.
         const held = await tx
           .insertInto('organization_slugs')
-          .values({ slug: slug.value, organization_id: organizationId })
+          .values({ slug, organization_id: organizationId })
           .onConflict((oc) => oc.column('slug').doNothing())
           .returning('slug')
           .executeTakeFirst();
@@ -148,25 +169,112 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
           .executeTakeFirstOrThrow();
         return member.id;
       });
+    try {
+      for (let attempt = 0; attempt < SLUG_TRIES; attempt += 1) {
+        if (attempt > 0) await sleep(randomInt(RETRY_WAIT_MS * 2 ** attempt));
+        const slug = slugCandidate(name, nextSuffix(), attempt);
+        try {
+          const membershipId = await writeWith(slug);
+          quietInfo(
+            deps.logger,
+            'auth.organization_created',
+            idFields({ ...ids, membershipId: ['mem', membershipId] }),
+          );
+          return ok({ organizationId, slug });
+        } catch (error) {
+          if (error !== TAKEN) throw error;
+        }
+      }
+      throw TAKEN;
     } catch (error) {
-      if (error === TAKEN) return fail(new AuthError('AUTH_SLUG_TAKEN'));
       quietWarn(deps.logger, 'auth.organization_create_failed', idFields(ids));
       return fail(error);
     }
+  }
+
+  const nameIn = (input: unknown) =>
+    parseOrganizationName((input as { name?: unknown } | undefined)?.name);
+
+  async function insert(
+    userId: UserId,
+    input: unknown,
+  ): Promise<Result<{ organizationId: OrganizationId; slug: string }, AuthError>> {
+    const name = nameIn(input);
+    if (!name.ok) return name;
+    // Counted before the work and in its own transaction, so a refused or failed attempt
+    // still counts and parallel attempts cannot all pass.
+    try {
+      await limiter.reserve('org_create', [userId]);
+    } catch (error) {
+      return fail(error);
+    }
+    return write(userId, name.value);
+  }
+
+  // Only owner counts: being an admin of a company's organization is no reason to hand a
+  // new first run someone else's tenant. The oldest wins, since the form can make twins.
+  const ownedWithName = (tx: Transaction<UserSchema>, name: string) =>
+    tx
+      .selectFrom('memberships as m')
+      .innerJoin('organizations as o', 'o.organization_id', 'm.organization_id')
+      .innerJoin('organization_slugs as sl', 'sl.organization_id', 'm.organization_id')
+      .select(['o.organization_id', 'sl.slug'])
+      .where('m.user_id', '=', sql<string>`app.current_user_id()`)
+      .where('m.role', '=', 'owner')
+      .where('o.name', '=', name)
+      .orderBy('o.organization_id')
+      .limit(1)
+      .executeTakeFirst();
+
+  function reused(
+    userId: UserId,
+    row: { readonly organization_id: string; readonly slug: string },
+  ): Result<EnsuredOrganization, AuthError> {
+    const organizationId = idOf('org', row.organization_id);
     quietInfo(
       deps.logger,
-      'auth.organization_created',
-      idFields({ ...ids, membershipId: ['mem', membershipId] }),
+      'auth.organization_reused',
+      idFields({ organizationId: ['org', organizationId], userId: ['usr', userId] }),
     );
-    return ok({ organizationId, slug: slug.value });
+    return ok({ organizationId, slug: row.slug, reused: true });
+  }
+
+  async function ensure(
+    userId: UserId,
+    input: unknown,
+  ): Promise<Result<EnsuredOrganization, AuthError>> {
+    const name = nameIn(input);
+    if (!name.ok) return name;
+    try {
+      // Read first, so a rerun for a fresh link spends no limit and takes no lock.
+      const owned = await store.user(userId, (tx) => ownedWithName(tx, name.value));
+      if (owned !== undefined) return reused(userId, owned);
+      await limiter.reserve('org_create', [userId]);
+      // A row cannot be unique on owner and name, since the form may make twins, so a lock
+      // per person stands in. It lives in this transaction and the write runs on a second
+      // connection, because only a user context can see what the person owns. That needs a
+      // pool of two; a smaller one times out and refuses instead of duplicating.
+      return await store.user(userId, async (tx) => {
+        await sql`select pg_advisory_xact_lock(hashtextextended(${`org_ensure:${userId}`}, 0))`.execute(
+          tx,
+        );
+        const again = await ownedWithName(tx, name.value);
+        if (again !== undefined) return reused(userId, again);
+        const made = await write(userId, name.value);
+        return made.ok ? ok({ ...made.value, reused: false }) : made;
+      });
+    } catch (error) {
+      return fail(error);
+    }
   }
 
   return Object.freeze({
     async createOrganization(s, input) {
       const made = await insert(s.userId, input);
       if (!made.ok) return made;
-      return ok(
-        grantAccess({
+      return ok({
+        slug: made.value.slug,
+        access: grantAccess({
           organizationId: made.value.organizationId,
           userId: s.userId,
           sessionId: s.sessionId,
@@ -175,10 +283,10 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
           tier: initialTier,
           authenticatedAt: s.authenticatedAt,
         }),
-      );
+      });
     },
 
-    createOrganizationFor: insert,
+    ensureOrganizationFor: ensure,
 
     async listMyOrganizations(s) {
       try {

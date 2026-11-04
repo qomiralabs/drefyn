@@ -28,15 +28,14 @@ export async function invitingOrganization(h: Harness) {
   const user = await h.user(email);
   const browser = { ip: '203.0.113.9', userAgent: 'Integration/1.0', cookies: new Map() };
   const started = await h.sessions().startSession(browser, { userId: user, method: 'email' });
-  const slug = `su-${randomBytes(5).toString('hex')}`;
   const made = await h.organizations({ limiter: unlimited }).createOrganization(started.session, {
     name: 'Sign Up Co',
-    slug,
   });
   if (!made.ok) throw made.error;
+  const { access, slug } = made.value;
   const resolved = await h.sessions().resolveAccess(sessionCookie(h, started.setCookies), slug);
   if (resolved.kind !== 'ok') throw new Error(`no access: ${resolved.kind}`);
-  return { organizationId: made.value.organizationId, access: resolved.access };
+  return { organizationId: access.organizationId, access: resolved.access };
 }
 
 // Invites the address and returns the token and block token the mail carried.

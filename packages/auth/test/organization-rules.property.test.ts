@@ -1,6 +1,11 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { RESERVED_SLUGS, SLUG_PATTERN, parseOrganizationName, parseSlug } from '../src/index.ts';
+import {
+  SLUG_SUFFIX_ALPHABET,
+  SLUG_SUFFIX_LENGTH,
+  slugCandidate,
+} from '../src/organization-rules.ts';
 import { runs } from './support.ts';
 
 const codeOf = (result: { ok: boolean; error?: { code: string } }) =>
@@ -219,5 +224,76 @@ describe('organization names', () => {
 
   it.each([undefined, null, 1, ['Acme']])('refuses the non string %j', (value) => {
     expect(codeOf(parseOrganizationName(value))).toBe('AUTH_INPUT_INVALID');
+  });
+});
+
+const suffix = fc
+  .array(fc.constantFrom(...SLUG_SUFFIX_ALPHABET.split('')), {
+    minLength: SLUG_SUFFIX_LENGTH,
+    maxLength: SLUG_SUFFIX_LENGTH,
+  })
+  .map((chars) => chars.join(''));
+const reservedName = fc
+  .constantFrom(...RESERVED_SLUGS)
+  .chain((word) =>
+    fc.constantFrom(word, word.toUpperCase(), word.replaceAll('-', ' '), ` ${word}! `),
+  );
+const noLatin = fc
+  .array(fc.constantFrom(...'北京東京Москваأحمد!? '.split('')), { minLength: 1, maxLength: 20 })
+  .map((chars) => `x${chars.join('')}`.slice(1));
+const longName = fc.string({ minLength: 39, maxLength: 100, unit: fc.constantFrom('a', ' ', '-') });
+const anyName = fc.oneof(safeName, reservedName, noLatin, longName, fc.string({ maxLength: 100 }));
+
+describe('slug candidates', () => {
+  it('gives a valid slug for every name on every try', () => {
+    fc.assert(
+      fc.property(anyName, suffix, fc.nat({ max: 4 }), (name, end, attempt) => {
+        expect(parseSlug(slugCandidate(name, end, attempt)).ok).toBe(true);
+      }),
+      runs,
+    );
+  });
+
+  it('carries the suffix on every retry, so a retry never asks for the same slug', () => {
+    fc.assert(
+      fc.property(anyName, suffix, fc.integer({ min: 1, max: 4 }), (name, end, attempt) => {
+        expect(slugCandidate(name, end, attempt).endsWith(`-${end}`)).toBe(true);
+      }),
+      runs,
+    );
+  });
+
+  it('adds a suffix on the first try to a reserved word or a name with nothing usable', () => {
+    fc.assert(
+      fc.property(fc.oneof(reservedName, noLatin), suffix, (name, end) => {
+        const slug = slugCandidate(name, end, 0);
+        expect(slug.endsWith(`-${end}`)).toBe(true);
+        expect(RESERVED_SLUGS).not.toContain(slug);
+      }),
+      runs,
+    );
+  });
+
+  it.each([
+    ['Acme Inc', 'acme-inc'],
+    ['Crème Brûlée', 'creme-brulee'],
+    ['Ørsted Æther', 'orsted-aether'],
+    ['Straße Łódź', 'strasse-lodz'],
+  ])('leaves a plain slug alone on the first try: %j', (name, slug) => {
+    expect(slugCandidate(name, 'b2c3', 0)).toBe(slug);
+  });
+
+  it('never ends the stem on a hyphen when the name is cut to fit', () => {
+    const name = `${'a'.repeat(34)}-${'b'.repeat(10)}`;
+    expect(slugCandidate(name, 'b2c3', 1)).toBe(`${'a'.repeat(34)}-b2c3`);
+  });
+
+  it('falls back to org for a name with no Latin letters', () => {
+    expect(slugCandidate('北京', 'b2c3', 0)).toBe('org-b2c3');
+  });
+
+  it('has no vowels in the alphabet, so a suffix cannot spell a word', () => {
+    expect(SLUG_SUFFIX_ALPHABET).toMatch(/^[b-df-hj-km-np-tv-xz2-9]+$/);
+    expect(new Set(SLUG_SUFFIX_ALPHABET).size).toBe(SLUG_SUFFIX_ALPHABET.length);
   });
 });

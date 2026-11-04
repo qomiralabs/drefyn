@@ -51,7 +51,7 @@ import { mailDeliveryEnabled } from './gate.ts';
 import { logInfo, logWarn, type LogContext } from './log.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
-// wiring that no test reaches, and createOrganizationFor, which takes a bare user id, stays
+// wiring that no test reaches, and ensureOrganizationFor, which takes a bare user id, stays
 // out of reach.
 export interface DashboardAuth {
   readonly sessions: Pick<

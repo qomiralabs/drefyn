@@ -81,6 +81,7 @@ describe('issuing a CLI link', () => {
         link: `https://app.drefyn.test/sign-in/cli#${formatCliLinkToken(SECRET)}`,
         userId: USER,
         organizationId: null,
+        organizationReused: false,
       },
     });
     const writes = scripted.writes();
@@ -116,36 +117,37 @@ describe('issuing a CLI link', () => {
     for (const input of [
       { email: 'nope' },
       { email: 'a@example.com', organizationName: '   ' },
-      { email: 'a@example.com', organizationName: '!!!' },
+      { email: 'a@example.com', organizationName: 'acme.com' },
     ]) {
       expect((await subject.issue(input)).ok).toBe(false);
     }
     expect(scripted.statements()).toEqual([]);
   });
 
-  it('creates the organization through createOrganizationFor with the derived slug', async () => {
+  it('leaves the organization to ensureOrganizationFor', async () => {
     const organizationId = newId('org');
-    const createOrganizationFor = vi.fn(() =>
-      Promise.resolve({ ok: true as const, value: { organizationId, slug: 'acme-docs' } }),
+    const ensureOrganizationFor = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        value: { organizationId, slug: 'acme-docs', reused: true },
+      }),
     );
-    const organizations = { createOrganizationFor } as unknown as Organizations;
+    const organizations = { ensureOrganizationFor } as unknown as Organizations;
     const { subject } = links({ user: USER }, { organizations });
     const result = await subject.issue({ email: 'a@example.com', organizationName: 'Acme Docs' });
     expect(result.ok && result.value.organizationId).toBe(organizationId);
-    expect(createOrganizationFor).toHaveBeenCalledWith(USER, {
-      name: 'Acme Docs',
-      slug: 'acme-docs',
-    });
+    expect(result.ok && result.value.organizationReused).toBe(true);
+    expect(ensureOrganizationFor).toHaveBeenCalledWith(USER, { name: 'Acme Docs' });
   });
 
   it('prints no link when the organization is refused', async () => {
     const organizations = {
-      createOrganizationFor: () =>
-        Promise.resolve({ ok: false as const, error: new AuthError('AUTH_SLUG_TAKEN') }),
+      ensureOrganizationFor: () =>
+        Promise.resolve({ ok: false as const, error: new AuthError('AUTH_RATE_LIMITED') }),
     } as unknown as Organizations;
     const { subject, scripted } = links({ user: USER }, { organizations });
     const result = await subject.issue({ email: 'a@example.com', organizationName: 'Acme' });
-    expect(!result.ok && result.error.code).toBe('AUTH_SLUG_TAKEN');
+    expect(!result.ok && result.error.code).toBe('AUTH_RATE_LIMITED');
     expect(scripted.writes()).toEqual([]);
   });
 
