@@ -575,23 +575,26 @@ const invitations = createInvitations(config, { db, authDb, logger, mailer });
 const roles = createRoles({ db, logger, mailer }); // mailer has sendSecurityNotice
 ```
 
-- `changeRole(access, membership, role)` and `removeMember(access, membership)` lock the
-  organization row, read the target and the actor's stored role, decide with `canChangeRole`
+- `changeRole(access, membership, role)` and `removeMember(access, membership)` first need a
+  sign in within 15 minutes by database time (`AUTH_RECENT_AUTH_REQUIRED`, or
+  `AUTH_SESSION_INVALID` for a session that has gone), before any lock or write. They then lock
+  the organization row, read the target and the actor's stored role, decide with `canChangeRole`
   or `canRemove`, then lock the target membership before writing. Lowering or removing the
   last owner is `AUTH_LAST_OWNER`; no authority is `AUTH_FORBIDDEN`; an unknown membership is
   `AUTH_NOT_FOUND`. The same role again is a no op.
 - Removal deletes every API key the person made, then the membership, which takes their
   pending invitations and project roles with it. A change to member deletes every key they
   made and all their pending invitations; owner to admin keeps keys and drops only owner
-  invitations. There is no option to keep keys.
+  invitations. A member promoted loses their project role rows, so a later demotion brings
+  none back. There is no option to keep keys.
 - Every owner gets `member_removed`, `member_keys_revoked` (a demotion that revoked keys) or
-  `owner_added` after the commit. A failed send is logged as `auth.member_notice_failed`
-  and never undoes the change. Logs carry ids and roles only.
+  `owner_added` after the commit. Each owner is tried on their own; a failed send is logged as
+  `auth.member_notice_failed` and neither stops the others nor undoes the change. Logs carry ids and roles only.
 - The database checks the same rules against the person acting (`app.current_actor_id()`).
   A guarded write that touches no row after the code allowed it is `AUTH_FORBIDDEN` and
   `auth.role_guard_refused`.
-- `setProjectRole(access, membership, project, role | null)` sets or clears a member's role on
-  one project; owners and admins are project admins everywhere and take no row.
+- `setProjectRole(access, membership, project, role | null)` needs the same recent sign in, then
+  sets or clears a member's role on one project; owners and admins are project admins everywhere and take no row.
   `projectRole(access, project)` is the role the person holds there now: `admin` for owners
   and admins, otherwise the project row, else the default project role, else `null`.
 
