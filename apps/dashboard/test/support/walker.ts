@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 export type WalkerProblem =
-  'guard_missing' | 'public_guard' | 'action_unwrapped' | 'route_unwrapped' | 'inline_use_server';
+  | 'guard_missing'
+  | 'public_guard'
+  | 'action_unwrapped'
+  | 'route_unwrapped'
+  | 'inline_use_server'
+  | 'pages_router'
+  | 'javascript_source';
 
 export interface Finding {
   readonly path: string;

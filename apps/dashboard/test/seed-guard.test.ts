@@ -31,7 +31,7 @@ describe('the seed refusal', () => {
   it('stops the script before it reads a file or opens a connection', () => {
     const script = fileURLToPath(new URL('../e2e/seed.ts', import.meta.url));
     const result = spawnSync(process.execPath, [script], {
-      env: { PATH: process.env['PATH'] } as NodeJS.ProcessEnv,
+      env: { PATH: process.env['PATH'], NODE_ENV: 'test' },
       encoding: 'utf8',
       timeout: 30_000,
     });
