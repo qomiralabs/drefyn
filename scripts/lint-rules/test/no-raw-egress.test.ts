@@ -575,3 +575,40 @@ describe('no-raw-egress scoped entry validation', () => {
     );
   });
 });
+
+describe('optional calls of fetch', () => {
+  const scoped = [{ path: 'scripts/tool/src/scoped.ts', reason: 'r', only: [{ global: 'fetch' }] }];
+  const linter = makeEslint(root, { [RULE]: ['error', { allow: scoped }] });
+  const lintScoped = async (code: string) =>
+    reports(await linter.lintText(code, { filePath: join(root, 'scripts/tool/src/scoped.ts') }));
+
+  it('are reported in an ordinary file', async () => {
+    const found = await lintAs('packages/web/src/a.ts', "export const f = fetch?.('x');");
+    expect(found.map((r) => r.message)).toEqual([message('fetch', '@drefyn/web')]);
+  });
+
+  it('are reported where only a direct call is allowed', async () => {
+    const found = await lintScoped("export const f = fetch?.('x');");
+    expect(found.map((r) => r.message)).toEqual([message('fetch', '@drefyn/tool')]);
+  });
+
+  it('leave a plain direct call allowed there', async () => {
+    expect(await lintScoped("export const f = fetch('x');")).toEqual([]);
+  });
+});
+
+describe('the allow list path schema', () => {
+  it.each([
+    './scripts/tool/src/github.ts',
+    'scripts/./tool/src/github.ts',
+    'scripts\\tool\\src\\github.ts',
+    'scripts//tool/src/github.ts',
+    '../scripts/tool.ts',
+    '/scripts/tool.ts',
+  ])('refuses %s', async (path) => {
+    const bad = makeEslint(root, { [RULE]: ['error', { allow: [{ path, reason: 'r' }] }] });
+    await expect(
+      bad.lintText(RAW_FETCH, { filePath: join(root, 'packages/web/src/a.ts') }),
+    ).rejects.toThrow(/allow|path|pattern/i);
+  });
+});

@@ -93,9 +93,18 @@ export default tseslint.config(
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
       // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * is refused
-      // there for every role, so it must not compile into a query either.
-      'drefyn/no-select-all': ['error', { tables: ['users', 'password_credentials'] }],
+      // there for every role, so it must not compile into a query either. A test holds this
+      // list to that one.
+      'drefyn/no-select-all': [
+        'error',
+        { tables: ['users', 'password_credentials', 'known_devices'] },
+      ],
     },
+  },
+  {
+    // Operator only: no web route may mint a sign in link or act for a bare user id.
+    files: ['apps/**'],
+    rules: { 'drefyn/no-operator-auth': 'error' },
   },
   {
     // Everything people see is styled from tokens only.

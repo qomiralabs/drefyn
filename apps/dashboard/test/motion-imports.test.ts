@@ -5,6 +5,9 @@ import { describe, expect, it } from 'vitest';
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
 const ALLOWED = new Set(['LazyMotion', 'm', 'MotionConfig']);
+// The one file that may name a feature bundle, so a lazy chunk holds that bundle and not Motion.
+const FEATURES_FILE = 'shell/motion-features.ts';
+const FEATURE_BUNDLES = new Set(['domAnimation']);
 // The only dynamic import of Motion: the async feature bundle.
 const FEATURES =
   /import\(\s*['"]motion\/react['"]\s*\)\s*\.then\(\s*\(?\s*\w*\s*\)?\s*=>\s*\w+\.domAnimation\s*\)/;
@@ -25,7 +28,7 @@ interface Use {
 function scan(file: string, source: string, named: Use[], other: Use[]): void {
   {
     const statics = source.matchAll(
-      /import\s+(type\s+)?([^'";]*?)\s+from\s+['"]((?:framer-)?motion(?:\/[^'"]*)?)['"]/g,
+      /(?:import|export)\s+(type\s+)?([^'";]*?)\s+from\s+['"]((?:framer-)?motion(?:\/[^'"]*)?)['"]/g,
     );
     for (const [text, typeOnly, clause = '', specifier] of statics) {
       if (typeOnly !== undefined) continue;
@@ -37,7 +40,8 @@ function scan(file: string, source: string, named: Use[], other: Use[]): void {
       for (const raw of (names[1] ?? '').split(',')) {
         const name = raw.trim().split(/\s+as\s+/)[0] ?? '';
         if (name === '' || name.startsWith('type ')) continue;
-        (ALLOWED.has(name) ? named : other).push({ file, text: name });
+        const allowed = file === FEATURES_FILE ? FEATURE_BUNDLES : ALLOWED;
+        (allowed.has(name) ? named : other).push({ file, text: name });
       }
     }
     for (const match of source.matchAll(
@@ -59,10 +63,10 @@ function motionUses(): { named: Use[]; other: Use[] } {
   return { named, other };
 }
 
-function scanText(source: string) {
+function scanText(source: string, file = 'fixture.tsx') {
   const named: Use[] = [];
   const other: Use[] = [];
-  scan('fixture.tsx', source, named, other);
+  scan(file, source, named, other);
   return { named: named.map((u) => u.text), other: other.map((u) => u.text) };
 }
 
@@ -87,6 +91,33 @@ describe('the Motion import scan', () => {
     ["const x = await import('motion/react');", 'a dynamic import of everything'],
     ["const x = require('motion/react');", 'a require'],
   ])('flags %s (%s)', (source) => {
+    expect(scanText(source).other).not.toEqual([]);
+  });
+
+  it.each([
+    "export { domAnimation } from 'motion/react';",
+    "import { domAnimation } from 'motion/react';\nexport default domAnimation;",
+  ])('accepts a separate features module: %s', (source) => {
+    const found = scanText(source, FEATURES_FILE);
+    expect(found).toEqual({ named: ['domAnimation'], other: [] });
+  });
+
+  it.each([
+    ["export * from 'motion/react';", 'everything'],
+    ["export { motion } from 'motion/react';", 'the eager component'],
+    ["import { domMax } from 'motion/react';", 'the larger bundle'],
+    ["import * as M from 'motion/react';", 'a namespace import'],
+    ["import Motion from 'motion';", 'the root entry'],
+    ["const x = await import('motion/react');", 'a dynamic import of everything'],
+  ])('still flags %s in the features module (%s)', (source) => {
+    expect(scanText(source, FEATURES_FILE).other).not.toEqual([]);
+  });
+
+  it.each([
+    "export { domAnimation } from 'motion/react';",
+    "export * from 'motion/react';",
+    "export { motion } from 'motion/react';",
+  ])('flags %s in any other file', (source) => {
     expect(scanText(source).other).not.toEqual([]);
   });
 

@@ -2,12 +2,19 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { credits, type CreditEntry, type CreditEntryId } from '../../src/index.ts';
 import { Model, ORGS, keyArb, opArb, opsArb, runOp, type Op, type Result } from '../model.ts';
-import { ORG_A, runs, snapshot, sumOf, type LedgerFactory } from '../support.ts';
+import {
+  ORG_A,
+  PROPERTY_TIMEOUT_MS,
+  runs,
+  snapshot,
+  sumOf,
+  type LedgerFactory,
+} from '../support.ts';
 
 export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
   const uniqueKeys = fc.uuid();
 
-  describe('ledger properties', () => {
+  describe('ledger properties', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     it('never lets a balance go below zero, after every step and in every organization', async () => {
       await fc.assert(
         fc.asyncProperty(opsArb(), async (ops) => {
@@ -104,7 +111,7 @@ export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
     });
   });
 
-  describe('idempotency properties', () => {
+  describe('idempotency properties', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     // The issue's form: duplicates of applied requests change nothing, wherever they land.
     // A refused request records nothing, so its key stays free; it is repeated right after
     // itself, where the state is unchanged and the retry is refused the same way.
@@ -189,7 +196,7 @@ export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
     });
   });
 
-  describe('isolation properties', () => {
+  describe('isolation properties', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     it('an organization ends in the same state whatever other organizations do around it', async () => {
       await fc.assert(
         fc.asyncProperty(opsArb(), async (ops) => {
@@ -209,7 +216,7 @@ export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
     });
   });
 
-  describe('concurrency properties', () => {
+  describe('concurrency properties', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     // The scheduler starts the calls in a random order and lets them interleave at every await.
     it('under any interleaving: never negative, balance equals entries, one entry per key', async () => {
       await fc.assert(

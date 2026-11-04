@@ -357,6 +357,8 @@ describe('review-gate github with history', () => {
   let repo: Repo;
   let X: string;
   let H: string;
+  // Spawns git once per step of the history: 0.9 s at most at load 33, and past the 10 s hook
+  // default under heavier load. Three times the 10 s seen, so a real slowdown still fails.
   beforeEach(() => {
     repo = new Repo();
     const R = repo.commit(undefined, { 'packages/core/src/a.ts': 'v1\n', 'other.txt': 'o\n' });
@@ -365,7 +367,7 @@ describe('review-gate github with history', () => {
     repo.git('update-ref', 'refs/remotes/origin/development', D1);
     X = repo.commit(R, { 'packages/core/src/a.ts': 'v2\n' });
     H = repo.merge(X, D1);
-  });
+  }, 30_000);
   afterEach(() => {
     repo.remove();
   });

@@ -11,6 +11,11 @@ import {
 // Fixed seed so a failure reproduces on every machine. Raise numRuns locally to hunt.
 export const runs = { seed: 12, numRuns: 300 } as const;
 
+// Each property replays 300 sequences through fresh ledgers: 1.33 s alone in the slowest report,
+// 1.1 s at most over three runs at load 40 to 65, and past the 5 s default once at load 85.
+// Three times that worst case, so a real slowdown still fails.
+export const PROPERTY_TIMEOUT_MS = 15_000;
+
 // The contract suites in test/contract take one of these, so the Postgres store can run
 // the same assertions as the in memory ledger.
 export type LedgerFactory = () => CreditLedger | Promise<CreditLedger>;

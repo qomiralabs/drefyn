@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ESLint, Linter } from 'eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -236,6 +237,32 @@ describe('the egress allow list in the root and guard configs', () => {
       expect(await egressOptions(eslint, path), path).toEqual([{ allow: egressAllowList }]);
       expect(await egressOptions(guard, path), path).toEqual([{ allow: egressAllowList }]);
     }
+  });
+});
+
+// The list in eslint.config.js is hand written because the config cannot load @drefyn/db. The
+// allow list is read as source for the same reason, and because the db entry does not export it.
+describe('the no-select-all table list', () => {
+  const grantTables = (): string[] => {
+    const source = readFileSync(join(repoRoot, 'packages/db/src/allow-lists.ts'), 'utf8');
+    const start = source.indexOf('export const COLUMN_GRANT_TABLES');
+    const block = source.slice(start, source.indexOf('\n];', start));
+    return [...block.matchAll(/^ {4}name: '([^']+)',$/gm)].map((match) => match[1] ?? '');
+  };
+
+  it('finds the allow list, so the check below cannot pass on nothing', () => {
+    expect(grantTables()).toEqual(expect.arrayContaining(['app.users', 'app.known_devices']));
+  });
+
+  it('names every table in COLUMN_GRANT_TABLES and no other', async () => {
+    const resolved = (await eslint.calculateConfigForFile(
+      join(repoRoot, 'packages/auth/src/index.ts'),
+    )) as { rules?: Linter.RulesRecord };
+    const setting = resolved.rules?.['drefyn/no-select-all'];
+    const options = (Array.isArray(setting) ? setting[1] : undefined) as
+      { tables: string[] } | undefined;
+    const expected = grantTables().map((name) => name.replace(/^app\./, ''));
+    expect([...(options?.tables ?? [])].sort()).toEqual(expected.sort());
   });
 });
 
