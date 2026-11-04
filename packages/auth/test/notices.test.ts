@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { INVITER_FALLBACK, plainInviterName } from '../src/invitations.ts';
-import { UNNAMED_PERSON, memberName } from '../src/notices.ts';
+import { UNNAMED_KEY, UNNAMED_PERSON, memberName, storedKeyName } from '../src/notices.ts';
 
 const ADDRESS = 'nia@example.com';
 
@@ -43,6 +43,16 @@ describe('memberName', () => {
   ])('gives the fixed text for the link shaped address %s', (address) => {
     expect(memberName(null, address)).toBe('A team member');
     expect(memberName('http://evil.example', address)).toBe(UNNAMED_PERSON);
+  });
+});
+
+describe('storedKeyName', () => {
+  it('keeps a name that passes the rule', () => {
+    expect(storedKeyName('Deploy from CI')).toBe('Deploy from CI');
+  });
+
+  it.each(['evil.example', 'www.evil.example', 'a\u200bb', ''])('replaces %j', (name) => {
+    expect(storedKeyName(name)).toBe(UNNAMED_KEY);
   });
 });
 

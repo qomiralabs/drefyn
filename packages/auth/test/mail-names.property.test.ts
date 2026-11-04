@@ -77,7 +77,7 @@ describe('the mail guard and the auth name rule', () => {
         await accepted(
           {
             template: 'security_notice',
-            notice: { kind: 'owner_added', at: AT, organizationName: 'Acme', ownerName: name },
+            notice: { kind: 'owner_added', at: AT, organizationName: 'Acme', memberName: name },
           },
           label,
         );

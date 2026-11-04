@@ -671,6 +671,21 @@ describe('revokeApiKey', () => {
     );
   });
 
+  it.each(['see evil.example', 'www.evil.example', 'deploy\u202eci', 'a'.repeat(101)])(
+    'tells owners about the stored name %j without printing it',
+    async (storedName) => {
+      const { value, mail } = await revoked({ emails: ['one@example.com'], storedName });
+      await value.send();
+      expect(mail.notices[0]?.notice).toMatchObject({
+        kind: 'api_key_revoked',
+        keyName: 'Unnamed key',
+        displaySuffix: 'x7qa',
+      });
+      // The person managing keys still needs to find the row by its real name.
+      expect(value.key.name).toBe(storedName);
+    },
+  );
+
   it('still tells the other owners when one send fails, with one line per miss', async () => {
     const emails = ['one@example.com', 'two@example.com', 'three@example.com'];
     const { value, mail, lines } = await revoked({ emails });

@@ -126,7 +126,7 @@ describe('facts per kind', () => {
 
   it('owner_added names the organization and the owner', async () => {
     const mail = await rendered(
-      notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', ownerName: 'Ada' }),
+      notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', memberName: 'Ada' }),
     );
     expect(mail.text).toMatch(/^Organization: +Acme$/m);
     expect(mail.text).toMatch(/^New owner: +Ada$/m);

@@ -1,3 +1,4 @@
+import { renderMail } from '@drefyn/email';
 import { idOf, type IdOf, type ProjectId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
 import { createRoles, type OrgRole } from '../src/index.ts';
@@ -548,6 +549,58 @@ describe('a notice that cannot be sent', () => {
     const failures = lines.filter((l) => l.event === 'auth.member_notice_failed');
     expect(failures).toHaveLength(1);
     expect(JSON.stringify(failures)).not.toContain('@example.com');
+  });
+});
+
+describe('a notice the mail guard refuses', () => {
+  const owners = ['one@example.com', 'two@example.com', 'three@example.com'];
+
+  // The real refusal, turned into the rejection the adapter gives auth.
+  async function refused(): Promise<Error> {
+    const rendered = await renderMail(
+      {
+        template: 'security_notice',
+        notice: {
+          kind: 'member_removed',
+          at: new Date('2026-11-04T10:00:00Z'),
+          organizationName: 'evil.example',
+          memberName: 'Nia Newcomer',
+          revokedKeys: 0,
+        },
+      },
+      { linkOrigin: new URL('https://app.drefyn.test') },
+    );
+    if (rendered.ok) throw new Error('the guard let it through');
+    return new Error(rendered.error.code);
+  }
+
+  it('is a logged failure with ids only, and the other owners still hear', async () => {
+    const refusal = await refused();
+    const scripted = scriptedStore(respond({ target: { role: 'member' }, owners }));
+    const { logger, lines } = capturingLogger();
+    const mail = createTestAuthMailer();
+    const roles = createRoles({
+      store: scripted.store,
+      logger,
+      mailer: {
+        ...mail.mailer,
+        sendSecurityNotice: (to, notice) =>
+          to === owners[0] ? Promise.reject(refusal) : mail.mailer.sendSecurityNotice(to, notice),
+      },
+    });
+
+    expect((await roles.removeMember(access('owner'), TARGET)).ok).toBe(true);
+
+    expect(refusal.message).toBe('email.input_invalid');
+    expect(mail.notices.map((n) => n.to)).toEqual(owners.slice(1));
+    const failures = lines.filter((l) => l.event === 'auth.member_notice_failed');
+    expect(failures).toHaveLength(1);
+    for (const field of Object.keys(failures[0]?.fields ?? {})) {
+      expect(field).toMatch(/Id$/);
+    }
+    const logged = JSON.stringify(lines);
+    expect(logged).not.toContain('@example.com');
+    expect(logged).not.toContain('email.input_invalid');
   });
 });
 
