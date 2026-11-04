@@ -26,6 +26,16 @@ describe('no-select-all', () => {
     "tx.selectFrom('sessions').selectAll('users');",
     "tx.selectFrom('sessions').selectAll(['sessions', 'password_credentials']);",
     "tx.selectFrom('users AS u').selectAll('u');",
+    "tx.selectFrom('app.users as u').selectAll('u');",
+    "tx.selectFrom('app.users as u').selectAll();",
+    'tx.selectFrom(`users`).selectAll();',
+    "const q = tx.selectFrom('users'); q.selectAll();",
+    "const q = tx.selectFrom('sessions').innerJoin('users', 'users.id', 'sessions.user_id'); q.selectAll();",
+    "const a = tx.selectFrom('users'); const b = a.where('id', '=', id); b.orderBy('id').selectAll();",
+    "let q = tx.selectFrom('sessions'); q = tx.selectFrom('users'); q.selectAll();",
+    "tx.selectFrom('users')!.selectAll();",
+    "(tx.selectFrom('users') as never).selectAll();",
+    "tx.selectFrom('users')?.selectAll();",
   ])('refuses %s', async (code) => {
     const found = await lint(code);
     expect(found).toHaveLength(1);
@@ -42,7 +52,50 @@ describe('no-select-all', () => {
     'tx.selectFrom(table).selectAll();',
     "tx.selectFrom('users as').selectAll();",
     "tx.selectFrom('users as u extra').selectAll();",
+    // A controlled name in another method's first argument reads no table.
+    "tx.selectFrom('sessions').where('users', '=', id).selectAll();",
+    "tx.selectFrom('sessions').orderBy('password_credentials').selectAll();",
+    "const q = tx.selectFrom('sessions'); q.selectAll();",
+    "const q = tx.selectFrom('users'); q.select(['id']);",
+    // A loop of names must end, not hang the linter.
+    'let a = b; let b = a; a.selectAll();',
   ])('allows %s', async (code) => {
+    expect(await lint(code)).toEqual([]);
+  });
+
+  it.each([
+    ["tx.updateTable('users').set({ a: 1 }).returningAll();", 'users'],
+    ["tx.insertInto('app.users').values(v).returningAll().execute();", 'users'],
+    [
+      "tx.deleteFrom('password_credentials').where('id', '=', id).returningAll();",
+      'password_credentials',
+    ],
+    ["tx.updateTable('users as u').set({ a: 1 }).returningAll('u');", 'users'],
+    ["const q = tx.updateTable('users'); q.returningAll();", 'users'],
+  ])('refuses %s, which sends returning *', async (code, table) => {
+    const found = await lint(code);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain('returning *');
+    expect(found[0]?.message).toContain(table);
+  });
+
+  it.each([
+    "tx.updateTable('sessions').set({ a: 1 }).returningAll();",
+    "tx.insertInto('sessions').values(v).returning(['id']);",
+    "tx.updateTable('users').set({ a: 1 }).returning(['id']);",
+  ])('allows %s', async (code) => {
+    expect(await lint(code)).toEqual([]);
+  });
+
+  // What the rule cannot see. Each is pinned so a change in reach shows up here; the database
+  // still refuses all of them at run time.
+  it.each([
+    ['a query passed in as a parameter', 'function f(q) { return q.selectAll(); }'],
+    ['a template with a placeholder', 'tx.selectFrom(`${schema}.users`).selectAll();'],
+    ['a table name held in a variable', "const t = 'users'; tx.selectFrom(t).selectAll();"],
+    ['a computed method name', "tx.selectFrom('users')['selectAll']();"],
+    ['a query returned by a helper', 'const q = base(); q.selectAll();'],
+  ])('known limit: does not see %s', async (_name, code) => {
     expect(await lint(code)).toEqual([]);
   });
 
@@ -62,11 +115,14 @@ describe('no-select-all', () => {
     });
   });
 
-  it('is on in the repository config for users and password_credentials', async () => {
+  it('is on in the repository config for the controlled tables', async () => {
     const repo = new ESLint({ cwd: repoRoot });
     const config = (await repo.calculateConfigForFile(
       join(repoRoot, 'packages/auth/src/rate-limiter.ts'),
     )) as { rules?: Record<string, unknown> };
-    expect(config.rules?.[RULE]).toEqual([2, { tables: ['users', 'password_credentials'] }]);
+    expect(config.rules?.[RULE]).toEqual([
+      2,
+      { tables: ['users', 'password_credentials', 'known_devices'] },
+    ]);
   });
 });

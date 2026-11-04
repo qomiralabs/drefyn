@@ -32,13 +32,20 @@ async function openBar(page: Page, browserName: string) {
   await expect(field(page)).toBeFocused();
 }
 
+// React Aria draws a collection one render after the field, as it does for a table's rows. Typing
+// in that gap can filter a list that is not there yet, so a spec that types waits for a row.
+async function openList(page: Page, browserName: string) {
+  await openBar(page, browserName);
+  await expect(page.getByRole('option').first()).toBeVisible();
+}
+
 for (const theme of THEMES) {
   test(`typing filters and aria-activedescendant names the highlighted row in ${theme}`, async ({
     page,
     browserName,
   }) => {
     await openStory(page, STORY, theme);
-    await openBar(page, browserName);
+    await openList(page, browserName);
     await page.keyboard.type('stat');
     await expect
       .poll(() => labels(page))
@@ -91,7 +98,7 @@ for (const theme of THEMES) {
     browserName,
   }) => {
     await openStory(page, STORY, theme);
-    await openBar(page, browserName);
+    await openList(page, browserName);
     await page.keyboard.type('invite');
     await expect
       .poll(() => active(page))
@@ -110,7 +117,7 @@ for (const theme of THEMES) {
     browserName,
   }) => {
     await openStory(page, STORY, theme);
-    await openBar(page, browserName);
+    await openList(page, browserName);
     await page.keyboard.type('docs');
     await page.keyboard.press('Escape');
     await expect(field(page)).toHaveValue('');

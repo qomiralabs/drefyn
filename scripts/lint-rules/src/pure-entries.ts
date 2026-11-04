@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import { dirname, relative, resolve, sep } from 'node:path';
 import tseslint from 'typescript-eslint';
@@ -22,7 +22,11 @@ interface Load {
   line: number;
   // A type only import is erased; a dynamic one runs at an unknown time.
   how: 'static' | 'type' | 'dynamic';
+  // Set when the code gets at a module loader without naming a module.
+  reach?: string;
 }
+
+const GLOBAL_OBJECTS = new Set(['globalThis', 'window', 'self', 'global']);
 
 const isNode = (value: unknown): value is Node =>
   isRecord(value) && typeof value['type'] === 'string';
@@ -40,6 +44,31 @@ function literal(node: unknown): string | undefined {
   }
   return undefined;
 }
+
+// a.b and a['b'] give b; a[anything else] gives undefined.
+function memberName(node: Node): string | undefined {
+  const property = node['property'];
+  if (node['computed'] === true) return literal(property);
+  return isNode(property) && typeof property['name'] === 'string' ? property['name'] : undefined;
+}
+
+function reachOfMember(node: Node): string | undefined {
+  const name = memberName(node);
+  // Any object: p.getBuiltinModule works through an alias, and the name means nothing else.
+  if (name === 'getBuiltinModule') return `'${name}'`;
+  const object = node['object'];
+  const onGlobal =
+    isNode(object) && object.type === 'Identifier' && GLOBAL_OBJECTS.has(String(object['name']));
+  if (!onGlobal) return undefined;
+  if (name === undefined) return 'a computed name';
+  return name === 'require' ? `'${name}'` : undefined;
+}
+
+const isGetBuiltinModuleKey = (property: unknown): boolean =>
+  isNode(property) &&
+  property.type === 'Property' &&
+  isNode(property['key']) &&
+  (literal(property['key']) ?? property['key']['name']) === 'getBuiltinModule';
 
 function loadsOf(file: string): Load[] {
   const parser = tseslint.parser as unknown as Parser;
@@ -82,6 +111,21 @@ function loadsOf(file: string): Load[] {
       }
       case 'TSExternalModuleReference':
         loads.push({ specifier: literal(node['expression']), line, how: 'static' });
+        break;
+      case 'MemberExpression': {
+        const reach = reachOfMember(node);
+        if (reach !== undefined) loads.push({ specifier: undefined, line, how: 'dynamic', reach });
+        break;
+      }
+      case 'ObjectPattern':
+        if (Array.isArray(node['properties']) && node['properties'].some(isGetBuiltinModuleKey)) {
+          loads.push({
+            specifier: undefined,
+            line,
+            how: 'dynamic',
+            reach: "'getBuiltinModule'",
+          });
+        }
         break;
       case 'CallExpression': {
         const callee = node['callee'];
@@ -142,16 +186,24 @@ function walkEntry(
 ) {
   const where = (file: string, line: number) =>
     `${relative(pkg.dir, file).split(sep).join('/')}:${String(line)}`;
+  const startStat = statSync(start, { throwIfNoEntry: false });
+  if (startStat === undefined || startStat.isDirectory()) {
+    const shown = relative(pkg.dir, start).split(sep).join('/');
+    const problem = startStat === undefined ? 'does not exist' : 'is a directory';
+    add('drefyn.pureEntries', `pure entry '${key}' points at ${shown}, which ${problem}`);
+    return;
+  }
   const seen = new Set<string>();
   const queue = [start];
   for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
     if (seen.has(file)) continue;
     seen.add(file);
-    if (!existsSync(file)) continue;
-    for (const { specifier, line, how } of loadsOf(file)) {
+    for (const { specifier, line, how, reach } of loadsOf(file)) {
       const at = where(file, line);
       const entry = `pure entry '${key}'`;
-      if (specifier === undefined) {
+      if (reach !== undefined) {
+        add(at, `${entry} reaches past the import graph through ${reach}`);
+      } else if (specifier === undefined) {
         add(at, `${entry} loads a computed specifier`);
       } else if (specifier.startsWith('node:') || isBuiltin(specifier)) {
         add(at, `${entry} imports Node built in '${specifier}'`);
@@ -159,10 +211,13 @@ function walkEntry(
         add(at, `${entry} loads '${specifier}' dynamically`);
       } else if (specifier.startsWith('.')) {
         const target = resolve(dirname(file), specifier);
+        const stat = statSync(target, { throwIfNoEntry: false });
         if (!target.startsWith(pkg.dir + sep)) {
           add(at, `${entry} imports '${specifier}' from outside the package`);
-        } else if (!existsSync(target)) {
+        } else if (stat === undefined) {
           add(at, `${entry} imports '${specifier}', which does not exist`);
+        } else if (stat.isDirectory()) {
+          add(at, `${entry} imports '${specifier}', which is a directory; name the file`);
         } else {
           queue.push(target);
         }

@@ -9,14 +9,24 @@ export interface ThemeFinding {
 
 const FUNCTIONS = new Set(['var', 'calc', 'min', 'max', 'clamp']);
 
+// The whole viewport or the whole parent is arithmetic, not a design value.
+const WHOLE_LENGTH = /^100(?:%|[dsl]?v[hw])$/;
+
+// A number with a unit that does not sit inside a name. Bare numbers are multipliers.
+const LENGTH = /(?<![\w.-])[+-]?(?:\d+\.?\d*|\.\d+)[a-z%]+/gi;
+
 // One value is composed when it is a CSS function, every variable in it is a token, at least
-// one token is used, and no colour or other function hides inside.
+// one token is used, no var() falls back to anything but another variable, and no colour, raw
+// length or other function hides inside.
 function composed(value: string): boolean {
   const head = /^([a-z-]+)\(/.exec(value);
   if (head === null || !FUNCTIONS.has(head[1] ?? '')) return false;
   const functions = [...value.matchAll(/([a-z-]+)\(/g)].map((m) => m[1] ?? '');
   if (!functions.every((f) => FUNCTIONS.has(f))) return false;
   if (/#[0-9a-f]{3,8}\b/i.test(value)) return false;
+  const unnamed = value.replace(/var\(\s*--[\w-]+/g, 'var(');
+  if (/var\(\s*,\s*(?!\s|var\()/.test(unnamed)) return false;
+  if ([...unnamed.matchAll(LENGTH)].some(([length]) => !WHOLE_LENGTH.test(length))) return false;
   const variables = [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1] ?? '');
   return variables.length > 0 && variables.every((v) => v.startsWith('--dr-'));
 }

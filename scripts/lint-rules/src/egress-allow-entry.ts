@@ -10,6 +10,11 @@ export interface EgressAllowEntry {
   readonly only?: readonly EgressAllowance[];
 }
 
+// Paths are compared as text with a path built from the workspace root, so any other spelling
+// (./a, a/./b, a//b, a\\b) would pass review and then match nothing. Trailing slash for a folder.
+export const ALLOW_PATH_PATTERN = '^(?!/)(?!.*\\\\)(?!.*//)(?!.*(^|/)\\.{1,2}(/|$)).+$';
+const ALLOW_PATH = new RegExp(ALLOW_PATH_PATTERN);
+
 const SOURCE_EXTENSIONS = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 // The rules JSON schema cannot express. A scoped directory entry would quietly extend
@@ -18,6 +23,11 @@ const SOURCE_EXTENSIONS = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 export function allowListProblems(entries: readonly EgressAllowEntry[]): string[] {
   const problems: string[] = [];
   for (const { path, only } of entries) {
+    if (!ALLOW_PATH.test(path)) {
+      problems.push(
+        `allow list entry '${path}': write a plain path from the workspace root, with forward slashes`,
+      );
+    }
     if (only !== undefined && (path.endsWith('/') || !SOURCE_EXTENSIONS.test(path))) {
       problems.push(
         `allow list entry '${path}': an entry with only must name one source file, not a directory`,
