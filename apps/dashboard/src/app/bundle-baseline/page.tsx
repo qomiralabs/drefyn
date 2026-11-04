@@ -1,9 +1,15 @@
-import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
-import { requireDashboard } from '../../server/gate.ts';
+import type { Metadata } from 'next';
+import { guardPublic } from '../../server/guard.ts';
+
+// Answers first, so with the flag off the title is the 404's and not the product's.
+export async function generateMetadata(): Promise<Metadata> {
+  await guardPublic();
+  return {};
+}
 
 // The framework baseline for the bundle check: one server component and nothing else. It
-// sits behind the release flag like every other route.
+// holds no data, so it sits behind the visitor flag and needs no session.
 export default async function BundleBaseline() {
-  await requireDashboard(PLACEHOLDER.organization.id);
+  await guardPublic();
   return null;
 }

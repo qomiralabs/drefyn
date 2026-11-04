@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, type Browser, type BrowserContextOptions } from '@playwright/test';
 import {
   KB,
   baselineReport,
@@ -9,6 +9,8 @@ import {
   type ScriptSize,
 } from '../src/bundle/budget.ts';
 import { ROUTES } from './fixtures.ts';
+import { MAYA, SIGNED_OUT, stateFile } from './people.ts';
+import { test } from './test.ts';
 
 const BASELINE_ROUTE = '/bundle-baseline';
 const recorded = JSON.parse(
@@ -17,8 +19,12 @@ const recorded = JSON.parse(
 
 // A cold load in a fresh context, every script response gzipped at level 9, up to the
 // point the network goes quiet and before any input.
-async function coldLoad(browser: Browser, path: string): Promise<ScriptSize[]> {
-  const context = await browser.newContext();
+async function coldLoad(
+  browser: Browser,
+  path: string,
+  storageState: NonNullable<BrowserContextOptions['storageState']>,
+): Promise<ScriptSize[]> {
+  const context = await browser.newContext({ storageState });
   const page = await context.newPage();
   const pending: Promise<ScriptSize>[] = [];
   page.on('response', (res) => {
@@ -41,11 +47,11 @@ const kb = (bytes: number) => `${(bytes / KB).toFixed(1)} KB`;
 test.describe.configure({ mode: 'serial' });
 
 test('every shell route stays under 150 KB beyond the framework baseline', async ({ browser }) => {
-  const baseline = await coldLoad(browser, BASELINE_ROUTE);
+  const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
   expect(baseline.length, 'the baseline route loads the framework').toBeGreaterThan(0);
   const reports: RouteReport[] = [];
   for (const path of [ROUTES.overview, ROUTES.project, ROUTES.empty, ROUTES.error]) {
-    reports.push(routeReport(path, await coldLoad(browser, path), baseline));
+    reports.push(routeReport(path, await coldLoad(browser, path, stateFile(MAYA)), baseline));
   }
   console.log(
     reports
@@ -61,7 +67,7 @@ test('every shell route stays under 150 KB beyond the framework baseline', async
 });
 
 test('the framework baseline has not grown more than 5 percent', async ({ browser }) => {
-  const baseline = await coldLoad(browser, BASELINE_ROUTE);
+  const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
   const measured = baseline.reduce((sum, s) => sum + s.gzipBytes, 0);
   const report = baselineReport(recorded.gzipBytes, measured);
   console.log(

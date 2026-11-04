@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { DESKTOP, MOBILE, openShell, products, ROUTES, TABLET } from './fixtures.ts';
+import { test } from './test.ts';
 
 test.describe('phone, 390 px', () => {
   test.use({ viewport: MOBILE });

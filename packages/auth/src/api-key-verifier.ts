@@ -186,6 +186,8 @@ export function createApiKeyVerifier(env: Env, deps: ApiKeyVerifierDeps): ApiKey
     async verifyApiRequest(request: ApiRequest) {
       let search: URLSearchParams;
       try {
+        // Only the query is read, to refuse a key put in a URL. Nothing absolute is built.
+        // eslint-disable-next-line no-restricted-syntax -- ApiRequest is not a Next request
         search = (typeof request.url === 'string' ? new URL(request.url) : request.url)
           .searchParams;
       } catch {

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { ROUTES } from './fixtures.ts';
 import {
   expectBodyLeaksNothing,
@@ -6,6 +6,8 @@ import {
   LEAK_PATHS,
   UNKNOWN_ORG_PATHS,
 } from './leaks.ts';
+import { MAYA, stateFile } from './people.ts';
+import { test } from './test.ts';
 
 // This project runs against the server started with dashboard.shell off.
 const paths = ['/', ...Object.values(ROUTES), '/acme/docs', '/acme/status', '/bundle-baseline'];
@@ -34,3 +36,18 @@ for (const path of [...LEAK_PATHS, ...UNKNOWN_ORG_PATHS]) {
     await expectTitleLeaksNothing(page, path);
   });
 }
+
+// A valid session changes nothing: with the flag off there is no dashboard for anyone.
+test.describe('signed in', () => {
+  test.use({ storageState: stateFile(MAYA) });
+
+  for (const path of new Set([...paths, ...LEAK_PATHS, ...UNKNOWN_ORG_PATHS])) {
+    test(`${path} with a valid session is a 404 with no page content`, async ({
+      request,
+      page,
+    }) => {
+      await expectBodyLeaksNothing(request, path);
+      await expectTitleLeaksNothing(page, path);
+    });
+  }
+});

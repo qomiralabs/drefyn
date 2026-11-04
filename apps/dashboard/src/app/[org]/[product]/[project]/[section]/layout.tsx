@@ -13,8 +13,8 @@ export default async function SectionLayout({
   params: Promise<{ org: string; product: string; project: string; section: string }>;
 }) {
   const { org, product, project, section } = await params;
-  await guardOrganization(org);
-  const found = findProject(product, project);
+  const { access } = await guardOrganization(org);
+  const found = findProject(access, product, project);
   const entry = found === undefined ? undefined : sectionOf(found.product, section);
   if (entry === undefined || entry.slug === '') notFound();
   return children;

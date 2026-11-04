@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { ROUTES, useTheme } from './fixtures.ts';
+import { test } from './test.ts';
 
 const GROUND = { light: 'rgb(250, 250, 249)', dark: 'rgb(20, 18, 16)' } as const;
 

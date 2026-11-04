@@ -238,3 +238,65 @@ describe('the egress allow list in the root and guard configs', () => {
     }
   });
 });
+
+// Next builds request.url from its own idea of the host, so nothing but the origin module
+// may read it. Each refused form has its own fixture.
+describe('the request URL rules', () => {
+  const REFUSED: readonly (readonly [string, string])[] = [
+    ['request.url', 'export const f = (request: Request) => request.url;\n'],
+    ['req.url', 'export const f = (req: Request) => req.url;\n'],
+    ['destructured url', 'export const f = ({ url }: Request) => url;\n'],
+    [
+      'destructured from request',
+      'export const f = (request: Request) => { const { url } = request; return url; };\n',
+    ],
+    ['request.nextUrl', 'export const f = (request: { nextUrl: URL }) => request.nextUrl;\n'],
+    ['destructured nextUrl', 'export const f = ({ nextUrl }: { nextUrl: URL }) => nextUrl;\n'],
+    ['new URL with a base', "export const f = (x: { url: string }) => new URL('/a', x.url);\n"],
+    [
+      'new URL of a read',
+      "export const f = (x: { nextUrl: URL }) => new URL('/a', x.nextUrl.href);\n",
+    ],
+    ['host header', "export const f = (h: Headers) => h.get('host');\n"],
+    ['Host in any case', "export const f = (h: Headers) => h.get('Host');\n"],
+    ['forwarded host', "export const f = (h: Headers) => h.get('x-forwarded-host');\n"],
+    ['forwarded proto', "export const f = (h: Headers) => h.get('X-Forwarded-Proto');\n"],
+    ['forwarded port', "export const f = (h: Headers) => h.get('x-forwarded-port');\n"],
+    [
+      'headers().get',
+      "declare const headers: () => Headers;\nexport const f = () => headers().get('host');\n",
+    ],
+  ];
+
+  const syntaxErrors = async (path: string, code: string) =>
+    (await lint(path, code)).filter((line) => line.startsWith('error no-restricted-syntax'));
+
+  it.each(REFUSED)('refuse %s in the dashboard and in auth', async (_name, code) => {
+    for (const path of ['apps/dashboard/src/server/x.ts', 'packages/auth/src/x.ts']) {
+      expect(await syntaxErrors(path, code), path).toEqual([
+        expect.stringContaining('DREFYN_APP_ORIGIN'),
+      ]);
+    }
+  });
+
+  it.each(REFUSED)('leave %s alone in the origin module', async (_name, code) => {
+    expect(await lint('apps/dashboard/src/server/origin.ts', code)).toEqual([]);
+  });
+
+  it('leave a url that is not a request, and other headers, alone', async () => {
+    const code = `
+export const a = (item: { url: string }) => item.url;
+export const b = (h: Headers) => h.get('user-agent');
+export const c = (h: Headers) => h.get('x-forwarded-for');
+export const d = () => new URL('/a', 'https://app.drefyn.test');
+export const e = (m: Map<string, string>) => m.get('name');
+`;
+    expect(await lint('apps/dashboard/src/server/x.ts', code)).toEqual([]);
+  });
+
+  it('keep the Motion rule in auth', async () => {
+    expect(
+      await syntaxErrors('packages/auth/src/x.ts', "export const m = import('motion');\n"),
+    ).toEqual([expect.stringContaining('Motion runs only')]);
+  });
+});

@@ -443,7 +443,17 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
                 .onRef('m.organization_id', '=', 's.organization_id')
                 .on('m.user_id', '=', sql<string>`app.current_user_id()`),
             )
-            .select(['s.organization_id', 'm.role', 'm.default_project_role', 'o.plan_tier'])
+            .innerJoin('users as u', 'u.id', 'm.user_id')
+            .select([
+              's.organization_id',
+              's.slug as organization_slug',
+              'o.name as organization_name',
+              'm.role',
+              'm.default_project_role',
+              'o.plan_tier',
+              'u.email',
+              'u.display_name',
+            ])
             .where('s.slug', '=', slug)
             .executeTakeFirst();
           if (member === undefined) return NOT_MEMBER;
@@ -456,7 +466,13 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             tier: member.plan_tier,
             authenticatedAt: row.authenticated_at,
           });
-          return { kind: 'ok', access, touchDue: row.touch_due } as const;
+          const view = {
+            organizationSlug: member.organization_slug,
+            organizationName: member.organization_name,
+            email: member.email,
+            displayName: member.display_name,
+          };
+          return { kind: 'ok', access, view, touchDue: row.touch_due } as const;
         });
       } catch (error) {
         if (error === REFUSED) return SIGNED_OUT;

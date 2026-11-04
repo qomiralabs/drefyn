@@ -496,6 +496,40 @@ function checkDirectives(workspace: Workspace, files: string[]): Finding[] {
   return findings;
 }
 
+const NEXT_FLOOR: readonly [number, number, number] = [16, 4, 1];
+const LOCK_NEXT = /^ {2}'?next@([^:'(]+)/gm;
+const RELEASE = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/;
+
+// Below the floor the dashboard is open to the 2026-10-22 advisories. A prerelease sorts
+// before its release, and a version this cannot read fails: the check must never pass by
+// not understanding. No lockfile means a fixture; the gate's frozen install needs one.
+function checkNextFloor(root: string): readonly Finding[] {
+  const path = join(root, 'pnpm-lock.yaml');
+  if (!existsSync(path)) return [];
+  const finding = (detail: string): Finding => ({
+    package: 'pnpm-lock.yaml',
+    field: 'next',
+    detail,
+  });
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const [, version = ''] of readFileSync(path, 'utf8').matchAll(LOCK_NEXT)) {
+    if (seen.has(version)) continue;
+    seen.add(version);
+    const match = RELEASE.exec(version);
+    if (match === null) {
+      findings.push(finding(`cannot read version ${version}`));
+      continue;
+    }
+    const parts = [match[1], match[2], match[3]].map(Number);
+    const gap = NEXT_FLOOR.map((floor, i) => (parts[i] ?? 0) - floor).find((d) => d !== 0) ?? 0;
+    if (gap < 0 || (gap === 0 && match[4] !== undefined)) {
+      findings.push(finding(`resolved ${version} is below the ${NEXT_FLOOR.join('.')} floor`));
+    }
+  }
+  return findings;
+}
+
 export function checkWorkspace(root: string): CheckResult {
   const workspace = loadWorkspace(root);
   const findings: Finding[] = [];
@@ -521,5 +555,6 @@ export function checkWorkspace(root: string): CheckResult {
   const files = sourceFiles(root, entries);
   findings.push(...checkDirectives(workspace, files));
   findings.push(...checkAppStyles(workspace, root, entries));
+  findings.push(...checkNextFloor(root));
   return { findings, workspace: workspace.packages.length, packages, files: files.length };
 }

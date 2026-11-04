@@ -52,9 +52,21 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@drefyn/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@drefyn/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@drefyn/entitlements':
+        specifier: workspace:*
+        version: link:../../packages/entitlements
       '@drefyn/flags':
         specifier: workspace:*
         version: link:../../packages/flags
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../../packages/tenancy
       '@drefyn/ui':
         specifier: workspace:*
         version: link:../../packages/ui

@@ -12,9 +12,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 }
 
 export default async function OrganizationSettings({ params }: Params) {
-  const { name } = await guardOrganization((await params).org);
+  const { view } = await guardOrganization((await params).org);
   return (
-    <Working title="Organization settings" caption={name}>
+    <Working title="Organization settings" caption={view.organizationName}>
       <p className="max-w-measure text-body-s text-secondary">
         Name, domains and the audit log arrive with the organization API.
       </p>

@@ -6,6 +6,7 @@ import { sql } from 'kysely';
 import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
+import { checkFormBinding, formBindingField } from './form-binding.ts';
 import { PRE_MAX_AGE_SECONDS, type BrowserContext, type CookieSpec } from './cookies.ts';
 import { newDeviceNotice, recordDevice } from './devices.ts';
 import type { AuthNoticeMailer } from './email-change.ts';
@@ -100,8 +101,6 @@ export interface PasswordSignIn {
   ): Promise<Result<{ readonly send: () => Promise<void> }, AuthError>>;
 }
 
-const CSRF_LABEL = 'drefyn.pre_form.v1';
-const CSRF_FIELD = /^[A-Za-z0-9_-]{43}$/;
 const LOGGED_KEY_HEX = 16;
 // A hosted check that has not answered by now counts as a refusal.
 const BOT_CHECK_TIMEOUT_MS = 3_000;
@@ -176,15 +175,6 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
   // operator should know at start, once.
   if (config.signUp === 'open' && deps.botCheck === undefined) {
     quietWarn(deps.logger, 'auth.signup_open_without_bot_check', {});
-  }
-
-  const csrfOf = (pre: Uint8Array) =>
-    config.keys.mac('csrf', [CSRF_LABEL, pre]).toString('base64url');
-
-  function bound(b: BrowserContext, field: string): boolean {
-    const pre = decodeSecret(b.cookies.get(config.cookies.pre));
-    if (pre === null || !CSRF_FIELD.test(field)) return false;
-    return config.keys.verify('csrf', [CSRF_LABEL, pre], Buffer.from(field, 'base64url'));
   }
 
   // Outcome codes and hashed keys only.
@@ -299,14 +289,14 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
             maxAgeSeconds: PRE_MAX_AGE_SECONDS,
           },
         ],
-        csrf: csrfOf(pre),
+        csrf: formBindingField(config, pre),
       };
     },
 
     async signInWithPassword(b, input) {
       if (!config.passwords.enabled) return fail(new AuthError('AUTH_PASSWORDS_DISABLED'));
       // Before anything is counted: a cross site post costs the person nothing.
-      if (!bound(b, input.csrf)) return refused('AUTH_ORIGIN_REFUSED');
+      if (!checkFormBinding(config, b, input.csrf)) return refused('AUTH_ORIGIN_REFUSED');
       const address = normalizeAddress(input.email);
       if (address === null) return fail(new AuthError('AUTH_INPUT_INVALID'));
       let password: string;

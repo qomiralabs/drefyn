@@ -1,6 +1,7 @@
+import type { AccessContext } from '@drefyn/auth';
 import { describe, expect, it } from 'vitest';
 import { PLACEHOLDER } from '../src/fixtures/placeholder.ts';
-import { findProject, projectsOf } from '../src/fixtures/projects.ts';
+import { findProject, mayRead, projectsOf } from '../src/fixtures/projects.ts';
 import { NEEDS_YOU, PLACEHOLDER_SHELL, needsYouSentence } from '../src/fixtures/shell.ts';
 import { ORG_SECTIONS, SECTIONS, sectionOf } from '../src/shell/sections.ts';
 
@@ -21,9 +22,21 @@ describe('what needs you', () => {
   });
 });
 
+const reader = (...permissions: string[]) => ({ permissions }) as unknown as AccessContext;
+const EVERY = reader('docs.read', 'studio.read', 'status.read');
+
 describe('placeholder projects', () => {
+  it('finds nothing and lists nothing without the product read permission', () => {
+    const none = reader('org.read');
+    expect(findProject(none, 'docs', 'payments-api')).toBeUndefined();
+    expect(projectsOf(none, 'docs')).toEqual([]);
+    expect(findProject(reader('status.read'), 'docs', 'payments-api')).toBeUndefined();
+    expect(mayRead(EVERY, 'docs')).toBe(true);
+    expect(mayRead(none, 'docs')).toBe(false);
+  });
+
   it('finds a project only under its own product', () => {
-    expect(findProject('docs', 'payments-api')).toEqual({
+    expect(findProject(EVERY, 'docs', 'payments-api')).toEqual({
       slug: 'payments-api',
       id: 'prj_payments',
       product: 'docs',
@@ -31,20 +44,20 @@ describe('placeholder projects', () => {
       answer: '3 pages are out of date.',
       readOnly: false,
     });
-    expect(findProject('docs', 'unreachable')?.readOnly).toBe(true);
-    expect(findProject('status', 'payments-api')).toBeUndefined();
-    expect(findProject('docs', 'missing')).toBeUndefined();
+    expect(findProject(EVERY, 'docs', 'unreachable')?.readOnly).toBe(true);
+    expect(findProject(EVERY, 'status', 'payments-api')).toBeUndefined();
+    expect(findProject(EVERY, 'docs', 'missing')).toBeUndefined();
   });
 
   it('lists the projects of each product', () => {
-    expect(projectsOf('docs').map((p) => p.slug)).toEqual([
+    expect(projectsOf(EVERY, 'docs').map((p) => p.slug)).toEqual([
       'payments-api',
       'new-docs',
       'unreachable',
       'pending',
     ]);
-    expect(projectsOf('status').map((p) => p.slug)).toEqual(['acme-status']);
-    expect(projectsOf('studio')).toEqual([]);
+    expect(projectsOf(EVERY, 'status').map((p) => p.slug)).toEqual(['acme-status']);
+    expect(projectsOf(EVERY, 'studio')).toEqual([]);
   });
 
   it('gives the shell every project by name and product', () => {

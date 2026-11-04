@@ -14,9 +14,12 @@ export default async function ProjectLayout({
   params: Promise<{ org: string; product: string; project: string }>;
 }) {
   const { org, product, project } = await params;
-  await guardOrganization(org);
+  const { access } = await guardOrganization(org);
   const location = parseShellPath(`/${org}/${product}/${project}`);
-  if (location?.project === undefined || findProject(product, location.project) === undefined) {
+  if (
+    location?.project === undefined ||
+    findProject(access, product, location.project) === undefined
+  ) {
     notFound();
   }
   return children;
