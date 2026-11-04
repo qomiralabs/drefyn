@@ -37,8 +37,8 @@ const OTHER_NAME_FIELDS: readonly (readonly [string, Build])[] = [
 
 const PERSON_FIELDS: readonly (readonly [string, Build])[] = [
   [
-    'notice.ownerName',
-    (n) => notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', ownerName: n }),
+    'notice.memberName',
+    (n) => notice({ kind: 'owner_added', at: AT, organizationName: 'Acme', memberName: n }),
   ],
   [
     'notice.memberName',

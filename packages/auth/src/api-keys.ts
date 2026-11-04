@@ -18,7 +18,7 @@ import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, lengthPrefixed, sha256 } from './keys.ts';
 import { parseOrganizationName } from './organization-rules.ts';
-import { memberName, noticeEach } from './notices.ts';
+import { memberName, noticeEach, storedKeyName } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
 import type { Permission } from './permissions.ts';
 import type { AuthLogger } from './rate-limiter.ts';
@@ -801,7 +801,7 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
         kind: 'api_key_revoked',
         organizationId,
         keyId,
-        keyName: key.name,
+        keyName: storedKeyName(key.name),
         displaySuffix: key.displaySuffix,
         at: done.revokedAt,
       };

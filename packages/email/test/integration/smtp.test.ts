@@ -1,6 +1,6 @@
 // Delivery to Mailpit over implicit TLS with AUTH, the way hosted sends to its relay.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { renderMail, type SendResult } from '../../src/index.ts';
+import { SECURITY_NOTICE_KINDS, renderMail, type SendResult } from '../../src/index.ts';
 import { FIXTURE_MESSAGES } from '../fixtures/messages.ts';
 import { ORIGIN } from '../support.ts';
 import { mailpit, smtpServer, type ServerRecord } from '../support/servers.ts';
@@ -50,6 +50,20 @@ describe('delivery to Mailpit', () => {
     expect(headers['Auto-Submitted']).toEqual(['auto-generated']);
     expect(headers[HEADER]).toEqual([key]);
     expect(headers['Message-Id'] ?? headers['Message-ID']).toEqual([sent.messageId]);
+  });
+
+  // The union decides the list, so a new kind cannot ship without a real delivery.
+  it.each(SECURITY_NOTICE_KINDS)('delivers the security notice %s', async (kind) => {
+    const fixture = FIXTURE_MESSAGES.find(
+      ([, message]) => message.template === 'security_notice' && message.notice.kind === kind,
+    );
+    if (fixture === undefined) throw new Error(`no fixture for ${kind}`);
+    const [, message] = fixture;
+    const sent = ok(await mailer.send(TO, message, { idempotencyKey: `notice:${kind}` }));
+    const rendered = await renderMail(message, { linkOrigin: ORIGIN });
+    if (!rendered.ok) throw new Error('fixture did not render');
+    const stored = await inbox.byMessageId(sent.messageId);
+    expect(stored.map((mail) => mail.Subject)).toEqual([rendered.value.subject]);
   });
 
   it('quotes the display name instead of reading it as addresses', async () => {
