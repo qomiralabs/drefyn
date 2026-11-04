@@ -215,7 +215,7 @@ export function createCodeIssuer(config: AuthConfig, deps: CodeIssuerDeps): Code
       const send = async () => {
         if (!deliver) return;
         try {
-          await deps.mailer.sendSignInCode(to, code, link, purpose, linking);
+          await deps.mailer.sendSignInCode(to, code, link, purpose, id, linking);
         } catch {
           warn(deps.logger, 'auth.sign_in_mail_failed', { purpose });
         }

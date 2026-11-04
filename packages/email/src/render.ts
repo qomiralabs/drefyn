@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { emailError } from './errors.ts';
 import { checkMessage } from './guards.ts';
-import { MailDocument } from './html/document.tsx';
+import { MailDocument } from './html/document.ts';
 import { fillOutlook } from './html/outlook.ts';
 import { mailContent } from './templates/index.ts';
 import { renderText } from './text.ts';
