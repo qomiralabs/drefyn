@@ -15,6 +15,7 @@ import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
 import { AuthError } from './errors.ts';
 import { constantTimeEqual, lengthPrefixed, sha256 } from './keys.ts';
 import { parseOrganizationName } from './organization-rules.ts';
+import { noticeEach } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
 import type { Permission } from './permissions.ts';
 import type { AuthLogger } from './rate-limiter.ts';
@@ -412,7 +413,14 @@ export function createApiKeys(deps: ApiKeysDeps): ApiKeys {
           const rows = await store.auth((tx) =>
             tx.selectFrom('users').select('email').where('id', 'in', made.owners).execute(),
           );
-          for (const row of rows) await deps.mailer.sendSecurityNotice(row.email, notice);
+          await noticeEach(
+            deps.mailer,
+            rows.map((row) => row.email),
+            notice,
+            () => {
+              quietWarn(deps.logger, 'auth.api_key_notice_failed', idFields(ids));
+            },
+          );
         } catch {
           quietWarn(deps.logger, 'auth.api_key_notice_failed', idFields(ids));
         }

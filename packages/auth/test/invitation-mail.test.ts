@@ -46,6 +46,7 @@ async function sendWith(organizationName: string, displayName: string | null) {
     limiter: noopLimiter(),
     store: scriptedStore(respond(organizationName, displayName)).store,
     mailer: {
+      sendSecurityNotice: () => Promise.resolve(),
       sendInvitation(_to, invitation) {
         sent.push(invitation);
         return Promise.resolve();
