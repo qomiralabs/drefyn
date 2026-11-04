@@ -111,6 +111,19 @@ test.describe('phone command bar', () => {
   });
 });
 
+test.describe('the first run pages at 390 px', () => {
+  test.use({ viewport: MOBILE });
+
+  // The long fixed prefix must shrink, not push the page sideways.
+  for (const path of ['/auth-states/organization/ready', '/auth-states/organization/taken']) {
+    test(`${path} stays inside the screen`, async ({ page }) => {
+      await page.goto(path);
+      const box = await page.locator('.auth-affix').boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(MOBILE.width);
+    });
+  }
+});
+
 test.describe('wide command bar', () => {
   test.use({ viewport: DESKTOP });
 
