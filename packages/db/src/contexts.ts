@@ -7,7 +7,7 @@ import type {
   AuthPasswordCredentialsTable,
   AuthUsersTable,
 } from './identity-columns.ts';
-import type { ColumnType, Schema } from './schema.generated.ts';
+import type { ApiKeysTable, ColumnType, Schema } from './schema.generated.ts';
 
 // Only the named tables, so a table outside the list is not even a name the transaction can
 // type.
@@ -23,15 +23,21 @@ type WithColumns<S, Users, Credentials, Devices> = Omit<
   known_devices: Devices;
 };
 
+type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
+
+// The one column the cleanup finds old revoked keys by. Kept apart from AuthTableName, which
+// also decides what organization work may not name, and this table is its to name.
+interface AuthApiKeysTable {
+  revoked_at: ColumnType<SelectOf<ApiKeysTable['revoked_at']>, never, never>;
+}
+
 // The identity tables drefyn_auth may touch, before anyone is signed in.
 export type AuthSchema = WithColumns<
   NamedTables<Schema, AuthTableName>,
   AuthUsersTable,
   AuthPasswordCredentialsTable,
   AuthKnownDevicesTable
->;
-
-type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
+> & { api_keys: AuthApiKeysTable };
 
 // Every column readable and none insertable or updatable. The policies already refuse the
 // write; this keeps it from compiling.

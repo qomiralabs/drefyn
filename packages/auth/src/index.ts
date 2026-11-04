@@ -50,12 +50,17 @@ export { type AccessContext, type AccessResult, type AccessView } from './access
 export {
   ApiKeyReplayError,
   createApiKeys,
+  type ApiKeyLastUsed,
+  type ApiKeyPage,
+  type ApiKeyState,
   type ApiKeyStore,
   type ApiKeySummary,
   type ApiKeys,
   type ApiKeysDeps,
   type CreateApiKeyInput,
   type CreatedApiKey,
+  type ListApiKeysInput,
+  type ListedApiKey,
   type RevokedApiKey,
   type ProjectScope,
 } from './api-keys.ts';

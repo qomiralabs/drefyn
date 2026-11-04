@@ -1,5 +1,5 @@
 import type { AuthDatabase, Database } from '@drefyn/db';
-import { toPublicId } from '@drefyn/tenancy';
+import { idOf, toPublicId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
 import {
   ApiKeyReplayError,
@@ -8,6 +8,7 @@ import {
   parseApiKey,
   type ApiKeysDeps,
   type CreateApiKeyInput,
+  type ListApiKeysInput,
 } from '../src/index.ts';
 import { createTestAuthMailer } from '../src/testing.ts';
 import {
@@ -27,16 +28,21 @@ import {
   isEmailsRead,
   isKeyInsert,
   isKeyProof,
+  isCountsRead,
   isKeyProjects,
   isMemberRead,
   isOwnerRead,
+  isPageRead,
   isProjectInsert,
   isRecentRead,
   isRevokeWrite,
+  listResponder,
+  listedRow,
   revokeResponder,
   sha,
   storedKey,
   type CreateShape,
+  type ListShape,
   type RevokeShape,
 } from './api-key-fixtures.ts';
 import { scriptedStore, type Statement } from './scripted-store.ts';
@@ -726,5 +732,319 @@ describe('revokeApiKey', () => {
       event: 'auth.api_key_revoke_failed',
       fields: { organizationId: toPublicId('org', ORG), keyId: toPublicId('key', KEY) },
     });
+  });
+});
+
+describe('listApiKeys', () => {
+  function listSetup(shape: ListShape = {}) {
+    const scripted = scriptedStore(listResponder(shape));
+    const { logger, lines } = capturingLogger();
+    const keys = createApiKeys({
+      store: scripted.store,
+      scopes: SCOPES,
+      logger,
+      mailer: createTestAuthMailer().mailer,
+    });
+    return { keys, scripted, lines };
+  }
+
+  async function listed(input: ListApiKeysInput = {}, shape: ListShape = {}) {
+    const t = listSetup(shape);
+    const result = await t.keys.listApiKeys(access(), input);
+    if (!result.ok) throw result.error;
+    return { ...t, page: result.value };
+  }
+
+  const ofKind = (statements: readonly Statement[], kind: (s: Statement) => boolean) => {
+    const found = statements.find(kind);
+    if (found === undefined) throw new Error('no such statement');
+    return found;
+  };
+
+  const tooMany = Array.from({ length: 51 }, () => MEMBERSHIP);
+  const cursorOf = (text: string) => Buffer.from(text).toString('base64url');
+
+  it.each<[string, unknown]>([
+    ['an empty search', { search: '' }],
+    ['a search over 100 characters', { search: 'a'.repeat(101) }],
+    ['a search that NFKC grows past 100', { search: '\uFDFA'.repeat(10) }],
+    ['a search with a NUL', { search: 'a\u0000b' }],
+    ['a search with half a surrogate pair', { search: 'a\uD800' }],
+    ['a search of the wrong type', { search: 7 }],
+    ['an unknown product', { products: ['billing'] }],
+    ['an empty product list', { products: [] }],
+    ['more products than exist', { products: ['docs', 'docs', 'docs', 'docs'] }],
+    ['an empty creator list', { createdBy: [] }],
+    ['a creator that is no id', { createdBy: ['nia'] }],
+    ['a project id shaped creator of the wrong type', { createdBy: [7] }],
+    ['51 creators', { createdBy: tooMany }],
+    ['an unknown last used choice', { lastUsed: 'yesterday' }],
+    ['a limit of 0', { limit: 0 }],
+    ['a limit of 101', { limit: 101 }],
+    ['a fractional limit', { limit: 1.5 }],
+    ['a limit as text', { limit: '10' }],
+    ['a cursor that is not ours', { cursor: 'abc' }],
+    ['an empty cursor', { cursor: '' }],
+    ['a cursor with no id', { cursor: cursorOf('k1.') }],
+    ['a cursor of another version', { cursor: cursorOf(`k2.${KEY}`) }],
+    ['a cursor with padding', { cursor: `${cursorOf(`k1.${KEY}`)}=` }],
+    ['a cursor in upper case hex', { cursor: cursorOf(`k1.${KEY.toUpperCase()}`) }],
+    ['a very long cursor', { cursor: 'a'.repeat(1_000) }],
+    ['a field nobody asked for', { sort: 'name' }],
+    ['no input at all', undefined],
+  ])('refuses %s with no statement sent', async (_name, input) => {
+    const t = listSetup();
+    const result = await t.keys.listApiKeys(access(), input as ListApiKeysInput);
+    if (result.ok) throw new Error('expected a refusal');
+    expect(result.error.code).toBe('AUTH_INPUT_INVALID');
+    expect(t.scripted.statements()).toEqual([]);
+  });
+
+  it('refuses a context without org.read before any statement', async () => {
+    const t = listSetup();
+    const a = { ...access(), permissions: [] };
+    const result = await t.keys.listApiKeys(a, {});
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_FORBIDDEN');
+    expect(t.scripted.statements()).toEqual([]);
+  });
+
+  it('lets a plain member read the list, with no step up', async () => {
+    const t = listSetup();
+    const result = await t.keys.listApiKeys(access('member'), {});
+    expect(result.ok).toBe(true);
+    expect(t.scripted.statements().some(isRecentRead)).toBe(false);
+  });
+
+  it('runs under the organization, on the read path with no actor', async () => {
+    const t = await listed();
+    expect(t.scripted.events[0]).toEqual({
+      kind: 'begin',
+      scope: 'organization',
+      organizationId: ORG,
+    });
+  });
+
+  it('sends three statements for a page with no listed key, and four with one', async () => {
+    const none = await listed({}, { keys: [listedRow()] });
+    expect(none.scripted.statements()).toHaveLength(3);
+    const some = await listed({}, { keys: [listedRow({ project_scope: 'listed' })] });
+    expect(some.scripted.statements()).toHaveLength(4);
+  });
+
+  it('names the organization in every statement', async () => {
+    const t = await listed({}, { keys: [listedRow({ project_scope: 'listed' })] });
+    for (const s of t.scripted.statements()) expect(s.parameters).toContain(ORG);
+  });
+
+  it('never names a hash or the idempotency key', async () => {
+    const t = await listed({ search: 'a' }, { keys: [listedRow({ project_scope: 'listed' })] });
+    const text = t.scripted
+      .statements()
+      .map((s) => s.sql)
+      .join('\n');
+    for (const column of ['secret_hash', 'request_hash', 'idempotency_key']) {
+      expect(text).not.toContain(column);
+    }
+  });
+
+  it('drops a hash from the result even if a row carried one', async () => {
+    const row = listedRow({
+      secret_hash: Buffer.alloc(32, 9),
+      request_hash: Buffer.alloc(32, 8),
+      idempotency_key: 'create-1',
+    });
+    const { page } = await listed({}, { keys: [row] });
+    const item = page.items[0];
+    expect(item).toBeDefined();
+    expect(Object.keys(item ?? {}).sort()).toEqual(
+      [
+        'createdAt',
+        'createdBy',
+        'creatorName',
+        'displaySuffix',
+        'expiresAt',
+        'keyId',
+        'lastUsedAt',
+        'name',
+        'organizationId',
+        'projectIds',
+        'projectScope',
+        'revokedAt',
+        'scopes',
+        'state',
+      ].sort(),
+    );
+    expect(JSON.stringify(page)).not.toContain('create-1');
+  });
+
+  it('asks for one row past the limit, and offers no cursor when none comes back', async () => {
+    const t = await listed({ limit: 2 }, { keys: [listedRow()] });
+    expect(ofKind(t.scripted.statements(), isPageRead).parameters).toContain(3);
+    expect(t.page.nextCursor).toBeNull();
+  });
+
+  it('defaults to 50 rows', async () => {
+    const t = await listed();
+    expect(ofKind(t.scripted.statements(), isPageRead).parameters).toContain(51);
+  });
+
+  it('accepts 1 and 100 as limits, 100 characters, and 50 creators', async () => {
+    await expect(listed({ limit: 1 })).resolves.toBeDefined();
+    await expect(listed({ limit: 100 })).resolves.toBeDefined();
+    await expect(listed({ search: 'a'.repeat(100) })).resolves.toBeDefined();
+    await expect(listed({ createdBy: tooMany.slice(1) })).resolves.toBeDefined();
+  });
+
+  it('cuts the extra row, and its cursor walks on from the last one shown', async () => {
+    const rows = [listedRow({ id: OTHER_KEY }), listedRow({ id: KEY })];
+    const first = await listed({ limit: 1 }, { keys: rows });
+    expect(first.page.items.map((i) => i.keyId)).toEqual([OTHER_KEY]);
+    expect(first.page.nextCursor).not.toBeNull();
+    const cursor = first.page.nextCursor ?? '';
+    expect(cursor).not.toContain(OTHER_KEY);
+    const second = await listed({ limit: 1, cursor });
+    expect(ofKind(second.scripted.statements(), isPageRead).sql).toContain('"k"."id" <');
+    expect(ofKind(second.scripted.statements(), isPageRead).parameters).toContain(OTHER_KEY);
+  });
+
+  it('sends no cursor comparison on the first page', async () => {
+    const t = await listed();
+    expect(ofKind(t.scripted.statements(), isPageRead).sql).not.toContain('"k"."id" <');
+  });
+
+  it('normalizes the search with NFKC and binds it, so it never reaches the text', async () => {
+    const t = await listed({ search: '\uFF21%' });
+    const page = ofKind(t.scripted.statements(), isPageRead);
+    expect(page.parameters).toContain('A%');
+    expect(page.sql).toContain('strpos(lower(k.name), lower($');
+    expect(page.sql).not.toContain('A%');
+    expect(page.sql).not.toContain(' like ');
+  });
+
+  it('counts by the same filters as the page', async () => {
+    const t = await listed({ search: 'deploy', products: ['docs'], lastUsed: 'never' });
+    const counts = ofKind(t.scripted.statements(), isCountsRead);
+    expect(counts.parameters).toContain('deploy');
+    expect(counts.parameters).toContainEqual(['docs']);
+    expect(counts.sql).toContain('k.last_used_at is null');
+  });
+
+  it('binds listed creators, and adds former only when asked', async () => {
+    const both = await listed({ createdBy: [MEMBERSHIP, 'former'] });
+    const page = ofKind(both.scripted.statements(), isPageRead);
+    expect(page.parameters).toContainEqual([MEMBERSHIP]);
+    expect(page.sql).toContain('k.created_by is null');
+    const one = await listed({ createdBy: [MEMBERSHIP] });
+    expect(ofKind(one.scripted.statements(), isPageRead).sql).not.toContain('k.created_by is null');
+    const former = await listed({ createdBy: ['former'] });
+    const onlyFormer = ofKind(former.scripted.statements(), isPageRead);
+    expect(onlyFormer.sql).toContain('k.created_by is null');
+    expect(onlyFormer.sql).not.toContain('= any');
+  });
+
+  it.each([
+    ['7d', "interval '7 days'"],
+    ['30d', "interval '30 days'"],
+    ['never', 'k.last_used_at is null'],
+  ] as const)('filters last used %s by database time', async (lastUsed, text) => {
+    const t = await listed({ lastUsed });
+    expect(ofKind(t.scripted.statements(), isPageRead).sql).toContain(text);
+  });
+
+  it('reads any as no last used filter at all', async () => {
+    const t = await listed({ lastUsed: 'any' });
+    expect(ofKind(t.scripted.statements(), isPageRead).sql).not.toContain('last_used_at >=');
+    expect(ofKind(t.scripted.statements(), isPageRead).sql).not.toContain('last_used_at is');
+  });
+
+  it('shapes a page from its rows, with projects, states, names and counts', async () => {
+    const creator = idOf('mem', MEMBERSHIP);
+    const { page } = await listed(
+      {},
+      {
+        keys: [
+          listedRow({ id: OTHER_KEY, project_scope: 'listed', state: 'expired' }),
+          listedRow({
+            state: 'revoked',
+            created_by: null,
+            display_name: null,
+            email: null,
+            revoked_at: REVOKED_AT,
+          }),
+        ],
+        projects: [
+          { api_key_id: OTHER_KEY, target_project_id: PROJECT_A },
+          { api_key_id: OTHER_KEY, target_project_id: PROJECT_B },
+        ],
+        counts: { total: 9, matched: 2, live: 4, former_keys: 3, docs: 7, studio: 1, status: 2 },
+        creators: [{ id: creator, display_name: null, email: 'nia@example.com', keys: 6 }],
+      },
+    );
+    expect(page.items[0]).toMatchObject({
+      keyId: OTHER_KEY,
+      state: 'expired',
+      creatorName: 'Nia Reed',
+      projectIds: [PROJECT_A, PROJECT_B],
+    });
+    expect(page.items[1]).toMatchObject({
+      keyId: KEY,
+      state: 'revoked',
+      createdBy: null,
+      creatorName: null,
+      projectIds: [],
+    });
+    expect(page).toMatchObject({
+      matched: 2,
+      total: 9,
+      live: 4,
+      formerKeys: 3,
+      products: { docs: 7, studio: 1, status: 2 },
+      creators: [{ membershipId: creator, name: 'nia@example.com', keys: 6 }],
+    });
+    expect(Object.isFrozen(page)).toBe(true);
+    expect(Object.isFrozen(page.items)).toBe(true);
+    expect(Object.isFrozen(page.creators)).toBe(true);
+  });
+
+  it('uses the mail safe name, so a link shaped name never reaches the table', async () => {
+    const { page } = await listed(
+      {},
+      {
+        keys: [listedRow({ display_name: 'evil.example', email: 'a/b@evil.example' })],
+        creators: [
+          { id: MEMBERSHIP, display_name: 'www.evil.example', email: 'a/b@evil.example', keys: 1 },
+        ],
+      },
+    );
+    expect(page.items[0]?.creatorName).toBe('A team member');
+    expect(page.creators[0]?.name).toBe('A team member');
+  });
+
+  it('fails closed on a stored state it does not know', async () => {
+    const t = listSetup({ keys: [listedRow({ state: 'paused' })] });
+    const result = await t.keys.listApiKeys(access(), {});
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('logs nothing on success', async () => {
+    const t = await listed({ search: 'deploy' }, { keys: [listedRow()] });
+    expect(t.lines).toEqual([]);
+  });
+
+  it('answers AUTH_UNAVAILABLE on a database failure, with ids and no search text', async () => {
+    const scripted = scriptedStore(() => {
+      throw new Error('connection lost near deploy-secret-name');
+    });
+    const { logger, lines } = capturingLogger();
+    const keys = createApiKeys({
+      store: scripted.store,
+      scopes: SCOPES,
+      logger,
+      mailer: createTestAuthMailer().mailer,
+    });
+    const result = await keys.listApiKeys(access(), { search: 'deploy-secret-name' });
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_UNAVAILABLE');
+    expect(lines.map((l) => l.event)).toEqual(['auth.api_key_list_failed']);
+    expect(JSON.stringify(lines)).not.toContain('deploy-secret-name');
   });
 });

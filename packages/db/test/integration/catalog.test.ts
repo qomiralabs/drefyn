@@ -460,6 +460,43 @@ grant execute on function app.bad_public_fn() to public;`,
 grant select on app.bad_auth_global to drefyn_auth;`,
     allow: lists(['bad_auth_global']),
   },
+  'an auth grant on a tenant table beyond the reviewed ones': {
+    rule: 'auth_grant',
+    object: 'app.api_keys',
+    mentions: ['app.api_keys.name', 'drefyn_auth', 'organization_id'],
+    up: () => 'grant select (name) on app.api_keys to drefyn_auth;',
+  },
+  'a reviewed auth grant on a tenant table with grant option': {
+    rule: 'auth_grant',
+    object: 'app.api_keys',
+    mentions: ['DELETE', 'drefyn_auth'],
+    up: () => 'grant delete on app.api_keys to drefyn_auth with grant option;',
+  },
+  'a reviewed auth delete grant that is gone': {
+    rule: 'auth_grant',
+    object: 'app.api_keys',
+    mentions: ['DELETE', 'missing'],
+    up: () => 'revoke delete on app.api_keys from drefyn_auth;',
+  },
+  'a reviewed auth column grant that is gone': {
+    rule: 'auth_grant',
+    object: 'app.api_keys',
+    mentions: ['app.api_keys.revoked_at', 'SELECT', 'missing'],
+    up: () => 'revoke select (revoked_at) on app.api_keys from drefyn_auth;',
+  },
+  'an API key expiry policy with other text': {
+    rule: 'policy',
+    object: 'app.api_keys',
+    mentions: ['auth_expire', 'USING'],
+    up: () =>
+      `alter policy auth_expire on app.api_keys using (revoked_at < now() - interval '1 day');`,
+  },
+  'an API key expiry read policy with other text': {
+    rule: 'policy',
+    object: 'app.api_keys',
+    mentions: ['auth_expire_read', 'USING'],
+    up: () => 'alter policy auth_expire_read on app.api_keys using (true);',
+  },
   'a column grant to drefyn_auth on a tenant table': {
     rule: 'auth_grant',
     object: 'app.fixture_members',

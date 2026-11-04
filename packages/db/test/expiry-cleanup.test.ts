@@ -7,6 +7,7 @@ import {
   deleteExpired,
   type ExpiryRule,
 } from '../src/index.ts';
+import { USER_POLICIES } from '../src/allow-lists.ts';
 import { DbError } from '../src/errors.ts';
 import { thrown } from './support.ts';
 
@@ -24,17 +25,30 @@ const RULES: readonly ExpiryRule<TwoTables>[] = [
 const tx = {} as Transaction<TwoTables>;
 
 describe('expiry rules', () => {
-  it('clear ended windows, challenges, states and CLI links a day after expiry, devices after 400 days', () => {
+  it('clear ended windows, challenges, states and CLI links a day after expiry, devices after 400 days, revoked keys after 90', () => {
     expect(AUTH_EXPIRY_RULES).toEqual([
       { table: 'auth_rate_limits', column: 'window_end', afterSeconds: 0 },
       { table: 'email_challenges', column: 'expires_at', afterSeconds: 86_400 },
       { table: 'oauth_states', column: 'expires_at', afterSeconds: 86_400 },
       { table: 'cli_sign_in_links', column: 'expires_at', afterSeconds: 86_400 },
       { table: 'known_devices', column: 'last_seen_at', afterSeconds: 400 * 86_400 },
+      { table: 'api_keys', column: 'revoked_at', afterSeconds: 90 * 86_400 },
     ]);
     expect(API_KEY_EXPIRY_RULES).toEqual([
       { table: 'api_key_failures', column: 'window_end', afterSeconds: 0 },
     ]);
+  });
+
+  // The rule picks what the cleanup sends and the policy bounds what it may do. If they drifted
+  // apart the cleanup would quietly delete fewer rows, or none.
+  it('agree with the delete and read policies on the age of a revoked key', () => {
+    const rule = AUTH_EXPIRY_RULES.find((r) => r.table === 'api_keys');
+    const days = (name: string) => {
+      const entry = USER_POLICIES.find((p) => p.name === name);
+      return Number(/'(\d+) days'::interval/.exec(entry?.using ?? '')?.[1]);
+    };
+    expect(rule?.afterSeconds).toBe(days('app.api_keys.auth_expire') * 86_400);
+    expect(rule?.afterSeconds).toBe(days('app.api_keys.auth_expire_read') * 86_400);
   });
 
   it.each<[string, readonly ExpiryRule<TwoTables>[]]>([
