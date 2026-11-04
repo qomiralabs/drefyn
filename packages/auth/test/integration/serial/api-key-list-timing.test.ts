@@ -5,9 +5,11 @@ import type { ApiKeys, ListApiKeysInput } from '../../../src/index.ts';
 import { memberOf, newOrg, recordingStore, type Org } from '../support/api-keys.ts';
 import { describeWithStack, harness, type Harness } from '../support/harness.ts';
 
-// listApiKeys for one organization of 1,000 keys, beside 2,000 keys of other organizations, so
-// the planner has the same choice it has in production. Half the keys are limited to two
-// projects, and a tenth are revoked.
+// listApiKeys for one organization of 1,000 keys, beside 100,000 keys of other organizations.
+// Half the keys are limited to two projects, and a tenth are revoked. The table has to be this
+// big: at 11,000 rows Postgres still walks the primary key backward and filters, which is the
+// cheaper plan by its estimate, and it moves to the unique (organization_id, id) well before
+// 100,000.
 
 const fresh = harness();
 let h: Harness;
@@ -15,7 +17,7 @@ let org: Org;
 let keys: ApiKeys;
 
 const KEYS = 1_000;
-const OTHER_ORGS = 400;
+const OTHER_ORGS = 20_000;
 const SAMPLES = 1_000;
 
 const QUERIES: readonly ListApiKeysInput[] = [
@@ -69,7 +71,7 @@ describeWithStack('listApiKeys timing', () => {
       analyze app.api_keys;
       analyze app.api_key_projects;
       analyze app.memberships;`);
-  });
+  }, 120_000);
 
   it('answers within 30 ms at p99 for 1,000 keys', async () => {
     const first = await keys.listApiKeys(org.owner, {});
