@@ -31,6 +31,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@drefyn/email": "workspace:*",
     "fast-check": "4.10.2",
     "typescript": "6.0.3"
   }

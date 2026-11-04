@@ -9,9 +9,12 @@ import type {
   Result,
   SendOptions,
   SendResult,
+  SecurityNoticeKind,
+  SignInCodePurpose,
   TemplateId,
   renderMail,
 } from '../../src/index.ts';
+import type { NOTICE_TEMPLATES, NoticeTemplates } from '../../src/templates/security-notice.ts';
 
 declare const link: URL;
 declare const mailer: Mailer;
@@ -58,6 +61,10 @@ function compileOnly(): void {
   const unblockable: MailMessage = noBlockLink;
   // @ts-expect-error the block link is a URL, not a string
   const textBlock: MailMessage = textBlockLink;
+  // @ts-expect-error cli_link is a session method and never a mail
+  const cli: SignInCodePurpose = 'cli_link';
+  // @ts-expect-error a notice kind with no template must not compile
+  const noTemplates: NoticeTemplates = {};
   // @ts-expect-error every send needs an idempotency key
   void mailer.send('a@b.test', missing, {});
 
@@ -70,7 +77,7 @@ function compileOnly(): void {
   void mailer.send('a@b.test', linked, { idempotencyKey: 'code:1' });
   const invited: MailMessage = { ...noBlockLink, blockLink: link };
   void mailer.send('a@b.test', invited, { idempotencyKey: 'invite:1' });
-  expect([extra, provider, text, unblockable, textBlock]).toBeDefined();
+  expect([extra, provider, text, unblockable, textBlock, cli, noTemplates]).toBeDefined();
 }
 
 describe('message type tests', () => {
@@ -80,6 +87,7 @@ describe('message type tests', () => {
 
   it('pin the exported shapes', () => {
     expectTypeOf<TemplateId>().toEqualTypeOf<'sign_in_code' | 'invitation' | 'security_notice'>();
+    expectTypeOf<keyof typeof NOTICE_TEMPLATES>().toEqualTypeOf<SecurityNoticeKind>();
     expectTypeOf<SendOptions['idempotencyKey']>().toEqualTypeOf<string>();
     expectTypeOf<Mailer['send']>().returns.toEqualTypeOf<Promise<SendResult>>();
     expectTypeOf<EmailError['code']>().toExtend<string>();

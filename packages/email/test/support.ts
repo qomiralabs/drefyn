@@ -147,11 +147,12 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'email_changed':
         return { ...f, kind, newAddress: 'new.person@example.com' as never };
       case 'api_key_created':
-        return { ...f, kind, organizationName: a, keyName: b };
+        return { ...f, kind, organizationName: a, keyName: b, displaySuffix: 'x7Qa' };
       case 'owner_added':
         return { ...f, kind, organizationName: a, ownerName: c };
       case 'member_removed':
-        return { ...f, kind, organizationName: a, memberName: c };
+      case 'member_keys_revoked':
+        return { ...f, kind, organizationName: a, memberName: c, revokedKeys: 3 };
       default:
         return { ...f, kind };
     }

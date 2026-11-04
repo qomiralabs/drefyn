@@ -239,7 +239,14 @@ describe('package entries', () => {
     expect(Object.isFrozen(main.SECURITY_NOTICE_KINDS)).toBe(true);
     expect(Object.isFrozen(main.LINK_PROVIDERS)).toBe(true);
     expect(Object.isFrozen(main.EMAIL_CONFIG_KEYS)).toBe(true);
-    expect(main.SIGN_IN_CODE_PURPOSES).toHaveLength(6);
-    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(11);
+    expect(main.SIGN_IN_CODE_PURPOSES).toEqual([
+      'sign_in',
+      'link_identity',
+      'step_up',
+      'password_reset',
+      'email_change',
+    ]);
+    expect(main.SECURITY_NOTICE_KINDS).toHaveLength(12);
+    expect(main.SECURITY_NOTICE_KINDS).toContain('member_keys_revoked');
   });
 });
