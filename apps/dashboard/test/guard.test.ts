@@ -1,7 +1,7 @@
 import type { AccessContext, AccessView, SessionInfo } from '@drefyn/auth';
 import { idOf } from '@drefyn/tenancy';
 import fc from 'fast-check';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VISITOR_FLAG_ORGANIZATION } from '../src/shell/release.ts';
 
 const NOT_FOUND = new Error('NEXT_NOT_FOUND');
@@ -85,6 +85,10 @@ beforeEach(() => {
 });
 
 const load = async () => import('../src/server/guard.ts');
+
+// The first import pulls in all of auth, and under coverage on a busy machine that alone
+// outran the first case's 5 s.
+beforeAll(load, PROPERTY_TIMEOUT_MS);
 
 async function caught(run: () => Promise<unknown>): Promise<unknown> {
   try {
