@@ -1,57 +1,57 @@
 import type { Block, MailContent } from '../blocks.ts';
+import { OUTLOOK_CLOSE_TAG, OUTLOOK_HEAD_TAG, OUTLOOK_OPEN_TAG } from './outlook.ts';
 import {
+  Action,
+  Article,
   Body,
   Code,
-  Container,
   Facts,
+  Fineprint,
+  Folio,
   Head,
   Heading,
   Html,
-  Link,
+  Page,
+  Paragraph,
   Preheader,
   Rule,
-  Text,
 } from './primitives.tsx';
 
 function BlockView({ block }: { readonly block: Block }) {
   switch (block.type) {
     case 'heading':
-      return <Heading>{block.text}</Heading>;
+      return <Heading text={block.text} />;
     case 'paragraph':
-      return <Text>{block.text}</Text>;
+      return <Paragraph text={block.text} />;
     case 'code':
-      return <Code code={block.code} />;
-    // The raw URL is repeated under the link for clients that hide where a link goes.
+      return <Code code={block.code} note={block.note} />;
     case 'action':
-      return (
-        <>
-          <Text>
-            <Link href={block.href}>{block.label}</Link>
-          </Text>
-          <Text small>{block.href.href}</Text>
-        </>
-      );
+      return <Action href={block.href} label={block.label} note={block.note} quiet={block.quiet} />;
     case 'facts':
       return <Facts rows={block.rows} />;
     case 'rule':
       return <Rule />;
     case 'fineprint':
-      return <Text small>{block.text}</Text>;
+      return <Fineprint text={block.text} />;
   }
 }
 
 export function MailDocument({ content }: { readonly content: MailContent }) {
   return (
     <Html>
-      <Head title={content.subject} />
+      <Head title={content.subject} outlook={OUTLOOK_HEAD_TAG} />
       <Body>
         <Preheader text={content.preheader} />
-        <Container>
-          {content.blocks.map((block, index) => (
-            // Blocks never reorder, so the position is a stable key.
-            <BlockView key={index} block={block} />
-          ))}
-        </Container>
+        <Article label={content.subject}>
+          <Page open={OUTLOOK_OPEN_TAG} close={OUTLOOK_CLOSE_TAG}>
+            <Folio text={content.folio} />
+            {content.blocks.map((block, index) => (
+              // Blocks never reorder, so the position is a stable key.
+              <BlockView key={index} block={block} />
+            ))}
+            <Fineprint text={content.sender} top={8} />
+          </Page>
+        </Article>
       </Body>
     </Html>
   );

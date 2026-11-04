@@ -31,17 +31,27 @@ export function cutName(value: string, limit: number): string {
   return out + ELLIPSIS;
 }
 
+// Half the label is the most a word boundary may cost, so a label with one long token is
+// still cut close to its limit.
+function cutAtWord(value: string, limit: number): string {
+  const cut = cutName(value, limit);
+  if (cut === value) return cut;
+  const body = cut.slice(0, -ELLIPSIS.length);
+  const space = body.search(/\s\S*$/u);
+  return space < Array.from(body).length / 2 ? cut : body.slice(0, space).trimEnd() + ELLIPSIS;
+}
+
 // A long user agent or organization name is cut rather than refused, so it can never
 // block a security notice. Control characters are refused: nothing a person types
 // should hold one, and they are how text breaks out of a line.
-const name = (limit: number) =>
+const name = (limit: number, cut: typeof cutName = cutName) =>
   z.string().transform((value, ctx) => {
     const trimmed = value.trim();
     if (trimmed === '' || CONTROL.test(value) || BIDI.test(value)) {
       ctx.addIssue({ code: 'custom', message: 'name' });
       return z.NEVER;
     }
-    return cutName(trimmed, limit);
+    return cut(trimmed, limit);
   });
 
 // A copy is checked and rendered, never the caller's object: rendering awaits, so the
@@ -54,7 +64,7 @@ const provider = z.enum(LINK_PROVIDERS);
 const facts = {
   at: date,
   method: name(100).optional(),
-  device: name(120).optional(),
+  device: name(120, cutAtWord).optional(),
   sessionsLink: url.optional(),
 };
 
@@ -85,6 +95,7 @@ const notice = z.discriminatedUnion('kind', [
     kind: z.literal('api_key_created'),
     organizationName: name(100),
     keyName: name(100),
+    displaySuffix: z.string().regex(/^[0-9a-hjkmnp-tv-z]{4}$/),
   }),
   z.object({
     ...facts,
@@ -94,9 +105,10 @@ const notice = z.discriminatedUnion('kind', [
   }),
   z.object({
     ...facts,
-    kind: z.literal('member_removed'),
+    kind: z.enum(['member_removed', 'member_keys_revoked']),
     organizationName: name(100),
     memberName: name(100),
+    revokedKeys: z.number().int().min(0).max(1_000_000),
   }),
 ]);
 
