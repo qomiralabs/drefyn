@@ -458,6 +458,8 @@ describe('a recent sign in', () => {
     ['a demotion', (r) => r.changeRole(access('owner'), TARGET, 'member')],
     ['the same role again', (r) => r.changeRole(access('owner'), TARGET, 'admin')],
     ['a removal', (r) => r.removeMember(access('owner'), TARGET)],
+    ['a project role', (r) => r.setProjectRole(access('owner'), TARGET, PROJECT, 'editor')],
+    ['clearing a project role', (r) => r.setProjectRole(access('owner'), TARGET, PROJECT, null)],
   ];
 
   it.each(actions)('stops %s before any lock, with one read', async (_label, act) => {
@@ -566,7 +568,9 @@ describe('setProjectRole', () => {
     const upsert = scripted.statements().find(isProjectRoleUpsert);
     expect(upsert?.parameters).toEqual(expect.arrayContaining([ORG, TARGET, PROJECT, 'editor']));
     expect(upsert?.sql).toContain('on conflict');
-    expect(scripted.events[0]).toMatchObject({ actorUserId: USER });
+    expect(
+      scripted.events.find((e) => e.kind === 'begin' && e.scope === 'organization'),
+    ).toMatchObject({ actorUserId: USER });
   });
 
   it('deletes the row for null, so the default applies again', async () => {

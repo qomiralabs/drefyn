@@ -243,6 +243,8 @@ describeWithStack('roles and removal against Postgres', () => {
   it('refuses a stale sign in on every action, changes nothing, and passes a fresh one', async () => {
     const org = await newOrg(h);
     const member = await join(org, 'member');
+    const [project] = await addProjects(h, org.organizationId, 1);
+    if (project === undefined) throw new Error('no project');
     const age = (minutes: number) =>
       h.sql(
         `update app.sessions set authenticated_at = now() - interval '${String(minutes)} minutes'
@@ -253,13 +255,23 @@ describeWithStack('roles and removal against Postgres', () => {
     for (const result of [
       await roles.changeRole(org.owner, member.membership, 'admin'),
       await roles.removeMember(org.owner, member.membership),
+      await roles.setProjectRole(org.owner, member.membership, project, 'admin'),
+      await roles.setProjectRole(org.owner, member.membership, project, null),
     ]) {
       expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
     }
+    expect(
+      await count(
+        `select count(*) from app.project_roles where membership_id = '${member.membership}';`,
+      ),
+    ).toBe(0);
     expect(await h.sql(`select role from app.memberships where id = '${member.membership}';`)).toBe(
       'member',
     );
     await age(14);
+    expect((await roles.setProjectRole(org.owner, member.membership, project, 'editor')).ok).toBe(
+      true,
+    );
     expect((await roles.changeRole(org.owner, member.membership, 'admin')).ok).toBe(true);
   });
 
