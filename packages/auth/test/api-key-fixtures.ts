@@ -129,6 +129,7 @@ export interface CreateShape {
   readonly replay?: Record<string, unknown> | null;
   readonly replayProjects?: readonly string[];
   readonly owners?: readonly string[];
+  readonly emails?: readonly string[];
 }
 
 // Every statement createApiKey sends, answered as the database would when nothing is in the
@@ -154,7 +155,9 @@ export function createResponder(shape: CreateShape = {}): Responder {
       return (shape.replayProjects ?? []).map((id) => ({ target_project_id: id }));
     }
     if (isOwnerRead(s)) return (shape.owners ?? [OWNER_USER]).map((id) => ({ user_id: id }));
-    if (isEmailsRead(s)) return [{ email: 'owner@example.com' }];
+    if (isEmailsRead(s)) {
+      return (shape.emails ?? ['owner@example.com']).map((email) => ({ email }));
+    }
     return [];
   };
 }

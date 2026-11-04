@@ -385,6 +385,15 @@ describe('createApiKey', () => {
     });
   });
 
+  it('still tells the other owners when one send fails', async () => {
+    const emails = ['one@example.com', 'two@example.com', 'three@example.com'];
+    const { value, mail, lines } = await created({ emails });
+    mail.failNext();
+    await value.send();
+    expect(mail.notices.map((n) => n.to)).toEqual(emails.slice(1));
+    expect(lines.filter((l) => l.event === 'auth.api_key_notice_failed')).toHaveLength(1);
+  });
+
   it('logs the creation by ids only, never the name or the secret', async () => {
     const { value, lines } = await created();
     expect(lines).toEqual([

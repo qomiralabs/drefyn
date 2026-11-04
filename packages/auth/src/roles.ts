@@ -11,6 +11,7 @@ import { sql, type Transaction } from 'kysely';
 import { storedRole, type AccessContext } from './access.ts';
 import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
+import { memberName, noticeEach } from './notices.ts';
 import type { OrganizationStore } from './organizations.ts';
 import { ORG_ROLES, PROJECT_ROLES, type OrgRole, type ProjectRole } from './permissions.ts';
 import type { AuthLogger } from './rate-limiter.ts';
@@ -133,12 +134,11 @@ async function readTarget(tx: Tx, member: string): Promise<Target> {
     .where('m.id', '=', member)
     .executeTakeFirst();
   if (row === undefined) throw new Refused('AUTH_NOT_FOUND');
-  const name = row.display_name ?? '';
   return {
     id: row.id,
     userId: row.user_id,
     role: storedRole(row.role),
-    name: name === '' ? row.email : name,
+    name: memberName(row.display_name, row.email),
   };
 }
 
@@ -224,16 +224,11 @@ export function createRoles(deps: RolesDeps): Roles {
     return fail(error);
   }
 
-  // After the commit. A failed send is logged and never undoes the change, and each owner is
-  // tried on their own, so one bad address cannot keep the news from the others.
+  // After the commit. A failed send is logged and never undoes the change.
   async function tell(owners: readonly string[], notice: AuthSecurityNotice, ids: Ids) {
-    for (const to of owners) {
-      try {
-        await deps.mailer.sendSecurityNotice(to, notice);
-      } catch {
-        quietWarn(deps.logger, 'auth.member_notice_failed', idFields(ids));
-      }
-    }
+    await noticeEach(deps.mailer, owners, notice, () => {
+      quietWarn(deps.logger, 'auth.member_notice_failed', idFields(ids));
+    });
   }
 
   // Before any lock or write. A session taken over or left open must not be able to add an

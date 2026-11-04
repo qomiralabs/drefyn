@@ -19,6 +19,7 @@ import {
   type InvitationsDeps,
   type OrgRole,
   type RateLimiter,
+  type AuthSecurityNotice,
 } from '../src/index.ts';
 import { formatBlockToken, parseBlockToken } from '../src/invitation-links.ts';
 import {
@@ -87,6 +88,9 @@ const isTier = (s: Statement) => has(s, 'select', 'organizations') && !isOrgLock
 const isMemberInsert = (s: Statement) => has(s, 'insert into', 'memberships');
 const isInvitationDelete = (s: Statement) => has(s, 'delete from', 'invitations');
 const isBlockInsert = (s: Statement) => has(s, 'insert into', 'invitation_blocks');
+const isRecentRead = (s: Statement) => has(s, 'select', 'sessions');
+const isOwnersRead = (s: Statement) =>
+  has(s, 'select', 'memberships') && s.sql.includes('"m"."role" = ');
 
 interface World {
   readonly tier?: string;
@@ -99,6 +103,10 @@ interface World {
   readonly invitation?: Record<string, unknown> | null;
   readonly inviterRole?: OrgRole | null;
   readonly memberInserted?: boolean;
+  readonly recent?: boolean;
+  readonly sessionFound?: boolean;
+  // Every owner row after the insert, the person accepting included.
+  readonly owners?: readonly Record<string, unknown>[];
 }
 
 function invitationRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -117,6 +125,8 @@ function invitationRow(overrides: Record<string, unknown> = {}): Record<string, 
 // Answers each statement the way Postgres would for the world described.
 function world(w: World = {}): Responder {
   return (s) => {
+    if (isRecentRead(s)) return w.sessionFound === false ? [] : [{ recent: w.recent ?? true }];
+    if (isOwnersRead(s)) return w.owners ?? [];
     if (isCount(s)) return [{ used: w.used ?? 1, plan_tier: w.tier ?? 'self_hosted' }];
     if (isOrgLock(s) || isTier(s)) {
       return [{ plan_tier: w.tier ?? 'self_hosted', name: w.organizationName ?? 'Acme Widgets' }];
@@ -144,13 +154,27 @@ function world(w: World = {}): Responder {
 
 function mailer() {
   const sent: { to: string; invitation: InvitationSend }[] = [];
+  const notices: { to: string; notice: AuthSecurityNotice }[] = [];
+  let failNotices = 0;
   let fail = false;
   return {
     sent,
+    notices,
+    failNextNotice() {
+      failNotices += 1;
+    },
     failNext() {
       fail = true;
     },
     mailer: {
+      sendSecurityNotice(to: string, notice: AuthSecurityNotice) {
+        if (failNotices > 0) {
+          failNotices -= 1;
+          return Promise.reject(new Error(`smtp refused ${to}`));
+        }
+        notices.push({ to, notice });
+        return Promise.resolve();
+      },
       sendInvitation(to: string, invitation: InvitationSend) {
         if (fail) {
           fail = false;
@@ -691,5 +715,125 @@ describe('seatUsage', () => {
     await expect(invitations.seatUsage(access())).rejects.toMatchObject({
       code: 'AUTH_UNAVAILABLE',
     });
+  });
+});
+
+// Inviting an owner is a way to add one, so it answers to the same rule as a role change.
+describe('inviting an owner', () => {
+  const owner = () => input({ role: 'owner' });
+  const organizationBegins = (scripted: ScriptedStore) =>
+    scripted.events.filter((e) => e.kind === 'begin' && e.scope === 'organization');
+
+  it('refuses a stale sign in before the limiter or any write', async () => {
+    const { invitations, scripted, limiter, mail } = setup(
+      world({ actorRole: 'owner', recent: false }),
+    );
+    const result = await invitations.invite(access('owner'), owner());
+    expect(failed(result).code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+    expect(scripted.statements().map(isRecentRead)).toEqual([true]);
+    expect(limiter.calls).toEqual([]);
+    expect(organizationBegins(scripted)).toEqual([]);
+    expect(mail.sent).toEqual([]);
+  });
+
+  it('refuses a session that has gone', async () => {
+    const { invitations, limiter } = setup(world({ actorRole: 'owner', sessionFound: false }));
+    const result = await invitations.invite(access('owner'), owner());
+    expect(failed(result).code).toBe('AUTH_SESSION_INVALID');
+    expect(limiter.calls).toEqual([]);
+  });
+
+  it('checks by database time, for this session and person, then carries on', async () => {
+    const { invitations, scripted } = setup(world({ actorRole: 'owner' }));
+    const result = await invitations.invite(access('owner'), owner());
+    expect(result.ok).toBe(true);
+    const [first] = scripted.statements();
+    expect(first?.sql).toContain("authenticated_at > now() - interval '15 minutes'");
+    expect(first?.sql).toContain('app.current_user_id()');
+    expect(first?.parameters).toContain(SESSION);
+    expect(scripted.statements().some(isUpsert)).toBe(true);
+  });
+
+  it('refuses an admin as before, with no sign in check', async () => {
+    const { invitations, scripted } = setup();
+    expect(failed(await invitations.invite(access('admin'), owner())).code).toBe('AUTH_FORBIDDEN');
+    expect(scripted.statements()).toEqual([]);
+  });
+
+  it.each(['admin', 'member'])('leaves a %s invitation unchanged, stale or not', async (role) => {
+    const { invitations, scripted } = setup(world({ actorRole: 'owner', recent: false }));
+    expect((await invitations.invite(access('owner'), input({ role }))).ok).toBe(true);
+    expect(scripted.statements().some(isRecentRead)).toBe(false);
+  });
+});
+
+describe('accepting an owner invitation', () => {
+  const AT = new Date('2026-11-04T09:00:00.000Z');
+  const row = (id: string, email: string, display_name: string | null = null) => ({
+    id,
+    email,
+    display_name,
+    at: AT,
+  });
+  const owners = [
+    row(USER, ADDRESS, 'Nia Newcomer'),
+    row('01890a5d-ac96-774b-bcce-b302099a8091', 'one@example.com', 'One'),
+    row('01890a5d-ac96-774b-bcce-b302099a8092', 'two@example.com'),
+  ];
+  const acceptWorld = (w: World = {}) =>
+    world({ inviterRole: 'owner', invitation: invitationRow({ role: 'owner' }), owners, ...w });
+
+  it('tells every existing owner after the commit, and not the new owner', async () => {
+    const { invitations, scripted, mail } = setup(acceptWorld());
+    const result = await invitations.acceptInvitation(guest(), token());
+    if (!result.ok) throw result.error;
+    expect(result.value.access.role).toBe('owner');
+    const notice = {
+      kind: 'owner_added',
+      organizationId: ORG,
+      membershipId: idOf('mem', NEW_MEMBERSHIP),
+      memberName: 'Nia Newcomer',
+      at: AT,
+    };
+    expect(mail.notices).toEqual([
+      { to: 'one@example.com', notice },
+      { to: 'two@example.com', notice },
+    ]);
+    expect(scripted.events.at(-1)).toEqual({ kind: 'commit' });
+    const order = scripted.statements();
+    expect(order.findIndex(isMemberInsert)).toBeLessThan(order.findIndex(isOwnersRead));
+  });
+
+  it('names the new owner by address when they set no name', async () => {
+    const { invitations, mail } = setup(
+      acceptWorld({
+        owners: [
+          row(USER, ADDRESS),
+          row('01890a5d-ac96-774b-bcce-b302099a8091', 'one@example.com'),
+        ],
+      }),
+    );
+    await invitations.acceptInvitation(guest(), token());
+    expect(mail.notices[0]?.notice).toMatchObject({ memberName: ADDRESS });
+  });
+
+  it('still tells the others when one send fails, and keeps the acceptance', async () => {
+    const { invitations, mail, lines } = setup(acceptWorld());
+    mail.failNextNotice();
+    const result = await invitations.acceptInvitation(guest(), token());
+    expect(result.ok).toBe(true);
+    expect(mail.notices.map((n) => n.to)).toEqual(['two@example.com']);
+    const failures = lines.filter((l) => l.event === 'auth.member_notice_failed');
+    expect(failures).toHaveLength(1);
+    expect(JSON.stringify(failures)).not.toContain('@example.com');
+  });
+
+  it.each(['admin', 'member'])('reads no owners and tells nobody for a new %s', async (role) => {
+    const { invitations, scripted, mail } = setup(
+      world({ inviterRole: 'owner', invitation: invitationRow({ role }), owners }),
+    );
+    expect((await invitations.acceptInvitation(guest(), token())).ok).toBe(true);
+    expect(scripted.statements().some(isOwnersRead)).toBe(false);
+    expect(mail.notices).toEqual([]);
   });
 });
