@@ -25,6 +25,7 @@ let checkBinding: ReturnType<typeof vi.fn<WrapperDeps['checkBinding']>>;
 let session: ReturnType<typeof vi.fn<WrapperDeps['session']>>;
 let organization: ReturnType<typeof vi.fn<WrapperDeps['organization']>>;
 let running: boolean;
+let visitorFlag: ReturnType<typeof vi.fn<WrapperDeps['visitorFlag']>>;
 
 const factsFor = (headers: Record<string, string>, cookies: [string, string][] = []) => ({
   headers: new Headers(headers),
@@ -36,6 +37,7 @@ function wrappers() {
     appOrigin: () => ORIGIN,
     request: () => Promise.resolve(facts),
     wrapperRunning: () => running,
+    visitorFlag,
     checkBinding,
     session,
     organization,
@@ -50,6 +52,7 @@ beforeEach(() => {
   now = 1_000_000;
   lines = [];
   running = true;
+  visitorFlag = vi.fn<WrapperDeps['visitorFlag']>().mockResolvedValue(undefined);
   facts = factsFor(GOOD);
   checkBinding = vi.fn<WrapperDeps['checkBinding']>().mockReturnValue(true);
   session = vi.fn<WrapperDeps['session']>().mockResolvedValue(SESSION);
@@ -125,6 +128,61 @@ describe.each(BAD_ORIGINS)('%s', (_name, headers) => {
       body: { error: { code: 'auth.origin_refused' } },
     });
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('with the release flag off', () => {
+  const OFF = new Error('NEXT_NOT_FOUND');
+  beforeEach(() => {
+    visitorFlag.mockRejectedValue(OFF);
+  });
+
+  it.each(ACTIONS)('%s is the 404, whatever the request', async (name) => {
+    const handler = vi.fn(() => Promise.resolve('ran'));
+    facts = factsFor({});
+    await expect(everyWrapper(handler)[name]()).rejects.toBe(OFF);
+    expect(handler).not.toHaveBeenCalled();
+    expect(checkBinding).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
+  });
+
+  it.each(ROUTES)('%s is the 404, not a 403 or a 503', async (name) => {
+    const handler = vi.fn(() => Promise.resolve('ran'));
+    await expect(everyWrapper(handler)[name]({})).rejects.toBe(OFF);
+    expect(handler).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
+  });
+
+  it('stops a form bound before a rollback', async () => {
+    const handler = vi.fn(() => Promise.resolve('ran'));
+    await expect(wrappers().publicAction(handler)(form())).rejects.toBe(OFF);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('the flag comes first', () => {
+  it.each(ACTIONS)('%s asks it before reading the request', async (name) => {
+    const request = vi.fn(() => Promise.resolve(facts));
+    const w = createWrappers({
+      appOrigin: () => ORIGIN,
+      request,
+      wrapperRunning: () => true,
+      visitorFlag,
+      checkBinding,
+      session,
+      organization,
+      now: () => now,
+      logWarn: () => undefined,
+    });
+    const run = {
+      publicAction: () => w.publicAction(() => Promise.resolve('ran'))(form()),
+      signedInAction: () => w.signedInAction(() => Promise.resolve('ran'))(),
+      orgAction: () => w.orgAction(() => Promise.resolve('ran'))('acme'),
+    }[name];
+    await run();
+    expect(visitorFlag.mock.invocationCallOrder[0]).toBeLessThan(
+      request.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 });
 

@@ -35,6 +35,16 @@ describe('the absolute link check', () => {
     ]);
   });
 
+  it('reads unquoted attributes and a scheme with no slashes', () => {
+    expect(absoluteLinkProblems('<a href=http://evil.test/a>x</a>', ORIGIN)).toEqual([
+      'http://evil.test/a',
+    ]);
+    expect(absoluteLinkProblems('<a href="https:evil.test">x</a>', ORIGIN)).toEqual([
+      'https:evil.test',
+    ]);
+    expect(locationProblem('https:evil.test', ORIGIN)).toBe('https:evil.test');
+  });
+
   it('allows our own status page link by exact value, in a link only', () => {
     expect(absoluteLinkProblems('<a href="https://status.drefyn.com">s</a>', ORIGIN)).toEqual([]);
     for (const link of [

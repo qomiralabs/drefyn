@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkSource, checkTree, sourceFiles } from './support/walker.ts';
 
@@ -12,7 +13,10 @@ const problems = (path: string, text: string) => checkSource(path, text).map((f)
 
 describe('pages and layouts', () => {
   it.each([
-    ['await first', 'export default async function P() { await guardOrganization(o); return 1; }'],
+    [
+      'await first',
+      'export default async function P({ params }) { await guardOrganization((await params).org); return 1; }',
+    ],
     [
       'params first',
       `export default async function P({ params }) {
@@ -39,62 +43,66 @@ describe('pages and layouts', () => {
     ],
     [
       'a default export by name',
-      'async function P() { await guardOrganization(o); }\nexport default P;',
+      'async function P({ params }) { await guardOrganization((await params).org); }\nexport default P;',
     ],
     [
       'an arrow generateMetadata',
-      `export const generateMetadata = async () => { await guardOrganization(o); };
-       export default async function P() { await guardOrganization(o); }`,
+      `export const generateMetadata = async ({ params }) => { await guardOrganization((await params).org); };
+       export default async function P({ params }) { await guardOrganization((await params).org); }`,
     ],
   ])('passes %s', (_name, body) => {
     expect(problems(PAGE, GUARD + body)).toEqual([]);
   });
 
   it.each([
-    ['no guard', 'export default async function P() { return 1; }'],
+    ['no guard', 'export default async function P({ params }) { return 1; }'],
     ['a sync page', 'export default function P() { return 1; }'],
-    ['an unawaited guard', 'export default async function P() { guardOrganization(o); }'],
+    [
+      'an unawaited guard',
+      'export default async function P({ params }) { guardOrganization((await params).org); }',
+    ],
     [
       'work before the guard',
-      'export default async function P() { track(); await guardOrganization(o); }',
+      'export default async function P({ params }) { track(); await guardOrganization((await params).org); }',
     ],
     [
       'an await before the guard',
-      'export default async function P() { await load(); await guardOrganization(o); }',
+      'export default async function P({ params }) { await load(); await guardOrganization((await params).org); }',
     ],
     [
       'a guard behind a condition',
-      'export default async function P() { if (x) { await guardOrganization(o); } }',
+      'export default async function P({ params }) { if (x) { await guardOrganization((await params).org); } }',
     ],
     [
       'a call in the same expression',
-      'export default async function P() { const a = other() + (await guardOrganization(o)); }',
+      'export default async function P({ params }) { const a = other() + (await guardOrganization((await params).org)); }',
     ],
     [
       'a call in the guard arguments',
-      'export default async function P() { await guardOrganization(await other()); }',
+      'export default async function P({ params }) { await guardOrganization(await other()); }',
     ],
     ['a wrapped default export', 'export default wrap(async () => 1);'],
     ['a default export of an import', "import P from './p.tsx';\nexport default P;"],
-    ['an unknown helper', 'export default async function P() { await load(); }'],
+    ['an unknown helper', 'export default async function P({ params }) { await load(); }'],
     [
       'helpers that loop',
       `async function a() { await b(); }
        async function b() { await a(); }
-       export default async function P() { await a(); }`,
+       export default async function P({ params }) { await a(); }`,
     ],
   ])('fails on %s', (_name, body) => {
     expect(problems(PAGE, GUARD + body)).toEqual(['guard_missing']);
   });
 
   it('fails on a generateMetadata without the guard, even with a guarded page', () => {
-    const text = `${GUARD}export default async function P() { await guardOrganization(o); }
+    const text = `${GUARD}export default async function P({ params }) { await guardOrganization((await params).org); }
       export async function generateMetadata() { return {}; }`;
     expect(problems(PAGE, text)).toEqual(['guard_missing']);
   });
 
   it('fails on a re exported generateMetadata and on export star', () => {
-    const page = 'export default async function P() { await guardOrganization(o); }\n';
+    const page =
+      'export default async function P({ params }) { await guardOrganization((await params).org); }\n';
     expect(problems(PAGE, `${GUARD}${page}export { generateMetadata } from './m.ts';`)).toEqual([
       'guard_missing',
     ]);
@@ -107,12 +115,12 @@ describe('pages and layouts', () => {
 
   it('fails on a guard of the same name from elsewhere', () => {
     const text =
-      "import { guardOrganization } from './fake.ts';\nexport default async function P() { await guardOrganization(o); }";
+      "import { guardOrganization } from './fake.ts';\nexport default async function P({ params }) { await guardOrganization((await params).org); }";
     expect(problems(PAGE, text)).toEqual(['guard_missing']);
   });
 
   it('fails on a local guard that shadows the import', () => {
-    const text = `${GUARD}export default async function P() {
+    const text = `${GUARD}export default async function P({ params }) {
       const guardOrganization = async () => 1;
       await guardOrganization();
     }`;
@@ -121,13 +129,13 @@ describe('pages and layouts', () => {
 
   it('fails on another guard renamed to the one the path needs', () => {
     const text = `import { guardPublic as guardOrganization } from '../../server/guard.ts';
-      export default async function P() { await guardOrganization(); }`;
+      export default async function P({ params }) { await guardOrganization(); }`;
     expect(problems(PAGE, text)).toEqual(['guard_missing']);
   });
 
   it('accepts a renamed guard of the right kind', () => {
     const text = `import { guardOrganization as guard } from '../../server/guard.ts';
-      export default async function P() { await guard(o); }`;
+      export default async function P({ params }) { await guard((await params).org); }`;
     expect(problems(PAGE, text)).toEqual([]);
   });
 
@@ -149,19 +157,30 @@ describe('pages and layouts', () => {
 describe('which guard each path takes', () => {
   const using = (name: string) =>
     `import { ${name} } from '../server/guard.ts';
-     export default async function P() { await ${name}(); }`;
+     export default async function P({ params }) { await ${name}(); }`;
 
   it('takes guardSignedIn at the root only', () => {
-    expect(problems('src/app/page.tsx', using('guardSignedIn'))).toEqual([]);
-    expect(problems('src/app/page.tsx', using('guardPublic'))).toEqual(['guard_missing']);
-    expect(problems('src/app/page.tsx', using('guardOrganization'))).toEqual(['guard_missing']);
-    expect(problems(PAGE, using('guardSignedIn'))).toEqual(['guard_missing']);
+    expect(problems('src/app/page.tsx', using('guardSignedIn', 'src/app/page.tsx'))).toEqual([]);
+    expect(problems('src/app/page.tsx', using('guardPublic', 'src/app/page.tsx'))).toEqual([
+      'guard_missing',
+    ]);
+    expect(problems('src/app/page.tsx', using('guardOrganization', 'src/app/page.tsx'))).toEqual([
+      'guard_missing',
+    ]);
+    expect(problems(PAGE, using('guardSignedIn', PAGE))).toEqual(['guard_missing']);
   });
 
   it('takes guardPublic only on the allow list', () => {
-    expect(problems('src/app/bundle-baseline/page.tsx', using('guardPublic'))).toEqual([]);
-    expect(problems('src/app/somewhere/page.tsx', using('guardPublic'))).toEqual(['public_guard']);
-    expect(problems(PAGE, using('guardPublic'))).toEqual(['guard_missing']);
+    expect(
+      problems(
+        'src/app/bundle-baseline/page.tsx',
+        using('guardPublic', 'src/app/bundle-baseline/page.tsx'),
+      ),
+    ).toEqual([]);
+    expect(
+      problems('src/app/somewhere/page.tsx', using('guardPublic', 'src/app/somewhere/page.tsx')),
+    ).toEqual(['public_guard']);
+    expect(problems(PAGE, using('guardPublic', PAGE))).toEqual(['guard_missing']);
   });
 
   it('refuses guardPublic on a path that only looks like the allowed one', () => {
@@ -169,12 +188,17 @@ describe('which guard each path takes', () => {
       'src/app/bundle-baseline/x/page.tsx',
       'src/app/[org]/bundle-baseline/page.tsx',
     ]) {
-      expect(problems(path, using('guardPublic')).length, path).toBe(1);
+      expect(problems(path, using('guardPublic', path)).length, path).toBe(1);
     }
   });
 
   it('asks for a guard on a page outside any list', () => {
-    expect(problems('src/app/somewhere/page.tsx', using('guardOrganization'))).toEqual([]);
+    expect(
+      problems(
+        'src/app/somewhere/page.tsx',
+        using('guardOrganization', 'src/app/somewhere/page.tsx'),
+      ),
+    ).toEqual([]);
     expect(problems('src/app/somewhere/page.tsx', 'export default async () => 1;')).toEqual([
       'guard_missing',
     ]);
@@ -266,8 +290,8 @@ describe("inline 'use server'", () => {
   });
 
   it('fails inside a page, on top of a good guard', () => {
-    const text = `${GUARD}export default async function P() {
-      await guardOrganization(o);
+    const text = `${GUARD}export default async function P({ params }) {
+      await guardOrganization((await params).org);
       async function a() { 'use server'; }
       return a;
     }`;
@@ -323,6 +347,222 @@ describe('route handlers', () => {
   });
 });
 
+describe('a guard that may not run', () => {
+  const body = (line: string) =>
+    `${GUARD}export default async function P({ params, flagged }) {
+      const { org } = await params;
+      ${line}
+    }`;
+
+  it.each([
+    ['a short circuit', 'false && await guardOrganization(org);'],
+    ['an or', 'flagged || await guardOrganization(org);'],
+    ['a nullish', 'flagged ?? await guardOrganization(org);'],
+    ['a short circuit in a const', 'const g = flagged && await guardOrganization(org);'],
+    ['a conditional', 'const g = flagged ? null : await guardOrganization(org);'],
+    ['a conditional statement', 'flagged ? await guardOrganization(org) : null;'],
+    ['a declaration before it', 'const rows = new Reader(), g = await guardOrganization(org);'],
+    [
+      'a tagged template before it',
+      'const rows = await sql`select 1`, g = await guardOrganization(org);',
+    ],
+    ['a guard in an array', 'const a = [await guardOrganization(org)];'],
+    ['a comma', 'other, await guardOrganization(org);'],
+    ['an unawaited property read', 'const a = guardOrganization(org).access;'],
+    ['a return with work first', 'return { a: other(), b: await guardOrganization(org) };'],
+    ['a return of a condition', 'return flagged && (await guardOrganization(org));'],
+    ['a later property', 'return { a: 1, b: (await guardOrganization(org)).view };'],
+    ['a void', 'void (await guardOrganization(org));'],
+  ])('fails on %s', (_name, line) => {
+    expect(problems(PAGE, body(line))).toEqual(['guard_missing']);
+  });
+
+  it.each([
+    ['a whole statement', 'await guardOrganization(org);'],
+    ['a sole declaration', 'const g = await guardOrganization(org);'],
+    ['a destructuring', 'const { access } = await guardOrganization(org);'],
+    ['a property read', 'const a = (await guardOrganization(org)).access;'],
+    ['a return', 'return await guardOrganization(org);'],
+    ['a return of a property read', 'return (await guardOrganization(org)).view;'],
+    ['the first property of a return', 'return { a: (await guardOrganization(org)).view };'],
+  ])('passes %s', (_name, line) => {
+    expect(problems(PAGE, body(line))).toEqual([]);
+  });
+
+  it('fails on a guard call in a helper behind a condition', () => {
+    const text = `${GUARD}async function load({ params }) {
+        const { org } = await params;
+        return flagged && (await guardOrganization(org));
+      }
+      export default async function P(props) { await load(props); }`;
+    expect(problems(PAGE, text)).toEqual(['guard_missing']);
+  });
+});
+
+describe('the slug the guard is given', () => {
+  const page = (text: string) => `${GUARD}export default async function P({ params }) { ${text} }`;
+
+  it.each([
+    ['a literal', "await guardOrganization('acme');"],
+    ['a template', 'await guardOrganization(`acme`);'],
+    ['another param', 'const { product } = await params; await guardOrganization(product);'],
+    ['a free name', 'await guardOrganization(slug);'],
+    ['another read', 'await guardOrganization((await params).product);'],
+  ])('fails on %s', (_name, text) => {
+    expect(problems(PAGE, page(text))).toEqual(['guard_missing']);
+  });
+
+  it('follows a rename of the route param', () => {
+    expect(
+      problems(PAGE, page('const { org: slug } = await params; await guardOrganization(slug);')),
+    ).toEqual([]);
+  });
+});
+
+describe('where a module really is', () => {
+  it('fails on a guard from a look alike path', () => {
+    const text = `import { guardOrganization } from '../evil/server/guard.ts';
+      export default async function P({ params }) { await guardOrganization((await params).org); }`;
+    expect(problems(PAGE, text)).toEqual(['guard_missing']);
+  });
+
+  it('fails on a wrapper from a look alike path', () => {
+    const text = `'use server';
+      import { publicAction } from '../evil/server/actions.ts';
+      export const a = publicAction(async () => 1);`;
+    expect(problems(ACTIONS, text)).toEqual(['action_unwrapped']);
+  });
+});
+
+describe('route groups and parallel slots', () => {
+  const signedIn = (path: string) => {
+    const from = posix.relative(posix.dirname(path), 'src/server/guard.ts');
+    return `import { guardSignedIn } from '${from}';
+      export default async function P() { await guardSignedIn(); }`;
+  };
+
+  it.each(['src/app/(group)/[org]/page.tsx', 'src/app/(a)/(b)/[org]/x/page.tsx'])(
+    'holds %s to the organization guard',
+    (path) => {
+      expect(problems(path, signedIn(path))).toEqual(['guard_missing']);
+    },
+  );
+
+  it('holds any other dynamic segment to the organization guard', () => {
+    const path = 'src/app/[slug]/page.tsx';
+    expect(problems(path, signedIn(path))).toEqual(['guard_missing']);
+  });
+
+  it('holds a page in a group at the root to the same rule as the root', () => {
+    const path = 'src/app/(group)/page.tsx';
+    expect(problems(path, signedIn(path))).toEqual([]);
+  });
+
+  it('never lets a grouped path use the public allow list', () => {
+    const path = 'src/app/(x)/bundle-baseline/page.tsx';
+    const from = posix.relative(posix.dirname(path), 'src/server/guard.ts');
+    const text = `import { guardPublic } from '${from}';
+      export default async function P() { await guardPublic(); }`;
+    expect(problems(path, text)).toEqual(['public_guard']);
+  });
+});
+
+describe('every route handler needs a guard, GET included', () => {
+  const route = 'src/app/[org]/export/route.ts';
+  const guard = "import { guardOrganization } from '../../../server/guard.ts';\n";
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])('fails on a bare %s', (method) => {
+    expect(
+      problems(route, `export async function ${method}() { return new Response('rows'); }`),
+    ).toEqual(['route_unwrapped']);
+  });
+
+  it('passes a GET that starts with the guard', () => {
+    const text = `${guard}export async function GET(request, { params }) {
+      const { access } = await guardOrganization((await params).org);
+      return new Response(access.organizationId);
+    }`;
+    expect(problems(route, text)).toEqual([]);
+  });
+
+  it('fails on a re exported GET and an alias', () => {
+    expect(problems(route, "export { GET } from './other.ts';")).toEqual(['route_unwrapped']);
+    expect(problems(route, 'const a = 1;\nexport { a as GET };')).toEqual(['route_unwrapped']);
+  });
+
+  it('passes a GET through a wrapper', () => {
+    const text = `import { orgRoute } from '../../../server/actions.ts';
+      export const GET = orgRoute(async () => new Response());`;
+    expect(problems(route, text)).toEqual([]);
+  });
+});
+
+describe('metadata routes', () => {
+  it.each([
+    'src/app/[org]/opengraph-image.tsx',
+    'src/app/[org]/twitter-image.tsx',
+    'src/app/[org]/icon.tsx',
+    'src/app/[org]/apple-icon.tsx',
+    'src/app/icon.ts',
+    'src/app/sitemap.ts',
+    'src/app/robots.ts',
+    'src/app/manifest.ts',
+  ])('fails on %s with no guard', (path) => {
+    expect(problems(path, 'export default function Image() { return new Response(); }')).toEqual([
+      'guard_missing',
+    ]);
+  });
+
+  it('fails on the id generators with no guard', () => {
+    const text = `${GUARD}export default async function I({ params }) {
+        await guardOrganization((await params).org);
+      }
+      export async function generateImageMetadata() { return []; }`;
+    expect(problems('src/app/[org]/icon.tsx', text)).toEqual(['guard_missing']);
+    const sitemap = text.replace('generateImageMetadata', 'generateSitemaps');
+    expect(problems('src/app/[org]/sitemap.ts', sitemap)).toEqual(['guard_missing']);
+  });
+});
+
+describe('exports the old walk could not see', () => {
+  it('fails on a destructured generateMetadata', () => {
+    const text = `${GUARD}export default async function P({ params }) {
+        await guardOrganization((await params).org);
+      }
+      export const { generateMetadata } = helpers;`;
+    expect(problems(PAGE, text)).toEqual(['guard_missing']);
+  });
+
+  it('fails on a destructured action', () => {
+    expect(problems(ACTIONS, "'use server';\nexport const { send } = helpers;")).toEqual([
+      'action_unwrapped',
+    ]);
+  });
+});
+
+describe('files that should not exist', () => {
+  it.each(['src/pages/index.tsx', 'src/pages/api/x.ts', 'src/pages/_app.tsx'])(
+    'refuses the Pages Router file %s',
+    (path) => {
+      expect(problems(path, 'export default function P() { return null; }')).toEqual([
+        'pages_router',
+      ]);
+    },
+  );
+
+  it.each([
+    'src/app/[org]/x/page.js',
+    'src/app/[org]/x/page.jsx',
+    'src/server/x.mjs',
+    'src/server/x.cjs',
+    'src/app/x/route.js',
+  ])('refuses the JavaScript source %s', (path) => {
+    expect(problems(path, 'export default function P() { return null; }')).toEqual([
+      'javascript_source',
+    ]);
+  });
+});
+
 describe('a finding', () => {
   it('names the file, the line and the export', () => {
     expect(
@@ -344,7 +584,7 @@ describe('the real tree', () => {
 describe('the session guard', () => {
   it('is refused on pages: it is for account level actions', () => {
     const text = `import { guardSession } from '../server/guard.ts';
-      export default async function P() { await guardSession(); }`;
+      export default async function P({ params }) { await guardSession(); }`;
     expect(problems('src/app/page.tsx', text)).toEqual(['guard_missing']);
   });
 });
