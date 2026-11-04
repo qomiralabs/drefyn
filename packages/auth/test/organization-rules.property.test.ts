@@ -83,6 +83,8 @@ describe('slugs', () => {
       'sign-in',
       'sign-out',
       'auth',
+      'auth-states',
+      'bundle-baseline',
       'invite',
       'api',
       'settings',

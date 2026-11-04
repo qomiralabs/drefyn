@@ -29,7 +29,7 @@ const FACTS: InvitationFacts = {
   blockHref: '/invite/block#token',
 };
 const UNAVAILABLE: FormNotice = { kind: 'unavailable', reference: 'ref_0a1b2c3d4e5f' };
-const NOT_SAVED: FormNotice = { kind: 'not_saved', reference: 'ref_0a1b2c3d4e5f' };
+const NOT_SAVED = { kind: 'not_saved', reference: 'ref_0a1b2c3d4e5f' } as const;
 const LIMITED: FormNotice = { kind: 'limited', minutes: 14 };
 const shared = (hosted: boolean) => ({ hosted, csrf: '' });
 
@@ -173,6 +173,9 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
     breached: welcome({ state: { problem: 'breached', name: 'Maya' } }),
     late: welcome({ state: { problem: 'late', name: 'Maya' } }),
     failed: welcome({ state: { notice: NOT_SAVED, name: 'Maya' } }),
+    'half-saved': welcome({
+      state: { notice: { ...NOT_SAVED, kind: 'name_not_saved' }, name: 'Maya' },
+    }),
   },
   organization: {
     ready: organization(),

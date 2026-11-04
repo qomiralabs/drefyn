@@ -60,7 +60,11 @@ export const saveWelcome = signedInAction(
       }
     }
     const saved = await auth.account.setDisplayName(session, { name });
-    if (!saved.ok) return { name, notice: notSaved('auth.welcome_name_failed') };
+    if (!saved.ok) {
+      const notice = notSaved('auth.welcome_name_failed');
+      // The password stands by now, so "nothing changed" would be untrue.
+      return { name, notice: password === '' ? notice : { ...notice, kind: 'name_not_saved' } };
+    }
     const target = await afterWelcome(form, session);
     await applyCookies(freshBinding(target));
     redirect(target);

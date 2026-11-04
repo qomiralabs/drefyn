@@ -8,6 +8,7 @@ export type ProviderName = 'GitHub' | 'Google';
 export type FormNotice =
   | { readonly kind: 'unavailable'; readonly reference: string }
   | { readonly kind: 'not_saved'; readonly reference: string }
+  | { readonly kind: 'name_not_saved'; readonly reference: string }
   | { readonly kind: 'limited'; readonly minutes: number }
   | { readonly kind: 'day_limit' }
   | { readonly kind: 'expired' }

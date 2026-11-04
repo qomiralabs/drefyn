@@ -139,6 +139,14 @@ function noticeWords(notice: FormNotice, others: string): readonly [string, Reac
           whoever runs this server: <code>{notice.reference}</code>
         </>,
       ];
+    case 'name_not_saved':
+      return [
+        'Your password is saved, but your name is not.',
+        <>
+          Press Continue again in a minute, and leave the password empty. If it keeps happening,
+          give this reference to whoever runs this server: <code>{notice.reference}</code>
+        </>,
+      ];
     case 'limited':
       return [
         'Too many tries from here.',
