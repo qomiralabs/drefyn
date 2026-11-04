@@ -130,7 +130,10 @@ describe('sign in logs', () => {
       db: {} as Database,
       authDb: {} as AuthDatabase,
       logger: t.deps.logger,
-      mailer: { sendInvitation: () => Promise.resolve() },
+      mailer: {
+        sendInvitation: () => Promise.resolve(),
+        sendSecurityNotice: () => Promise.resolve(),
+      },
       store: down.store,
     });
     const flow = createEmailSignIn(cfg, { ...t.deps, invitations });

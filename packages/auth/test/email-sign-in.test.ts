@@ -344,7 +344,10 @@ describe('start does the same work for every address', () => {
       db: {} as Database,
       authDb: {} as AuthDatabase,
       logger: { warn: () => undefined },
-      mailer: { sendInvitation: () => Promise.resolve() },
+      mailer: {
+        sendInvitation: () => Promise.resolve(),
+        sendSecurityNotice: () => Promise.resolve(),
+      },
       store: t.scripted.store,
     });
     const allowsSignUp = vi.fn((token: string | null, email: string) =>

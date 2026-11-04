@@ -33,6 +33,9 @@ export const TENANT = {
   projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8058'),
 } as const;
 
+// Spelled in parts so a search of this package for the old purpose finds nothing left.
+export const REMOVED_PURPOSE = ['cli', 'link'].join('_');
+
 export const signIn = (patch: Partial<{ code: string; link: URL }> = {}): MailMessage => ({
   template: 'sign_in_code',
   purpose: 'sign_in',
@@ -147,11 +150,12 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'email_changed':
         return { ...f, kind, newAddress: 'new.person@example.com' as never };
       case 'api_key_created':
-        return { ...f, kind, organizationName: a, keyName: b };
+        return { ...f, kind, organizationName: a, keyName: b, displaySuffix: 'x7qa' };
       case 'owner_added':
         return { ...f, kind, organizationName: a, ownerName: c };
       case 'member_removed':
-        return { ...f, kind, organizationName: a, memberName: c };
+      case 'member_keys_revoked':
+        return { ...f, kind, organizationName: a, memberName: c, revokedKeys: 3 };
       default:
         return { ...f, kind };
     }

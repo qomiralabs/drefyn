@@ -1,7 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "lib": ["es2024", "dom", "dom.iterable"]
   },
-  "include": ["src", "test", "vitest.config.ts", "vitest.integration.config.ts"]
+  "include": [
+    "src",
+    "test",
+    "tools",
+    "e2e",
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "vitest.tools.config.ts",
+    "playwright.config.ts"
+  ]
 }
