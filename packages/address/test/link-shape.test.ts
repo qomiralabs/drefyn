@@ -34,6 +34,25 @@ describe('isLinkShaped', () => {
     'evil\u00ad.example',
     'evil.\ufeffexample',
     'evil.\u2060example',
+    'evil.\u2065example',
+    'evil.e\u{e0080}xample',
+    'evil.\u3164example',
+    '8.8.8.8',
+    '8.8.8.8.',
+    '8.8.8.8/login',
+    '8.8.8.8:8080',
+    'see 8.8.8.8 today',
+    '(8.8.8.8)',
+    'v8.8.8.8',
+    '0177.0.0.1',
+    '\uff18\uff0e\uff18\uff0e\uff18\uff0e\uff18',
+    '8\u30028\u30028\u30028',
+    '\u{1d7d6}.\u{1d7d6}.\u{1d7d6}.\u{1d7d6}',
+    '\u2467.\u2467.\u2467.\u2467',
+    '\u248f\u248f\u248f8',
+    '\u0668.\u0668.\u0668.\u0668',
+    '8.\u200d8.8.8',
+    '8\u0301.8.8.8',
   ])('reads %j as a link', (text) => {
     expect(isLinkShaped(text)).toBe(true);
   });
@@ -50,6 +69,8 @@ describe('isLinkShaped', () => {
     'Chrome on macOS',
     'e.g',
     '1.5 million',
+    'Version 1.2.3',
+    '8.8 8.8',
     `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}`,
   ])('reads %j as plain text', (text) => {
     expect(isLinkShaped(text)).toBe(false);
@@ -61,6 +82,8 @@ describe('isLinkShaped', () => {
     ['letters', 'a'.repeat(100_000)],
     ['dotted single letters', 'a.'.repeat(50_000)],
     ['joiners', ZWJ.repeat(100_000)],
+    ['digits', '1'.repeat(100_000)],
+    ['three part numbers', '1.1.1 '.repeat(16_000)],
     ['marks', 'a\u0301'.repeat(50_000)],
   ])('stays linear on 100,000 characters of %s', (_label, text) => {
     const started = performance.now();

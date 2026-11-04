@@ -85,6 +85,8 @@ const LINKS = [
   `evil.${ZWJ}example`,
   `www${ZWJ}.evil.example`,
   `ht${ZWJ}tp://x`,
+  '8.8.8.8/login',
+  '\uff18\uff0e\uff18\uff0e\uff18\uff0e\uff18',
 ];
 const HIDDEN = ['\u200b', '\ufeff', '\u00ad', '\u2060'];
 const FAMILY = `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}`;

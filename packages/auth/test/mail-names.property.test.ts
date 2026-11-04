@@ -46,7 +46,13 @@ describe('the mail guard and the auth name rule', () => {
     const hostileName = fc.oneof(
       candidate,
       fc.string({ unit: 'binary', maxLength: 120 }),
-      fc.constantFrom('   ', 'Ada\u202eLovelace', 'Ada\nLovelace', 'http://evil.example/login'),
+      fc.constantFrom(
+        '   ',
+        'Ada\u202eLovelace',
+        'Ada\nLovelace',
+        'http://evil.example/login',
+        '8.8.8.8/login',
+      ),
     );
     const address = fc
       .oneof(
