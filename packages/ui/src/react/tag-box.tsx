@@ -57,6 +57,11 @@ export function stepsOntoChip(
   return event.key === 'Backspace' || event.key === 'ArrowLeft';
 }
 
+// WebKit can take Backspace in a read only input as going back a page.
+export function holdBackspace(event: { key: string; preventDefault: () => void }): void {
+  if (event.key === 'Backspace') event.preventDefault();
+}
+
 export function focusLastChip(box: HTMLElement | null): boolean {
   const last = box?.querySelectorAll<HTMLElement>('[role="row"]');
   const row = last?.[last.length - 1];

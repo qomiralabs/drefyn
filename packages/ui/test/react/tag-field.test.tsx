@@ -271,6 +271,11 @@ describe('a disabled TagField', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('keeps Backspace from reaching the browser, which can go back a page', () => {
+    render(<Addresses disabled />);
+    expect(fireEvent.keyDown(input(), { key: 'Backspace' })).toBe(false);
+  });
+
   it('offers no way to remove a chip and paints with the disabled family', () => {
     render(<Addresses disabled defaultValue={['kai@acme.dev']} />);
     const row = screen.getByRole('row', { name: 'kai@acme.dev' });

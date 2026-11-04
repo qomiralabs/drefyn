@@ -1,7 +1,14 @@
 'use client';
 import { useId, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { markDisabled } from './field-parts.tsx';
-import { focusLastChip, hiddenValues, stepsOntoChip, TagBox, TagMessages } from './tag-box.tsx';
+import {
+  focusLastChip,
+  hiddenValues,
+  holdBackspace,
+  stepsOntoChip,
+  TagBox,
+  TagMessages,
+} from './tag-box.tsx';
 
 export interface TagFieldProps {
   // The visible label, which names the input.
@@ -144,8 +151,12 @@ export function TagField({
             if (!disabled && text !== '') add(text);
           }}
           onKeyDown={(event) => {
+            if (disabled) {
+              holdBackspace(event);
+              return;
+            }
             // Enter also ends a composition, and that text is not finished yet.
-            if (disabled || event.nativeEvent.isComposing) return;
+            if (event.nativeEvent.isComposing) return;
             if (stepsOntoChip(event, text, event.currentTarget.selectionStart)) {
               if (focusLastChip(boxRef.current)) event.preventDefault();
               return;

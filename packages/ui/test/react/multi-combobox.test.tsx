@@ -300,6 +300,11 @@ describe('a disabled MultiCombobox', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('keeps Backspace from reaching the browser, which can go back a page', () => {
+    render(<Projects disabled />);
+    expect(fireEvent.keyDown(input(), { key: 'Backspace' })).toBe(false);
+  });
+
   it('paints the box with the disabled family', () => {
     render(<Projects disabled />);
     expect(classesOf(screen.getByRole('group', { name: 'Projects' }))).toEqual(

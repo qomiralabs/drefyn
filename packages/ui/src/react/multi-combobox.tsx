@@ -32,7 +32,14 @@ import { markDisabled } from './field-parts.tsx';
 import { LoadingRows, markBusy } from './list-parts.tsx';
 import { ROW, Sheet, usePhone } from './sheet.tsx';
 import type { SelectOptionProps } from './select-option.tsx';
-import { focusLastChip, hiddenValues, stepsOntoChip, TagBox, TagMessages } from './tag-box.tsx';
+import {
+  focusLastChip,
+  hiddenValues,
+  holdBackspace,
+  stepsOntoChip,
+  TagBox,
+  TagMessages,
+} from './tag-box.tsx';
 
 export interface MultiComboboxProps {
   // The visible label, and the title of the sheet on a phone.
@@ -141,6 +148,7 @@ function SearchInput({
   }, []);
 
   const keys = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) holdBackspace(event);
     if (disabled || state === null) return;
     if (state.isOpen && event.key === 'Escape') {
       // With a pick made React Aria lets Escape carry on, and a dialog around this would

@@ -64,9 +64,10 @@ for (const theme of THEMES) {
     await expect(chip(page, 'ren@northwind.dev')).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await expect(chip(page, 'kai@acme.dev')).toBeFocused();
-    await page.keyboard.press(tabKey(browserName));
+    // Plain Tab in every engine: on a chip the keys are React Aria's, and it gives Alt+Tab up.
+    await page.keyboard.press('Tab');
     await expect(page.getByRole('button', { name: /^Remove kai@acme\.dev/ })).toBeFocused();
-    await page.keyboard.press(tabKey(browserName));
+    await page.keyboard.press('Tab');
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await expect(chip(page, 'ren@northwind.dev')).toBeFocused();
