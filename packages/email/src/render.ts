@@ -3,14 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { emailError } from './errors.ts';
 import { checkMessage } from './guards.ts';
 import { MailDocument } from './html/document.tsx';
-import { placeholderContent } from './templates/placeholder.ts';
+import { fillOutlook } from './html/outlook.ts';
+import { mailContent } from './templates/index.ts';
 import { renderText } from './text.ts';
 import type { EmailError, MailMessage, RenderedMail, Result } from './types.ts';
 
-// React cannot write a doctype. XHTML Transitional keeps clients in almost standards
-// mode, which table layouts rely on, and keeps the markup as it was before the swap.
-const DOCTYPE =
-  '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">';
+// React cannot write a doctype.
+const DOCTYPE = '<!doctype html>';
 
 // Rendering is synchronous; the promise stays so callers do not change if a template ever
 // needs to load something.
@@ -31,8 +30,9 @@ function renderNow(
     const checked = checkMessage(message, ctx.linkOrigin);
     if (!checked.ok) return checked;
     const clean = checked.value;
-    const content = placeholderContent(clean);
-    const html = DOCTYPE + renderToStaticMarkup(createElement(MailDocument, { content }));
+    const content = mailContent(clean, ctx);
+    const markup = renderToStaticMarkup(createElement(MailDocument, { content }));
+    const html = DOCTYPE + fillOutlook(markup);
     const value: RenderedMail = Object.freeze({
       template: clean.template,
       ...(clean.template === 'sign_in_code' ? { purpose: clean.purpose } : {}),

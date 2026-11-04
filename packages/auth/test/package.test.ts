@@ -47,6 +47,15 @@ describe('package layout', () => {
     }
   });
 
+  // Mail is a dev dependency for the kind parity type test only. The app joins the two.
+  it('imports nothing from the mail package in source', () => {
+    for (const file of sourceFiles(src)) {
+      for (const spec of specifiers(join(src, file))) {
+        expect(spec, file).not.toMatch(/^@drefyn\/email(\/|$)/);
+      }
+    }
+  });
+
   it('keeps the permissions entry free of imports other than types', () => {
     const text = readFileSync(join(src, 'permissions.ts'), 'utf8');
     for (const spec of specifiers(join(src, 'permissions.ts'))) {
