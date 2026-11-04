@@ -19,7 +19,8 @@ export interface Finding {
   readonly problem: WalkerProblem;
 }
 
-type Guard = 'guardOrganization' | 'guardSignedIn' | 'guardPublic';
+type Guard =
+  'guardOrganization' | 'guardSignedIn' | 'guardPublic' | 'guardSession' | 'guardAccountHome';
 
 const ROUTE_FILE = /^src\/app\/(?:.*\/)?route\.tsx?$/;
 // Metadata files are GET routes under another name.
@@ -52,13 +53,18 @@ const PUBLIC_PAGES: ReadonlySet<string> = new Set([
   'src/app/sign-in/password/page.tsx',
   'src/app/sign-in/reset/page.tsx',
   'src/app/sign-in/verify/page.tsx',
+  'src/app/settings-states/[screen]/[state]/page.tsx',
   'src/app/sign-up/page.tsx',
 ]);
+// A person's own pages, which no organization in the URL can guard.
+const ACCOUNT_PATH = 'src/app/account/';
+const NO_ORGANIZATION_PAGE = 'src/app/organizations/new/page.tsx';
 // Signed out GET handlers, such as an OAuth callback. Each new one is a reviewed line too.
 const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([
   'src/app/auth/oauth/[provider]/callback/route.ts',
   'src/app/auth/oauth/[provider]/start/route.ts',
   'src/app/auth/pre/route.ts',
+  'src/app/settings-states/whoami/route.ts',
 ]);
 
 // Groups and slots change no URL, so a path is judged as if they were not there.
@@ -67,6 +73,8 @@ const routePath = (path: string) => path.replace(/\/(?:\([^/]*\)|@[^/]*)(?=\/)/g
 // Allow lists match the path as written, so a group cannot borrow an entry.
 function acceptedGuards(path: string): readonly Guard[] {
   if (PUBLIC_PAGES.has(path) || PUBLIC_GET_ROUTES.has(path)) return ['guardPublic'];
+  if (path.startsWith(ACCOUNT_PATH)) return ['guardAccountHome'];
+  if (path === NO_ORGANIZATION_PAGE) return ['guardSession'];
   return routePath(path) === 'src/app/page.tsx' ? ['guardSignedIn'] : ['guardOrganization'];
 }
 

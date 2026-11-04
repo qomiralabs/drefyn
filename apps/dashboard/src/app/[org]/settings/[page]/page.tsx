@@ -8,7 +8,6 @@ const PAGES = {
     title: 'Plan and usage',
     caption: 'Starter covers Docs, Studio and Status. $19 a month, renews 1 Nov.',
   },
-  members: { title: 'Members', caption: '4 of 5 seats used' },
 } as const;
 
 interface Params {
@@ -36,7 +35,7 @@ export default async function SettingsPage({ params }: Params) {
   return (
     <Working title={page.title} caption={page.caption}>
       <p className="max-w-measure text-body-s text-secondary">
-        This view arrives with the billing and members work.
+        This view arrives with the billing work.
       </p>
     </Working>
   );

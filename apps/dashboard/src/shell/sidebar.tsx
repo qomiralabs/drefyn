@@ -9,7 +9,7 @@ import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
 import { parseShellPath, shellHref } from './route.ts';
 import { ICON_BY_NAME } from './section-icons.ts';
-import { ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
+import { ACCOUNT_SECTIONS, ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
 import { OrganizationMenu } from './top-bar.tsx';
 
 type ShellIcon = (props: { size?: 'sm' | 'md' }) => ReactNode;
@@ -21,6 +21,9 @@ const PRODUCT_ICON: Record<ProductId, ShellIcon> = {
   studio: IconSchema,
   status: IconPulse,
 };
+
+// Wherever settings are open, so a person never hunts for the other half of them.
+const SETTINGS_PATH = /^\/(?:account(?:\/|$)|settings-states\/|[^/]+\/settings(?:\/|$))/;
 
 // Labels leave the screen on the tablet rail but stay in the accessibility tree.
 const RAIL_HIDDEN = 'sm:max-md:sr-only';
@@ -203,6 +206,27 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
               </span>
             </Link>
           )}
+
+          {SETTINGS_PATH.test(pathname) ? (
+            <div className="flex flex-col gap-4">
+              <h2 className={`px-8 text-label text-secondary uppercase ${RAIL_HIDDEN}`}>
+                Your account
+              </h2>
+              <ul className="flex flex-col gap-2">
+                {ACCOUNT_SECTIONS.map((section) => {
+                  const href = `/${section.slug}`;
+                  return (
+                    <li key={href}>
+                      <NavLink
+                        item={{ href, label: section.label, icon: section.icon }}
+                        current={href === pathname}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-4">
             <h2 className={`px-8 text-label text-secondary uppercase ${RAIL_HIDDEN}`}>

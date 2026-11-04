@@ -2,7 +2,7 @@ import { safeReturnTo, serializeCookie, type AuthErrorCode } from '@drefyn/auth'
 import { after, NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
-import { guardPublic } from '../../../../../server/guard.ts';
+import { currentSession, guardPublic } from '../../../../../server/guard.ts';
 import { appOrigin, appUrl, requestQuery } from '../../../../../server/origin.ts';
 
 interface Context {
@@ -21,8 +21,16 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   if (provider !== 'github' && provider !== 'google') {
     return new Response(null, { status: 404 });
   }
-  const refuse = (error: string) =>
-    NextResponse.redirect(appUrl(`/sign-in?error=${error}&provider=${provider}`), 303);
+  // Someone signed in got here from linking or step up, so they go back to their methods.
+  const refuse = async (error: string) =>
+    NextResponse.redirect(
+      appUrl(
+        (await currentSession()) === null
+          ? `/sign-in?error=${error}&provider=${provider}`
+          : '/account/sign-in?error=provider',
+      ),
+      303,
+    );
   const browser = await visitorBrowser();
   if (browser === null) return refuse('provider');
   const auth = await dashboardAuth();

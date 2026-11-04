@@ -597,3 +597,29 @@ describe('the session guard', () => {
     expect(problems('src/app/page.tsx', text)).toEqual(['guard_missing']);
   });
 });
+
+describe('pages with no organization in the URL', () => {
+  const home = "import { guardAccountHome } from '../../server/guard.ts';\n";
+  const session = "import { guardSession } from '../../../server/guard.ts';\n";
+
+  it('take the account guard under /account', () => {
+    expect(
+      problems(
+        'src/app/account/page.tsx',
+        `${home}export default async function P() { await guardAccountHome(); return 1; }`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuse an account page with no guard', () => {
+    expect(
+      problems('src/app/account/page.tsx', 'export default async function P() { return 1; }'),
+    ).toContain('guard_missing');
+  });
+
+  it('let only the new organization page stand on the session alone', () => {
+    const text = `${session}export default async function P() { await guardSession(); return 1; }`;
+    expect(problems('src/app/organizations/new/page.tsx', text)).toEqual([]);
+    expect(problems('src/app/[org]/page.tsx', text)).toContain('guard_missing');
+  });
+});

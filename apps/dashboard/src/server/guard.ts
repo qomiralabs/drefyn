@@ -85,6 +85,23 @@ export const guardSession = cache(async (): Promise<SessionInfo> => {
   return session;
 });
 
+// For pages with no organization in the URL. The shell needs one to draw, so it is the
+// person's first; someone with none gets a null home and a page that needs none.
+export const guardAccountHome = cache(
+  async (): Promise<{
+    readonly session: SessionInfo;
+    readonly organizations: readonly OrganizationSummary[];
+    readonly home: GuardedOrganization | null;
+  }> => {
+    const { auth, session } = await signedIn();
+    await requireDashboardForVisitor();
+    const organizations = await orOutage(() => auth.organizations.listMyOrganizations(session));
+    const first = organizations[0];
+    const home = first === undefined ? null : await guardOrganization(first.slug);
+    return { session, organizations, home };
+  },
+);
+
 // For / alone: the flag is asked about the first organization, the one it lands on.
 export const guardSignedIn = cache(
   async (): Promise<{

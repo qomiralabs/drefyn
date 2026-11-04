@@ -424,7 +424,7 @@ const removed = await account.removePassword(session);
   send allowance.
 - Email code, password and OAuth sign ins then carry `send()`, which mails
   `new_device_sign_in` with the method, the browser family, the time and a link to
-  `SESSIONS_PAGE_PLACEHOLDER_PATH`. The sign in that creates the account sends none.
+  `SESSIONS_PAGE_PATH`. The sign in that creates the account sends none.
 
 ## Email change
 

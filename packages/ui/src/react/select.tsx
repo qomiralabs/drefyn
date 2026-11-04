@@ -19,6 +19,8 @@ import { LoadingRows, markBusy } from './list-parts.tsx';
 export interface SelectProps {
   // The visible label.
   label: string;
+  // Read by screen readers only, for a picker in a table row whose column already names it.
+  labelHidden?: boolean;
   // SelectOption elements.
   children: ReactNode;
   value?: string;

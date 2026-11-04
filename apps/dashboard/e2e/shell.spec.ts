@@ -209,6 +209,7 @@ test.describe('top bar', () => {
     for (const item of [
       'Plan and usage',
       'Members',
+      'API keys',
       'Organization settings',
       'Create organization',
     ]) {

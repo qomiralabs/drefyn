@@ -139,7 +139,7 @@ describe('the main entry', () => {
         'DEVICES_PER_USER',
         'DEVICE_MAX_AGE_SECONDS',
         'NEW_DEVICE_AFTER_DAYS',
-        'SESSIONS_PAGE_PLACEHOLDER_PATH',
+        'SESSIONS_PAGE_PATH',
         'INVITE_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
