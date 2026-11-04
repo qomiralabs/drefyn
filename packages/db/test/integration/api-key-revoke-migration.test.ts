@@ -50,8 +50,10 @@ const seed = (db: TestDatabase) =>
     db.name,
   );
 
-const keys = async (db: TestDatabase) =>
-  superuser('select id from app.api_keys order by id;', db.name);
+// psql ends its output with a newline.
+const scalar = async (sql: string, db: TestDatabase) => (await superuser(sql, db.name)).trim();
+
+const keys = async (db: TestDatabase) => scalar('select id from app.api_keys order by id;', db);
 
 describeWithStack('the API key revoke migration', () => {
   // Migrations run as drefyn_owner, which forced row level security hides these rows from, so
@@ -68,9 +70,9 @@ describeWithStack('the API key revoke migration', () => {
     );
     await up(db);
     expect(
-      await superuser(
+      await scalar(
         `select string_agg((revoked_at is not null)::text, ',' order by id) from app.api_keys;`,
-        db.name,
+        db,
       ),
     ).toBe('false,true');
   });
@@ -90,8 +92,8 @@ describeWithStack('the API key revoke migration', () => {
     );
     expect((await keys(db)).split('\n').map((l) => l.trim())).toEqual([LIVE, REVOKED]);
     await down(db);
-    expect((await keys(db)).trim()).toBe(LIVE);
-    expect(await superuser('select count(*) from app.api_key_projects;', db.name)).toBe('0');
+    expect(await keys(db)).toBe(LIVE);
+    expect(await scalar('select count(*) from app.api_key_projects;', db)).toBe('0');
   });
 
   it('forces row level security again in both directions', async () => {
@@ -111,7 +113,7 @@ describeWithStack('the API key revoke migration', () => {
   it('gives drefyn_app its delete grant back on the way down', async () => {
     const db = await dbs.fresh('migrated');
     const can = () =>
-      superuser(`select has_table_privilege('drefyn_app', 'app.api_keys', 'delete');`, db.name);
+      scalar(`select has_table_privilege('drefyn_app', 'app.api_keys', 'delete');`, db);
     expect(await can()).toBe('f');
     await down(db);
     expect(await can()).toBe('t');

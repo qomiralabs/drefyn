@@ -1,7 +1,7 @@
 import type { AccessContext, AccessView, SessionInfo } from '@drefyn/auth';
 import { idOf } from '@drefyn/tenancy';
 import fc from 'fast-check';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VISITOR_FLAG_ORGANIZATION } from '../src/shell/release.ts';
 
 const NOT_FOUND = new Error('NEXT_NOT_FOUND');
@@ -24,7 +24,7 @@ const VIEW: AccessView = {
 const SESSION = { sessionId: SESSION_ID, userId: USER } as unknown as SessionInfo;
 
 // Slow under coverage on a shared runner; the default 5 s failed there with nothing wrong.
-const PROPERTY_TIMEOUT_MS = 60_000;
+const SLOW_TIMEOUT_MS = 60_000;
 
 class Redirect extends Error {
   readonly target: string;
@@ -85,6 +85,12 @@ beforeEach(() => {
 });
 
 const load = async () => import('../src/server/guard.ts');
+
+// The first import pulls in the auth package under coverage and took over 5 s on a busy runner,
+// which failed whichever test ran first. Paid here, so each test's timeout measures that test.
+beforeAll(async () => {
+  await load();
+}, SLOW_TIMEOUT_MS);
 
 async function caught(run: () => Promise<unknown>): Promise<unknown> {
   try {
@@ -267,7 +273,7 @@ describe('guardOrganization', () => {
           }),
         );
       },
-      PROPERTY_TIMEOUT_MS,
+      SLOW_TIMEOUT_MS,
     );
   });
 });
