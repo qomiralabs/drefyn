@@ -35,7 +35,8 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   `parseEmailConfig` returned.
 - `createSmtpTransport(smtpConfig)` is that transport, for a caller that wraps it.
 - `renderMail(message, { linkOrigin })` returns the subject, preheader, HTML and text, or
-  `email.input_invalid` naming the field. It never throws.
+  `email.input_invalid` naming the field. It never throws. The host of `linkOrigin` is named
+  in the footer of every mail.
 - `isHeaderSafe(name, value)` is the check every header value passes.
 - `logEmailConfig(result, logger)` writes the startup lines.
 - `@drefyn/email/testing` exports `createTestTransport()`, which captures every send
@@ -50,7 +51,8 @@ await mailer.drain(10_000); // on SIGTERM, returns { dropped }
   on the line once encoded.
 - Names (organization, inviter, device, account, key, owner and member) refuse control
   characters and bidi marks, embeddings, overrides and isolates, naming the field, and are cut at a grapheme boundary with an
-  ellipsis: 100 code points, 120 for a device and 254 for an account.
+  ellipsis: 100 code points, 120 for a device and 254 for an account. A device label is cut
+  at a word boundary when one falls in its second half.
 - Links must be https on the link origin, or http only when that origin is loopback, with
   no user or password. Each link is copied before the check and only the copy is
   rendered, so editing the URL after `send` or a URL subclass cannot change where it
@@ -113,7 +115,25 @@ Integration tests: `bash scripts/email-integration.sh` makes throwaway certifica
 AUTH password, starts four Mailpit containers on loopback, runs `test:integration` and
 removes everything.
 
-## Not here yet
+## Templates
 
-The designed templates come next. Until then one plain placeholder
-template renders every message.
+`src/templates/` turns each message into blocks, and `src/html/` and `src/text.ts` write the
+two parts from them.
+
+- Every purpose and notice kind has a template. `NoticeTemplates` is a mapped type, so a new
+  kind fails to compile until it has one, and `packages/auth/test/types/mail-kinds.test.ts`
+  fails the build when auth can send a kind, purpose or provider this package lacks.
+- The look is signal on paper: a mono folio over a hairline, the code beside a 2 px ink
+  gutter, facts as rows, and one underlined text link with its address under it. An
+  invitation has a second, small link in the footer so the recipient can refuse it.
+- Every style is inline. The style block adds only phone sizes and dark mode, so a client
+  that strips it still shows a complete mail. There are no images, web fonts, scripts or
+  remote requests, and the only colours are the `@drefyn/ui` tokens in `src/html/palette.ts`.
+- The code has no space character: its gap is letter spacing, so a copy takes eight digits.
+- Templates are synchronous, because static rendering does not wait for anything suspended.
+
+```sh
+pnpm --filter @drefyn/email preview   # writes .preview/, open index.html
+pnpm --filter @drefyn/email test:e2e  # axe, requests and layout over those files, in Chromium
+pnpm --filter @drefyn/email bench     # renderMail p50 and p95 per fixture
+```

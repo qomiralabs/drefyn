@@ -91,11 +91,25 @@ const hostileCases: readonly [string, (name: string) => MailMessage][] = [
   ],
   [
     'notice.organizationName',
-    (n) => notice({ kind: 'api_key_created', at: AT, organizationName: n, keyName: 'ci' }),
+    (n) =>
+      notice({
+        kind: 'api_key_created',
+        at: AT,
+        organizationName: n,
+        keyName: 'ci',
+        displaySuffix: 'x7Qa',
+      }),
   ],
   [
     'notice.keyName',
-    (n) => notice({ kind: 'api_key_created', at: AT, organizationName: 'Acme', keyName: n }),
+    (n) =>
+      notice({
+        kind: 'api_key_created',
+        at: AT,
+        organizationName: 'Acme',
+        keyName: n,
+        displaySuffix: 'x7Qa',
+      }),
   ],
   [
     'notice.ownerName',
@@ -103,7 +117,14 @@ const hostileCases: readonly [string, (name: string) => MailMessage][] = [
   ],
   [
     'notice.memberName',
-    (n) => notice({ kind: 'member_removed', at: AT, organizationName: 'Acme', memberName: n }),
+    (n) =>
+      notice({
+        kind: 'member_removed',
+        at: AT,
+        organizationName: 'Acme',
+        memberName: n,
+        revokedKeys: 0,
+      }),
   ],
 ];
 

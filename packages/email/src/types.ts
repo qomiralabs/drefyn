@@ -9,7 +9,6 @@ export const SIGN_IN_CODE_PURPOSES = Object.freeze([
   'link_identity',
   'step_up',
   'password_reset',
-  'cli_link',
   'email_change',
 ] as const);
 export type SignInCodePurpose = (typeof SIGN_IN_CODE_PURPOSES)[number];
@@ -29,6 +28,7 @@ export const SECURITY_NOTICE_KINDS = Object.freeze([
   'api_key_created',
   'owner_added',
   'member_removed',
+  'member_keys_revoked',
 ] as const);
 export type SecurityNoticeKind = (typeof SECURITY_NOTICE_KINDS)[number];
 
@@ -59,6 +59,8 @@ export type SecurityNoticeMail =
       readonly kind: 'api_key_created';
       readonly organizationName: string;
       readonly keyName: string;
+      // The last few characters, the only part of a key ever shown again.
+      readonly displaySuffix: string;
     })
   | (NoticeFacts & {
       readonly kind: 'owner_added';
@@ -66,9 +68,10 @@ export type SecurityNoticeMail =
       readonly ownerName: string;
     })
   | (NoticeFacts & {
-      readonly kind: 'member_removed';
+      readonly kind: 'member_removed' | 'member_keys_revoked';
       readonly organizationName: string;
       readonly memberName: string;
+      readonly revokedKeys: number;
     });
 
 interface CodeFields {

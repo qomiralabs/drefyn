@@ -1,9 +1,9 @@
-import { contrast, floor2 } from '@drefyn/ui';
+import { contrast, floor2, type Hex } from '@drefyn/ui';
 import { describe, expect, it } from 'vitest';
 import { MAIL_PALETTE, MAIL_TEXT_ROLES } from '../../src/html/palette.ts';
 
-const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-const toHex = (rgb: readonly number[]) =>
+const channels = (hex: Hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const toHex = (rgb: readonly number[]): Hex =>
   `#${rgb
     .map((v) =>
       Math.round(Math.min(255, Math.max(0, v)))
@@ -13,7 +13,7 @@ const toHex = (rgb: readonly number[]) =>
     )
     .join('')}`;
 
-const invertPlain = (hex: string) => toHex(channels(hex).map((v) => 255 - v));
+const invertPlain = (hex: Hex) => toHex(channels(hex).map((v) => 255 - v));
 
 // The CSS hue-rotate(180deg) matrix in sRGB, the usual stand in for the way the Gmail apps
 // flip lightness and keep hue.
@@ -23,7 +23,7 @@ const HUE_180 = [
   [0.426, 1.43, -0.856],
 ] as const;
 
-function invertKeepingHue(hex: string): string {
+function invertKeepingHue(hex: Hex): Hex {
   const v = channels(invertPlain(hex));
   return toHex(HUE_180.map((row) => row.reduce((sum, w, i) => sum + w * (v[i] ?? 0), 0)));
 }

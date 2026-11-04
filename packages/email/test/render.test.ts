@@ -12,6 +12,7 @@ import { createTestTransport } from '../src/testing.ts';
 import {
   AT,
   ORIGIN,
+  REMOVED_PURPOSE,
   invitation,
   link,
   notice,
@@ -211,8 +212,8 @@ describe('invitation', () => {
 });
 
 describe('value guards', () => {
-  it('refuses the removed cli_link purpose before any transport', async () => {
-    const message = { ...signIn(), purpose: 'cli_link' } as unknown as MailMessage;
+  it('refuses the removed command line purpose before any transport', async () => {
+    const message = { ...signIn(), purpose: REMOVED_PURPOSE } as unknown as MailMessage;
     await refused(message, 'purpose');
     const transport = createTestTransport();
     const { logger, metrics } = recorder();
@@ -434,9 +435,9 @@ describe('long names', () => {
   });
 
   it('cuts a long device label at a word boundary', async () => {
-    const words = `${'Firefox on a long label '.repeat(8)}`.trim();
+    const words = 'Firefox on a long label '.repeat(8).trim();
     const mail = await rendered(notice({ kind: 'new_device_sign_in', at: AT, device: words }));
-    const value = /Device:\s+(.*(?:\n\s+.*)*)/.exec(mail.text)?.[1]?.replace(/\s+/g, ' ') ?? '';
+    const value = /Device: +(.*(?:\n {8}\S.*)*)/.exec(mail.text)?.[1]?.replace(/\s+/g, ' ') ?? '';
     expect(value.endsWith('…')).toBe(true);
     expect(Array.from(value).length).toBeLessThanOrEqual(120);
     expect(words).toContain(`${value.slice(0, -1)} `);

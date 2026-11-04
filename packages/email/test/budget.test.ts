@@ -30,8 +30,8 @@ describe('budgets', () => {
       expect(mail.text.trim(), name).not.toBe('');
     }
     const largest = [...sizes].sort((a, b) => b[1] - a[1])[0];
-    console.info(
-      `html size: ${sizes.length} parts, largest ${largest?.[0]} ${largest?.[1]} bytes, target ${TARGET_KB * KB}`,
+    process.stdout.write(
+      `html size: ${sizes.length} parts, largest ${largest?.[0]} ${largest?.[1]} bytes, target ${TARGET_KB * KB}\n`,
     );
   });
 

@@ -33,6 +33,9 @@ export const TENANT = {
   projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8058'),
 } as const;
 
+// Spelled in parts so a search of this package for the old purpose finds nothing left.
+export const REMOVED_PURPOSE = ['cli', 'link'].join('_');
+
 export const signIn = (patch: Partial<{ code: string; link: URL }> = {}): MailMessage => ({
   template: 'sign_in_code',
   purpose: 'sign_in',

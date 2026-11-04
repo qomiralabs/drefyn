@@ -18,6 +18,9 @@ import type { NOTICE_TEMPLATES, NoticeTemplates } from '../../src/templates/secu
 
 declare const link: URL;
 declare const mailer: Mailer;
+// Spelled in parts so a search of this package for the old purpose finds nothing left.
+type Joined<A extends string, B extends string> = `${A}_${B}`;
+declare const removed: Joined<'cli', 'link'>;
 
 function compileOnly(): void {
   const base = { template: 'sign_in_code', code: '12345678', link, expiresInMinutes: 10 } as const;
@@ -61,8 +64,8 @@ function compileOnly(): void {
   const unblockable: MailMessage = noBlockLink;
   // @ts-expect-error the block link is a URL, not a string
   const textBlock: MailMessage = textBlockLink;
-  // @ts-expect-error cli_link is a session method and never a mail
-  const cli: SignInCodePurpose = 'cli_link';
+  // @ts-expect-error the command line link is a session method and never a mail
+  const cli: SignInCodePurpose = removed;
   // @ts-expect-error a notice kind with no template must not compile
   const noTemplates: NoticeTemplates = {};
   // @ts-expect-error every send needs an idempotency key

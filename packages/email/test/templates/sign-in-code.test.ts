@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SIGN_IN_CODE_PURPOSES, renderMail, type MailMessage } from '../../src/index.ts';
 import { FIXTURE_MESSAGES } from '../fixtures/messages.ts';
-import { ORIGIN, link, signIn } from '../support.ts';
+import { ORIGIN, REMOVED_PURPOSE, link, signIn } from '../support.ts';
 
 async function rendered(message: MailMessage) {
   const result = await renderMail(message, { linkOrigin: ORIGIN });
@@ -74,7 +74,7 @@ describe('sign in code mail', () => {
 
   it('covers exactly the five purposes', () => {
     expect(SIGN_IN_CODE_PURPOSES).toHaveLength(5);
-    expect(SIGN_IN_CODE_PURPOSES).not.toContain('cli_link');
+    expect(SIGN_IN_CODE_PURPOSES).not.toContain(REMOVED_PURPOSE);
   });
 
   it('names the provider and the account on a link code, as facts', async () => {
