@@ -212,6 +212,8 @@ describe('package entries', () => {
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
       './testing': './src/testing.ts',
+      // Config parsing alone, with no React or Nodemailer, for a bundled start check.
+      './config': './src/config.ts',
       './package.json': './package.json',
     });
   });

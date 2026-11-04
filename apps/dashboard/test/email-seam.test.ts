@@ -23,7 +23,7 @@ function importsOf(path: string): readonly string[] {
     if (moduleSpecifier === undefined || !ts.isStringLiteral(moduleSpecifier)) continue;
     const clause = ts.isImportDeclaration(statement) ? statement.importClause : undefined;
     const typeOnly = ts.isImportDeclaration(statement)
-      ? clause?.isTypeOnly === true ||
+      ? clause?.phaseModifier === ts.SyntaxKind.TypeKeyword ||
         (clause?.name === undefined &&
           clause?.namedBindings !== undefined &&
           ts.isNamedImports(clause.namedBindings) &&

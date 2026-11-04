@@ -1,10 +1,10 @@
-import { flags } from '../src/registry.ts';
 import { describe, expect, it } from 'vitest';
 import {
   FLAG_AREAS,
   FLAG_KINDS,
   FlagError,
   defineFlags,
+  flags,
   type DefinitionProblem,
   type FlagDefinition,
 } from '../src/index.ts';

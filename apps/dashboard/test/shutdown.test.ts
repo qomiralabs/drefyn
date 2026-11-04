@@ -38,17 +38,21 @@ describe('drainMailer', () => {
 const CHILD = `
 import { createMailer } from '@drefyn/email';
 import { createTestTransport } from '@drefyn/email/testing';
+import { parseEmailConfig } from '@drefyn/email/config';
 import { drainMailer, holdMailer } from './src/server/mail-holder.ts';
 const transport = createTestTransport();
 transport.hangNext();
-const config = {
-  kind: 'smtp',
-  sender: { from: 'drefyn@example.dev', fromName: 'Drefyn', headers: new Map() },
-  limits: { maxConcurrent: 4, queueMax: 100 },
-  smtp: { timeouts: { deadlineMs: 60000 } },
-};
+const parsed = parseEmailConfig({
+  DREFYN_EMAIL_TRANSPORT: 'smtp',
+  DREFYN_EMAIL_FROM: 'drefyn@example.dev',
+  DREFYN_SMTP_HOST: 'relay.example.dev',
+  DREFYN_SMTP_TLS: 'none',
+  DREFYN_SMTP_ALLOW_PLAINTEXT: 'true',
+  DREFYN_SMTP_MAX_CONCURRENT: '1',
+});
+if (!parsed.ok) throw new Error(parsed.error.key);
 const noop = () => undefined;
-const mailer = createMailer(config, {
+const mailer = createMailer(parsed.value, {
   linkOrigin: new URL('https://app.drefyn.test'),
   logger: { info: noop, warn: noop, error: noop },
   metrics: { counter: noop, histogram: noop, gauge: noop },
@@ -60,31 +64,40 @@ process.once('SIGTERM', async () => {
   process.stdout.write(JSON.stringify({ dropped }));
   process.exit(0);
 });
-void mailer.send('a@example.com', {
-  template: 'sign_in_code', purpose: 'sign_in', code: '12345678',
-  link: new URL('https://app.drefyn.test/sign-in/verify#x'), expiresInMinutes: 10,
-}, { idempotencyKey: 'code:one' });
-process.stdout.write('ready\\n');
+const send = (key: string) =>
+  void mailer.send('a@example.com', {
+    template: 'sign_in_code', purpose: 'sign_in', code: '12345678',
+    link: new URL('https://app.drefyn.test/sign-in/verify#x'), expiresInMinutes: 10,
+  }, { idempotencyKey: key });
+// One held open by the transport, which drain waits for, and two queued behind it.
+for (const key of ['code:one', 'code:two', 'code:three']) send(key);
+setTimeout(() => process.stdout.write('ready\\n'), 100);
 `;
 
 describe('SIGTERM', () => {
   it('drains in flight sends up to the deadline and counts what it dropped', async () => {
     const child = spawn(process.execPath, ['--input-type=module-typescript', '-e', CHILD], {
       cwd: new URL('..', import.meta.url),
+      // As the server runs, since React's dev build warns about the mail's table attributes.
+      env: { ...process.env, NODE_ENV: 'production' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';
     let errors = '';
+    let signalled = false;
     child.stderr.on('data', (chunk: Buffer) => (errors += chunk.toString('utf8')));
     const code = await new Promise<number | null>((done) => {
       child.stdout.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8');
-        if (output.includes('ready')) child.kill('SIGTERM');
+        if (!signalled && output.includes('ready')) {
+          signalled = true;
+          child.kill('SIGTERM');
+        }
       });
       child.on('exit', done);
     });
     expect(errors).toBe('');
     expect(code).toBe(0);
-    expect(output).toContain('{"dropped":1}');
+    expect(output).toContain('{"dropped":2}');
   }, 30_000);
 });

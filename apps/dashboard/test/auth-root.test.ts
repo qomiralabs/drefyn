@@ -13,10 +13,16 @@ vi.mock('@drefyn/db', () => ({
   createAuthDatabase,
   parseDatabaseConfig,
   parseAuthDatabaseConfig,
+  withOrganization: vi.fn(),
 }));
+vi.mock('@drefyn/email/config', () => ({ parseEmailConfig: () => ({ ok: true }) }));
 vi.mock('@drefyn/auth', () => ({ createSessions, createOrganizations, parseAuthConfig }));
 
-const CONFIG = { cookies: { session: '__Host-drefyn_session' } };
+const CONFIG = {
+  appOrigin: 'https://app.drefyn.test',
+  email: 'auto',
+  cookies: { session: '__Host-drefyn_session' },
+};
 const sessions = {
   resolveAccess: vi.fn(),
   resolveSession: vi.fn(),
@@ -41,6 +47,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const dashboardMail = vi.fn(() => Promise.resolve({ auth: {}, configured: true }));
+vi.mock('../src/server/auth-mailer.ts', () => ({ dashboardMail, noteEmailOff: vi.fn() }));
+vi.mock('../src/server/gate.ts', () => ({ mailDeliveryEnabled: () => Promise.resolve(false) }));
+
 const load = async () => import('../src/server/auth.ts');
 
 describe('the composition root', () => {
@@ -62,6 +72,15 @@ describe('the composition root', () => {
       'touchSession',
     ]);
     expect(Object.keys(auth.organizations)).toEqual(['listMyOrganizations']);
+    expect(Object.keys(auth).sort()).toEqual(['emailOn', 'organizations', 'sessions']);
+  });
+
+  it('reports email on only with a working mailer', async () => {
+    const { dashboardAuth } = await load();
+    expect((await dashboardAuth()).emailOn).toBe(true);
+    vi.resetModules();
+    dashboardMail.mockResolvedValueOnce({ auth: {}, configured: false });
+    expect((await (await load()).dashboardAuth()).emailOn).toBe(false);
   });
 
   it('keeps the method receivers working', async () => {

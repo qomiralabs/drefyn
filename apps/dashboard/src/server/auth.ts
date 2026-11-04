@@ -13,7 +13,12 @@ import {
   createDatabase,
   parseAuthDatabaseConfig,
   parseDatabaseConfig,
+  withOrganization,
+  type Database,
 } from '@drefyn/db';
+import { parseEmailConfig } from '@drefyn/email/config';
+import { dashboardMail, noteEmailOff, type OrganizationName } from './auth-mailer.ts';
+import { mailDeliveryEnabled } from './gate.ts';
 import { logInfo, logWarn, type LogContext } from './log.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
@@ -22,6 +27,7 @@ import { logInfo, logWarn, type LogContext } from './log.ts';
 export interface DashboardAuth {
   readonly sessions: Pick<Sessions, 'resolveAccess' | 'resolveSession' | 'touchSession'>;
   readonly organizations: Pick<Organizations, 'listMyOrganizations'>;
+  readonly emailOn: boolean;
 }
 
 // Auth passes ids and outcome codes; a value of any other shape stays out of the log.
@@ -55,11 +61,30 @@ export function sessionCookieName(): string {
   return authConfig().cookies.session;
 }
 
+function organizationNames(db: Database): OrganizationName {
+  return async (organizationId) => {
+    const row = await withOrganization(db, { organizationId }, (tx) =>
+      tx
+        .selectFrom('organizations')
+        .select('name')
+        .where('organization_id', '=', organizationId)
+        .executeTakeFirstOrThrow(),
+    );
+    return row.name;
+  };
+}
+
 async function compose(): Promise<DashboardAuth> {
   const parsed = authConfig();
   const db = await createDatabase(parseDatabaseConfig(process.env));
   const authDb = await createAuthDatabase(parseAuthDatabaseConfig(process.env));
-  const sessions = createSessions(parsed, { db, authDb, logger });
+  const mail = await dashboardMail({
+    linkOrigin: new URL(parsed.appOrigin),
+    organizationName: organizationNames(db),
+    enabled: mailDeliveryEnabled,
+  });
+  noteEmailOff(mail, parsed.email);
+  const sessions = createSessions(parsed, { db, authDb, logger, mailer: mail.auth });
   // The tier of an organization this root never creates; hosted refuses it in the database.
   const organizations = createOrganizations(parsed, {
     db,
@@ -76,6 +101,7 @@ async function compose(): Promise<DashboardAuth> {
     organizations: {
       listMyOrganizations: (session) => organizations.listMyOrganizations(session),
     },
+    emailOn: mail.configured && parsed.email !== 'off',
   };
 }
 
@@ -96,4 +122,6 @@ export function checkDashboardConfig(env: Env): void {
   parseAuthConfig(env);
   parseDatabaseConfig(env);
   parseAuthDatabaseConfig(env);
+  const email = parseEmailConfig(env);
+  if (!email.ok) throw new Error(`${email.error.key} ${email.error.reason}`);
 }

@@ -2,6 +2,7 @@ import type { FlagClient, FlagContext } from '@drefyn/flags';
 import { idOf, type OrganizationId } from '@drefyn/tenancy';
 
 export const DASHBOARD_FLAG = 'dashboard.shell';
+export const MAIL_FLAG = 'email.smtp_delivery';
 
 // Who the flag is asked about when nobody is signed in. The nil UUID, which generated ids
 // never are, so it belongs to no tenant and the answer can never depend on a slug.
@@ -19,6 +20,18 @@ export async function dashboardEnabled(
   try {
     // Typed as boolean, but only a real true turns the dashboard on.
     const value: unknown = await client.isOn(DASHBOARD_FLAG, context);
+    return value === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function mailDelivery(
+  client: FlagClient,
+  context: Pick<FlagContext, 'organizationId'>,
+): Promise<boolean> {
+  try {
+    const value: unknown = await client.isOn(MAIL_FLAG, context);
     return value === true;
   } catch {
     return false;
