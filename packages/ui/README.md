@@ -193,6 +193,11 @@ In an app that uses Tailwind:
 - A disabled checkbox, radio, option, select or tab stays focusable and reachable by the
   arrow keys, is announced as unavailable, and is never chosen.
 - A `Select` needs at least one option; pass `loading` while they are on their way.
+- `TagField` holds free text as removable chips, such as addresses to invite; `tagErrors`
+  marks a chip and lists its message under the field. `MultiCombobox` takes `SelectOption`
+  children for several picks from a known list, and opens its search and list in the bottom
+  sheet on a phone. Both post one hidden input per chip. Give both a `tagsLabel` that says what
+  the chips are, because the label names the input.
 - `Popover` is not modal. Focus moves into the panel; Escape, a press outside, and Tab past
   its last control close it. Use a `Dialog` for a task with a Save button.
 - `Tabs` holds one `TabList` of `Tab`s and a `TabPanel` per tab, matched by `value`. Use

@@ -23,6 +23,8 @@ const describedBy = (el: HTMLElement) =>
     .map((id) => document.getElementById(id)?.textContent ?? '')
     .join(' ');
 
+// Where focus goes after a press on a chip button is proven in the browser specs: happy-dom
+// hands focus back to the row, which no engine does.
 describe('TagField', () => {
   it('starts empty on an input named by its label, with no list of chips', () => {
     render(<Addresses />);
@@ -101,14 +103,13 @@ describe('TagField', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('removes a chip by its button and sends focus to the input', async () => {
+  it('removes a chip by its button', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<Addresses defaultValue={['kai@acme.dev', 'ren@acme.dev']} onChange={onChange} />);
     await user.click(remove('kai@acme.dev'));
     expect(chips()).toEqual(['ren@acme.dev']);
     expect(onChange.mock.calls).toEqual([[['ren@acme.dev']]]);
-    expect(document.activeElement).toBe(input());
   });
 
   it('moves to the last chip on Backspace in an empty input, and a second press removes it', async () => {

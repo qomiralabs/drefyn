@@ -118,7 +118,10 @@ for (const theme of THEMES) {
     await expect(page.getByRole('row')).toHaveCount(2);
   });
 
-  test(`Shift Tab from an open list lands on a chip in ${theme}`, async ({ page, browserName }) => {
+  test(`Shift Tab from an open list lands on the last chip button in ${theme}`, async ({
+    page,
+    browserName,
+  }) => {
     await openStory(page, 'components-multi-combobox--chosen', theme);
     await expect(page.getByRole('row')).toHaveCount(2);
     await input(page).focus();
@@ -126,7 +129,7 @@ for (const theme of THEMES) {
     await expect(list(page)).toBeVisible();
     await page.keyboard.press(`Shift+${tabKey(browserName)}`);
     await expect(list(page)).toHaveCount(0);
-    await expect(page.getByRole('row').first()).toBeFocused();
+    await expect(page.getByRole('button', { name: /^Remove Partner/ })).toBeFocused();
   });
 
   test(`Backspace steps onto the last chip, removes it and reaches the input in ${theme}`, async ({
@@ -223,10 +226,10 @@ test.describe('on a phone', () => {
       await expect(trigger(page)).toBeFocused();
       await page.keyboard.press('Enter');
       await expectSheet(page, 'Projects', 'option');
-      await expect(page.getByRole('combobox', { name: 'Search projects' })).toBeFocused();
+      await expect(page.getByRole('textbox', { name: 'Search projects' })).toBeFocused();
       await page.keyboard.type('docs');
       await expect(page.getByRole('option')).toHaveCount(2);
-      await page.keyboard.press('ArrowDown');
+      // Typing makes the first match active.
       await page.keyboard.press('Enter');
       await expect(option(page, 'Payments API docs')).toHaveAttribute('aria-selected', 'true');
       await expect(list(page)).toBeVisible();
@@ -269,6 +272,8 @@ test.describe('on a phone', () => {
       await expect(list(page)).toHaveCount(0);
       await expect(dialog).toBeVisible();
       await expect(trigger(page)).toBeFocused();
+      // Escape shut the sheet and left the pick alone.
+      await expect(chip(page, 'Payments API docs')).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(open).toBeFocused();

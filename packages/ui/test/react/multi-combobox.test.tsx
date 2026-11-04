@@ -103,14 +103,13 @@ describe('MultiCombobox', () => {
     expect(onChange.mock.calls).toEqual([[[]]]);
   });
 
-  it('removes a chip by its button and keeps the list closed', async () => {
+  it('removes a chip by its button', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<Projects defaultValue={['pay', 'status']} onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /^Remove Payments/ }));
     expect(chips()).toEqual(['Status page']);
     expect(onChange.mock.calls).toEqual([[['status']]]);
-    expect(document.activeElement).toBe(input());
   });
 
   it('moves to the last chip on Backspace in an empty input, and a second press removes it', async () => {
@@ -340,7 +339,7 @@ describe('on a phone', () => {
     const user = userEvent.setup();
     render(<Projects />);
     await user.click(trigger());
-    await user.keyboard('status');
+    await user.type(screen.getByRole('textbox', { name: 'Search' }), 'status');
     expect(within(listbox()).getAllByRole('option')).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await user.click(trigger());

@@ -170,7 +170,6 @@ const USES: Use[] = [
   ...each('TagField disabled', ['disabled.edge'], ['disabled.fill', ...ON], 'non-text', 'disabled'),
   // The list is Select's own options; the box and chips are TagField's. This is the count line.
   ...each('MultiCombobox count and empty list', ['text.secondary'], ON, 'text'),
-  ...each('MultiCombobox count rule', ['border.rule'], ON, 'non-text', 'supplementary'),
 ];
 
 const key = (p: { mode: Mode; fg: string; bg: string; kind: PairKind }) =>

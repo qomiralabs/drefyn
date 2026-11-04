@@ -52,7 +52,7 @@ for (const theme of THEMES) {
     await expect(input(page)).toBeFocused();
   });
 
-  test(`the arrows move between chips and Tab leaves for the input in ${theme}`, async ({
+  test(`the arrows move between chips and Tab goes by the chip button to the input in ${theme}`, async ({
     page,
     browserName,
   }) => {
@@ -64,6 +64,8 @@ for (const theme of THEMES) {
     await expect(chip(page, 'ren@northwind.dev')).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await expect(chip(page, 'kai@acme.dev')).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: /^Remove kai@acme\.dev/ })).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('ArrowLeft');
