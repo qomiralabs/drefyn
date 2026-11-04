@@ -18,7 +18,10 @@ import {
 import { userId } from '@drefyn/tenancy';
 import { ON_ORIGIN } from './fixtures.ts';
 import { ACME_ID, ADA, BETA_ID, MAYA, NOOR, PEOPLE, SAM, stateFile } from './people.ts';
+import { refuseOutsideTests } from './seed-guard.ts';
 import { roleUrl, serverEnv, stackFile } from './stack-env.ts';
+
+refuseOutsideTests(process.env);
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const file = stackFile();

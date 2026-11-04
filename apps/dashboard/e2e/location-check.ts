@@ -1,8 +1,9 @@
 // Absolute URLs come only from the configured origin. Pure, so a deliberately bad response
 // can prove the check goes red without a bad route in the build.
 
-const ABSOLUTE = /^(?:[a-z][a-z0-9+.-]*:)?[/\\]{2}/i;
-const LINK = /\b(?:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+// http and https need no slashes for a browser to read a host.
+const ABSOLUTE = /^(?:https?:|(?:[a-z][a-z0-9+.-]*:)?[/\\]{2})/i;
+const LINK = /\b(?:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
 
 // Fixed text in the product, never built from a request. Exact, so another path or a look
 // alike host on it still fails.
@@ -25,6 +26,6 @@ export function locationProblem(value: string, origin: string): string | null {
 
 export function absoluteLinkProblems(html: string, origin: string): readonly string[] {
   return [...html.matchAll(LINK)]
-    .map((match) => match[1] ?? match[2] ?? '')
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
     .filter((value) => leaves(value, origin) && !OUR_OWN_LINKS.has(value));
 }

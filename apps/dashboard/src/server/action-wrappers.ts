@@ -31,6 +31,9 @@ export interface WrapperDeps {
   // What an action sees of its request; a route has it on the request itself.
   readonly request: () => Promise<RequestFacts>;
   readonly wrapperRunning: () => boolean;
+  // Throws the 404 when the dashboard is off. First in every wrapper, so the flag is a kill
+  // switch for signed out forms too, and a dashboard that is off answers nothing else.
+  readonly visitorFlag: () => Promise<void>;
   readonly checkBinding: (browser: BrowserContext, field: string) => boolean;
   // Both redirect or answer 404 by throwing, which passes through the wrappers.
   readonly session: () => Promise<SessionInfo>;
@@ -162,6 +165,7 @@ export function createWrappers(deps: WrapperDeps) {
 
   function publicAction<R>(handler: (context: PublicContext, form: FormData) => Promise<R>) {
     return async (form: FormData): Promise<R | Refusal> => {
+      await deps.visitorFlag();
       const browser = admit(await deps.request());
       if (isRefusal(browser)) return browser;
       const refused = formRefusal(browser, form);
@@ -173,6 +177,7 @@ export function createWrappers(deps: WrapperDeps) {
     handler: (context: SignedInContext, ...args: A) => Promise<R>,
   ) {
     return async (...args: A): Promise<R | Refusal> => {
+      await deps.visitorFlag();
       const browser = admit(await deps.request());
       if (isRefusal(browser)) return browser;
       return handler({ browser, session: await deps.session() }, ...args);
@@ -184,6 +189,7 @@ export function createWrappers(deps: WrapperDeps) {
   ) {
     // The slug is a client argument. It selects nothing until the guard proves membership.
     return async (slug: string, ...args: A): Promise<R | Refusal> => {
+      await deps.visitorFlag();
       const browser = admit(await deps.request());
       if (isRefusal(browser)) return browser;
       const parsed = Slug.safeParse(slug);
@@ -196,6 +202,7 @@ export function createWrappers(deps: WrapperDeps) {
     handler: (context: PublicContext, form: FormData, request: RouteRequest) => Promise<Response>,
   ) {
     return async (request: RouteRequest): Promise<Response> => {
+      await deps.visitorFlag();
       const browser = admit(factsOf(request));
       if (isRefusal(browser)) return respond(browser);
       const form = await readForm(request);
@@ -209,6 +216,7 @@ export function createWrappers(deps: WrapperDeps) {
     handler: (context: SignedInContext, request: RouteRequest) => Promise<Response>,
   ) {
     return async (request: RouteRequest): Promise<Response> => {
+      await deps.visitorFlag();
       const browser = admit(factsOf(request));
       if (isRefusal(browser)) return respond(browser);
       return handler({ browser, session: await deps.session() }, request);
@@ -219,6 +227,7 @@ export function createWrappers(deps: WrapperDeps) {
     handler: (context: OrganizationContext, request: RouteRequest) => Promise<Response>,
   ) {
     return async (request: RouteRequest, route: OrganizationRouteContext): Promise<Response> => {
+      await deps.visitorFlag();
       const browser = admit(factsOf(request));
       if (isRefusal(browser)) return respond(browser);
       const { org } = await route.params;

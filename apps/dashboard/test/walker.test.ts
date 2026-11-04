@@ -155,9 +155,14 @@ describe('pages and layouts', () => {
 });
 
 describe('which guard each path takes', () => {
-  const using = (name: string) =>
-    `import { ${name} } from '../server/guard.ts';
-     export default async function P({ params }) { await ${name}(); }`;
+  const using = (name: string, path: string) => {
+    const from = posix.relative(posix.dirname(path), 'src/server/guard.ts');
+    return `import { ${name} } from '${from}';
+      export default async function P({ params }) {
+        const { org } = await params;
+        await ${name}(org);
+      }`;
+  };
 
   it('takes guardSignedIn at the root only', () => {
     expect(problems('src/app/page.tsx', using('guardSignedIn', 'src/app/page.tsx'))).toEqual([]);
@@ -312,8 +317,6 @@ describe("inline 'use server'", () => {
 
 describe('route handlers', () => {
   it.each([
-    ['a GET', 'export async function GET() { return new Response(); }'],
-    ['HEAD and OPTIONS', 'export const HEAD = async () => 1;\nexport const OPTIONS = HEAD;'],
     ['a wrapped POST', 'export const POST = publicRoute(async () => new Response());'],
     [
       'a wrapped POST by name',

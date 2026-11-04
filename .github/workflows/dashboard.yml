@@ -67,6 +67,8 @@ jobs:
         run: bash scripts/selfhost.sh up
       - run: pnpm --filter @drefyn/dashboard build
       - name: Seed people and sessions
+        env:
+          DREFYN_E2E_SEED: real-stack-e2e
         run: pnpm --filter @drefyn/dashboard seed:e2e
       # Three visual runs until zero tolerance screenshots have proven stable at scale; a
       # missing baseline fails, since the config never writes snapshots.
