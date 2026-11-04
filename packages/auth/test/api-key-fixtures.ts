@@ -26,6 +26,8 @@ export const OTHER_KEY: IdOf<'key'> = idOf('key', fixed(74));
 export const PROJECT_A: ProjectId = idOf('prj', fixed(75));
 export const PROJECT_B: ProjectId = idOf('prj', fixed(76));
 export const CREATED_AT = new Date('2026-11-03T09:00:00.000Z');
+export const REVOKED_AT = new Date('2026-11-04T09:00:00.000Z');
+export const FIRST_REVOKED_AT = new Date('2026-11-04T08:00:00.000Z');
 export const KEY_SECRET = Buffer.alloc(32, 7);
 
 export const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest();
@@ -68,7 +70,8 @@ const select = (s: Statement, table: string) =>
 export const isKeyProof = (s: Statement) =>
   select(s, 'api_keys') && !s.sql.includes('idempotency_key" =');
 export const isKeyProjects = (s: Statement) => select(s, 'api_key_projects');
-export const isUseWrite = (s: Statement) => /^update "api_keys"/i.test(s.sql);
+export const isUseWrite = (s: Statement) => /^update "api_keys" set "last_used_at"/i.test(s.sql);
+export const isRevokeWrite = (s: Statement) => /^update "api_keys" set "revoked_at"/i.test(s.sql);
 export const isRecentRead = (s: Statement) => select(s, 'sessions');
 export const isMemberRead = (s: Statement) =>
   select(s, 'memberships') && s.sql.includes('"user_id" =');
@@ -159,6 +162,45 @@ export function createResponder(shape: CreateShape = {}): Responder {
       return (shape.emails ?? ['owner@example.com']).map((email) => ({ email }));
     }
     return [];
+  };
+}
+
+export type RevokeState = 'live' | 'revoked' | 'absent';
+
+export interface RevokeShape extends CreateShape {
+  readonly state?: RevokeState;
+  readonly projectScope?: 'all' | 'listed';
+}
+
+export function storedKey(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: KEY,
+    name: 'Deploy from CI',
+    display_suffix: 'x7qa',
+    scopes: ['docs:read'],
+    project_scope: 'all',
+    created_by: MEMBERSHIP,
+    created_at: CREATED_AT,
+    expires_at: null,
+    last_used_at: null,
+    revoked_at: null,
+    ...over,
+  };
+}
+
+// Every statement revokeApiKey sends, answered as the database would for a key in that state.
+export function revokeResponder(shape: RevokeShape = {}): Responder {
+  const state = shape.state ?? 'live';
+  const row = { project_scope: shape.projectScope ?? 'all' };
+  const members = createResponder(shape);
+  return (s) => {
+    if (isRevokeWrite(s)) {
+      return state === 'live' ? [storedKey({ ...row, revoked_at: REVOKED_AT })] : [];
+    }
+    if (isKeyProof(s)) {
+      return state === 'revoked' ? [storedKey({ ...row, revoked_at: FIRST_REVOKED_AT })] : [];
+    }
+    return members(s);
   };
 }
 

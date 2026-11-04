@@ -1,8 +1,10 @@
 import { beforeAll, expect, it } from 'vitest';
+import { newId, withOrganization } from '@drefyn/db';
 import {
   ApiKeyReplayError,
   apiKeyErrorResponse,
   parseApiKey,
+  type ApiKeyVerifierStore,
   type CreatedApiKey,
 } from '../../src/index.ts';
 import { addProjects, input, memberOf, newOrg, testIp, type Org } from './support/api-keys.ts';
@@ -273,6 +275,197 @@ describeWithStack('API keys against Postgres', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('AUTH_API_KEY_INVALID');
     expect(JSON.stringify(h.logs)).not.toContain(made.secret.slice(-20));
+  });
+
+  describe('revoking', () => {
+    const revoke = async (org: Org, key: CreatedApiKey) => {
+      const result = await h.apiKeys().revokeApiKey(org.owner, key.key.keyId);
+      if (!result.ok) throw result.error;
+      return result.value;
+    };
+    const stateOf = (key: CreatedApiKey) =>
+      h.sql(
+        `select (revoked_at is not null)::text from app.api_keys where id = '${key.key.keyId}';`,
+      );
+    const noticesTo = (key: CreatedApiKey, from: number) =>
+      h.mail.notices
+        .slice(from)
+        .filter((n) => n.notice.kind === 'api_key_revoked' && n.notice.keyId === key.key.keyId);
+    const verifies = async (key: CreatedApiKey) => {
+      const result = await h.verifier().verifyApiKey(bearer(key.secret), testIp());
+      return result.ok ? 'ok' : result.error.code;
+    };
+
+    it('ends the key: an owner revokes it and the next verification fails', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      expect(await verifies(key)).toBe('ok');
+      const done = await revoke(org, key);
+      expect(done.alreadyRevoked).toBe(false);
+      expect(done.key.revokedAt).toBeInstanceOf(Date);
+      expect(await verifies(key)).toBe('AUTH_API_KEY_INVALID');
+    });
+
+    it('lets an admin revoke a key an owner made, and keeps the row and its project', async () => {
+      const org = await newOrg(h);
+      const [project] = await addProjects(h, org.organizationId, 1);
+      if (project === undefined) throw new Error('no project');
+      const key = await create(org, { projectScope: 'listed', projectIds: [project] });
+      const { access } = await memberOf(h, org, 'admin');
+      const result = await h.apiKeys().revokeApiKey(access, key.key.keyId);
+      if (!result.ok) throw result.error;
+      expect(result.value.key.projectIds).toEqual([project]);
+      expect(await verifies(key)).toBe('AUTH_API_KEY_INVALID');
+      expect(
+        await h.sql(
+          `select count(*) from app.api_key_projects where api_key_id = '${key.key.keyId}';`,
+        ),
+      ).toBe('1');
+    });
+
+    it('refuses a member and a stale session, and changes nothing', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      const { access } = await memberOf(h, org, 'member');
+      const asMember = await h.apiKeys().revokeApiKey(access, key.key.keyId);
+      expect(asMember.ok ? 'ok' : asMember.error.code).toBe('AUTH_FORBIDDEN');
+      await h.sql(
+        `update app.sessions set authenticated_at = now() - interval '16 minutes'
+          where id = '${org.owner.sessionId}';`,
+      );
+      const stale = await h.apiKeys().revokeApiKey(org.owner, key.key.keyId);
+      expect(stale.ok ? 'ok' : stale.error.code).toBe('AUTH_RECENT_AUTH_REQUIRED');
+      expect(await stateOf(key)).toBe('false');
+      expect(await verifies(key)).toBe('ok');
+    });
+
+    it('answers an unknown id and a key of another organization the same, with no change', async () => {
+      const org = await newOrg(h);
+      const other = await newOrg(h);
+      const foreign = await create(other);
+      const before = h.mail.notices.length;
+      const unknown = await h.apiKeys().revokeApiKey(org.owner, newId('key'));
+      const across = await h.apiKeys().revokeApiKey(org.owner, foreign.key.keyId);
+      if (unknown.ok || across.ok) throw new Error('expected a refusal');
+      expect(across.error.code).toBe('AUTH_NOT_FOUND');
+      expect(across.error.code).toBe(unknown.error.code);
+      expect(across.error.message).toBe(unknown.error.message);
+      expect(await stateOf(foreign)).toBe('false');
+      expect(await verifies(foreign)).toBe('ok');
+      expect(h.mail.notices.length).toBe(before);
+    });
+
+    it('answers a second revoke with the first time, and one notice goes out', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      const before = h.mail.notices.length;
+      const first = await revoke(org, key);
+      await first.send();
+      const second = await revoke(org, key);
+      await second.send();
+      expect(second.alreadyRevoked).toBe(true);
+      expect(second.key.revokedAt).toEqual(first.key.revokedAt);
+      expect(noticesTo(key, before)).toHaveLength(1);
+    });
+
+    it('sends one notice when two revokes race, and both answer with the same time', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      const before = h.mail.notices.length;
+      const [one, two] = await Promise.all([revoke(org, key), revoke(org, key)]);
+      await Promise.all([one.send(), two.send()]);
+      expect([one.alreadyRevoked, two.alreadyRevoked].sort()).toEqual([false, true]);
+      expect(one.key.revokedAt).toEqual(two.key.revokedAt);
+      expect(noticesTo(key, before)).toHaveLength(1);
+    });
+
+    it('revokes an expired key and tells the owners', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      await h.sql(
+        `update app.api_keys set created_at = now() - interval '2 days',
+                expires_at = now() - interval '1 day' where id = '${key.key.keyId}';`,
+      );
+      const before = h.mail.notices.length;
+      const done = await revoke(org, key);
+      await done.send();
+      expect(done.alreadyRevoked).toBe(false);
+      expect(noticesTo(key, before)).toHaveLength(1);
+    });
+
+    it('refuses a verification that started before the revoke from then on', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      // The verification reads the key and writes its use time, then waits before committing,
+      // so its connection holds the row while the revoke runs on another.
+      let wrote!: () => void;
+      let release!: () => void;
+      const written = new Promise<void>((resolve) => (wrote = resolve));
+      const released = new Promise<void>((resolve) => (release = resolve));
+      const paused: ApiKeyVerifierStore = {
+        organization: (organizationId, work) =>
+          withOrganization(h.db, { organizationId }, async (tx) => {
+            const value = await work(tx);
+            wrote();
+            await released;
+            return value;
+          }),
+      };
+      const inFlight = h
+        .verifier({ store: paused, limiter: { reserve: () => Promise.resolve() } })
+        .verifyApiKey(bearer(key.secret), testIp());
+      await written;
+      const revoking = revoke(org, key);
+      // Time for the revoke to reach the row lock; it must not finish before the release.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      release();
+      expect((await inFlight).ok).toBe(true);
+      expect((await revoking).alreadyRevoked).toBe(false);
+      expect(await verifies(key)).toBe('AUTH_API_KEY_INVALID');
+    });
+
+    it('never lets a key verify once a revoke raced it has finished', async () => {
+      const org = await newOrg(h);
+      const key = await create(org);
+      const verifier = h.verifier({ limiter: { reserve: () => Promise.resolve() } });
+      const [done] = await Promise.all([
+        revoke(org, key),
+        ...Array.from({ length: 8 }, () => verifier.verifyApiKey(bearer(key.secret), testIp())),
+      ]);
+      expect(done.alreadyRevoked).toBe(false);
+      for (let i = 0; i < 4; i += 1) {
+        expect((await verifier.verifyApiKey(bearer(key.secret), testIp())).ok).toBe(false);
+      }
+    });
+
+    it('shows a create replayed after a revoke as revoked, and makes no new key', async () => {
+      const org = await newOrg(h);
+      const request = input();
+      const made = await h.apiKeys().createApiKey(org.owner, request);
+      if (!made.ok) throw made.error;
+      const done = await revoke(org, made.value);
+      const replay = await h.apiKeys().createApiKey(org.owner, request);
+      if (replay.ok) throw new Error('a replay made a key');
+      expect(replay.error).toBeInstanceOf(ApiKeyReplayError);
+      const { existing } = replay.error as ApiKeyReplayError;
+      expect(existing.keyId).toBe(made.value.key.keyId);
+      expect(existing.revokedAt).toEqual(done.key.revokedAt);
+      expect(
+        await h.sql(
+          `select count(*) from app.api_keys where organization_id = '${org.organizationId}';`,
+        ),
+      ).toBe('1');
+    });
+
+    it('logs ids only', async () => {
+      const org = await newOrg(h);
+      const key = await create(org, { name: 'Secret project name' });
+      await revoke(org, key);
+      const line = h.logs.filter((l) => l.event === 'auth.api_key_revoked').at(-1);
+      expect(line?.fields).toBeDefined();
+      expect(JSON.stringify(h.logs)).not.toContain('Secret project name');
+      expect(JSON.stringify(h.logs)).not.toContain(org.ownerEmail);
+    });
   });
 
   it('never logs a secret on any path in this file', () => {

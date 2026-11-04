@@ -25,6 +25,7 @@ const FAILURES = [
   { name: 'a missing row', rows: [], key: keyFor() },
   { name: 'a row for another key id', rows: [keyRow()], key: keyFor(ORG, OTHER_KEY) },
   { name: 'an expired row', rows: [keyRow({ live: false })], key: keyFor() },
+  { name: 'a revoked row', rows: [keyRow({ live: false })], key: keyFor() },
   {
     name: 'an expired row that is also due a use write',
     rows: [keyRow({ live: false, useDue: true, projectScope: 'listed' })],
@@ -65,6 +66,10 @@ describe('verifyApiKey proves the key before anything else runs in its organizat
     );
     expect(first?.parameters).toEqual([KEY, ORG]);
     expect(first?.sql).toContain('"project_scope"');
+    // Revoked is read with expiry, by the same statement, so it costs no extra round trip.
+    expect(first?.sql).toContain(
+      '(expires_at is null or expires_at > now()) and revoked_at is null',
+    );
     expect(rest).toEqual([]);
   });
 
