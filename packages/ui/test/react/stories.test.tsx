@@ -53,6 +53,7 @@ const REQUIRED: Record<string, string[]> = {
   switch: ['Disabled', 'Off', 'On', 'Settings'],
   menu: [
     'Default',
+    'Filter',
     'IconTrigger',
     'InARow',
     'Open',
