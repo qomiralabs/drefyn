@@ -24,9 +24,23 @@ export interface AccessContext {
   readonly [accessBrand]: true;
 }
 
+// What the shell draws. Apart from AccessContext because this holds personal data and an
+// access context goes to every data function and is likely to reach a log.
+export interface AccessView {
+  readonly organizationSlug: string;
+  readonly organizationName: string;
+  readonly email: string;
+  readonly displayName: string | null;
+}
+
 export type AccessResult =
   // touchDue: run touchSession after the response.
-  | { readonly kind: 'ok'; readonly access: AccessContext; readonly touchDue: boolean }
+  | {
+      readonly kind: 'ok';
+      readonly access: AccessContext;
+      readonly view: AccessView;
+      readonly touchDue: boolean;
+    }
   | { readonly kind: 'signed_out' }
   // The same answer for an unknown slug, so the guard's 404 says nothing about which.
   | { readonly kind: 'not_member' };

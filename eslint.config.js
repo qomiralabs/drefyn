@@ -23,6 +23,40 @@ const dynamicMotion = [
   },
 ];
 
+const urlMessage =
+  'Next builds request URLs from its own idea of the host. Use appUrl or requestPath from the origin module, which start from DREFYN_APP_ORIGIN.';
+const REQUEST_NAME = '/^(?:req|request|incoming)$/i';
+// Syntax only, so an alias can slip past; the Location check over the e2e suite covers that.
+const requestUrlReads = [
+  {
+    selector: `MemberExpression[object.name=${REQUEST_NAME}][property.name='url']`,
+    message: urlMessage,
+  },
+  { selector: "MemberExpression[property.name='nextUrl']", message: urlMessage },
+  {
+    selector: "ObjectPattern > Property[key.name='nextUrl']",
+    message: urlMessage,
+  },
+  {
+    selector: `FunctionDeclaration > ObjectPattern > Property[key.name='url'], ArrowFunctionExpression > ObjectPattern > Property[key.name='url']`,
+    message: urlMessage,
+  },
+  {
+    selector: `VariableDeclarator[init.name=${REQUEST_NAME}] > ObjectPattern > Property[key.name='url']`,
+    message: urlMessage,
+  },
+  {
+    selector:
+      "NewExpression[callee.name='URL'] > MemberExpression:nth-child(2)[property.name='url']",
+    message: urlMessage,
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='get'] > Literal:first-child[value=/^(?:host|x-forwarded-(?:host|proto|port))$/i]",
+    message: urlMessage,
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -116,6 +150,16 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // Later blocks replace the rule's list, so each keeps what it already had.
+    files: ['apps/dashboard/src/**'],
+    ignores: ['apps/dashboard/src/server/origin.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...requestUrlReads] },
+  },
+  {
+    files: ['packages/auth/src/**'],
+    rules: { 'no-restricted-syntax': ['error', ...dynamicMotion, ...requestUrlReads] },
   },
   {
     files: ['**/*.js'],

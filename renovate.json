@@ -27,6 +27,16 @@
       "description": "Majors stay separate; each needs its own look at the changelog.",
       "matchUpdateTypes": ["major"],
       "groupName": null
+    },
+    {
+      "description": "next runs behind our own server, so custom server advisories apply to us. Keep it in its own PR, security reviewed, with no release age wait.",
+      "matchPackageNames": ["next"],
+      "groupName": null,
+      "minimumReleaseAge": null,
+      "labels": ["type:security", "area:platform", "needs-security"],
+      "prBodyNotes": [
+        "The dashboard is a custom server (the client IP wrapper). Treat any advisory that mentions custom servers as applying to us."
+      ]
     }
   ]
 }

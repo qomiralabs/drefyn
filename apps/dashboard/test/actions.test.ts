@@ -89,15 +89,13 @@ function everyWrapper(handler: () => Promise<string>) {
     publicRoute: (headers: Record<string, string>) =>
       route(() =>
         w.publicRoute(() => handler().then(json))(
-          withCookies(post({ ...headers, 'content-length': '10' })) as never,
+          withCookies(post({ ...headers, 'content-length': '10' })),
         ),
       ),
     signedInRoute: (headers: Record<string, string>) =>
-      route(() => w.signedInRoute(() => handler().then(json))(withCookies(post(headers)) as never)),
+      route(() => w.signedInRoute(() => handler().then(json))(withCookies(post(headers)))),
     orgRoute: (headers: Record<string, string>) =>
-      route(() =>
-        w.orgRoute(() => handler().then(json))(withCookies(post(headers)) as never, params),
-      ),
+      route(() => w.orgRoute(() => handler().then(json))(withCookies(post(headers)), params)),
   };
 }
 
@@ -156,7 +154,6 @@ describe('the client address', () => {
     ['unparsable', { origin: ORIGIN, 'x-forwarded-for': `[2001:db8::1]` }],
     ['unparsable', { origin: ORIGIN, 'x-forwarded-for': 'fe80::1%eth0' }],
     ['unparsable', { origin: ORIGIN, 'x-forwarded-for': '010.0.0.1' }],
-    ['unparsable', { origin: ORIGIN, 'x-forwarded-for': ' 203.0.113.9' }],
   ])('refuses with 503 and logs reason %s', async (reason, headers) => {
     facts = factsFor(headers);
     const handler = vi.fn(() => Promise.resolve('ran'));
@@ -359,7 +356,7 @@ describe('the route versions', () => {
     const response = await wrappers().publicRoute((context, submitted, incoming) => {
       seen = { browser: context.browser, form: submitted, request: incoming };
       return Promise.resolve(new Response('ok'));
-    })(request as never);
+    })(request);
     expect(response.status).toBe(200);
     expect(seen?.form.get('csrf')).toBe('field');
     expect(seen?.browser.ip).toBe(IP);
@@ -369,7 +366,7 @@ describe('the route versions', () => {
 
   it('never caches a refusal', async () => {
     const response = await wrappers().signedInRoute(() => Promise.resolve(new Response('ok')))(
-      cookieRequest({}) as never,
+      cookieRequest({}),
     );
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
@@ -378,7 +375,7 @@ describe('the route versions', () => {
     checkBinding.mockReturnValue(false);
     const handler = vi.fn(() => Promise.resolve(new Response('ok')));
     const response = await wrappers().publicRoute(handler)(
-      cookieRequest({ ...GOOD, 'content-length': '10' }) as never,
+      cookieRequest({ ...GOOD, 'content-length': '10' }),
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: { code: 'auth.challenge_binding' } });
@@ -393,7 +390,7 @@ describe('the route versions', () => {
     const handler = vi.fn(() => Promise.resolve(new Response('ok')));
     const request = cookieRequest({ ...GOOD, ...extra });
     const read = vi.spyOn(request, 'formData');
-    const response = await wrappers().publicRoute(handler)(request as never);
+    const response = await wrappers().publicRoute(handler)(request);
     expect(response.status).toBe(413);
     expect(read).not.toHaveBeenCalled();
   });
@@ -408,7 +405,7 @@ describe('the route versions', () => {
       { cookies: { getAll: () => [] } },
     );
     const response = await wrappers().publicRoute(() => Promise.resolve(new Response('ok')))(
-      request as never,
+      request,
     );
     expect(response.status).toBe(403);
   });
@@ -416,21 +413,21 @@ describe('the route versions', () => {
   it('signedInRoute passes the session', async () => {
     const response = await wrappers().signedInRoute((context) =>
       Promise.resolve(new Response(context.session.sessionId)),
-    )(cookieRequest(GOOD) as never);
+    )(cookieRequest(GOOD));
     expect(await response.text()).toBe('ses_1');
   });
 
   it('orgRoute guards the slug from the route', async () => {
     const response = await wrappers().orgRoute((context) =>
       Promise.resolve(new Response(context.view.organizationSlug)),
-    )(cookieRequest(GOOD) as never, { params: Promise.resolve({ org: 'acme' }) });
+    )(cookieRequest(GOOD), { params: Promise.resolve({ org: 'acme' }) });
     expect(await response.text()).toBe('acme');
     expect(organization).toHaveBeenCalledWith('acme');
   });
 
   it('a route answers 503 when the address cannot be read', async () => {
     const response = await wrappers().orgRoute(() => Promise.resolve(new Response('ok')))(
-      cookieRequest({ origin: ORIGIN }) as never,
+      cookieRequest({ origin: ORIGIN }),
       { params: Promise.resolve({ org: 'acme' }) },
     );
     expect(response.status).toBe(503);

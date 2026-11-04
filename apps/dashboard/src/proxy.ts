@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { REQUEST_PATH_HEADER, requestPath, requestPathname } from './server/origin.ts';
 import {
   forwardedRequestHeaders,
   newNonce,
@@ -16,15 +17,18 @@ export function proxy(request: NextRequest): NextResponse {
   const nonce = newNonce();
   const headers = securityHeaders({
     nonce,
-    pathname: request.nextUrl.pathname,
+    pathname: requestPathname(request),
     https,
     development,
   });
-  const response = NextResponse.next({
-    request: {
-      headers: forwardedRequestHeaders(request.headers, nonce, headers['Content-Security-Policy']),
-    },
-  });
+  const forwarded = forwardedRequestHeaders(
+    request.headers,
+    nonce,
+    headers['Content-Security-Policy'],
+  );
+  // Always overwritten, so what the guard reads is never what the client sent.
+  forwarded.set(REQUEST_PATH_HEADER, requestPath(request));
+  const response = NextResponse.next({ request: { headers: forwarded } });
   for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
   return response;
 }
