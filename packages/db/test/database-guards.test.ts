@@ -1,4 +1,5 @@
 import { organizationId, projectId } from '@drefyn/tenancy';
+import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
 import {
   parseAuthDatabaseConfig,
@@ -10,7 +11,9 @@ import {
   createAuthDatabase,
   createDatabase,
   createPublishedDatabase,
+  databaseOverPool,
   poolConfig,
+  withApiKeyLimiter,
   withAuth,
   withPublishedReader,
   withTenant,
@@ -19,6 +22,7 @@ import {
   type PublishedDatabase,
 } from '../src/database.ts';
 import { DbError } from '../src/errors.ts';
+import { reserveApiKeyFailureWindows, reserveAuthRateWindows } from '../src/rate-windows.ts';
 import { rejected } from './support.ts';
 
 const URL = 'postgres://drefyn_app:Sup3r-Secret-Pa55word@127.0.0.1:1/drefyn';
@@ -137,5 +141,110 @@ describe('poolConfig', () => {
     expect(poolConfig(config('postgres://drefyn_auth:x@127.0.0.1/drefyn'), 'auth')).toMatchObject({
       application_name: 'drefyn-auth',
     });
+  });
+});
+
+// Answers a transaction statement by statement and a reservation in its one message, and
+// counts the connections taken: a nested reservation must not take one.
+function counting(kind: 'auth' | 'app') {
+  let connections = 0;
+  const ok = (rows: unknown[] = []) => ({ command: 'SELECT', rows, rowCount: rows.length });
+  const client = {
+    on: () => client,
+    removeListener: () => client,
+    release: () => undefined,
+    query: (text: string) =>
+      Promise.resolve(
+        text.includes('window_seconds')
+          ? [ok(), ok(), ok(), ok([{ window_seconds: 60, count: 1, retry_after: 9 }]), ok()]
+          : ok(),
+      ),
+  };
+  const pool = {
+    connect: () => {
+      connections += 1;
+      return Promise.resolve(client);
+    },
+  };
+  const db = databaseOverPool(pool as unknown as pg.Pool, kind, { statementTimeoutMs: 5000 });
+  return { db, connections: () => connections };
+}
+
+const KEY = new Uint8Array(32).fill(0x5a);
+const request = { bucket: 'email_send', keyHmac: KEY, windowSeconds: [60] };
+
+type Hold = (work: () => Promise<unknown>) => Promise<unknown>;
+type Reserve = () => Promise<unknown>;
+
+describe('a reservation inside a limiter or sign in transaction', () => {
+  const auth = counting('auth');
+  const app = counting('app');
+  const taken = () => auth.connections() + app.connections();
+  const holders: readonly (readonly [string, Hold])[] = [
+    ['withAuth', (work) => withAuth(auth.db as AuthDatabase, work)],
+    ['withApiKeyLimiter', (work) => withApiKeyLimiter(app.db as Database, work)],
+  ];
+  const reservers: readonly (readonly [string, Reserve])[] = [
+    ['reserveAuthRateWindows', () => reserveAuthRateWindows(auth.db as AuthDatabase, request)],
+    [
+      'reserveApiKeyFailureWindows',
+      () => reserveApiKeyFailureWindows(app.db as Database, { keyHmac: KEY, windowSeconds: [60] }),
+    ],
+  ];
+  const pairs = holders.flatMap(([holder, hold]) =>
+    reservers.map(([reserver, reserve]) => [holder, reserver, hold, reserve] as const),
+  );
+
+  it.each(pairs)('%s refuses %s before it takes a connection', async (_h, _r, hold, reserve) => {
+    const refused = await hold(async () => {
+      const before = taken();
+      const error = await rejected(reserve());
+      expect(taken()).toBe(before);
+      return error;
+    });
+    expect(refused).toBeInstanceOf(DbError);
+    expect(refused).toMatchObject({ code: 'DB_RESERVATION_NESTED' });
+  });
+
+  it.each(pairs)('%s still refuses %s after a hop', async (_h, _r, hold, reserve) => {
+    const refused = await hold(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      return rejected(reserve());
+    });
+    expect(refused).toMatchObject({ code: 'DB_RESERVATION_NESTED' });
+  });
+
+  it.each(pairs)('%s leaves %s free once it has ended', async (_h, _r, hold, reserve) => {
+    await hold(() => Promise.resolve());
+    await expect(reserve()).resolves.toHaveLength(1);
+  });
+
+  // Fire and forget work keeps the async context, but its transaction is gone, so it holds
+  // nothing and a refusal here would be a false lock out.
+  it.each(pairs)('%s lets go of work it left behind', async (_h, _r, hold, reserve) => {
+    const gate = Promise.withResolvers<void>();
+    let left: Promise<unknown> = Promise.resolve();
+    await hold(() => {
+      left = gate.promise.then(reserve);
+      return Promise.resolve();
+    });
+    gate.resolve();
+    await expect(left).resolves.toHaveLength(1);
+  });
+
+  it.each(pairs)('%s does not reach %s in another request', async (_h, _r, hold, reserve) => {
+    const gate = Promise.withResolvers<void>();
+    const held = hold(() => gate.promise);
+    await expect(reserve()).resolves.toHaveLength(1);
+    gate.resolve();
+    await held;
+  });
+
+  it('lets go when the work fails', async () => {
+    const failed = await rejected(
+      withAuth(auth.db as AuthDatabase, () => Promise.reject(new Error('work failed'))),
+    );
+    expect(String(failed)).toContain('work failed');
+    await expect(reserveAuthRateWindows(auth.db as AuthDatabase, request)).resolves.toHaveLength(1);
   });
 });
