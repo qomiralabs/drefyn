@@ -49,6 +49,54 @@ async function seedRows(): Promise<void> {
   );
 }
 
+const USER = '01a14984-4476-77ce-9335-12800000ec01';
+const ORG = '01a14984-4476-77ce-9335-12800000ec02';
+const MEMBER = '01a14984-4476-77ce-9335-12800000ec03';
+const PROJECT = '01a14984-4476-77ce-9335-12800000ec04';
+const PAST_LIMIT = '01a14984-4476-77ce-9335-12800000ec11';
+const INSIDE_LIMIT = '01a14984-4476-77ce-9335-12800000ec12';
+const LIVE = '01a14984-4476-77ce-9335-12800000ec13';
+const EXPIRED = '01a14984-4476-77ce-9335-12800000ec14';
+
+const keyRow = (id: string, createdAt: string, expiresAt: string, revokedAt: string) =>
+  `('${id}', '${ORG}', 'CI', decode(repeat('ab', 32), 'hex'), 'a1b2', array['docs:read'], 'listed',
+    '${MEMBER}', 'k-${id}', decode(repeat('cd', 32), 'hex'), ${createdAt}, ${expiresAt}, ${revokedAt})`;
+
+// A key on each side of the 90 day line, a live one, and an old expired one nobody revoked,
+// each listed on a project so the cascade can be seen.
+async function seedKeys(): Promise<void> {
+  const old = `now() - interval '200 days'`;
+  await superuser(
+    `insert into app.organizations (organization_id, name, plan_tier)
+       values ('${ORG}', 'Acme', 'self_hosted');
+     insert into app.memberships (id, organization_id, user_id, role)
+       values ('${MEMBER}', '${ORG}', '${USER}', 'owner');
+     insert into app.projects (id, organization_id, product, slug, name)
+       values ('${PROJECT}', '${ORG}', 'docs', 'handbook', 'Handbook');
+     insert into app.api_keys (id, organization_id, name, secret_hash, display_suffix, scopes,
+         project_scope, created_by, idempotency_key, request_hash, created_at, expires_at,
+         revoked_at)
+       values ${[
+         keyRow(PAST_LIMIT, old, 'null', `now() - interval '90 days 1 minute'`),
+         keyRow(INSIDE_LIMIT, old, 'null', `now() - interval '89 days 23 hours'`),
+         keyRow(LIVE, old, 'null', 'null'),
+         keyRow(EXPIRED, old, `now() - interval '199 days'`, 'null'),
+       ].join(',')};
+     insert into app.api_key_projects (organization_id, api_key_id, target_project_id)
+       select organization_id, id, '${PROJECT}' from app.api_keys;`,
+    db.name,
+  );
+}
+
+async function remainingKeys(table: 'api_keys' | 'api_key_projects'): Promise<string[]> {
+  const column = table === 'api_keys' ? 'id' : 'api_key_id';
+  const text = await superuser(`select ${column} from app.${table} order by 1;`, db.name);
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
 async function remaining(): Promise<string> {
   return (
     await superuser(
@@ -68,6 +116,7 @@ describeWithStack('expiry cleanup', () => {
     auth = await open.auth(authUrl(db));
     app = await open.app(db.app);
     await seedRows();
+    await seedKeys();
   });
 
   it('removes ended windows and rows 24 hours past expiry, keeps the rest and counts', async () => {
@@ -79,6 +128,7 @@ describeWithStack('expiry cleanup', () => {
       oauth_states: 1,
       cli_sign_in_links: 1,
       known_devices: 1,
+      api_keys: 1,
     });
     expect(
       (
@@ -98,7 +148,16 @@ describeWithStack('expiry cleanup', () => {
       oauth_states: 0,
       cli_sign_in_links: 0,
       known_devices: 0,
+      api_keys: 0,
     });
+  });
+
+  // Runs after the case above: a delete policy with no read policy would report 0 and look fine,
+  // so the row has to be seen going, along with its project row.
+  it('deletes a key revoked past 90 days with its project rows, and only that key', async () => {
+    const left = [INSIDE_LIMIT, LIVE, EXPIRED];
+    expect(await remainingKeys('api_keys')).toEqual(left);
+    expect(await remainingKeys('api_key_projects')).toEqual(left);
   });
 
   it('deletes at most the batch size per table in one run', async () => {
@@ -144,6 +203,7 @@ describeWithStack('expiry cleanup', () => {
       oauth_states: 0,
       cli_sign_in_links: 0,
       known_devices: 0,
+      api_keys: 0,
     });
     expect(counted).toEqual([
       ['auth_rate_limits', 0],
@@ -151,6 +211,7 @@ describeWithStack('expiry cleanup', () => {
       ['oauth_states', 0],
       ['cli_sign_in_links', 0],
       ['known_devices', 0],
+      ['api_keys', 0],
     ]);
     expect(await cleanup.maybeRun()).toBeNull();
   });
