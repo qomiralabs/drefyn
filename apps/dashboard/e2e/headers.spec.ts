@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { test, type Violation } from './csp.ts';
 import { withoutWebKitSelectArtefact } from './csp-webkit-select.ts';
-import { banner, commandBar, DESKTOP, MOBILE, openShell } from './fixtures.ts';
+import { banner, commandBar, DESKTOP, MOBILE, OPEN_ORIGIN, openShell } from './fixtures.ts';
 import { LEAK_PATHS, NO_SHELL_PATH, UNKNOWN_ORG_PATHS } from './leaks.ts';
 
 // Runs in the shell engine projects against the flag on server, and in flag-off against
@@ -285,14 +285,25 @@ for (const path of LEAK_PATHS.filter((p) => p !== NO_SHELL_PATH)) {
   });
 }
 
-test(`${NO_SHELL_PATH} loads with no CSP violation`, async ({ page }) => {
+test(`${NO_SHELL_PATH} sends an owner home where sign up is closed`, async ({ page }) => {
   const res = await page.goto(NO_SHELL_PATH);
   if (!flagOn()) {
     expect(res?.status()).toBe(404);
     return;
   }
-  // Where sign up is closed it moves an owner on, and the fixture reads whichever page drew.
-  await expect(page.getByRole('main')).toBeVisible();
+  await expect(page).toHaveURL(/\/acme$/);
+  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+});
+
+test.describe('where sign up is open', () => {
+  test.use({ baseURL: OPEN_ORIGIN });
+
+  test(`${NO_SHELL_PATH} draws its form with no CSP violation`, async ({ page }) => {
+    test.skip(!flagOn(), 'the flag off project has its own server');
+    await page.goto(NO_SHELL_PATH);
+    await expect(page).toHaveURL(/\/organizations\/new$/);
+    await expect(page.getByRole('button', { name: 'Create organization' })).toBeVisible();
+  });
 });
 
 test('a not found page loads with no CSP violation', async ({ page }) => {

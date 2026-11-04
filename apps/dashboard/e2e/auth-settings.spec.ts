@@ -62,7 +62,6 @@ async function freshOwner(
   await expect(page).toHaveURL(/\/organizations\/new$/);
   const slug = `team-${id.slice(-6)}`;
   await page.getByLabel('Name', { exact: true }).fill(`Team ${id.slice(-6)}`);
-  await page.getByLabel('Address').fill(slug);
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page).toHaveURL(new RegExp(`/${slug}$`));
   return { id, address, slug };
