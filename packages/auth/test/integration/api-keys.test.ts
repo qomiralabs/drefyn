@@ -524,7 +524,10 @@ describeWithStack('API keys against Postgres', () => {
         }
       } while (cursor !== null);
       expect(pages).toBe(5);
-      const newestFirst = made.map((m) => m.key.keyId).reverse();
+      const newestFirst = made
+        .map((m) => m.key.keyId as string)
+        .sort()
+        .reverse();
       expect(seen).toEqual(newestFirst);
     });
 

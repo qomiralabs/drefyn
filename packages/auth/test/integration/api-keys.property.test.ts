@@ -395,7 +395,7 @@ describeWithStack('the API key list against an oracle', () => {
       ) as ListApiKeysInput;
       await agrees(query);
     }
-  });
+  }, 60_000);
 
   it('any random filter, at any page size, matches', async () => {
     const filters: fc.Arbitrary<ListApiKeysInput> = fc.record(

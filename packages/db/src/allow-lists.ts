@@ -41,6 +41,9 @@ export interface AllowLists {
   readonly crossProjectForeignKeys: readonly AllowEntry[];
   // Tables drefyn_auth may hold grants on. A table with organization_id is refused even here.
   readonly authTables: readonly AllowEntry[];
+  // The only grants drefyn_auth may hold on a table with organization_id: a named column to
+  // select, or a whole table to delete from, each bounded by a listed policy. All must exist.
+  readonly authTenantGrants: readonly ColumnGrantEntry[];
   // Auth tables drefyn_app may hold no grant on at all, not even one column.
   readonly authOnlyTables: readonly AllowEntry[];
   // Reviewed policies beyond the two standard ones, compared field by field.
@@ -156,6 +159,20 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
   },
 ];
 
+const KEY_EXPIRY =
+  'the expiry cleanup removes keys revoked over 90 days ago; the auth_expire policies hide every other row';
+
+export const AUTH_TENANT_GRANTS: readonly ColumnGrantEntry[] = [
+  { name: 'app.api_keys.ctid', grantee: 'drefyn_auth', privilege: 'SELECT', reason: KEY_EXPIRY },
+  {
+    name: 'app.api_keys.revoked_at',
+    grantee: 'drefyn_auth',
+    privilege: 'SELECT',
+    reason: KEY_EXPIRY,
+  },
+  { name: 'app.api_keys', grantee: 'drefyn_auth', privilege: 'DELETE', reason: KEY_EXPIRY },
+];
+
 const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limiter keys';
 
 export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
@@ -164,6 +181,8 @@ export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
   { name: 'app.cli_sign_in_links', reason: 'holds hashes of sign in links issued before sign in' },
   { name: 'app.auth_rate_limits', reason: AUTH_ONLY },
 ];
+
+const KEY_PAST_RETENTION = "(revoked_at < (now() - '90 days'::interval))";
 
 const SELF = '(id = app.current_user_id())';
 // The context withApiKeyLimiter sets: no organization, project or user.
@@ -260,6 +279,24 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     using: "(last_seen_at < (now() - '400 days'::interval))",
     withCheck: null,
     reason: 'the expiry cleanup may remove only devices unseen for 400 days, whatever it sends',
+  },
+  {
+    name: 'app.api_keys.auth_expire',
+    command: 'delete',
+    roles: ['drefyn_auth'],
+    using: KEY_PAST_RETENTION,
+    withCheck: null,
+    reason:
+      'the expiry cleanup may remove only keys revoked over 90 days ago, whatever it sends; a live key is never reachable',
+  },
+  {
+    name: 'app.api_keys.auth_expire_read',
+    command: 'select',
+    roles: ['drefyn_auth'],
+    using: KEY_PAST_RETENTION,
+    withCheck: null,
+    reason:
+      'a delete needs a read policy under forced row level security; grants allow ctid and revoked_at, on rows past the limit only',
   },
   {
     name: 'app.api_key_failures.api_access',
@@ -451,6 +488,7 @@ export const ALLOW_LISTS: AllowLists = {
   appFunctions: APP_FUNCTIONS,
   crossProjectForeignKeys: CROSS_PROJECT_FOREIGN_KEYS,
   authTables: AUTH_TABLES,
+  authTenantGrants: AUTH_TENANT_GRANTS,
   authOnlyTables: AUTH_ONLY_TABLES,
   userPolicies: USER_POLICIES,
   restrictivePolicies: RESTRICTIVE_POLICIES,

@@ -47,8 +47,9 @@ without one of those.
 - `createAuthDatabase(config, { logger })` opens the auth pool as `drefyn_auth`, with the same
   startup role check, and refuses any other role with `DB_ROLE_UNSAFE`.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
-  known, with every setting empty. `drefyn_auth` holds grants only on the identity tables and
-  its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+  known, with every setting empty. `drefyn_auth` holds grants on the identity tables and, for
+  the expiry cleanup, on `ctid`, `revoked_at` and delete of `api_keys`, past the 90 day limit
+  only. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
   `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
@@ -191,7 +192,9 @@ foreign key into a tenant table without the tenant columns; and any persisted se
 beyond the bootstrap's.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
-`organization_id`, even one on the auth table list, or on a table off that list; `EXECUTE` on
+`organization_id`, even one on the auth table list, unless that exact grant is on the auth tenant
+grant list (a column to select or a table to delete from, never with grant option, and a listed
+grant that is gone fails too), or on a table off that list; `EXECUTE` on
 any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; anything
 beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or any grant option;
 default privileges to `drefyn_auth`; a permissive policy other than `tenant_isolation` and

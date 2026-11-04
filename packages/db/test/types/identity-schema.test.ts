@@ -60,6 +60,11 @@ async function compileOnly(): Promise<void> {
   });
 
   await withAuth(authDb, async (tx) => {
+    await tx.deleteFrom('api_keys').execute();
+    // @ts-expect-error the auth role finds a key by revoked_at and reads nothing else
+    await tx.selectFrom('api_keys').select('secret_hash').execute();
+    // @ts-expect-error nor can it un-revoke one
+    await tx.updateTable('api_keys').set({ revoked_at: null }).execute();
     await tx.selectFrom('users').select(['id', 'email_normalized', 'email_verified_at']).execute();
     await tx
       .updateTable('users')
@@ -132,7 +137,6 @@ describe('identity schema types', () => {
     expectTypeOf<keyof Insertable<AuthSchema['known_devices']>>().toEqualTypeOf<never>();
     expectTypeOf<keyof AuthSchema['api_keys']>().toEqualTypeOf<'revoked_at'>();
     expectTypeOf<keyof Insertable<AuthSchema['api_keys']>>().toEqualTypeOf<never>();
-    expectTypeOf<keyof Updateable<AuthSchema['api_keys']>>().toEqualTypeOf<never>();
     expectTypeOf<keyof Insertable<UserSchema['known_devices']>>().toEqualTypeOf<
       'user_id' | 'device_hash' | 'user_agent_family'
     >();

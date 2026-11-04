@@ -37,6 +37,8 @@ export const AUTH_EXPIRY_RULES: readonly ExpiryRule<AuthSchema>[] = Object.freez
   { table: 'cli_sign_in_links', column: 'expires_at', afterSeconds: DAY },
   // Browsers keep a cookie at most 400 days, so an older row can never match one again.
   { table: 'known_devices', column: 'last_seen_at', afterSeconds: 400 * DAY },
+  // Revoked keys stay listed this long, then their dead hash and typed name go.
+  { table: 'api_keys', column: 'revoked_at', afterSeconds: 90 * DAY },
 ]);
 
 export const API_KEY_EXPIRY_RULES: readonly ExpiryRule<ApiKeyLimiterSchema>[] = Object.freeze([

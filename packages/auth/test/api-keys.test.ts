@@ -29,7 +29,6 @@ import {
   isKeyInsert,
   isKeyProof,
   isCountsRead,
-  isCreatorsRead,
   isKeyProjects,
   isMemberRead,
   isOwnerRead,

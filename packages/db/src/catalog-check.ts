@@ -74,6 +74,7 @@ const PUBLISHED_POLICY =
 const TABLE_NAME = /^app\.[a-z_][a-z0-9_]*$/;
 const FUNCTION_NAME = /^app\.[a-z_][a-z0-9_]*\([^()]*\)$/;
 const CONSTRAINT_NAME = /^app\.[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/;
+const AUTH_TENANT_TARGET = /^app\.[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
 
 const problem = (rule: CatalogRule, object: string, message: string): CatalogProblem => ({
   rule,
@@ -115,6 +116,16 @@ function columnGrantUnsafe(
   return undefined;
 }
 
+// Reaching tenant rows is the one thing the sign in role is otherwise never allowed, so the
+// only shapes on offer are reading a named column and deleting: nothing that writes a row, and
+// never a whole table to read.
+function authTenantGrantUnsafe(entry: ColumnGrantEntry): string | undefined {
+  if (entry.grantee !== AUTH_ROLE) return `is to ${entry.grantee}, not ${AUTH_ROLE}`;
+  const wanted = entry.name.split('.').length === 3 ? 'SELECT' : 'DELETE';
+  if (entry.privilege === wanted) return undefined;
+  return `is for ${entry.privilege}; only SELECT on a column or DELETE on a table are allowed`;
+}
+
 function policyUnsafe(entry: PolicyEntry): string | undefined {
   if (entry.roles.length === 0) return 'names no role';
   if (entry.roles.includes('public')) return 'is for public, which every role inherits';
@@ -151,6 +162,16 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
       shape: CONSTRAINT_NAME,
     },
     { label: 'auth table', entries: allow.authTables, shape: TABLE_NAME },
+    {
+      label: 'auth tenant grant',
+      entries: allow.authTenantGrants,
+      shape: AUTH_TENANT_TARGET,
+      key: (entry) => {
+        const grant = entry as ColumnGrantEntry;
+        return grantKey(grant.name, grant.grantee, grant.privilege);
+      },
+      unsafe: (entry) => authTenantGrantUnsafe(entry as ColumnGrantEntry),
+    },
     {
       label: 'auth only table',
       entries: allow.authOnlyTables,
@@ -850,8 +871,8 @@ async function definitionProblems(
 // are owner business.
 const AUTH_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE', 'DELETE']);
 
-// The sign in role reaches only listed tables, never one that holds tenant rows, and even
-// there only with plain DML it cannot pass on.
+// The sign in role reaches only listed tables, and tenant rows only through a grant on the
+// reviewed tenant list, and even there only with plain DML it cannot pass on.
 function authGrantProblems(
   target: string,
   object: string,
@@ -859,8 +880,10 @@ function authGrantProblems(
   grantable: boolean,
   tenant: boolean,
   authTables: ReadonlySet<string>,
+  tenantGrants: ReadonlySet<string>,
 ): CatalogProblem[] {
   if (tenant) {
+    if (tenantGrants.has(grantKey(target, AUTH_ROLE, privilege)) && !grantable) return [];
     return [
       problem(
         'auth_grant',
@@ -932,6 +955,10 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
   const out: CatalogProblem[] = [];
   const published = new Set(allow.publishedTables.map((e) => e.name));
   const authTables = new Set(allow.authTables.map((e) => e.name));
+  const tenantGrants = new Set(
+    allow.authTenantGrants.map((e) => grantKey(e.name, e.grantee, e.privilege)),
+  );
+  const unseenTenantGrants = new Set(tenantGrants);
   const columnTables = new Set(allow.columnGrantTables.map((e) => e.name));
   const authOnly = new Set(allow.authOnlyTables.map((e) => e.name));
   const columnGrants = new Set(
@@ -955,6 +982,7 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
       continue;
     }
     if (grantee === AUTH_ROLE) {
+      unseenTenantGrants.delete(grantKey(target, grantee, privilege));
       out.push(
         ...authGrantProblems(
           target,
@@ -963,6 +991,7 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
           flag(row, 'grantable'),
           flag(row, 'tenant'),
           authTables,
+          tenantGrants,
         ),
       );
     }
@@ -990,6 +1019,14 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
         object,
         `${target} grants ${privilege} to ${grantee}${grantee === 'public' ? ', which the reader inherits' : ''}; the reader may only select from tables on the published allow list`,
       ),
+    );
+  }
+  // A cleanup with its grant gone would stop deleting and look healthy, so absence fails too.
+  for (const { name, grantee, privilege } of allow.authTenantGrants) {
+    if (!unseenTenantGrants.has(grantKey(name, grantee, privilege))) continue;
+    const table = name.split('.').slice(0, 2).join('.');
+    out.push(
+      problem('auth_grant', table, `${name} is missing its ${privilege} grant to ${grantee}`),
     );
   }
   const readerFunctions = new Set(allow.readerFunctions.map((e) => e.name));
