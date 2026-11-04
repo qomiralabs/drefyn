@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   namedQueryProblems,
   repoSourceProblems,
+  sessionSettingProblems,
   tenantSettingProblems,
   transactionControlProblems,
 } from '../src/source-check.ts';
@@ -49,6 +50,73 @@ describe('tenant settings outside the context code', () => {
       ).toEqual([]);
     },
   );
+});
+
+describe('spellings of a drefyn setting', () => {
+  const SET = 'set';
+  const refused = (text: string) => [
+    ...sessionSettingProblems('apps/api/src/handler.ts', text),
+    ...tenantSettingProblems('apps/api/src/handler.ts', text),
+  ];
+
+  it.each([
+    ['a quoted function', `select "${SET_CONFIG}"('drefyn.user_id', 'x', true)`],
+    ['a quoted function in a schema', `select pg_catalog."${SET_CONFIG}"('drefyn.x', 'x', true)`],
+    ['a comment before the call', `select ${SET_CONFIG} /* x */ ('drefyn.user_id', 'x', true)`],
+    ['a comment in the arguments', `select ${SET_CONFIG}(/* it's */ 'drefyn.x', 'x', true)`],
+    ['an upper case name', `select ${SET_CONFIG}('DREFYN.user_id', 'x', true)`],
+    ['an escape string', `select ${SET_CONFIG}(E'\\x64refyn.user_id', 'x', true)`],
+    ['a dollar quoted name', `select ${SET_CONFIG}($$drefyn.user_id$$, 'x', true)`],
+    ['two strings', `select ${SET_CONFIG}('dre' 'fyn.user_id', 'x', true)`],
+    ['a cast name', `select ${SET_CONFIG}('drefyn.user_id'::text, 'x', true)`],
+    ['no arguments', `select ${SET_CONFIG}()`],
+    [
+      'a JavaScript double quoted string',
+      `const q = "select ${SET_CONFIG}('drefyn.x', 'y', true)"`,
+    ],
+    ['JavaScript escaped quotes', `const q = '${SET_CONFIG}(\\'drefyn.x\\', y, true)'`],
+    ['JavaScript escaped identifiers', `"\\"${SET_CONFIG}\\"('drefyn.x', 'y', true)"`],
+    ['local with both quoted', `${SET} local "drefyn"."user_id" = 'x'`],
+    ['local with an upper case quote', `${SET} local "DREFYN"."user_id" = 'x'`],
+    ['local spaced around the dot', `${SET} local drefyn . user_id = 'x'`],
+    ['local after a comment', `${SET} /* x */ local drefyn.user_id = 'x'`],
+    ['local after a line comment', `${SET} -- x\n local drefyn.user_id = 'x'`],
+    ['local across lines', `${SET}\nlocal\ndrefyn\n.\nuser_id = 'x'`],
+    ['local with one quoted name', `${SET} local "drefyn.user_id" = 'x'`],
+    ['local with a unicode quoted name', `${SET} local U&"\\0064refyn".user_id = 'x'`],
+    ['local with JavaScript escapes', `"${SET} local \\"drefyn\\".\\"user_id\\" = 'x'"`],
+    ['session with a quoted schema', `${SET} "drefyn".user_id = 'x'`],
+    ['session named with a quoted schema', `${SET} session "drefyn"."user_id" = 'x'`],
+    ['session after a comment', `${SET} /* x */ drefyn.user_id = 'x'`],
+    ['session with a unicode quoted name', `${SET} U&"\\0064refyn".user_id = 'x'`],
+  ])('refuses %s', (_label, text) => {
+    expect(refused(text).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['a JavaScript setter', `class A { ${SET} drefyn(value) { this.v = value; } }`],
+    ['a map call', `cache.${SET}('drefyn.user_id', value)`],
+    ['a longer word', `off${SET} drefyn.user_id`],
+    ['another schema', `${SET} local other.user_id = 'x'`],
+    ['a name that only starts alike', `${SET} local drefynx.user_id = 'x'`],
+    ['a quoted other setting', `select "${SET_CONFIG}"('search_path', 'app', true)`],
+    ['a word that is not a call', `const name = '${SET_CONFIG}';`],
+  ])('passes %s', (_label, text) => {
+    expect(refused(text)).toEqual([]);
+  });
+
+  it('reports the line the statement starts on and stops the text at its end', () => {
+    const [problem] = sessionSettingProblems(
+      'a.sql',
+      `select 1;\n${SET} "drefyn".x = 1;\nselect 2;`,
+    );
+    expect(problem).toMatchObject({ line: 2, statement: `${SET} "drefyn".x = 1` });
+  });
+
+  it('holds a quoted set_config with is_local false to the session rule everywhere', () => {
+    const text = `select "${SET_CONFIG}"('drefyn.x', 'y', false)`;
+    expect(sessionSettingProblems('packages/db/src/database.ts', text)).toHaveLength(1);
+  });
 });
 
 describe('transaction control in raw SQL', () => {

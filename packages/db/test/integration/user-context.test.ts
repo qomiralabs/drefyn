@@ -119,6 +119,31 @@ describeWithStack('user and auth contexts', () => {
     expect((error as { code?: unknown }).code).toBe('DB_TRANSACTION_INVALID');
   });
 
+  // The commit reads the settings once, at the end. A switch still in place fails there; one
+  // undone by a rollback to a savepoint leaves nothing to see, which is why the source check
+  // is the guard for this case.
+  it('misses a user switch rolled back to a savepoint before the commit', async () => {
+    const seen = await withUser(single, USER, async (tx) => {
+      await sql`savepoint inner_work`.execute(tx);
+      await sql`select set_config('drefyn.user_id', ${OTHER}, true)`.execute(tx);
+      const inside = await one(tx, currentUser);
+      await sql`rollback to savepoint inner_work`.execute(tx);
+      return { inside: inside.user_id, after: (await one(tx, currentUser)).user_id };
+    });
+    expect(seen).toEqual({ inside: OTHER, after: USR });
+  });
+
+  it('refuses a user switch that a released savepoint keeps', async () => {
+    const error = await rejected(
+      withUser(single, USER, async (tx) => {
+        await sql`savepoint inner_work`.execute(tx);
+        await sql`select set_config('drefyn.user_id', ${OTHER}, true)`.execute(tx);
+        await sql`release savepoint inner_work`.execute(tx);
+      }),
+    );
+    expect((error as { code?: unknown }).code).toBe('DB_TRANSACTION_INVALID');
+  });
+
   it('runs withAuth as drefyn_auth with no tenant and no user', async () => {
     const row = await withAuth(auth, (tx) => one(tx, settings));
     expect(row).toMatchObject({ org: '', project: '', user_id: '', who: 'drefyn_auth' });

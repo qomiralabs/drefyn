@@ -150,6 +150,51 @@ describe('the answer to a reservation', () => {
     ).rejects.toMatchObject({ name: 'DbError', code: 'DB_CONFIG_INVALID' });
   });
 
+  describe.each<[string, unknown]>([
+    ['null', null],
+    ['undefined', undefined],
+    ['NaN', Number.NaN],
+    ['0', 0],
+    ['a negative', -1],
+    ['a fraction', 1.5],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['2 ** 53', 2 ** 53],
+    ['a string', '5'],
+  ])('with %s', (_label, bad) => {
+    it.each<[string, Record<string, unknown>]>([
+      ['count', { window_seconds: 60, count: bad, retry_after: 9 }],
+      ['retry_after', { window_seconds: 60, count: 1, retry_after: bad }],
+    ])('throws for both reservations when it is the %s', async (_field, answer) => {
+      const auth = recording('auth', [answer]);
+      await expect(
+        reserveAuthRateWindows(auth.db as AuthDatabase, {
+          bucket: 'email_send',
+          keyHmac: key,
+          windowSeconds: [60],
+        }),
+      ).rejects.toMatchObject({ name: 'DbError', code: 'DB_CONFIG_INVALID' });
+
+      const api = recording('app', [answer]);
+      await expect(
+        reserveApiKeyFailureWindows(api.db as Database, { keyHmac: key, windowSeconds: [60] }),
+      ).rejects.toMatchObject({ name: 'DbError', code: 'DB_CONFIG_INVALID' });
+    });
+  });
+
+  it('accepts the largest values the columns can hold', async () => {
+    const { db } = recording('auth', [
+      { window_seconds: 60, count: 2_147_483_647, retry_after: 604_800 },
+    ]);
+    const counts = await reserveAuthRateWindows(db as AuthDatabase, {
+      bucket: 'email_send',
+      keyHmac: key,
+      windowSeconds: [60],
+    });
+    expect(counts).toEqual([
+      { windowSeconds: 60, count: 2_147_483_647, retryAfterSeconds: 604_800 },
+    ]);
+  });
+
   it('accepts each window once, in any order, and keeps the order asked for', async () => {
     const { db } = recording('auth', [row(3600), row(60), row(600)]);
     const counts = await reserveAuthRateWindows(db as AuthDatabase, {
