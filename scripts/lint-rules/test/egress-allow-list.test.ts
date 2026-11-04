@@ -34,6 +34,19 @@ describe('egress allow list schema', () => {
     ]);
   });
 
+  it.each([
+    ['./packages/auth/src/x.ts'],
+    ['packages/./auth/x.ts'],
+    ['packages\\auth\\x.ts'],
+    ['packages//auth/x.ts'],
+    ['packages/../auth/x.ts'],
+    ['/packages/auth/x.ts'],
+  ])('refuses %s, which could never match a file', (path) => {
+    expect(allowListProblems([{ path, reason: 'r' }])).toEqual([
+      `allow list entry '${path}': write a plain path from the workspace root, with forward slashes`,
+    ]);
+  });
+
   it('accepts scoped file entries anywhere and whole file entries outside apps/', () => {
     expect(
       allowListProblems([

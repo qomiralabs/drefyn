@@ -1,12 +1,22 @@
-import type { Rule } from 'eslint';
+import type { Rule, Scope } from 'eslint';
+import { literal } from './references.ts';
 import { isRecord } from './workspace.ts';
 
-// Kysely's selectAll() sends `select *`, and on a table whose grants are per column the
-// database refuses it for every role. The schema types cannot stop the method compiling, so
-// this rule refuses it at build time instead, by reading the query chain it ends.
+// Kysely's selectAll() sends `select *` and returningAll() sends `returning *`, and on a table
+// whose grants are per column the database refuses both for every role. The schema types cannot
+// stop the methods compiling, so this rule refuses them at build time instead, by reading the
+// query they end, through local variables too. Parameters, helper results, table names held in
+// variables and templates with a placeholder are out of its reach; the tests pin those limits.
 
 const FROM = new Set([
   'selectFrom',
+  'updateTable',
+  'insertInto',
+  'replaceInto',
+  'deleteFrom',
+  'mergeInto',
+  'from',
+  'using',
   'innerJoin',
   'leftJoin',
   'rightJoin',
@@ -17,14 +27,25 @@ const FROM = new Set([
   'crossJoinLateral',
 ]);
 
+const ALL = new Set(['selectAll', 'returningAll']);
+// Wrappers that leave the query as it is at run time.
+const TRANSPARENT = new Set([
+  'ChainExpression',
+  'TSAsExpression',
+  'TSNonNullExpression',
+  'TSSatisfiesExpression',
+  'TSTypeAssertion',
+]);
+
 interface Options {
   readonly tables: readonly string[];
 }
 
-// String literals in an argument: 'users' or ['sessions', 'users'].
+// String literals in an argument: 'users', `users` or ['sessions', 'users'].
 function literals(node: unknown): string[] {
   if (!isRecord(node)) return [];
-  if (node['type'] === 'Literal' && typeof node['value'] === 'string') return [node['value']];
+  const text = literal(node)?.spec;
+  if (text !== undefined) return [text];
   const elements = node['elements'];
   if (node['type'] === 'ArrayExpression' && Array.isArray(elements)) {
     return elements.flatMap((element: unknown) => literals(element));
@@ -71,10 +92,59 @@ function methodCall(node: unknown): MethodCall | undefined {
   return { method: name, receiver: callee['object'], firstArgument: args[0] as unknown };
 }
 
+function unwrap(node: unknown): unknown {
+  let current = node;
+  while (
+    isRecord(current) &&
+    typeof current['type'] === 'string' &&
+    TRANSPARENT.has(current['type'])
+  ) {
+    current = current['expression'];
+  }
+  return current;
+}
+
+function variableNamed(scope: Scope.Scope | null, name: string): Scope.Variable | undefined {
+  for (let current = scope; current !== null; current = current.upper) {
+    const found = current.set.get(name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+// Every method call that fed this query, following local variables through each value written
+// to them, because a query is often built up over several statements. The seen set is the
+// bound: each node is read once, so a loop of names ends.
+function linksOf(start: unknown, scope: Scope.Scope): MethodCall[] {
+  const links: MethodCall[] = [];
+  const seen = new Set<unknown>();
+  const queue = [start];
+  while (queue.length > 0) {
+    const node = unwrap(queue.pop());
+    if (seen.has(node)) continue;
+    seen.add(node);
+    const call = methodCall(node);
+    if (call !== undefined) {
+      links.push(call);
+      queue.push(call.receiver);
+    } else if (isRecord(node) && node['type'] === 'Identifier') {
+      const variable = variableNamed(scope, String(node['name']));
+      for (const reference of variable?.references ?? []) {
+        if (reference.writeExpr !== undefined && reference.writeExpr !== null) {
+          queue.push(reference.writeExpr);
+        }
+      }
+    }
+  }
+  return links;
+}
+
 export const noSelectAll: Rule.RuleModule = {
   meta: {
     type: 'problem',
-    docs: { description: 'Refuse selectAll() on tables whose grants are per column' },
+    docs: {
+      description: 'Refuse selectAll() and returningAll() on tables whose grants are per column',
+    },
     schema: [
       {
         type: 'object',
@@ -86,6 +156,8 @@ export const noSelectAll: Rule.RuleModule = {
     messages: {
       selectAll:
         'selectAll() on {{table}} sends select *, which the database refuses: its grants are per column. Name the columns you need.',
+      returningAll:
+        'returningAll() on {{table}} sends returning *, which the database refuses: its grants are per column. Name the columns you need.',
     },
   },
   create(context) {
@@ -94,14 +166,10 @@ export const noSelectAll: Rule.RuleModule = {
     return {
       CallExpression(node) {
         const call = methodCall(node);
-        if (call?.method !== 'selectAll') return;
-        // Every controlled table the chain reads, under its own name and its alias.
+        if (call === undefined || !ALL.has(call.method)) return;
+        // Every controlled table the query reads, under its own name and its alias.
         const seen = new Map<string, string>();
-        for (
-          let link = methodCall(call.receiver);
-          link !== undefined;
-          link = methodCall(link.receiver)
-        ) {
+        for (const link of linksOf(call.receiver, context.sourceCode.getScope(node))) {
           if (!FROM.has(link.method)) continue;
           for (const text of literals(link.firstArgument)) {
             const { table, alias } = nameAndAlias(text);
@@ -112,7 +180,7 @@ export const noSelectAll: Rule.RuleModule = {
           }
         }
         const asked = literals(call.firstArgument);
-        // selectAll() takes every table in the query; selectAll('t') only the ones named.
+        // With no argument it takes every table in the query; with one, only those named.
         const hit =
           asked.length === 0
             ? [...seen.values()][0]
@@ -120,7 +188,11 @@ export const noSelectAll: Rule.RuleModule = {
                 .map((name) => seen.get(name) ?? (controlled.has(name) ? name : undefined))
                 .find((name) => name !== undefined);
         if (hit !== undefined) {
-          context.report({ node, messageId: 'selectAll', data: { table: hit } });
+          context.report({
+            node,
+            messageId: call.method === 'selectAll' ? 'selectAll' : 'returningAll',
+            data: { table: hit },
+          });
         }
       },
     };

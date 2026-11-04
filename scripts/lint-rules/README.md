@@ -128,6 +128,25 @@ variant passes, as does `motion-safe:` anywhere in the variant chain. State vari
 width (`@page:`). `supports-[...]:` is not checked. The guard step does not run this rule; it
 is a styling rule, not a boundary.
 
+### `drefyn/no-select-all`
+
+Refuses `selectAll()` and `returningAll()` on a table whose grants are per column, because the
+database refuses `select *` and `returning *` there for every role. It reads the chain and
+follows local variables, including each value written to a `let`. It cannot see a query passed
+as a parameter or returned by a helper, a table name held in a variable, a template with a
+placeholder, or a computed method name; `test/no-select-all.test.ts` pins those limits, and the
+database still refuses them at run time. The `tables` list in `eslint.config.js` is held to
+`COLUMN_GRANT_TABLES` by `test/root-config.test.ts`.
+
+### `drefyn/no-operator-auth`
+
+On for `apps/` in the root config and the guard. Refuses `issue` and `createOrganizationFor`,
+which are for the operator command: one mints a sign in link for anyone, the other acts for a
+bare user id. The factories stay importable, because apps need `redeem` and
+`createOrganization` from the same objects, so the names are refused: imports and re-exports
+from `@drefyn/auth`, member reads and destructuring. An unrelated method called `issue` has to
+be renamed under `apps/`.
+
 ## Manifest checker
 
 `pnpm check:packages` checks every package under `packages/` and `apps/`: exports map
@@ -147,7 +166,7 @@ so it gets security review.
 ## Guard step
 
 `pnpm lint:guard` (and the gate) lints every source file in the tree once from the
-root with `guard.config.js`, which holds only the two rules. It runs with
+root with `guard.config.js`, which holds only the boundary rules. It runs with
 `--no-config-lookup`, `--no-inline-config`, `--no-ignore` and `--max-warnings 0`, ends
 the options with `--`, and pins the rules' workspace root to the git top level. It
 needs no type information and takes about a second. Per package lint still runs the
