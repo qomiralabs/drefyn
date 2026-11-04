@@ -80,7 +80,7 @@ test('an API key is shown once, works over HTTP, and is gone on reload', async (
   });
   expect(answer.status()).toBe(200);
   await page.reload();
-  await expect(page.getByRole('cell', { name: /shown-once/ })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^shown-once/ })).toBeVisible();
   expect(await page.content()).not.toContain(secret);
   await page.context().close();
 });
@@ -97,14 +97,14 @@ test('each key filter narrows the list, in the URL', async ({ browser }) => {
   await page.getByRole('menuitemcheckbox', { name: 'Status' }).click();
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(/can=status/);
-  await expect(page.getByRole('cell', { name: /shown-once/ })).toHaveCount(0);
+  await expect(page.getByRole('cell', { name: /^shown-once/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await page.getByRole('button', { name: /^Last used/ }).click();
   await page.getByRole('menuitemradio', { name: 'Never used' }).click();
   await expect(page).toHaveURL(/used=never/);
-  await expect(page.getByRole('cell', { name: /filter-status/ })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^filter-status/ })).toBeVisible();
   await page.goto(`${KEYS}?used=7d`);
-  await expect(page.getByRole('cell', { name: /filter-status/ })).toHaveCount(0);
+  await expect(page.getByRole('cell', { name: /^filter-status/ })).toHaveCount(0);
   await page.context().close();
 });
 
@@ -126,7 +126,7 @@ test('removal lists the keys first, and they stay listed as revoked with no acti
   await expect(page.getByRole('cell', { name: /Tess Moore/ })).toHaveCount(0);
 
   await page.goto(`${KEYS}?by=former`);
-  const row = page.getByRole('row', { name: /tess-deploy/ });
+  const row = page.getByRole('row', { name: /^tess-deploy/ });
   await expect(row).toContainText('Revoked');
   await expect(row.getByRole('button', { name: /Revoke/ })).toHaveCount(0);
   await page.context().close();
@@ -174,11 +174,11 @@ test('an invitation can be sent and withdrawn, and Undo sends it again', async (
   await dialog.getByRole('textbox', { name: /Email addresses/ }).fill(address);
   await page.keyboard.press('Enter');
   await dialog.getByRole('button', { name: 'Send 1 invitation' }).click();
-  await expect(page.getByRole('cell', { name: address })).toBeVisible();
+  await expect(page.getByRole('cell', { name: address, exact: true })).toBeVisible();
   await page.getByRole('button', { name: `Withdraw invitation to ${address}` }).click();
-  await expect(page.getByRole('cell', { name: address })).toHaveCount(0);
+  await expect(page.getByRole('cell', { name: address, exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(page.getByRole('cell', { name: address })).toBeVisible();
+  await expect(page.getByRole('cell', { name: address, exact: true })).toBeVisible();
   await page.context().close();
 });
 
