@@ -21,6 +21,7 @@
     "test:visual": "playwright test --project=visual"
   },
   "dependencies": {
+    "@drefyn/auth": "workspace:*",
     "@drefyn/flags": "workspace:*",
     "@drefyn/ui": "workspace:*",
     "motion": "14.4.0",
