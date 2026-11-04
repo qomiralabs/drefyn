@@ -233,6 +233,17 @@ describe('MultiCombobox', () => {
     expect(input().getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('keeps its chips exposed to readers only while its list is open', async () => {
+    const user = userEvent.setup();
+    render(<Projects defaultValue={['pay']} />);
+    const exempt = () => document.querySelector('[data-react-aria-top-layer]');
+    expect(exempt()).toBeNull();
+    await user.click(input());
+    expect(exempt()?.contains(screen.getByRole('row'))).toBe(true);
+    await user.keyboard('{Escape}');
+    expect(exempt()).toBeNull();
+  });
+
   it('never chooses a disabled option', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

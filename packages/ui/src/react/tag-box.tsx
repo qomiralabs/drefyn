@@ -15,13 +15,14 @@ export interface TagItem {
 }
 
 export interface TagBoxProps {
-  label: string;
   labelId: string;
   // Names the list of chips, apart from the input beside them.
   tagsLabel: string;
   tags: readonly TagItem[];
   disabled: boolean;
   invalid: boolean;
+  // A combobox list is open beside the chips.
+  listOpen?: boolean;
   onRemove: (ids: string[]) => void;
   // Where focus goes when the chip that held it is gone.
   field: RefObject<HTMLElement | null>;
@@ -67,12 +68,12 @@ export function focusLastChip(box: HTMLElement | null): boolean {
 // on the box while the input has focus. React Aria's tag group runs the keys on the chips:
 // the arrows between them, Delete or Backspace on one, Tab on to its button.
 export function TagBox({
-  label,
   labelId,
   tagsLabel,
   tags,
   disabled,
   invalid,
+  listOpen = false,
   onRemove,
   field,
   boxRef,
@@ -95,7 +96,6 @@ export function TagBox({
     <div
       ref={boxRef}
       role="group"
-      aria-label={label}
       aria-labelledby={labelId}
       className={`flex min-h-control-lg flex-wrap items-center gap-4 rounded-sm border px-8 py-4 transition-colors duration-fast ease-enter has-[input:focus-visible]:focus-ring ${boxPaint(
         disabled,
@@ -104,8 +104,9 @@ export function TagBox({
     >
       {tags.length === 0 ? null : (
         // An open combobox hides the rest of the page from readers, which would leave the
-        // chips hidden yet reachable by Tab. This marker keeps them in the page's tree.
-        <div data-react-aria-top-layer="" className="contents">
+        // chips hidden yet reachable by Tab. The marker exempts them, so it is set only for
+        // that: a modal over the page has to hide them too.
+        <div {...(listOpen ? { 'data-react-aria-top-layer': '' } : {})} className="contents">
           <TagGroup
             aria-label={tagsLabel}
             className="contents"
@@ -164,9 +165,9 @@ export function TagMessages({
   if (messages.length === 0) return null;
   return (
     <ul id={id} className="flex flex-col gap-2">
-      {messages.map((message) => (
+      {messages.map((message, i) => (
         <li
-          key={message}
+          key={i}
           className="flex max-w-measure items-start gap-4 text-caption text-state-broken-text"
         >
           <Icon name="alert" tone="broken">
@@ -179,7 +180,7 @@ export function TagMessages({
   );
 }
 
-export const HIDDEN_VALUES = (name: string | undefined, values: readonly string[]): ReactNode =>
+export const hiddenValues = (name: string | undefined, values: readonly string[]): ReactNode =>
   name === undefined
     ? null
     : values.map((value) => <input key={value} type="hidden" name={name} value={value} />);

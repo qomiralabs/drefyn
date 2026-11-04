@@ -87,6 +87,14 @@ describe('TagField', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('leaves Enter to an input method that is still composing', () => {
+    render(<Addresses />);
+    fireEvent.change(input(), { target: { value: 'kai' } });
+    fireEvent.keyDown(input(), { key: 'Enter', isComposing: true });
+    expect(chips()).toEqual([]);
+    expect(input().value).toBe('kai');
+  });
+
   it('lets Enter submit the form when there is nothing to add', async () => {
     const onSubmit = vi.fn((event: SubmitEvent) => {
       event.preventDefault();

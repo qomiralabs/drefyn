@@ -103,19 +103,22 @@ for (const theme of THEMES) {
     await expectActive(page, 'Status page');
   });
 
+  // In a dialog, since a field last on the page has nowhere for Tab to go in Firefox.
   test(`Tab closes the list without picking and moves on in ${theme}`, async ({
     page,
     browserName,
   }) => {
-    await openStory(page, 'components-multi-combobox--chosen', theme);
-    await expect(page.getByRole('row')).toHaveCount(2);
+    await openStory(page, 'components-multi-combobox--in-a-dialog', theme);
+    await page.getByRole('button', { name: 'Create key' }).click();
+    await expect(page.getByRole('row')).toHaveCount(1);
     await input(page).focus();
     await page.keyboard.press('ArrowDown');
     await expectActive(page, 'Payments API docs');
     await page.keyboard.press(tabKey(browserName));
     await expect(list(page)).toHaveCount(0);
     await expect(input(page)).not.toBeFocused();
-    await expect(page.getByRole('row')).toHaveCount(2);
+    await expect(page.getByRole('dialog', { name: 'Create an API key' })).toBeVisible();
+    await expect(page.getByRole('row')).toHaveCount(1);
   });
 
   test(`Shift Tab from an open list lands on the last chip button in ${theme}`, async ({
@@ -209,6 +212,21 @@ for (const theme of THEMES) {
     await expect(open).toBeFocused();
   });
 }
+
+// A press on the list lands outside the dialog in the page, and must not count as outside it.
+test('a press on an option in a dialog adds a chip and leaves the dialog open', async ({
+  page,
+}) => {
+  await openStory(page, 'components-multi-combobox--in-a-dialog', 'light');
+  await page.getByRole('button', { name: 'Create key' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create an API key' });
+  await expect(dialog).toBeVisible();
+  await input(page).click();
+  await option(page, 'Status page').click();
+  await expect(chip(page, 'Status page')).toBeVisible();
+  await expect(list(page)).toBeVisible();
+  await expect(dialog).toBeVisible();
+});
 
 // Below the small breakpoint the list and its search open in the shared sheet.
 test.describe('on a phone', () => {

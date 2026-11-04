@@ -32,7 +32,7 @@ import { markDisabled } from './field-parts.tsx';
 import { LoadingRows, markBusy } from './list-parts.tsx';
 import { ROW, Sheet, usePhone } from './sheet.tsx';
 import type { SelectOptionProps } from './select-option.tsx';
-import { focusLastChip, HIDDEN_VALUES, stepsOntoChip, TagBox, TagMessages } from './tag-box.tsx';
+import { focusLastChip, hiddenValues, stepsOntoChip, TagBox, TagMessages } from './tag-box.tsx';
 
 export interface MultiComboboxProps {
   // The visible label, and the title of the sheet on a phone.
@@ -214,6 +214,7 @@ export function MultiCombobox({
   const [own, setOwn] = useState<readonly string[]>(defaultValue ?? []);
   const [query, setQuery] = useState(defaultSearch);
   const [sheetOpen, setSheetOpen] = useState(defaultOpen && !disabled);
+  const [listOpen, setListOpen] = useState(false);
   const phone = usePhone();
   const { contains } = useFilter({ sensitivity: 'base' });
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -274,7 +275,6 @@ export function MultiCombobox({
         </span>
       )}
       <TagBox
-        label={label}
         labelId={labelId}
         tagsLabel={tagsLabel ?? label}
         tags={chosen.map((key) => {
@@ -283,6 +283,7 @@ export function MultiCombobox({
         })}
         disabled={disabled}
         invalid={invalid}
+        listOpen={listOpen}
         onRemove={(ids) => {
           change(chosen.filter((key) => !ids.includes(key)));
         }}
@@ -356,6 +357,7 @@ export function MultiCombobox({
             inputValue={query}
             onInputChange={setQuery}
             onOpenChange={(open) => {
+              setListOpen(open);
               if (!open) setQuery('');
             }}
             allowsEmptyCollection
@@ -391,7 +393,7 @@ export function MultiCombobox({
         )}
       </TagBox>
       <TagMessages id={errorId} messages={invalid ? [error] : []} />
-      {HIDDEN_VALUES(name, chosen)}
+      {hiddenValues(name, chosen)}
     </div>
   );
 }
