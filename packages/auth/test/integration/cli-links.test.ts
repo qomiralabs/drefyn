@@ -223,18 +223,35 @@ describeWithStack('drefyn auth link and its redemption', () => {
     );
     expect(row.trim()).toBe(`${name}|${name.toLowerCase().replace(' ', '-')}|owner|self_hosted`);
     expect((await links().redeem(browser(), token)).ok).toBe(true);
-    // The same name again gets its own slug, as it would from the dashboard.
-    const second = await drefyn([
-      'auth',
-      'link',
-      '--email',
-      `other-${randomBytes(3).toString('hex')}@example.com`,
-      '--create-organization',
-      name,
+    // Someone else with the same name gets their own, with a suffix.
+    const other = `other-${randomBytes(3).toString('hex')}@example.com`;
+    const second = await link(other, ['--create-organization', name]);
+    expect(second.stderr).not.toContain('Reusing');
+    const owned = await h.sql(`select count(*) from app.organizations where name = '${name}';`);
+    expect(owned).toBe('2');
+  });
+
+  it('reuses what the person owns under that name and says so', async () => {
+    const email = `again-${randomBytes(3).toString('hex')}@example.com`;
+    const name = `Again ${randomBytes(2).toString('hex')}`;
+    const first = await link(email, ['--create-organization', name]);
+    expect(first.stderr).not.toContain('Reusing');
+    const second = await link(email, ['--create-organization', name]);
+    expect(second.stderr).toContain('Reusing the organization');
+    expect(second.stderr).not.toContain(name);
+    expect(await h.sql(`select count(*) from app.organizations where name = '${name}';`)).toBe('1');
+  });
+
+  it('ends with one organization when two commands race', async () => {
+    const email = `race-${randomBytes(3).toString('hex')}@example.com`;
+    const name = `Race ${randomBytes(2).toString('hex')}`;
+    await link(email);
+    const runs = await Promise.all([
+      link(email, ['--create-organization', name]),
+      link(email, ['--create-organization', name]),
     ]);
-    expect(second.code).toBe(0);
-    expect(second.stdout).toContain('/sign-in/cli#');
-    expect(await h.sql(`select count(*) from app.organizations where name = '${name}';`)).toBe('2');
+    expect(runs.filter((run) => run.stderr.includes('Reusing the organization'))).toHaveLength(1);
+    expect(await h.sql(`select count(*) from app.organizations where name = '${name}';`)).toBe('1');
   });
 
   it('exits 4 when the auth role is not the one the URL logs in as', async () => {

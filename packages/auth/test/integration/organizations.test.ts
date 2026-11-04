@@ -6,6 +6,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CookieSpec, SessionInfo } from '../../src/index.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
+import { unlimited } from './support/invite.ts';
 
 const fresh = harness();
 let h: Harness;
@@ -132,6 +133,92 @@ describeWithStack('organizations against Postgres', () => {
       const resolved = await person.sessions.resolveAccess(person.cookie, slugs[index] ?? '');
       expect(resolved.kind).toBe('ok');
     }
+  });
+
+  describe('ensureOrganizationFor', () => {
+    it('reuses the organization the person owns under that exact name', async () => {
+      const { session } = await signIn();
+      const name = slug('Mine');
+      const orgs = h.organizations();
+      const first = await orgs.ensureOrganizationFor(session.userId, { name });
+      const second = await orgs.ensureOrganizationFor(session.userId, { name });
+      if (!first.ok) throw first.error;
+      expect(first.value.reused).toBe(false);
+      expect(second).toEqual({ ok: true, value: { ...first.value, reused: true } });
+      expect(await count('organizations', `name = '${name}'`)).toBe('1');
+    });
+
+    it('treats a different spelling as a different organization', async () => {
+      const { session } = await signIn();
+      const name = slug('Mine');
+      const orgs = h.organizations();
+      await orgs.ensureOrganizationFor(session.userId, { name });
+      const other = await orgs.ensureOrganizationFor(session.userId, {
+        name: name.toUpperCase(),
+      });
+      expect(other.ok && other.value.reused).toBe(false);
+    });
+
+    it.each(['admin', 'member'])(
+      'makes a new one when the person is only %s of that name',
+      async (role) => {
+        const owner = await signIn();
+        const other = await signIn();
+        const name = slug('Shared');
+        const orgs = h.organizations();
+        const made = await orgs.createOrganization(owner.session, { name });
+        if (!made.ok) throw made.error;
+        await h.sql(
+          `insert into app.memberships (organization_id, user_id, role)
+           values ('${made.value.access.organizationId}', '${other.user}', '${role}');`,
+        );
+        const result = await orgs.ensureOrganizationFor(other.user, { name });
+        if (!result.ok) throw result.error;
+        expect(result.value.reused).toBe(false);
+        expect(result.value.organizationId).not.toBe(made.value.access.organizationId);
+        expect(await count('organizations', `name = '${name}'`)).toBe('2');
+      },
+    );
+
+    it('never reuses an organization of someone else', async () => {
+      const a = await signIn();
+      const b = await signIn();
+      const name = slug('Other');
+      const orgs = h.organizations();
+      await orgs.ensureOrganizationFor(a.user, { name });
+      const result = await orgs.ensureOrganizationFor(b.user, { name });
+      expect(result.ok && result.value.reused).toBe(false);
+    });
+
+    it('ends with one organization when parallel runs race', async () => {
+      const { user } = await signIn();
+      const name = slug('Race');
+      const orgs = h.organizations({ limiter: unlimited });
+      const runs = await Promise.all(
+        Array.from({ length: 8 }, () => orgs.ensureOrganizationFor(user, { name })),
+      );
+      const values = runs.map((run) => {
+        if (!run.ok) throw run.error;
+        return run.value;
+      });
+      expect(new Set(values.map((v) => v.organizationId)).size).toBe(1);
+      expect(values.filter((v) => !v.reused)).toHaveLength(1);
+      expect(await count('organizations', `name = '${name}'`)).toBe('1');
+      expect(await count('memberships', `user_id = '${user}'`)).toBe('1');
+    });
+
+    it('still reuses for a person with no limit left', async () => {
+      const { user } = await signIn();
+      const name = slug('Full');
+      const orgs = h.organizations();
+      await orgs.ensureOrganizationFor(user, { name });
+      await orgs.ensureOrganizationFor(user, { name: slug('Full') });
+      await orgs.ensureOrganizationFor(user, { name: slug('Full') });
+      const again = await orgs.ensureOrganizationFor(user, { name });
+      expect(again.ok && again.value.reused).toBe(true);
+      const fresh = await orgs.ensureOrganizationFor(user, { name: slug('Full') });
+      expect(!fresh.ok && fresh.error.code).toBe('AUTH_RATE_LIMITED');
+    });
   });
 
   it.each([

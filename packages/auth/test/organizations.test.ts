@@ -430,23 +430,105 @@ describe('listMyOrganizations', () => {
   });
 });
 
-describe('createOrganizationFor', () => {
-  it('takes the same path as createOrganization, with the person as actor and owner', async () => {
-    const viaSession = setup();
-    await viaSession.orgs.createOrganization(sessionInfo(), { name: NAME });
-    const forUser = setup();
-    const result = await forUser.orgs.createOrganizationFor(USER, { name: NAME });
-    expect(result).toEqual({ ok: true, value: { organizationId: ORG, slug: SLUG } });
-    expect(forUser.limiter.calls).toEqual([['org_create', [USER]]]);
-    expect(forUser.scripted.events).toEqual(viaSession.scripted.events);
-  });
+describe('ensureOrganizationFor', () => {
+  const isOwnedRead = (s: Statement) =>
+    s.sql.startsWith('select') && s.sql.includes('"organization_slugs"');
+  const isLock = (s: Statement) => s.sql.includes('pg_advisory_xact_lock');
+  const OWNED = { organization_id: ORG, slug: 'acme-widgets' };
 
-  it('picks the slug the same way, suffix included', async () => {
-    const taken = setup(heldFor(['acme-widgets']), { newSlugSuffix: () => 'b2c3' });
-    const result = await taken.orgs.createOrganizationFor(USER, { name: NAME });
+  it('makes the organization on the same path, under a lock, when the person owns none', async () => {
+    const { orgs, scripted, limiter } = setup((s) => (isOwnedRead(s) ? [] : happy(s)));
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
     expect(result).toEqual({
       ok: true,
-      value: { organizationId: ORG, slug: 'acme-widgets-b2c3' },
+      value: { organizationId: ORG, slug: SLUG, reused: false },
     });
+    expect(limiter.calls).toEqual([['org_create', [USER]]]);
+    const order = scripted.statements().map((s) => {
+      if (isLock(s)) return 'lock';
+      if (isOwnedRead(s)) return 'read';
+      return isOrgInsert(s) ? 'insert' : 'other';
+    });
+    expect(order.slice(0, 4)).toEqual(['read', 'lock', 'read', 'insert']);
+  });
+
+  it('reuses what the person owns, writing nothing and spending no limit', async () => {
+    const { orgs, scripted, limiter } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result).toEqual({
+      ok: true,
+      value: { organizationId: ORG, slug: SLUG, reused: true },
+    });
+    expect(scripted.writes()).toEqual([]);
+    expect(limiter.calls).toEqual([]);
+  });
+
+  it('asks only for an exact name the person owns, oldest first', async () => {
+    const { orgs, scripted } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    await orgs.ensureOrganizationFor(USER, { name: '  Ａｃｍｅ  ' });
+    const read = scripted.statements().find(isOwnedRead);
+    expect(read?.sql).toContain('app.current_user_id()');
+    expect(read?.sql).toContain('order by "o"."organization_id"');
+    expect(read?.parameters).toEqual(expect.arrayContaining(['Acme', 'owner']));
+    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
+  });
+
+  it('reuses when a parallel run made it while this one waited for the lock', async () => {
+    let reads = 0;
+    const { orgs, scripted, limiter } = setup((s) => {
+      if (!isOwnedRead(s)) return happy(s);
+      reads += 1;
+      return reads === 1 ? [] : [OWNED];
+    });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result.ok && result.value.reused).toBe(true);
+    expect(scripted.writes()).toEqual([]);
+    expect(limiter.calls).toEqual([['org_create', [USER]]]);
+  });
+
+  it('logs a reuse by id, with no name or slug', async () => {
+    const { orgs, lines } = setup((s) => (isOwnedRead(s) ? [OWNED] : happy(s)));
+    await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(lines).toEqual([
+      {
+        level: 'info',
+        event: 'auth.organization_reused',
+        fields: { organizationId: toPublicId('org', ORG), userId: toPublicId('usr', USER) },
+      },
+    ]);
+  });
+
+  it('refuses a bad name before any transaction', async () => {
+    const { orgs, scripted } = setup();
+    const result = await orgs.ensureOrganizationFor(USER, { name: 'acme.com' });
+    expect(failed(result).code).toBe('AUTH_INPUT_INVALID');
+    expect(scripted.events).toEqual([]);
+  });
+
+  it('answers the limit when one is hit', async () => {
+    const limiter: RateLimiter = {
+      keyFor: () => Buffer.alloc(32),
+      reserve: () => Promise.reject(new AuthError('AUTH_RATE_LIMITED')),
+    };
+    const { orgs, scripted } = setup((s) => (isOwnedRead(s) ? [] : happy(s)), { limiter });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(failed(result).code).toBe('AUTH_RATE_LIMITED');
+    expect(scripted.writes()).toEqual([]);
+  });
+
+  it('answers AUTH_UNAVAILABLE when the read fails', async () => {
+    const { orgs } = setup(() => {
+      throw new Error('down');
+    });
+    const result = await orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(failed(result).code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('carries a suffix like any other new organization', async () => {
+    const taken = setup((s) => (isOwnedRead(s) ? [] : heldFor(['acme-widgets'])(s)), {
+      newSlugSuffix: () => 'b2c3',
+    });
+    const result = await taken.orgs.ensureOrganizationFor(USER, { name: NAME });
+    expect(result.ok && result.value.slug).toBe('acme-widgets-b2c3');
   });
 });

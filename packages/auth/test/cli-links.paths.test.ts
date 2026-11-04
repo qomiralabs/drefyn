@@ -81,6 +81,7 @@ describe('issuing a CLI link', () => {
         link: `https://app.drefyn.test/sign-in/cli#${formatCliLinkToken(SECRET)}`,
         userId: USER,
         organizationId: null,
+        organizationReused: false,
       },
     });
     const writes = scripted.writes();
@@ -123,21 +124,25 @@ describe('issuing a CLI link', () => {
     expect(scripted.statements()).toEqual([]);
   });
 
-  it('leaves the slug to createOrganizationFor', async () => {
+  it('leaves the organization to ensureOrganizationFor', async () => {
     const organizationId = newId('org');
-    const createOrganizationFor = vi.fn(() =>
-      Promise.resolve({ ok: true as const, value: { organizationId, slug: 'acme-docs' } }),
+    const ensureOrganizationFor = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        value: { organizationId, slug: 'acme-docs', reused: true },
+      }),
     );
-    const organizations = { createOrganizationFor } as unknown as Organizations;
+    const organizations = { ensureOrganizationFor } as unknown as Organizations;
     const { subject } = links({ user: USER }, { organizations });
     const result = await subject.issue({ email: 'a@example.com', organizationName: 'Acme Docs' });
     expect(result.ok && result.value.organizationId).toBe(organizationId);
-    expect(createOrganizationFor).toHaveBeenCalledWith(USER, { name: 'Acme Docs' });
+    expect(result.ok && result.value.organizationReused).toBe(true);
+    expect(ensureOrganizationFor).toHaveBeenCalledWith(USER, { name: 'Acme Docs' });
   });
 
   it('prints no link when the organization is refused', async () => {
     const organizations = {
-      createOrganizationFor: () =>
+      ensureOrganizationFor: () =>
         Promise.resolve({ ok: false as const, error: new AuthError('AUTH_RATE_LIMITED') }),
     } as unknown as Organizations;
     const { subject, scripted } = links({ user: USER }, { organizations });
