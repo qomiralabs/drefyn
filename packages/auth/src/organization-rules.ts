@@ -16,8 +16,10 @@ export const RESERVED_SLUGS: readonly string[] = Object.freeze([
   'app',
   'assets',
   'auth',
+  'auth-states',
   'billing',
   'blog',
+  'bundle-baseline',
   'cli',
   'contact',
   'dashboard',
@@ -62,6 +64,7 @@ export const RESERVED_SLUGS: readonly string[] = Object.freeze([
   'system',
   'terms',
   'undefined',
+  'welcome',
   'www',
 ]);
 

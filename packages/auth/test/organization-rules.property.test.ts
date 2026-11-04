@@ -79,7 +79,19 @@ describe('slugs', () => {
   });
 
   it('reserves the dashboard routes that sit beside /<slug>', () => {
-    for (const route of ['sign-in', 'sign-out', 'auth', 'invite', 'api', 'settings', 'new']) {
+    for (const route of [
+      'sign-in',
+      'sign-out',
+      'auth',
+      'auth-states',
+      'bundle-baseline',
+      'invite',
+      'api',
+      'settings',
+      'new',
+      'welcome',
+      'organizations',
+    ]) {
       expect(RESERVED_SLUGS, route).toContain(route);
     }
   });

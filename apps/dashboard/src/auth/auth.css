@@ -455,3 +455,68 @@
     gap: var(--dr-space-2);
   }
 }
+
+/* The way out of the first run pages: a quiet line, never a second call to action. */
+.auth-signed-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dr-space-4);
+  font: var(--dr-type-body-s);
+  color: var(--dr-text-secondary);
+}
+.auth-text-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--dr-space-24);
+  margin-inline-start: var(--dr-space-8);
+  color: var(--dr-accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.auth-text-button:focus-visible {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+
+/* A field that starts with the fixed part of the URL. The whole row carries the field edge, so
+   the prefix reads as part of the value without being one. */
+.auth-affix {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-4);
+  height: var(--dr-size-control-lg);
+  padding-inline: var(--dr-space-12);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-control);
+  border-radius: var(--dr-radius-sm);
+  background: var(--dr-surface-ground);
+  font: var(--dr-type-body-s);
+  font-family: var(--dr-font-mono);
+}
+.auth-affix[data-invalid] {
+  border-color: var(--dr-state-broken-mark);
+}
+.auth-affix:focus-within {
+  outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
+  outline-offset: var(--dr-stroke-focus-offset);
+}
+.auth-affix span {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dr-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* No width of its own, or the input's default size widens the whole form on a phone. */
+.auth-affix input {
+  flex: 1 1 40%;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--dr-text-ink);
+  font: var(--dr-type-body-m);
+  font-family: var(--dr-font-mono);
+  outline: none;
+}

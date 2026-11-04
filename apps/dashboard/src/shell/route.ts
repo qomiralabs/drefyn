@@ -16,9 +16,11 @@ export const RESERVED_SLUGS: readonly string[] = [
   'auth',
   'auth-states',
   'invite',
+  'organizations',
   'sign-in',
   'sign-out',
   'sign-up',
+  'welcome',
 ];
 
 // Lower case letters, digits and inner hyphens, at most 63 characters: the DNS label rule,

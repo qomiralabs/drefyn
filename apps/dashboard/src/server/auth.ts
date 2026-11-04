@@ -1,4 +1,5 @@
 import {
+  createAccount,
   createCliLinks,
   createEmailSignIn,
   createInvitations,
@@ -11,6 +12,7 @@ import {
   createSessions,
   loadBreachedPasswords,
   parseAuthConfig,
+  type Account,
   type AuthConfig,
   type AuthLogger,
   type CliLinks,
@@ -46,9 +48,10 @@ export interface DashboardAuth {
     Sessions,
     'resolveAccess' | 'resolveSession' | 'touchSession' | 'signOut'
   >;
-  readonly organizations: Pick<Organizations, 'listMyOrganizations'>;
+  readonly organizations: Pick<Organizations, 'listMyOrganizations' | 'createOrganization'>;
+  readonly account: Pick<Account, 'readAccount' | 'setDisplayName'>;
   readonly emailSignIn: EmailSignIn;
-  readonly passwordSignIn: Pick<PasswordSignIn, 'signInWithPassword'>;
+  readonly passwordSignIn: Pick<PasswordSignIn, 'signInWithPassword' | 'setPassword'>;
   readonly passwordAccount: Pick<PasswordAccount, 'startPasswordReset' | 'completePasswordReset'>;
   readonly oauth: Pick<OAuth, 'startOAuth' | 'completeOAuth'>;
   readonly invitations: Pick<
@@ -139,16 +142,19 @@ async function compose(): Promise<DashboardAuth> {
     limiter,
     passwords: hasher,
   });
-  // The tier of an organization this root never creates; hosted refuses it in the database.
+  // New organizations take the install's own tier; hosted refuses this one in the database,
+  // so the cloud root passes its own.
   const organizations = createOrganizations(parsed, {
     db,
     authDb,
     logger,
+    limiter,
     initialTier: 'self_hosted',
   });
   const invitations = createInvitations(parsed, { db, authDb, logger, mailer, limiter });
   const shared = { db, authDb, logger, mailer, limiter, sessions };
   const emailSignIn = createEmailSignIn(parsed, { ...shared, invitations });
+  const account = createAccount({ db, authDb, logger });
   const passwordSignIn = createPasswordSignIn(parsed, {
     ...shared,
     hasher,
@@ -174,10 +180,16 @@ async function compose(): Promise<DashboardAuth> {
     },
     organizations: {
       listMyOrganizations: (session) => organizations.listMyOrganizations(session),
+      createOrganization: (session, input) => organizations.createOrganization(session, input),
+    },
+    account: {
+      readAccount: (session) => account.readAccount(session),
+      setDisplayName: (session, input) => account.setDisplayName(session, input),
     },
     emailSignIn,
     passwordSignIn: {
       signInWithPassword: (b, input) => passwordSignIn.signInWithPassword(b, input),
+      setPassword: (session, input) => passwordSignIn.setPassword(session, input),
     },
     passwordAccount: {
       startPasswordReset: (b, input) => passwordAccount.startPasswordReset(b, input),

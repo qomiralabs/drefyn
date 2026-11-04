@@ -8,8 +8,8 @@ import {
   type RouteReport,
   type ScriptSize,
 } from '../src/bundle/budget.ts';
-import { ROUTES } from './fixtures.ts';
-import { MAYA, SIGNED_OUT, stateFile } from './people.ts';
+import { OPEN_ORIGIN, ROUTES } from './fixtures.ts';
+import { MAYA, SIGNED_OUT, stateFile, ZARA } from './people.ts';
 import { test } from './test.ts';
 
 const BASELINE_ROUTE = '/bundle-baseline';
@@ -83,6 +83,17 @@ test('sign in stays under 30 KB beyond the framework baseline', async ({ browser
   console.log(`/sign-in: ${kb(report.beyondBaselineBytes)} beyond baseline`);
   expect(report.beyondBaselineBytes).toBeGreaterThan(0);
   expect(report.beyondBaselineBytes).toBeLessThan(SIGN_IN_BUDGET_BYTES);
+});
+
+// Welcome shares this page's one client file, so measuring one measures both.
+test('the first run pages stay under 150 KB beyond the framework baseline', async ({ browser }) => {
+  // The same server, because scripts are matched to the baseline by URL.
+  const baseline = await coldLoad(browser, `${OPEN_ORIGIN}${BASELINE_ROUTE}`, SIGNED_OUT);
+  const path = `${OPEN_ORIGIN}/organizations/new`;
+  const report = routeReport(path, await coldLoad(browser, path, stateFile(ZARA)), baseline);
+  console.log(`${path}: ${kb(report.beyondBaselineBytes)} beyond baseline`);
+  expect(report.beyondBaselineBytes).toBeGreaterThan(0);
+  expect(report.overBudget).toBe(false);
 });
 
 // Mail loads through Node at run time, so a browser must never be sent a byte of it.

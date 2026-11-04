@@ -1,5 +1,5 @@
 'use client';
-import { startTransition, useActionState, useEffect, useRef, type ReactNode } from 'react';
+import { startTransition, useEffect, useRef, type ReactNode } from 'react';
 import {
   finishLink,
   inspectLink,
@@ -14,7 +14,7 @@ import {
   verifyCode,
 } from '../server/sign-in-actions.ts';
 import { useFocusOnChange } from './controls.tsx';
-import { isRefusal, refusalNotice } from './outcomes.ts';
+import { isRefusal } from './outcomes.ts';
 import { BlockScreen, CliScreen, Failed, InviteScreen } from './outcome-screens.tsx';
 import { AuthFrame } from './parts.tsx';
 import {
@@ -41,28 +41,7 @@ import type {
   StartState,
   TypedCodeState,
 } from './states.ts';
-
-interface Refused {
-  readonly ok: false;
-  readonly code: string;
-}
-
-// The server reference goes straight to useActionState, which is what keeps these forms
-// working with scripts off. Stated here because React cannot infer the payload from it.
-function useForm<T extends object>(
-  action: (state: unknown, form: FormData) => Promise<T | Refused>,
-  initial: T,
-): [T | Refused, (form: FormData) => void, boolean] {
-  const start = initial as Awaited<T | Refused>;
-  return useActionState<T | Refused, FormData>(action, start);
-}
-
-// A refusal comes back in place of the form's state, with scripts on or off. Its code is a
-// fixed word, so it can stand as the reference a person passes on.
-function noticed<T extends object>(state: T | Refused, empty: T) {
-  if (isRefusal(state)) return { view: empty, notice: refusalNotice(state, state.code) };
-  return { view: state, notice: undefined };
-}
+import { noticed, useForm } from './use-form.ts';
 
 type SignInBase = Omit<Parameters<typeof SignInScreen>[0], 'action' | 'email' | 'invalid'>;
 

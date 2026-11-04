@@ -13,6 +13,8 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   'oauth.ts': ['insert'],
   // The operator's sign up: the address the person running the box vouches for.
   'cli-links.ts': ['insert'],
+  // The display name only. The test below and the column grant both hold it to that.
+  'account.ts': ['update'],
 };
 
 const QUOTED_TABLE = String.raw`\(\s*(['"\x60])(?:app\.)?users(?:\s+as\s+\w+)?\1\s*\)`;
@@ -62,6 +64,14 @@ describe('writes of the user address', () => {
   const gap = fc.stringMatching(/^[ \n\t]{0,3}$/);
   const schema = fc.constantFrom('', 'app.');
   const alias = fc.constantFrom('', ' as u', ' as users');
+
+  it('the account file sets the name and nothing near an address', () => {
+    const text = readFileSync(join(SRC, 'account.ts'), 'utf8');
+    const sets = Array.from(text.matchAll(/\.set\(\{([^}]*)\}\)/g), (m) => m[1] ?? '');
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toContain('display_name');
+    expect(sets[0]).not.toMatch(/email/);
+  });
 
   it('the check sees a builder write however it is spelled', () => {
     fc.assert(

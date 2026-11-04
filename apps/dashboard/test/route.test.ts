@@ -115,6 +115,12 @@ describe('productHref', () => {
   });
 });
 
+describe('paths the first run pages own', () => {
+  it.each(['/welcome', '/organizations', '/organizations/new'])('%s is no shell path', (path) => {
+    expect(parseShellPath(path)).toBeNull();
+  });
+});
+
 describe('paths the signed out pages own', () => {
   it.each(['sign-in', 'sign-up', 'sign-out', 'invite', 'auth'])('%s is no organization', (slug) => {
     expect(parseShellPath(`/${slug}`)).toBeNull();
