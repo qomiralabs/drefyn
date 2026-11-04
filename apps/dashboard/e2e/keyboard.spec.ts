@@ -282,6 +282,42 @@ test.describe('signed out pages', () => {
     await expect(page.getByText('That address and password do not match.')).toBeVisible();
   });
 
+  test('Welcome goes name, password, Show, Continue, Sign out', async ({ page, browserName }) => {
+    await page.goto('/auth-states/welcome/ready');
+    await expect(page.getByLabel('Your name')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Password (optional)')).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: /^Show password/ })).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeFocused();
+  });
+
+  test('Create organization goes name, address, Create, Sign out', async ({
+    page,
+    browserName,
+  }) => {
+    await page.goto('/auth-states/organization/ready');
+    await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Address')).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Create organization' })).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeFocused();
+  });
+
+  test('a stopped Create organization stays focusable and says why', async ({ page }) => {
+    await page.goto('/auth-states/organization/limited');
+    const button = page.getByRole('button', { name: 'Create organization' });
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toHaveAccessibleDescription('Paused until tomorrow.');
+    await button.focus();
+    await expect(button).toBeFocused();
+  });
+
   test('the first Tab reaches the skip link, and it moves to main', async ({
     page,
     browserName,

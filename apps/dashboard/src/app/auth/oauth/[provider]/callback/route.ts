@@ -2,6 +2,7 @@ import { safeReturnTo, serializeCookie, type AuthErrorCode } from '@drefyn/auth'
 import { after, NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
+import { arrival } from '../../../../../server/first-run.ts';
 import { guardPublic } from '../../../../../server/guard.ts';
 import { appOrigin, appUrl, requestQuery } from '../../../../../server/origin.ts';
 
@@ -35,7 +36,9 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   const target =
     outcome.kind === 'link_pending'
       ? appUrl('/sign-in/link')
-      : appUrl(safeReturnTo(outcome.returnTo, appOrigin()));
+      : outcome.kind === 'signed_in'
+        ? appUrl(await arrival(outcome.session, outcome.returnTo))
+        : appUrl(safeReturnTo(outcome.returnTo, appOrigin()));
   const response = NextResponse.redirect(target, 303);
   const config = authConfig();
   for (const spec of outcome.setCookies) {

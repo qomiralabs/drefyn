@@ -1,4 +1,10 @@
-import { safeReturnTo, type AccessContext, type AccessView, type SessionInfo } from '@drefyn/auth';
+import {
+  safeReturnTo,
+  type AccessContext,
+  type AccessView,
+  type AccountView,
+  type SessionInfo,
+} from '@drefyn/auth';
 import type { OrganizationSummary } from '@drefyn/auth';
 import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
@@ -85,20 +91,25 @@ export const guardSession = cache(async (): Promise<SessionInfo> => {
   return session;
 });
 
-// For / alone: the flag is asked about the first organization, the one it lands on.
-export const guardSignedIn = cache(
-  async (): Promise<{
-    readonly session: SessionInfo;
-    readonly organizations: readonly OrganizationSummary[];
-  }> => {
-    const { auth, session } = await signedIn();
-    const organizations = await orOutage(() => auth.organizations.listMyOrganizations(session));
-    const first = organizations[0];
-    if (first === undefined) notFound();
-    await requireDashboard(first.organizationId, session.userId);
-    return { session, organizations };
-  },
-);
+export interface SignedInPerson {
+  readonly session: SessionInfo;
+  readonly organizations: readonly OrganizationSummary[];
+  readonly account: AccountView;
+}
+
+// For / and the first run pages, the pages for someone who may belong to nothing yet. The
+// flag is asked about the first organization, the one / lands on, or about nobody when there
+// is none. Flag first, so a dashboard that is off reads no account.
+export const guardSignedIn = cache(async (): Promise<SignedInPerson> => {
+  const { auth, session } = await signedIn();
+  const organizations = await orOutage(() => auth.organizations.listMyOrganizations(session));
+  const first = organizations[0];
+  if (first === undefined) await requireDashboardForVisitor();
+  else await requireDashboard(first.organizationId, session.userId);
+  const read = await auth.account.readAccount(session);
+  if (!read.ok) throw read.error;
+  return { session, organizations, account: read.value };
+});
 
 // Who a signed out page is talking to, for the pages that change with it. An outage reads as
 // nobody, so the page still offers its form.

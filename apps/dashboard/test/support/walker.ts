@@ -61,13 +61,20 @@ const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([
   'src/app/auth/pre/route.ts',
 ]);
 
+// Pages for a person who may belong to no organization yet.
+const SIGNED_IN_PAGES: ReadonlySet<string> = new Set([
+  'src/app/page.tsx',
+  'src/app/organizations/new/page.tsx',
+  'src/app/welcome/page.tsx',
+]);
+
 // Groups and slots change no URL, so a path is judged as if they were not there.
 const routePath = (path: string) => path.replace(/\/(?:\([^/]*\)|@[^/]*)(?=\/)/g, '');
 
 // Allow lists match the path as written, so a group cannot borrow an entry.
 function acceptedGuards(path: string): readonly Guard[] {
   if (PUBLIC_PAGES.has(path) || PUBLIC_GET_ROUTES.has(path)) return ['guardPublic'];
-  return routePath(path) === 'src/app/page.tsx' ? ['guardSignedIn'] : ['guardOrganization'];
+  return SIGNED_IN_PAGES.has(routePath(path)) ? ['guardSignedIn'] : ['guardOrganization'];
 }
 
 type FunctionNode =

@@ -112,6 +112,7 @@ export {
   type Roles,
   type RolesDeps,
 } from './roles.ts';
+export { createAccount, type Account, type AccountView, type LinkedIdentity } from './account.ts';
 export { countSeats, type SeatHolder } from './seats.ts';
 export {
   RESERVED_SLUGS,

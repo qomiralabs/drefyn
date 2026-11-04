@@ -20,6 +20,7 @@ vi.mock('@drefyn/auth', () => ({
   createSessions,
   createOrganizations,
   parseAuthConfig,
+  createAccount: () => ({}),
   createCliLinks: () => ({}),
   createEmailSignIn: () => ({}),
   createInvitations: () => ({}),
@@ -87,8 +88,9 @@ describe('the composition root', () => {
       'signOut',
       'touchSession',
     ]);
-    expect(Object.keys(auth.organizations)).toEqual(['listMyOrganizations']);
+    expect(Object.keys(auth.organizations)).toEqual(['listMyOrganizations', 'createOrganization']);
     expect(Object.keys(auth).sort()).toEqual([
+      'account',
       'cliLinks',
       'emailSignIn',
       'invitations',

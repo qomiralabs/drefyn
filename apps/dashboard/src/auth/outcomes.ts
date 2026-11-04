@@ -7,7 +7,9 @@ export type ProviderName = 'GitHub' | 'Google';
 // raw code or server message can reach a person.
 export type FormNotice =
   | { readonly kind: 'unavailable'; readonly reference: string }
+  | { readonly kind: 'not_saved'; readonly reference: string }
   | { readonly kind: 'limited'; readonly minutes: number }
+  | { readonly kind: 'day_limit' }
   | { readonly kind: 'expired' }
   | { readonly kind: 'botcheck_down' }
   | { readonly kind: 'oauth_error'; readonly provider: ProviderName }

@@ -15,7 +15,7 @@ import {
   SpokenCode,
 } from './parts.tsx';
 
-type FormAction = ((form: FormData) => void) | undefined;
+export type FormAction = ((form: FormData) => void) | undefined;
 
 export interface Shared {
   readonly hosted: boolean;
@@ -498,6 +498,17 @@ const WEAK_WORDS: Readonly<Record<string, string>> = {
 };
 const WEAK_FALLBACK = 'This is one of the first things guessed. Choose another.';
 
+export function passwordProblem(
+  rules: readonly string[] | undefined,
+  breached: boolean | undefined,
+): string | undefined {
+  const [rule] = rules ?? [];
+  if (breached === true) {
+    return 'This password is in known data breaches, so attackers try it early. Choose another.';
+  }
+  return rule === undefined ? undefined : (WEAK_WORDS[rule] ?? WEAK_FALLBACK);
+}
+
 export function ChoosePassword({
   action,
   csrf,
@@ -515,13 +526,7 @@ export function ChoosePassword({
   breached?: boolean | undefined;
   notice?: FormNotice | undefined;
 }): ReactNode {
-  const [rule] = rules ?? [];
-  const error =
-    breached === true
-      ? 'This password is in known data breaches, so attackers try it early. Choose another.'
-      : rule === undefined
-        ? undefined
-        : (WEAK_WORDS[rule] ?? WEAK_FALLBACK);
+  const error = passwordProblem(rules, breached);
   return (
     <>
       <Head>

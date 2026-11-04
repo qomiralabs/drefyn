@@ -1,4 +1,4 @@
-import { AuthError, type SessionInfo } from '@drefyn/auth';
+import { AuthError, type SessionInfo, type WeakPasswordRule } from '@drefyn/auth';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const REDIRECT = 'NEXT_REDIRECT';
@@ -47,7 +47,10 @@ const form = (fields: Record<string, string>) => {
   for (const [name, value] of Object.entries(fields)) body.set(name, value);
   return body;
 };
-const refused = (code: ConstructorParameters<typeof AuthError>[0], rules?: string[]) => ({
+const refused = (
+  code: ConstructorParameters<typeof AuthError>[0],
+  rules?: readonly WeakPasswordRule[],
+) => ({
   ok: false,
   error: new AuthError(code, rules === undefined ? {} : { rules }),
 });
@@ -89,6 +92,7 @@ describe('saveWelcome', () => {
 
   it.each([
     [refused('AUTH_PASSWORD_WEAK', ['too_short']), { problem: 'password', rules: ['too_short'] }],
+    [refused('AUTH_INPUT_INVALID'), { problem: 'password', rules: ['too_long'] }],
     [refused('AUTH_PASSWORD_BREACHED'), { problem: 'breached' }],
     [refused('AUTH_RECENT_AUTH_REQUIRED'), { problem: 'late' }],
   ])('keeps the name, never the password, on %#', async (answer, state) => {

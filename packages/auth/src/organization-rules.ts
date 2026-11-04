@@ -62,6 +62,7 @@ export const RESERVED_SLUGS: readonly string[] = Object.freeze([
   'system',
   'terms',
   'undefined',
+  'welcome',
   'www',
 ]);
 
