@@ -906,7 +906,7 @@ describe('readInvitation', () => {
     ['a wrong secret', null, { invitation: { secret_hash: Buffer.alloc(32, 7) } }],
     ['an organization that is gone', null, { organizationName: null }],
   ] as const)('answers invalid for %s', async (_name, raw, w) => {
-    const { invitations } = reading(w as World);
+    const { invitations } = reading(w);
     const read = await invitations.readInvitation(raw ?? token());
     expect(read).toMatchObject({ ok: false, error: { code: 'AUTH_INVITATION_INVALID' } });
   });

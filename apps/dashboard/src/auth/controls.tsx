@@ -92,7 +92,7 @@ export function CopyButton({
 }
 
 // Moves focus to the first notice a state brings, or the heading of a new step.
-export function useFocusOnChange<T>(state: T): (node: HTMLElement | null) => void {
+export function useFocusOnChange(state: unknown): (node: HTMLElement | null) => void {
   const root = useRef<HTMLElement | null>(null);
   const first = useRef(true);
   useEffect(() => {

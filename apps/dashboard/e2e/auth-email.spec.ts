@@ -5,6 +5,8 @@ import { MAYA, SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
 test.use({ storageState: SIGNED_OUT });
+// One seeded person and one inbox, so a mail can only belong to the test that asked.
+test.describe.configure({ mode: 'serial' });
 
 test('request, receive, verify, land signed in, sign out', async ({ page }) => {
   await signInByCode(page, MAYA.email);

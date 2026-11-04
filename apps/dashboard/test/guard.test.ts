@@ -348,6 +348,22 @@ describe('guardPublic', () => {
   });
 });
 
+describe('currentSession', () => {
+  it('reads no database with no cookie', async () => {
+    cookie = undefined;
+    const { currentSession } = await load();
+    await expect(currentSession()).resolves.toBeNull();
+    expect(dashboardAuth).not.toHaveBeenCalled();
+  });
+
+  it('reads an outage as nobody, so the page still offers its form', async () => {
+    dashboardAuth.mockRejectedValue(new Error('down'));
+    cookie = 'held';
+    const { currentSession } = await load();
+    await expect(currentSession()).resolves.toBeNull();
+  });
+});
+
 describe('the reserved visitor id', () => {
   it('is the nil UUID, which no generated id can be', () => {
     expect(VISITOR_FLAG_ORGANIZATION).toBe('00000000-0000-0000-0000-000000000000');

@@ -1,9 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 import {
-  HOP_HOST,
   HOP_ORIGIN,
-  HOP_PORT,
   HOP_SERVER_PORT,
   OFF_ORIGIN,
   OFF_PORT,
@@ -26,10 +24,11 @@ const server = (
   port: number,
   origin: string,
   hops: Record<string, string> = {},
+  // A static file, so readiness does not depend on the flag: with it off every route is 404.
+  ready: { url: string } | { port: number } = { url: `http://127.0.0.1:${port}/robots.txt` },
 ) => ({
   command: 'node server.ts',
-  // A static file, so readiness does not depend on the flag: with it off every route is 404.
-  url: `http://127.0.0.1:${port}/robots.txt`,
+  ...ready,
   reuseExistingServer: false,
   timeout: 60_000,
   stdout: 'ignore' as const,
@@ -47,14 +46,23 @@ const server = (
   },
 });
 
+// Every spec on these servers shares one client address, so only the lockout specs on the
+// third server meet the real limits.
+const ROOMY = {
+  DREFYN_AUTH_RATE_EMAIL_SEND: '1000/10m',
+  DREFYN_AUTH_RATE_EMAIL_SEND_IP: '1000/10m',
+  DREFYN_AUTH_RATE_EMAIL_SEND_DEVICE: '1000/1d',
+  DREFYN_AUTH_RATE_EMAIL_SEND_ADDRESS_CEILING: '1000/1d',
+  DREFYN_AUTH_RATE_CODE_VERIFY: '1000/1h',
+  DREFYN_AUTH_RATE_PASSWORD_FAIL: '1000/15m',
+  DREFYN_AUTH_RATE_PASSWORD_FAIL_IP: '1000/10m',
+};
+
 // Hops 1 with a non loopback origin, so the wrapper's start check stays on, and secure
 // cookies, which that origin needs. Only the specs in the auth-hop project reach this one.
 const HOPS = { DREFYN_TRUSTED_PROXY_HOPS: '1', DREFYN_AUTH_COOKIE_SECURE: 'true' };
-const hopProxy = {
-  command: `node e2e/hop-proxy.ts ${HOP_PORT} ${HOP_SERVER_PORT} ${HOP_HOST}`,
-  port: HOP_PORT,
-  reuseExistingServer: false,
-};
+// Ready by port: this wrapper answers only the configured Host, and readiness sends none.
+const hopServer = server('on', HOP_SERVER_PORT, HOP_ORIGIN, HOPS, { port: HOP_SERVER_PORT });
 
 export default defineConfig({
   testDir: './e2e',
@@ -81,10 +89,9 @@ export default defineConfig({
   // a person, through the real guard.
   use: { baseURL: ON_ORIGIN, storageState: stateFile(MAYA) },
   webServer: [
-    server('on', ON_PORT, ON_ORIGIN),
+    server('on', ON_PORT, ON_ORIGIN, ROOMY),
     server('off', OFF_PORT, OFF_ORIGIN),
-    server('on', HOP_SERVER_PORT, HOP_ORIGIN, HOPS),
-    hopProxy,
+    hopServer,
   ],
   projects: [
     {
@@ -130,8 +137,6 @@ export default defineConfig({
         ...chromium,
         baseURL: HOP_ORIGIN,
         storageState: SIGNED_OUT,
-        ignoreHTTPSErrors: true,
-        launchOptions: { args: [`--host-resolver-rules=MAP ${HOP_HOST} 127.0.0.1`] },
       },
     },
     { name: 'bundle', testMatch: /bundle\.spec\.ts$/, use: { ...chromium } },

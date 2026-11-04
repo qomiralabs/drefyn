@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 import { preTarget } from '../../../auth/pre-target.ts';
 import { authConfig } from '../../../server/auth.ts';
 import { guardPublic } from '../../../server/guard.ts';
-import { appUrl } from '../../../server/origin.ts';
+import { appUrl, requestQuery } from '../../../server/origin.ts';
 
 const SECRET_BYTES = 32;
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     value: encodeSecret(randomBytes(SECRET_BYTES)),
     maxAgeSeconds: PRE_MAX_AGE_SECONDS,
   });
-  const target = appUrl(preTarget(request.nextUrl.searchParams.get('to')));
+  const target = appUrl(preTarget(requestQuery(request).get('to')));
   return new Response(null, {
     status: 303,
     headers: { location: target.href, 'set-cookie': cookie },

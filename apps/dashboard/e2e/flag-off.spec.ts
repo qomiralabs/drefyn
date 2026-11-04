@@ -21,6 +21,7 @@ const SIGNED_OUT_PAGES = [
   '/invite',
   '/invite/block',
   '/auth/pre',
+  '/auth-states/sign-in/ready',
   '/auth/oauth/github/start',
   '/auth/oauth/github/callback',
 ];

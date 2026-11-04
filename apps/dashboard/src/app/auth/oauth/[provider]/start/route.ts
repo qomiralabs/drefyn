@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
 import { guardPublic } from '../../../../../server/guard.ts';
-import { appUrl } from '../../../../../server/origin.ts';
+import { appUrl, requestQuery } from '../../../../../server/origin.ts';
 
 interface Context {
   readonly params: Promise<{ readonly provider: string }>;
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   const failed = appUrl(`/sign-in?error=provider&provider=${provider}`);
   const browser = await visitorBrowser();
   if (browser === null) return NextResponse.redirect(failed, 303);
-  const next = request.nextUrl.searchParams.get('next');
+  const next = requestQuery(request).get('next');
   const auth = await dashboardAuth();
   const started = await auth.oauth.startOAuth(browser, {
     provider,

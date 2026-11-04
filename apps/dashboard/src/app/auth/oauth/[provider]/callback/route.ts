@@ -3,7 +3,7 @@ import { after, NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
 import { guardPublic } from '../../../../../server/guard.ts';
-import { appOrigin, appUrl } from '../../../../../server/origin.ts';
+import { appOrigin, appUrl, requestQuery } from '../../../../../server/origin.ts';
 
 interface Context {
   readonly params: Promise<{ readonly provider: string }>;
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   const auth = await dashboardAuth();
   const done = await auth.oauth.completeOAuth(browser, {
     provider,
-    query: request.nextUrl.searchParams,
+    query: requestQuery(request),
   });
   if (!done.ok) return refuse(errorName(done.error.code));
   const outcome = done.value;
@@ -41,6 +41,7 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   for (const spec of outcome.setCookies) {
     response.headers.append('set-cookie', serializeCookie(config, spec));
   }
-  if ('send' in outcome && outcome.send !== undefined) after(outcome.send);
+  const send = 'send' in outcome ? outcome.send : undefined;
+  if (send !== undefined) after(send);
   return response;
 }

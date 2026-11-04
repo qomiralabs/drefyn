@@ -1,4 +1,4 @@
-import { Skeleton, TextField } from '@drefyn/ui/react';
+import { IconClock, Skeleton, TextField } from '@drefyn/ui/react';
 import type { ReactNode } from 'react';
 import { CopyButton, SecretField, Submit } from './controls.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
@@ -93,7 +93,6 @@ function AddressForm({
         spellCheck={false}
         required
         defaultValue={email}
-        // eslint-disable-next-line jsx-a11y/no-autofocus -- the address is the page's one job
         autoFocus
         {...(invalid === true ? { error: 'Enter an address like name@example.com.' } : {})}
       />
@@ -446,11 +445,12 @@ export function PasswordScreen(props: PasswordProps): ReactNode {
       </Head>
       {props.notice?.kind === 'limited' ? (
         <div className="auth-notice" role="status" tabIndex={-1} data-notice="">
+          <IconClock />
           <div>
             <p className="auth-notice-title">Too many password tries for this address.</p>
             <p>
               Try again in <span className="tabular-nums">{props.notice.minutes}</span> minutes, or
-              sign in with an email code now. Codes, GitHub and Google are not affected.
+              sign in another way now. Codes and linked accounts are not affected.
             </p>
           </div>
         </div>
@@ -592,7 +592,6 @@ export function ResetScreen({ hosted, csrf, action, state }: ResetProps): ReactN
               spellCheck={false}
               required
               defaultValue={state.email}
-              // eslint-disable-next-line jsx-a11y/no-autofocus -- the address is the one job here
               autoFocus
               {...(state.invalid === true
                 ? { error: 'Enter an address like name@example.com.' }

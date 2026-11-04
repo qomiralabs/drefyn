@@ -68,11 +68,13 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
 // shows its G and leaves the file as Google ships it.
 const G_VIEW = '#svgView(viewBox(10,10,20,20))';
 
+const pathOf = (image: unknown): string => (image as { src: string }).src;
+
 function ProviderMark({ provider }: { provider: Provider }): ReactNode {
   const [light, dark] =
     provider === 'github'
-      ? [githubBlack.src, githubWhite.src]
-      : [`${googleLight.src}${G_VIEW}`, `${googleDark.src}${G_VIEW}`];
+      ? [pathOf(githubBlack), pathOf(githubWhite)]
+      : [`${pathOf(googleLight)}${G_VIEW}`, `${pathOf(googleDark)}${G_VIEW}`];
   return (
     <>
       <img className="auth-only-light" src={light} alt="" width="20" height="20" />
@@ -233,7 +235,6 @@ export function CodeField({ id, hint, error, defaultValue }: CodeFieldProps): Re
         maxLength={9}
         spellCheck={false}
         required
-        // eslint-disable-next-line jsx-a11y/no-autofocus -- the code is the page's one job
         autoFocus
         defaultValue={defaultValue}
         aria-invalid={error === undefined ? undefined : true}

@@ -147,7 +147,7 @@
 }
 .auth-reveal-button {
   position: absolute;
-  inset-block-end: var(--dr-space-4);
+  inset-block-end: calc((var(--dr-size-control-lg) - var(--dr-size-control-sm)) / 2);
   inset-inline-end: var(--dr-space-4);
 }
 .auth-field-error {
@@ -389,6 +389,10 @@
   padding: var(--dr-space-48);
   text-align: center;
   color: var(--dr-text-ink);
+}
+.auth-brand-copy [data-mark] {
+  width: var(--dr-space-48);
+  height: var(--dr-space-48);
 }
 .auth-brand-line {
   font: var(--dr-type-display-m);

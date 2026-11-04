@@ -54,25 +54,21 @@ function useForm<T extends object>(
   initial: T,
 ): [T | Refused, (form: FormData) => void, boolean] {
   const start = initial as Awaited<T | Refused>;
-  return useActionState<T | Refused, FormData>(action, start) as [
-    T | Refused,
-    (form: FormData) => void,
-    boolean,
-  ];
+  return useActionState<T | Refused, FormData>(action, start);
 }
 
 // A refusal comes back in place of the form's state, with scripts on or off. Its code is a
 // fixed word, so it can stand as the reference a person passes on.
 function noticed<T extends object>(state: T | Refused, empty: T) {
   if (isRefusal(state)) return { view: empty, notice: refusalNotice(state, state.code) };
-  return { view: state as T, notice: undefined };
+  return { view: state, notice: undefined };
 }
 
 type SignInBase = Omit<Parameters<typeof SignInScreen>[0], 'action' | 'email' | 'invalid'>;
 
 export function SignInForm(props: SignInBase): ReactNode {
   const [state, action] = useForm<StartState>(startEmail, {});
-  const { view, notice } = noticed(state, {} as StartState);
+  const { view, notice } = noticed(state, {});
   const focus = useFocusOnChange(state);
   return (
     <div ref={focus} className="contents">
@@ -91,7 +87,7 @@ type SignUpBase = Omit<Parameters<typeof SignUpScreen>[0], 'action' | 'email' | 
 
 export function SignUpForm(props: SignUpBase): ReactNode {
   const [state, action] = useForm<StartState>(startEmail, {});
-  const { view, notice } = noticed(state, {} as StartState);
+  const { view, notice } = noticed(state, {});
   const focus = useFocusOnChange(state);
   return (
     <div ref={focus} className="contents">
@@ -143,12 +139,12 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
       readAction(asForm({ csrf, fragment }));
     });
   });
-  const { view: linked } = noticed(link, { kind: 'idle' } as LinkState);
-  const { view: done } = noticed(finished, { kind: 'idle' } as LinkState);
+  const { view: linked } = noticed(link, { kind: 'idle' });
+  const { view: done } = noticed(finished, { kind: 'idle' });
   const current = done.kind === 'idle' ? linked : done;
-  const { view: typedView, notice } = noticed(typed, {} as TypedCodeState);
+  const { view: typedView, notice } = noticed(typed, {});
   const focus = useFocusOnChange(current.kind === 'idle' ? typed : current);
-  const { view: resetView } = noticed(reset, { step: 'ask' } as ResetState);
+  const { view: resetView } = noticed(reset, { step: 'ask' });
   if (resetView.step === 'saved' || (resetView.step === 'choose' && current.kind === 'choose')) {
     return <ResetScreen hosted={hosted} csrf={csrf} action={resetAction} state={resetView} />;
   }
@@ -212,7 +208,7 @@ type PasswordBase = Omit<
 
 export function PasswordForm(props: PasswordBase): ReactNode {
   const [state, action] = useForm<PasswordState>(signInPassword, {});
-  const { view, notice } = noticed(state, {} as PasswordState);
+  const { view, notice } = noticed(state, {});
   const focus = useFocusOnChange(state);
   return (
     <div ref={focus} className="contents">
@@ -229,7 +225,7 @@ export function PasswordForm(props: PasswordBase): ReactNode {
 
 export function ResetForm({ hosted, csrf }: Shared): ReactNode {
   const [state, action] = useForm<ResetState>(resetStep, { step: 'ask' });
-  const { view, notice } = noticed(state, { step: 'ask' } as ResetState);
+  const { view, notice } = noticed(state, { step: 'ask' });
   const focus = useFocusOnChange(state);
   const shown: ResetState = notice === undefined ? view : { step: 'ask', notice };
   return (
@@ -246,7 +242,7 @@ export function LinkForm({
   provider,
 }: Shared & { email: string | null; provider: string }): ReactNode {
   const [state, action] = useForm<TypedCodeState>(verifyCode, {});
-  const { view } = noticed(state, {} as TypedCodeState);
+  const { view } = noticed(state, {});
   const focus = useFocusOnChange(state);
   return (
     <div ref={focus} className="contents">
@@ -265,7 +261,7 @@ export function LinkForm({
 
 export function CliForm({ hosted, csrf }: Shared): ReactNode {
   const [state, action, pending] = useForm<CliState>(redeemCliLink, { kind: 'idle' });
-  const { view, notice } = noticed(state, { kind: 'idle' } as CliState);
+  const { view, notice } = noticed(state, { kind: 'idle' });
   useFragment((fragment) => {
     if (fragment === '') return;
     startTransition(() => {

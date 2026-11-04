@@ -38,6 +38,26 @@ Tarball integrity as the registry publishes it, to check a download before unpac
 | --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------ |
 | `apps/dashboard/src/app/icon.svg` | Our own drawing of the Drefyn mark on its 100 unit grid, ink in light and paper in dark | Apache-2.0 with the repo |
 
+## Provider marks and the Google button font
+
+Official third party assets, copied byte for byte and shown only on the sign in provider buttons.
+They are not covered by this repository's Apache-2.0 licence: each stays under its owner's terms,
+and the marks remain trademarks of their owners. Their use here does not imply endorsement. Both
+are in `apps/dashboard/src/auth/marks/`. The owner accepted these uses on 2026-11-04.
+
+| File                                 | Source                                                                                           | Terms                                                                                                   | SHA-256                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `github-black.svg`                   | `https://brand.github.com/GitHub_Logos.zip`, `GitHub_Invertocat_Black.svg`                       | GitHub trademark, used to show the GitHub integration under `https://brand.github.com/foundations/logo` | `693d7abe6f899646cc2e96856723b45e95f71885a54910b2749f6decdf7e1ee1` |
+| `github-white.svg`                   | `https://brand.github.com/GitHub_Logos.zip`, `GitHub_Invertocat_White.svg`                       | As above                                                                                                | `ccd84c89b1056345608fc3489357f8acc7397e49a3cdc2d418b6c8016911d47b` |
+| `google-light.svg`                   | `https://developers.google.com/static/identity/images/signin-assets.zip`, Light, square, no text | Google trademark, used under `https://developers.google.com/identity/branding-guidelines`               | `6587b180203a99da15c0a041018e15c94ffd9556c4b9855bdc69806081a93791` |
+| `google-dark.svg`                    | The same bundle, Dark, square, no text                                                           | As above                                                                                                | `2f7ecc307b1db0f1738456269ee2c4433b3a73c35060ced67a9afcfc6821e786` |
+| `google-sans-latin-500-normal.woff2` | `https://registry.npmjs.org/@fontsource/google-sans/-/google-sans-5.3.2.tgz`                     | SIL Open Font License 1.1, in `GoogleSans-OFL.txt`                                                      | `7ee2b232de66f7530be28964818bc8a813e62553138e48bffd917e95b19bd7fa` |
+| `GoogleSans-OFL.txt`                 | The same tarball, `package/LICENSE`                                                              | SIL OFL 1.1, itself                                                                                     | `ee5ba219bfa2ce3cb1403d2a535383cd131c9154912560c286691781203fd02d` |
+
+Google requires Google Sans Medium on its sign in button, so the font loads from the sign in
+pages' own stylesheet and reaches no other surface. The Google button also uses Google's required
+fill, stroke and text colours, kept in `auth.css` as named values on that button alone.
+
 ## Container images
 
 Images the repository pulls by digest and never ships. Each digest is the multi arch index

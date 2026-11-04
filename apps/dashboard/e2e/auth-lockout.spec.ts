@@ -1,5 +1,6 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { seedPerson, sql, uniqueAddress } from './auth-helpers.ts';
+import { behindHop } from './hop.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
@@ -8,20 +9,20 @@ import { test } from './test.ts';
 // is a real resolved address to the server, and the buckets are the production ones.
 test.use({ storageState: SIGNED_OUT });
 
-const CLIENT = 'x-test-client';
 const VICTIM_IP = '2001:db8:a::1';
 // The default shared ceiling for one address in a day.
 const CEILING = 30;
 // Mail leaves after the response, so a mail that should not exist is given time to appear.
 const MAIL_SETTLE_MS = 1_000;
 
-const ceilingCount = (_address: string) =>
-  `select count(*) from app.auth_rate_limits where bucket = 'email_send_address_ceiling'`;
+const CEILING_ROWS = `select count(*) from app.auth_rate_limits where bucket = 'email_send_address_ceiling'`;
 const hasSession = async (context: BrowserContext) =>
   (await context.cookies()).some((c) => c.name.endsWith('session'));
 
 async function client(browser: Browser, ip: string): Promise<BrowserContext> {
-  return browser.newContext({ storageState: SIGNED_OUT, extraHTTPHeaders: { [CLIENT]: ip } });
+  const context = await browser.newContext({ storageState: SIGNED_OUT });
+  await behindHop(context, ip);
+  return context;
 }
 
 async function ask(page: Page, address: string): Promise<void> {
@@ -95,7 +96,7 @@ for (const count of [4, 16]) {
     const seen = await countTo(victim);
     const strangerPage = await stranger.newPage();
     await ask(strangerPage, victim);
-    await expect.poll(async () => sql(ceilingCount(victim))).not.toBe('0');
+    await expect.poll(async () => sql(CEILING_ROWS)).not.toBe('0');
     await strangerPage.waitForTimeout(MAIL_SETTLE_MS);
     expect(await countTo(victim)).toBe(seen);
 

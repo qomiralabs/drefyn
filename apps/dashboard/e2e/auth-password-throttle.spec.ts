@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { expect, type Browser } from '@playwright/test';
 import { seedPerson, uniqueAddress } from './auth-helpers.ts';
+import { behindHop } from './hop.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
@@ -12,8 +13,11 @@ const PASSWORD = 'paper lantern over the harbour';
 // The default password_fail limit for one address.
 const BUCKET = 10;
 
-const client = (browser: Browser, ip: string) =>
-  browser.newContext({ storageState: SIGNED_OUT, extraHTTPHeaders: { 'x-test-client': ip } });
+async function client(browser: Browser, ip: string) {
+  const context = await browser.newContext({ storageState: SIGNED_OUT });
+  await behindHop(context, ip);
+  return context;
+}
 
 test('a filled password bucket refuses the right password and leaves the email code', async ({
   browser,

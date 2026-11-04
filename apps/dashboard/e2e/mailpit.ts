@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { expect, request } from '@playwright/test';
 
 const API = `http://127.0.0.1:${process.env['DREFYN_MAILPIT_WEB_PORT'] ?? '58025'}/api/v1`;
 
@@ -8,10 +8,18 @@ interface Summary {
   readonly Created: string;
 }
 
+async function api(path: string): Promise<unknown> {
+  const context = await request.newContext();
+  try {
+    return await (await context.get(`${API}/${path}`)).json();
+  } finally {
+    await context.dispose();
+  }
+}
+
 async function messagesTo(address: string): Promise<readonly Summary[]> {
   const query = new URLSearchParams({ query: `to:"${address}"` });
-  const response = await fetch(`${API}/search?${query.toString()}`);
-  const body = (await response.json()) as { messages: readonly Summary[] };
+  const body = (await api(`search?${query.toString()}`)) as { messages: readonly Summary[] };
   return body.messages;
 }
 
@@ -20,8 +28,7 @@ export async function countTo(address: string): Promise<number> {
 }
 
 async function textOf(id: string): Promise<string> {
-  const response = await fetch(`${API}/message/${id}`);
-  return ((await response.json()) as { Text: string }).Text;
+  return ((await api(`message/${id}`)) as { Text: string }).Text;
 }
 
 export interface SignInMail {

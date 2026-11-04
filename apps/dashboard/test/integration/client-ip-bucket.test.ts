@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { request as httpRequest } from 'node:http';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { roleUrl, serverEnv, stackFile } from '../../e2e/stack-env.ts';
+import { curl } from './support/curl.ts';
 
 const root = join(import.meta.dirname, '..', '..');
 const ORIGIN = 'http://127.0.0.1:3110';
@@ -41,42 +42,24 @@ function start(port: number, origin: string, extra: Record<string, string>): Chi
   });
 }
 
-interface Answer {
-  readonly status: number;
-  readonly cookies: readonly string[];
-  readonly body: string;
-}
+const execute = promisify(execFile);
 
-function send(
+// curl, because it sends Host and X-Forwarded-For exactly as given; fetch replaces Host.
+async function post(
   port: number,
-  path: string,
-  headers: Record<string, string>,
-  body?: Buffer,
-): Promise<Answer> {
-  return new Promise((done, fail) => {
-    const req = httpRequest(
-      { host: '127.0.0.1', port, path, method: body === undefined ? 'GET' : 'POST', headers },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          done({
-            status: res.statusCode ?? 0,
-            cookies: res.headers['set-cookie'] ?? [],
-            body: Buffer.concat(chunks).toString('utf8'),
-          });
-        });
-      },
-    );
-    req.on('error', fail);
-    req.end(body);
-  });
+  headers: readonly string[],
+  fields: ReadonlyMap<string, string>,
+): Promise<void> {
+  const args = ['--silent', '--http1.1', '--noproxy', '*', '--output', '/dev/null'];
+  for (const header of headers) args.push('--header', header);
+  for (const [name, value] of fields) args.push('--form-string', `${name}=${value}`);
+  await execute('curl', [...args, `http://127.0.0.1:${String(port)}/sign-in`]);
 }
 
 async function ready(port: number): Promise<void> {
   for (let i = 0; i < 100; i += 1) {
     try {
-      await send(port, '/robots.txt', { host: '127.0.0.1' });
+      await curl(port, '/robots.txt', ['Host: 127.0.0.1']);
       return;
     } catch {
       await new Promise((wake) => setTimeout(wake, 200));
@@ -88,31 +71,18 @@ async function ready(port: number): Promise<void> {
 // The form as a browser with scripts off would post it: every hidden field from the page,
 // plus the address. Two fresh browsers, so only the client address can join their counts.
 async function postStart(port: number, host: string, origin: string, forwarded: string) {
-  const common = { host, 'x-forwarded-for': forwarded };
-  const minted = await send(port, '/auth/pre?to=%2Fsign-in', common);
-  const cookie = minted.cookies.map((c) => c.split(';')[0]).join('; ');
-  const page = await send(port, '/sign-in', { ...common, cookie });
-  const form = new FormData();
+  const common = [`Host: ${host}`, `X-Forwarded-For: ${forwarded}`];
+  const minted = await curl(port, '/auth/pre?to=%2Fsign-in', common);
+  const cookie = (minted.headers['set-cookie'] ?? '').split(';')[0] ?? '';
+  const page = await curl(port, '/sign-in', [...common, `Cookie: ${cookie}`]);
+  const fields = new Map<string, string>();
   for (const [, name, value] of page.body.matchAll(
-    /<input type="hidden" name="([^"]+)" value="([^"]*)"/g,
+    /<input type="hidden" name="([^"]+)"(?: value="([^"]*)")?/g,
   )) {
-    if (name !== undefined) form.set(name, (value ?? '').replaceAll('&quot;', '"'));
+    if (name !== undefined) fields.set(name, (value ?? '').replaceAll('&quot;', '"'));
   }
-  form.set('email', 'bucket@example.dev');
-  const encoded = new Response(form);
-  const body = Buffer.from(await encoded.arrayBuffer());
-  await send(
-    port,
-    '/sign-in',
-    {
-      ...common,
-      cookie,
-      origin,
-      'content-type': encoded.headers.get('content-type') ?? '',
-      'content-length': String(body.length),
-    },
-    body,
-  );
+  fields.set('email', 'bucket@example.dev');
+  await post(port, [...common, `Cookie: ${cookie}`, `Origin: ${origin}`], fields);
 }
 
 describe('the client address through the wrapper into a real bucket', () => {
