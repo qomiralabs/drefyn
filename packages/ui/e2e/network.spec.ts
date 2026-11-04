@@ -48,7 +48,12 @@ test('drained waits for a request still on its way', async ({ page, drained }) =
     await route.fulfill({ status: 200, contentType: 'text/plain', body: 'ok' });
   });
   const started = page.waitForRequest(url);
-  const answer = page.evaluate((target) => fetch(target).then((r) => r.text()), url);
+  const answered = page.waitForResponse(url);
+  await page.evaluate((target) => {
+    const image = new Image();
+    image.src = target;
+    document.body.append(image);
+  }, url);
   await started;
 
   let finished = false;
@@ -60,7 +65,7 @@ test('drained waits for a request still on its way', async ({ page, drained }) =
   expect(finished).toBe(false);
 
   release();
-  expect(await answer).toBe('ok');
+  await answered;
   await drain;
   expect(finished).toBe(true);
 });
