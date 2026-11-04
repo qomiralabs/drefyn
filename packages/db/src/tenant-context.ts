@@ -108,6 +108,24 @@ export const AUTH_SETTINGS: TenantSettings = Object.freeze({
   actorUserId: '',
 });
 
+const SETTING = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/;
+
+// A statement run alone has its settings written into the text rather than bound, so each
+// one must be an id or empty by the time it gets there, wherever it came from.
+export function assertWritableSettings(settings: TenantSettings): void {
+  const values: readonly unknown[] = [
+    settings.organizationId,
+    settings.projectId,
+    settings.userId,
+    settings.actorUserId,
+  ];
+  for (const value of values) {
+    if (typeof value !== 'string' || !SETTING.test(value)) {
+      throw invalid('has a setting that is not an id');
+    }
+  }
+}
+
 // Ceilings per pool: an unbounded value would quietly turn the timeout off.
 export const APP_TIMEOUT_MAX_MS = 60_000;
 export const READER_TIMEOUT_MAX_MS = 10_000;

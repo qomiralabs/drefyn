@@ -222,21 +222,21 @@ describe('a reservation inside a limiter or sign in transaction', () => {
   // Fire and forget work keeps the async context, but its transaction is gone, so it holds
   // nothing and a refusal here would be a false lock out.
   it.each(pairs)('%s lets go of work it left behind', async (_h, _r, hold, reserve) => {
-    const gate = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<undefined>();
     let left: Promise<unknown> = Promise.resolve();
     await hold(() => {
       left = gate.promise.then(reserve);
       return Promise.resolve();
     });
-    gate.resolve();
+    gate.resolve(undefined);
     await expect(left).resolves.toHaveLength(1);
   });
 
   it.each(pairs)('%s does not reach %s in another request', async (_h, _r, hold, reserve) => {
-    const gate = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<undefined>();
     const held = hold(() => gate.promise);
     await expect(reserve()).resolves.toHaveLength(1);
-    gate.resolve();
+    gate.resolve(undefined);
     await held;
   });
 
