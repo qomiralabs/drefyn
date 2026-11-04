@@ -508,8 +508,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* No width of its own, or the input's default size widens the whole form on a phone. */
 .auth-affix input {
   flex: 1 1 40%;
+  width: 0;
   min-width: 0;
   height: 100%;
   background: transparent;

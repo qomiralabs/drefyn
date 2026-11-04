@@ -118,8 +118,9 @@ test.describe('the first run pages at 390 px', () => {
   for (const path of ['/auth-states/organization/ready', '/auth-states/organization/taken']) {
     test(`${path} stays inside the screen`, async ({ page }) => {
       await page.goto(path);
-      const box = await page.locator('.auth-affix').boundingBox();
-      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(MOBILE.width);
+      const right = (selector: string) =>
+        page.locator(selector).evaluate((el) => el.getBoundingClientRect().right);
+      expect(await right('.auth-affix')).toBe(await right('.auth-margin'));
     });
   }
 });
