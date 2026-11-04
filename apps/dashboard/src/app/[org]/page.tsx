@@ -2,21 +2,18 @@ import { Badge, IconLock, StatusPip } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { PLACEHOLDER } from '../../fixtures/placeholder.ts';
 import { guardOrganization } from '../../server/guard.ts';
+import { PLAN_LABELS } from '../../server/shell-data.ts';
 import { NEEDS_YOU, needsYouSentence } from '../../fixtures/shell.ts';
 import { Answer, Calm, Eyebrow, Head, Ranked, TextLink } from '../../views/calm.tsx';
-
-const { organization } = PLACEHOLDER;
-const org = organization.slug;
 
 interface Params {
   params: Promise<{ org: string }>;
 }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const { name } = await guardOrganization((await params).org);
-  return { title: `${name} overview` };
+  const { view } = await guardOrganization((await params).org);
+  return { title: `${view.organizationName} overview` };
 }
 
 interface ProductRow {
@@ -27,7 +24,7 @@ interface ProductRow {
   readonly action: string;
 }
 
-const ROWS: readonly ProductRow[] = [
+const rowsFor = (org: string): readonly ProductRow[] => [
   {
     product: 'Docs',
     say: '3 of 50 pages in Payments API docs are out of date.',
@@ -77,18 +74,19 @@ const DETAILS: Readonly<Record<string, string>> = {
 // The organization overview answers "does anything need me?" in one sentence, then one row
 // per product, the ranked list and the plan line.
 export default async function Overview({ params }: Params) {
-  await guardOrganization((await params).org);
+  const { access, view } = await guardOrganization((await params).org);
+  const org = view.organizationSlug;
   return (
     <Calm>
       <Head>
-        <Eyebrow>{organization.name}</Eyebrow>
+        <Eyebrow>{view.organizationName}</Eyebrow>
         <Answer
           claim={needsYouSentence(NEEDS_YOU.length)}
           rest="Everything else is fresh and running."
         />
       </Head>
       <ul aria-label="Products" className="border-t border-rule">
-        {ROWS.map((row) => (
+        {rowsFor(org).map((row) => (
           <li
             key={row.product}
             className="flex flex-col gap-8 border-b border-rule py-24 sm:flex-row sm:items-baseline sm:gap-16"
@@ -116,9 +114,10 @@ export default async function Overview({ params }: Params) {
         }))}
       />
       <p className="text-body-s text-secondary">
-        {organization.name} is on <span className="font-medium text-ink">{organization.plan}</span>:
-        Docs, Studio and Status on one plan, <data value="1900">$19</data> a month.{' '}
-        <data value="4">4</data> of <data value="5">5</data> seats used.{' '}
+        {view.organizationName} is on{' '}
+        <span className="font-medium text-ink">{PLAN_LABELS[access.tier]}</span>: Docs, Studio and
+        Status on one plan, <data value="1900">$19</data> a month. <data value="4">4</data> of{' '}
+        <data value="5">5</data> seats used.{' '}
         <Link
           href={`/${org}/settings/plan`}
           className="text-accent-ink underline hover:text-accent-press focus-visible:focus-ring"

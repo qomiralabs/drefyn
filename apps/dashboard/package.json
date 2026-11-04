@@ -13,19 +13,22 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
-    "start": "next start --port 3000",
-    "start:server": "node server.ts",
+    "start": "node server.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "bench:wrapper": "node bench/wrapper.ts",
     "test:server": "vitest run --config vitest.server.config.ts",
     "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle",
-    "test:visual": "playwright test --project=visual"
+    "test:visual": "playwright test --project=visual",
+    "seed:e2e": "node e2e/seed.ts"
   },
   "dependencies": {
     "@drefyn/auth": "workspace:*",
+    "@drefyn/db": "workspace:*",
+    "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
+    "@drefyn/tenancy": "workspace:*",
     "@drefyn/ui": "workspace:*",
     "motion": "14.4.0",
     "next": "16.4.2",

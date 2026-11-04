@@ -24,8 +24,10 @@ const VIEW: AccessView = {
 const SESSION = { sessionId: SESSION_ID, userId: USER } as unknown as SessionInfo;
 
 class Redirect extends Error {
-  constructor(readonly target: string) {
+  readonly target: string;
+  constructor(target: string) {
     super('NEXT_REDIRECT');
+    this.target = target;
   }
 }
 
@@ -106,7 +108,7 @@ describe('guardOrganization', () => {
     expect(first).toBeLessThan(dashboardAuth.mock.invocationCallOrder[0] ?? 0);
   });
 
-  it.each(['', 'bundle-baseline', 'sign-in', '__proto__', 'a/b', '..'])(
+  it.each(['', 'bundle-baseline', 'api', '__proto__', 'a/b', '..'])(
     'is a 404 for the slug %j with no flag and no database',
     async (slug) => {
       const { guardOrganization } = await load();

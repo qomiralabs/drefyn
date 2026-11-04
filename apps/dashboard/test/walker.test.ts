@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkSource, checkTree } from './support/walker.ts';
+import { checkSource, checkTree, sourceFiles } from './support/walker.ts';
 
 const PAGE = 'src/app/[org]/page.tsx';
 const ACTIONS = 'src/server/thing-actions.ts';
@@ -337,7 +337,7 @@ describe('the real tree', () => {
   });
 
   it('read files, so a walker that reads nothing cannot pass', () => {
-    expect(checkTree.filesRead(new URL('..', import.meta.url))).toBeGreaterThan(30);
+    expect(sourceFiles(new URL('..', import.meta.url)).length).toBeGreaterThan(30);
   });
 });
 

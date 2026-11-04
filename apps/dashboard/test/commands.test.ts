@@ -39,7 +39,7 @@ describe('the command registry', () => {
   it.each([
     ['name_missing', { ...entry, name: ' ' }],
     ['target_missing', { ...entry, href: '' }],
-    ['permission_missing', { ...entry, permission: '' }],
+    ['permission_missing', { ...entry, permission: '' as never }],
     ['undo_and_confirm', { ...entry, undoable: true, confirm: 'typed' as const }],
   ])('refuses %s', (expected, command) => {
     expect(problem(command)).toBe(expected);

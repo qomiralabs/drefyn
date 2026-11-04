@@ -1,6 +1,7 @@
 import { AxeBuilder } from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { MOBILE, ROUTES, TABLET, THEMES, useTheme } from './fixtures.ts';
+import { test } from './test.ts';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 const WIDTHS = ['wide', '390'] as const;

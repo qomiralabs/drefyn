@@ -42,6 +42,7 @@ const pathOf = (url: string | undefined) => (url ?? '').split('?')[0];
 // Origin form only. An absolute form target overrides the Host header, so the Host check
 // would pass while Next builds its URLs from the target; // and /\ read as a host to browsers.
 const ORIGIN_FORM = /^\/(?![/\\])/;
+// eslint-disable-next-line no-restricted-syntax -- the raw target, checked before Next
 const badTarget = (req: IncomingMessage) => !ORIGIN_FORM.test(req.url ?? '');
 
 interface Refusal {
@@ -93,6 +94,7 @@ export function createWrapper(deps: WrapperDeps) {
   const admit = createAdmission(config, warn, deps.now ?? Date.now);
 
   return (req: IncomingMessage, res: ServerResponse): void => {
+    // eslint-disable-next-line no-restricted-syntax -- the raw target, checked before Next
     if (!badTarget(req) && isLoopbackHost(req.headers.host) && pathOf(req.url) === HEALTH_PATH) {
       reply(res, 200, 'ok\n');
       return;

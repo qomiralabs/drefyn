@@ -59,6 +59,19 @@ describe('the start check', () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain('hunter2');
   });
 
+  it('names the key of a database config error, which carries it in the message', () => {
+    check.mockImplementation(() => {
+      throw Object.assign(new Error('DREFYN_DATABASE_URL is missing'), {
+        code: 'DB_CONFIG_INVALID',
+      });
+    });
+    run();
+    expect(log).toHaveBeenCalledWith('dashboard.config_invalid', {
+      code: 'DB_CONFIG_INVALID',
+      key: 'DREFYN_DATABASE_URL',
+    });
+  });
+
   it('treats an error with no code as unknown', () => {
     check.mockImplementation(() => {
       throw new Error('secret');

@@ -160,67 +160,70 @@ export function createWrappers(deps: WrapperDeps) {
     }
   }
 
-  return {
-    publicAction<R>(handler: (context: PublicContext, form: FormData) => Promise<R>) {
-      return async (form: FormData): Promise<R | Refusal> => {
-        const browser = admit(await deps.request());
-        if (isRefusal(browser)) return browser;
-        const refused = formRefusal(browser, form);
-        return refused ?? handler({ browser }, form);
-      };
-    },
+  function publicAction<R>(handler: (context: PublicContext, form: FormData) => Promise<R>) {
+    return async (form: FormData): Promise<R | Refusal> => {
+      const browser = admit(await deps.request());
+      if (isRefusal(browser)) return browser;
+      const refused = formRefusal(browser, form);
+      return refused ?? handler({ browser }, form);
+    };
+  }
 
-    signedInAction<A extends unknown[], R>(
-      handler: (context: SignedInContext, ...args: A) => Promise<R>,
-    ) {
-      return async (...args: A): Promise<R | Refusal> => {
-        const browser = admit(await deps.request());
-        if (isRefusal(browser)) return browser;
-        return handler({ browser, session: await deps.session() }, ...args);
-      };
-    },
+  function signedInAction<A extends unknown[], R>(
+    handler: (context: SignedInContext, ...args: A) => Promise<R>,
+  ) {
+    return async (...args: A): Promise<R | Refusal> => {
+      const browser = admit(await deps.request());
+      if (isRefusal(browser)) return browser;
+      return handler({ browser, session: await deps.session() }, ...args);
+    };
+  }
 
-    orgAction<A extends unknown[], R>(
-      handler: (context: OrganizationContext, ...args: A) => Promise<R>,
-    ) {
-      // The slug is a client argument. It selects nothing until the guard proves membership.
-      return async (slug: string, ...args: A): Promise<R | Refusal> => {
-        const browser = admit(await deps.request());
-        if (isRefusal(browser)) return browser;
-        const parsed = Slug.safeParse(slug);
-        if (!parsed.success) return SLUG_REFUSED;
-        return handler({ browser, ...(await deps.organization(parsed.data)) }, ...args);
-      };
-    },
+  function orgAction<A extends unknown[], R>(
+    handler: (context: OrganizationContext, ...args: A) => Promise<R>,
+  ) {
+    // The slug is a client argument. It selects nothing until the guard proves membership.
+    return async (slug: string, ...args: A): Promise<R | Refusal> => {
+      const browser = admit(await deps.request());
+      if (isRefusal(browser)) return browser;
+      const parsed = Slug.safeParse(slug);
+      if (!parsed.success) return SLUG_REFUSED;
+      return handler({ browser, ...(await deps.organization(parsed.data)) }, ...args);
+    };
+  }
 
-    publicRoute(
-      handler: (context: PublicContext, form: FormData, request: RouteRequest) => Promise<Response>,
-    ) {
-      return async (request: RouteRequest): Promise<Response> => {
-        const browser = admit(factsOf(request));
-        if (isRefusal(browser)) return respond(browser);
-        const form = await readForm(request);
-        if (!(form instanceof FormData)) return respond(form);
-        const refused = formRefusal(browser, form);
-        return refused === null ? handler({ browser }, form, request) : respond(refused);
-      };
-    },
+  function publicRoute(
+    handler: (context: PublicContext, form: FormData, request: RouteRequest) => Promise<Response>,
+  ) {
+    return async (request: RouteRequest): Promise<Response> => {
+      const browser = admit(factsOf(request));
+      if (isRefusal(browser)) return respond(browser);
+      const form = await readForm(request);
+      if (!(form instanceof FormData)) return respond(form);
+      const refused = formRefusal(browser, form);
+      return refused === null ? handler({ browser }, form, request) : respond(refused);
+    };
+  }
 
-    signedInRoute(handler: (context: SignedInContext, request: RouteRequest) => Promise<Response>) {
-      return async (request: RouteRequest): Promise<Response> => {
-        const browser = admit(factsOf(request));
-        if (isRefusal(browser)) return respond(browser);
-        return handler({ browser, session: await deps.session() }, request);
-      };
-    },
+  function signedInRoute(
+    handler: (context: SignedInContext, request: RouteRequest) => Promise<Response>,
+  ) {
+    return async (request: RouteRequest): Promise<Response> => {
+      const browser = admit(factsOf(request));
+      if (isRefusal(browser)) return respond(browser);
+      return handler({ browser, session: await deps.session() }, request);
+    };
+  }
 
-    orgRoute(handler: (context: OrganizationContext, request: RouteRequest) => Promise<Response>) {
-      return async (request: RouteRequest, route: OrganizationRouteContext): Promise<Response> => {
-        const browser = admit(factsOf(request));
-        if (isRefusal(browser)) return respond(browser);
-        const { org } = await route.params;
-        return handler({ browser, ...(await deps.organization(org)) }, request);
-      };
-    },
-  };
+  function orgRoute(
+    handler: (context: OrganizationContext, request: RouteRequest) => Promise<Response>,
+  ) {
+    return async (request: RouteRequest, route: OrganizationRouteContext): Promise<Response> => {
+      const browser = admit(factsOf(request));
+      if (isRefusal(browser)) return respond(browser);
+      const { org } = await route.params;
+      return handler({ browser, ...(await deps.organization(org)) }, request);
+    };
+  }
+  return { publicAction, signedInAction, orgAction, publicRoute, signedInRoute, orgRoute };
 }

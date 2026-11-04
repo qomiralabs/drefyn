@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 export type WalkerProblem =
@@ -289,4 +291,19 @@ export function checkSource(path: string, text: string): readonly Finding[] {
     ...actionFindings(facts, path),
     ...routeFindings(facts, path),
   ];
+}
+
+// Every source file under src, as a path from the app root.
+export function sourceFiles(root: URL): readonly string[] {
+  const src = fileURLToPath(new URL('src/', root));
+  return readdirSync(src, { recursive: true, encoding: 'utf8' })
+    .filter((path) => /\.tsx?$/.test(path))
+    .map((path) => `src/${path}`)
+    .sort();
+}
+
+export function checkTree(root: URL): readonly Finding[] {
+  return sourceFiles(root).flatMap((path) =>
+    checkSource(path, readFileSync(new URL(path, root), 'utf8')),
+  );
 }

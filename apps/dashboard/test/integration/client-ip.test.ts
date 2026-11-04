@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -108,8 +109,8 @@ const runBuilt = built || process.env['CI'] === 'true';
 
 // Boot parses these and connects to nothing, so no database runs behind this job.
 const AUTH_ENV = {
-  DREFYN_AUTH_SECRET: 'a'.repeat(43),
-  DREFYN_AUTH_INVITATION_BLOCK_KEY: 'b'.repeat(43),
+  DREFYN_AUTH_SECRET: randomBytes(32).toString('base64url'),
+  DREFYN_AUTH_INVITATION_BLOCK_KEY: randomBytes(32).toString('base64url'),
   DREFYN_DATABASE_URL: 'postgres://app:app@127.0.0.1:1/drefyn',
   DREFYN_AUTH_DATABASE_URL: 'postgres://auth:auth@127.0.0.1:1/drefyn',
   DREFYN_DATABASE_SSL: 'disable',

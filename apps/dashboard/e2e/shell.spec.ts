@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import {
   ANSWERS,
   banner,
@@ -14,6 +14,7 @@ import {
   useTheme,
 } from './fixtures.ts';
 import { expectBodyLeaksNothing, expectTitleLeaksNothing, UNKNOWN_ORG_PATHS } from './leaks.ts';
+import { test } from './test.ts';
 
 test.describe('flag on', () => {
   test('/ sends a first visit to the organization overview', async ({ page }) => {

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { PLACEHOLDER_SHELL } from '../../fixtures/shell.ts';
 import { guardOrganization } from '../../server/guard.ts';
+import { shellDataFor } from '../../server/shell-data.ts';
 import { ShellFrame } from '../../shell/frame.tsx';
 import { ShellMain } from '../../shell/main.tsx';
 import { Sidebar } from '../../shell/sidebar.tsx';
@@ -16,9 +16,10 @@ export default async function OrgLayout({
   params: Promise<{ org: string }>;
 }) {
   const { org } = await params;
-  const organization = await guardOrganization(org);
+  const guarded = await guardOrganization(org);
+  const data = shellDataFor(guarded);
   return (
-    <ShellFrame org={org} orgName={organization.name}>
+    <ShellFrame org={org} orgName={data.organization.name} permissions={guarded.access.permissions}>
       <a
         href="#main"
         data-skip=""
@@ -26,9 +27,9 @@ export default async function OrgLayout({
       >
         Skip to content
       </a>
-      <TopBar data={PLACEHOLDER_SHELL} />
+      <TopBar data={data} />
       <div className="flex">
-        <Sidebar data={PLACEHOLDER_SHELL} />
+        <Sidebar data={data} />
         <ShellMain>{children}</ShellMain>
       </div>
     </ShellFrame>

@@ -13,19 +13,17 @@ import {
   ModalOverlay,
   SearchField,
 } from 'react-aria-components';
-import { allowed, commandFilter } from './commands.ts';
-import { places } from './places.ts';
+import { commandFilter } from './commands.ts';
+import { visiblePlaces } from './places.ts';
 import { ICON_BY_NAME } from './section-icons.ts';
 
 export interface CommandBarProps {
   org: string;
   orgName: string;
+  permissions: readonly string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-// Placeholder people may do everything; the permission check is real once sessions exist.
-const canEverything = () => true;
 
 const KEYCAP =
   'inline-flex h-icon-md items-center rounded-xs border border-rule-strong px-4 font-mono text-label text-secondary';
@@ -33,10 +31,16 @@ const KEYCAP =
 const QUIET =
   'inline-grid shrink-0 cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter outline-none hover:bg-hover hover:text-ink data-focus-visible:focus-ring';
 
-export function CommandBar({ org, orgName, open, onOpenChange }: CommandBarProps): ReactNode {
+export function CommandBar({
+  org,
+  orgName,
+  permissions,
+  open,
+  onOpenChange,
+}: CommandBarProps): ReactNode {
   const router = useRouter();
   const [query, setQuery] = useState('');
-  const entries = useMemo(() => allowed(places(org), canEverything), [org]);
+  const entries = useMemo(() => visiblePlaces(org, permissions), [org, permissions]);
   const filter = useMemo(() => commandFilter(entries), [entries]);
   const close = () => {
     onOpenChange(false);

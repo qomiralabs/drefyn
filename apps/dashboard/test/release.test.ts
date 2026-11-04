@@ -49,6 +49,6 @@ describe('the dashboard release flag', () => {
       close: () => Promise.resolve(),
     } as unknown as FlagClient;
     await dashboardEnabled(spy, CONTEXT);
-    expect(seen).toEqual([[DASHBOARD_FLAG, expect.objectContaining({ organizationId: ORG })]]);
+    expect(seen).toEqual([[DASHBOARD_FLAG, expect.objectContaining(CONTEXT)]]);
   });
 });
