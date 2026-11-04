@@ -140,6 +140,10 @@ export function heldHasher(inner: PasswordHasher) {
   };
 }
 
+// For a test that calls insideWindow: its usual 60 s of work on top of the longest wait,
+// which alone can use up the default timeout when a test starts just before an edge.
+export const insideWindowTimeout = (budgetSeconds: number) => (budgetSeconds + 1) * 1000 + 60_000;
+
 // Rate windows are aligned to the database clock. Waits until a test fits in one window of
 // the given length, so an edge in the middle never resets a count it relies on.
 export async function insideWindow(h: Harness, windowSeconds: number, budgetSeconds: number) {
