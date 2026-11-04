@@ -62,13 +62,13 @@ export type AuthSecurityNotice =
     }
   // To every owner, on a new API key.
   | {
-      readonly kind: 'api_key_created';
+      readonly kind: 'api_key_created' | 'api_key_revoked';
       readonly organizationId: OrganizationId;
       readonly keyId: IdOf<'key'>;
       readonly keyName: string;
       // The last 4 characters, the only part of the key ever shown again.
       readonly displaySuffix: string;
-      // Database time of the creation.
+      // Database time of the creation or the revoke.
       readonly at: Date;
     }
   // To every owner after the change commits. memberName is the person's display name, or

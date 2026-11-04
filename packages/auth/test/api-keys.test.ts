@@ -35,6 +35,7 @@ import {
   isRevokeWrite,
   revokeResponder,
   sha,
+  storedKey,
   type CreateShape,
   type RevokeShape,
 } from './api-key-fixtures.ts';
@@ -615,6 +616,17 @@ describe('revokeApiKey', () => {
     expect(t.scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     expect(t.lines).toEqual([]);
     expect(t.mail.notices).toEqual([]);
+  });
+
+  it('never calls a key revoked unless the row says so', async () => {
+    const t = revoker();
+    t.scripted.respondWith((s) => {
+      if (isRevokeWrite(s)) return [];
+      if (isKeyProof(s)) return [storedKey()];
+      return revokeResponder()(s);
+    });
+    const result = await t.keys.revokeApiKey(access(), KEY);
+    expect(result.ok ? 'ok' : result.error.code).toBe('AUTH_NOT_FOUND');
   });
 
   it('answers a second revoke with the first time, and sends and logs nothing', async () => {

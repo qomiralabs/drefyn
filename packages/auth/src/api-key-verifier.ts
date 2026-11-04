@@ -86,7 +86,7 @@ async function prove(
       'scopes',
       'project_scope',
       // Database time only, so a skewed app clock cannot stretch a key.
-      sql<boolean>`expires_at is null or expires_at > now()`.as('live'),
+      sql<boolean>`(expires_at is null or expires_at > now()) and revoked_at is null`.as('live'),
       sql<boolean>`last_used_at is null or last_used_at < now() - interval '1 hour'`.as('use_due'),
     ])
     .where('id', '=', parts.keyId)

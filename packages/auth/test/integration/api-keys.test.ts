@@ -1,4 +1,4 @@
-import { beforeAll, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { newId, withOrganization } from '@drefyn/db';
 import {
   ApiKeyReplayError,

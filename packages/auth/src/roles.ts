@@ -177,8 +177,10 @@ async function lockTarget(tx: Tx, target: Target): Promise<void> {
 
 async function revokeKeys(tx: Tx, target: Target): Promise<IdOf<'key'>[]> {
   const rows = await tx
-    .deleteFrom('api_keys')
+    .updateTable('api_keys')
+    .set({ revoked_at: sql<Date>`now()` })
     .where('created_by', '=', target.id)
+    .where('revoked_at', 'is', null)
     .returning('id')
     .execute();
   return rows.map((r) => idOf('key', r.id));
