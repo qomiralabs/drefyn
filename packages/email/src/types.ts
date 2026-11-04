@@ -66,7 +66,7 @@ export type SecurityNoticeMail =
   | (NoticeFacts & {
       readonly kind: 'owner_added';
       readonly organizationName: string;
-      readonly ownerName: string;
+      readonly memberName: string;
     })
   | (NoticeFacts & {
       readonly kind: 'member_removed' | 'member_keys_revoked';

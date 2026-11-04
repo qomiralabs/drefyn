@@ -5,6 +5,9 @@ import { parseOrganizationName } from './organization-rules.ts';
 // Said in mail when a person's name cannot be. It is the last step, so no name or address
 // can stop a notice.
 export const UNNAMED_PERSON = 'A team member';
+// Said in place of a stored key name the rules no longer allow. How the key ends still
+// identifies it.
+export const UNNAMED_KEY = 'Unnamed key';
 
 // Each address is tried on its own, so one bad address cannot keep the news from the others.
 // failed runs once per missed send and gets no address: logs carry none.
@@ -29,6 +32,12 @@ export function checkedDisplayName(displayName: string | null): string | null {
   if (displayName === null) return null;
   const checked = parseOrganizationName(displayName);
   return checked.ok ? checked.value : null;
+}
+
+// Names are checked when a key is made, but the rule has tightened since, and an older key
+// must still be revocable with its owners told.
+export function storedKeyName(name: string): string {
+  return checkedDisplayName(name) ?? UNNAMED_KEY;
 }
 
 // The person being named picks both the name and the local part of the address, and this

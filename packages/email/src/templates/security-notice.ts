@@ -160,7 +160,7 @@ export const NOTICE_TEMPLATES: NoticeTemplates = {
     lead: () => 'This person can now manage everything in the organization.',
     rows: (n) => [
       { label: 'Organization', value: n.organizationName },
-      { label: 'New owner', value: n.ownerName },
+      { label: 'New owner', value: n.memberName },
     ],
     next: CHECK_MEMBERS,
     fineprint: OWNER_FINEPRINT,
