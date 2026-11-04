@@ -17,6 +17,7 @@ import {
   createApiKeys,
   createInvitations,
   createOrganizations,
+  createRoles,
   createScopeRegistry,
   createSessions,
   parseAuthConfig,
@@ -30,6 +31,8 @@ import {
   type InvitationSend,
   type InvitationsDeps,
   type OrganizationsDeps,
+  type Roles,
+  type RolesDeps,
   type ScopeRegistry,
   type SessionsDeps,
 } from '../../../src/index.ts';
@@ -71,6 +74,7 @@ export interface Harness {
     extra?: Partial<InvitationsDeps>,
     config?: AuthConfig,
   ): ReturnType<typeof createInvitations>;
+  roles(extra?: Partial<RolesDeps>): Roles;
   // Every invitation mail any invitations() instance sent, in order.
   readonly invitationMail: { to: string; invitation: InvitationSend }[];
   readonly logs: { level: 'info' | 'warn'; event: string; fields: unknown }[];
@@ -150,6 +154,7 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
         }),
       apiKeys: (extra = {}) =>
         createApiKeys({ db, authDb, logger, scopes: TEST_SCOPES, mailer: mail.mailer, ...extra }),
+      roles: (extra = {}) => createRoles({ db, logger, mailer: mail.mailer, ...extra }),
       verifier: (extra = {}, env = { DREFYN_API_RATE_LIMIT_KEY: API_RATE_KEY }) =>
         createApiKeyVerifier(env, { db, logger, ...extra }),
       invitations: (extra = {}, other = config) =>

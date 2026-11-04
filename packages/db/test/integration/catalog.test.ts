@@ -895,6 +895,41 @@ create policy invitation_insert_inviter on app.invitations as restrictive for in
       appFunctions: ALLOW_LISTS.appFunctions.filter((f) => f.name !== 'app.current_actor_id()'),
     },
   },
+  // Role changes rest on these guards: without one an admin could demote an owner, or the
+  // last owner could leave.
+  'the membership update guard dropped': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_update_actor', 'missing'],
+    up: () => 'drop policy membership_update_actor on app.memberships;',
+  },
+  'the membership update guard letting an admin touch owners': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_update_actor', 'USING'],
+    up: () => `drop policy membership_update_actor on app.memberships;
+create policy membership_update_actor on app.memberships as restrictive for update to drefyn_app
+  using (exists (select from app.memberships a
+    where a.organization_id = memberships.organization_id and a.user_id = app.current_actor_id()
+      and a.role in ('owner', 'admin')))
+  with check (true);`,
+  },
+  'the membership delete guard without the last owner arm': {
+    rule: 'restrictive_policy',
+    object: 'app.memberships',
+    mentions: ['membership_delete_actor', 'USING'],
+    up: () => `drop policy membership_delete_actor on app.memberships;
+create policy membership_delete_actor on app.memberships as restrictive for delete to drefyn_app
+  using (exists (select from app.memberships a
+    where a.organization_id = memberships.organization_id and a.user_id = app.current_actor_id()
+      and (a.role = 'owner' or (a.role = 'admin' and memberships.role <> 'owner'))));`,
+  },
+  'the project role grant guard dropped': {
+    rule: 'restrictive_policy',
+    object: 'app.project_roles',
+    mentions: ['project_role_insert_actor', 'missing'],
+    up: () => 'drop policy project_role_insert_actor on app.project_roles;',
+  },
   'a policy to public and a role': {
     rule: 'public_policy',
     object: 'app.fixture_members',

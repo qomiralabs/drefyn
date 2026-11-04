@@ -16,9 +16,17 @@ const HASH = Buffer.alloc(32, 7);
 let db: TestDatabase;
 const sessions: pg.Client[] = [];
 
+// One session per role and database, reused by every case: each case rolls back, and other
+// files run beside this one, so a session per case runs the server out of connection slots.
+const shared = new Map<string, pg.Client>();
+
 async function as(role: 'app' | 'auth'): Promise<pg.Client> {
+  const key = `${role}:${db.name}`;
+  const held = shared.get(key);
+  if (held !== undefined) return held;
   const client = await rawSession(role, db.name);
   sessions.push(client);
+  shared.set(key, client);
   return client;
 }
 
@@ -65,6 +73,7 @@ describeWithStack('identity tables', () => {
   });
 
   afterAll(async () => {
+    shared.clear();
     for (const client of sessions.splice(0)) await client.end().catch(() => undefined);
   });
 
