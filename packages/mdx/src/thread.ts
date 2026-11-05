@@ -6,6 +6,8 @@ import type { Dialect, MdxIssueCode, RenderPolicy } from './types.ts';
 
 export interface ThreadLimits {
   readonly timeoutMs: number;
+  // Falls back to timeoutMs, which is all a thread that only parses needs.
+  readonly printTimeoutMs?: number;
   readonly maxMemoryMb: number;
   readonly killGraceMs: number;
   readonly startTimeoutMs?: number;
@@ -137,7 +139,9 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
     });
     const began = performance.now();
     worker.postMessage({ id, job });
-    const limit = deadline(limits.timeoutMs);
+    const limit = deadline(
+      'tree' in job ? (limits.printTimeoutMs ?? limits.timeoutMs) : limits.timeoutMs,
+    );
     const settled = await Promise.race([death, answer, limit.expired]);
     limit.clear();
     const workMs = Math.ceil(performance.now() - began);

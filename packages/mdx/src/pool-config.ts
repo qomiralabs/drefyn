@@ -5,10 +5,15 @@ const MAX_THREADS = 64;
 const MAX_QUEUE = 4_096;
 const MAX_WINDOW_MS = 86_400_000;
 
+// A print is a print plus a whole parse. The largest honest page took up to 3.6 s of thread time
+// on a CI runner, so it would die at the parse limit on a machine of that size.
+export const DEFAULT_PRINT_TIMEOUT_MS = 6_000;
+
 const budget = z.int().min(1).max(MAX_WINDOW_MS);
 
 const poolShape = z.object({
   timeoutMs: z.int().min(1).max(MAX_TIMEOUT_MS),
+  printTimeoutMs: z.int().min(1).max(MAX_TIMEOUT_MS),
   maxMemoryMb: z.int().min(16).max(8_192),
   // One thread would let one bomb stop every organization.
   threads: z.int().min(2).max(MAX_THREADS),
@@ -43,6 +48,12 @@ export const poolConfigSchema = poolShape
   .refine((config) => config.projectBudgetMs <= config.orgBudgetMs, {
     message: 'a project budget cannot be larger than its organization budget',
   })
+  .refine((config) => config.printTimeoutMs >= config.timeoutMs, {
+    message: 'a print holds a whole parse, so it cannot have less time than one',
+  })
+  .refine((config) => config.projectBudgetMs >= config.printTimeoutMs, {
+    message: 'a project budget under the print limit would refuse a print it could finish',
+  })
   .refine((config) => config.projectBudgetMs >= config.timeoutMs, {
     message: 'the budget has to cover at least one page',
   })
@@ -62,6 +73,7 @@ const number = (fallback: number) =>
 export const envSchema = z
   .object({
     DREFYN_PARSE_TIMEOUT_MS: number(2_000),
+    DREFYN_PARSE_PRINT_TIMEOUT_MS: number(DEFAULT_PRINT_TIMEOUT_MS),
     DREFYN_PARSE_WORKER_MEMORY_MB: number(512),
     DREFYN_PARSE_THREADS: number(2),
     DREFYN_PARSE_QUEUE_MAX: number(64),
@@ -76,6 +88,7 @@ export const envSchema = z
   })
   .transform((env) => ({
     timeoutMs: env.DREFYN_PARSE_TIMEOUT_MS,
+    printTimeoutMs: env.DREFYN_PARSE_PRINT_TIMEOUT_MS,
     maxMemoryMb: env.DREFYN_PARSE_WORKER_MEMORY_MB,
     threads: env.DREFYN_PARSE_THREADS,
     maxQueued: env.DREFYN_PARSE_QUEUE_MAX,

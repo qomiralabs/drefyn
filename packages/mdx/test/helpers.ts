@@ -122,7 +122,11 @@ export const POOL_CONFIG: ParsePoolConfig = {
 
 // The outer budget follows the window, so a test can shrink one without restating the other.
 export function poolConfig(overrides: Partial<ParsePoolConfig> = {}): ParsePoolConfig {
-  const merged = { ...POOL_CONFIG, ...overrides };
+  const merged = {
+    ...POOL_CONFIG,
+    ...overrides,
+    printTimeoutMs: overrides.printTimeoutMs ?? overrides.timeoutMs ?? POOL_CONFIG.printTimeoutMs,
+  };
   const spendable = merged.windowMs * merged.orgThreads - 1;
   return { ...merged, orgBudgetMs: overrides.orgBudgetMs ?? Math.min(60_000, spendable) };
 }

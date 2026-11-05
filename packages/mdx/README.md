@@ -145,6 +145,7 @@ code that is determined to get out, and proves nothing about the network.
 | Key                              | Default   | Meaning                                                   |
 | -------------------------------- | --------- | --------------------------------------------------------- |
 | `DREFYN_PARSE_TIMEOUT_MS`        | 2000      | A thread is killed this long into a page                  |
+| `DREFYN_PARSE_PRINT_TIMEOUT_MS`  | 6000      | The same for a print, which holds a whole parse too       |
 | `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512       | Heap cap per thread                                       |
 | `DREFYN_PARSE_THREADS`           | 2         | Threads per host, at least 2                              |
 | `DREFYN_PARSE_QUEUE_MAX`         | 64        | Pages waiting across all organizations                    |
