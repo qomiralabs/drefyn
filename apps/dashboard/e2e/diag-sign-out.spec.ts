@@ -29,11 +29,6 @@ const watch = () => {
       original(...args);
     };
   }
-  const fetcher = fetch;
-  globalThis.fetch = (input, init) => {
-    note(`fetch ${init?.method ?? 'GET'} ${String(input)}`);
-    return fetcher(input, init);
-  };
 };
 
 test('sweep', async ({ browser }) => {
@@ -44,6 +39,10 @@ test('sweep', async ({ browser }) => {
       const context = await browser.newContext({ baseURL: OPEN_ORIGIN });
       const page = await context.newPage();
       await page.addInitScript(watch);
+      const posts: string[] = [];
+      page.on('request', (request) => {
+        if (request.method() === 'POST') posts.push(request.url());
+      });
       await page.goto('/sign-in', { waitUntil: 'commit' });
       await page.getByLabel('Email address').fill(uniqueAddress('diag'));
       if (delay > 0) await page.waitForTimeout(delay);
@@ -58,7 +57,7 @@ test('sweep', async ({ browser }) => {
       tally[key] = (tally[key] ?? 0) + 1;
       if (!passed) {
         const log = await page.evaluate(() => (globalThis as unknown as { __log: string[] }).__log);
-        console.log(`STUCK delay=${String(delay)}\n${log.join('\n')}`);
+        console.log(`STUCK delay=${String(delay)} posts=${posts.join(',')}\n${log.join('\n')}`);
       }
       await context.close();
     }
