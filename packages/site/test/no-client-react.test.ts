@@ -53,7 +53,7 @@ describe.each([
   });
 
   it('holds only the theme line and the page script', () => {
-    const scripts = [...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]);
+    const scripts = [...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]);
     expect(scripts).toEqual(['<script>', '<script defer src="/assets/page.js">']);
     expect(html).toContain(`<script>${themeScript}</script>`);
   });
