@@ -1,5 +1,12 @@
 import { randomInt } from 'node:crypto';
-import { expect, request, type BrowserContext, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  request,
+  type BrowserContext,
+  type Frame,
+  type Page,
+  type Route,
+} from '@playwright/test';
 import { authSql, userSql } from './auth-helpers.ts';
 import { test as base } from './test.ts';
 import {
@@ -13,17 +20,7 @@ import {
   type ProviderName,
 } from './oauth-fake.ts';
 
-const START = /^http:\/\/127\.0\.0\.1:\d+\/auth\/oauth\/(?:github|google)\/start(?:\?|$)/;
 const OFF_THE_MACHINE = (url: URL) => url.hostname !== '127.0.0.1';
-
-const escaped = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
-
-function withoutRedirect(headers: Readonly<Record<string, string>>): Record<string, string> {
-  const kept = Object.entries(headers).filter(
-    ([name]) => !['content-length', 'transfer-encoding', 'location'].includes(name),
-  );
-  return { ...Object.fromEntries(kept), 'content-type': 'text/html' };
-}
 
 export class ProviderRoute {
   // The next visit to a provider. Set it before the browser gets there.
@@ -33,21 +30,27 @@ export class ProviderRoute {
   readonly handovers: URL[] = [];
   readonly callbacks: string[] = [];
   readonly strays: string[] = [];
+  private readonly refused = new Map<Frame, string>();
+  private readonly errored = new Set<Frame>();
 
-  // The real redirect would leave Playwright's sight, so it becomes a page that moves on by
-  // itself. A refresh is a new navigation and comes back through route(). Cookies stay on it.
-  private async handOver(route: Route): Promise<void> {
-    // Every header, Sec-Fetch-Site above all: link and step up refuse a start without it.
-    const headers = await route.request().allHeaders();
-    const response = await route.fetch({ headers, maxRedirects: 0 });
-    const location = response.headers()['location'] ?? '/';
-    const target = new URL(location, route.request().url());
-    if (isAuthorizationUrl(target)) this.handovers.push(target);
-    await route.fulfill({
-      response,
-      status: 200,
-      headers: withoutRedirect(response.headers()),
-      body: `<meta http-equiv="refresh" content="0;url=${escaped(location)}">`,
+  // Playwright routes no request a redirect makes, and a route cannot carry the browser's
+  // Sec-Fetch-Site, which link and step up depend on. So the start runs for real, and its
+  // redirect dies at the lookup block. From the error page the walk goes on with a new
+  // navigation to the same URL, which the route below can answer.
+  private resumeOnce(frame: Frame): void {
+    const url = this.refused.get(frame);
+    if (url === undefined || !this.errored.has(frame)) return;
+    this.refused.delete(frame);
+    this.errored.delete(frame);
+    this.handovers.push(new URL(url));
+    frame.goto(url).catch(() => undefined);
+  }
+
+  private watch(page: Page): void {
+    page.on('framenavigated', (frame) => {
+      if (!frame.url().startsWith('chrome-error:')) return;
+      this.errored.add(frame);
+      this.resumeOnce(frame);
     });
   }
 
@@ -76,7 +79,15 @@ export class ProviderRoute {
   }
 
   async attach(context: BrowserContext): Promise<void> {
-    await context.route(START, (route) => this.handOver(route));
+    for (const page of context.pages()) this.watch(page);
+    context.on('page', (page) => {
+      this.watch(page);
+    });
+    context.on('requestfailed', (request) => {
+      if (!isAuthorizationUrl(new URL(request.url()))) return;
+      this.refused.set(request.frame(), request.url());
+      this.resumeOnce(request.frame());
+    });
     await context.route(OFF_THE_MACHINE, (route) => this.toFake(route));
   }
 }

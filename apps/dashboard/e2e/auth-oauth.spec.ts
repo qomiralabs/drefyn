@@ -141,9 +141,12 @@ for (const each of PROVIDERS) {
       const second = await outside.newPage();
       const address = uniqueAddress(`oauth-away-${name}`);
       provider.script = { account: newAccount(address) };
-      await second.goto(
-        `${OAUTH_ORIGIN}/auth/oauth/${name}/start?next=${encodeURIComponent('https://evil.test/x')}`,
-      );
+      // The redirect ends at the lookup block, so goto reports that, and the helper moves on.
+      await second
+        .goto(
+          `${OAUTH_ORIGIN}/auth/oauth/${name}/start?next=${encodeURIComponent('https://evil.test/x')}`,
+        )
+        .catch(() => undefined);
       await second.getByRole('link', { name: 'Authorize' }).click();
       await expect(second).toHaveURL(/\/welcome$/);
       await outside.close();
@@ -502,6 +505,7 @@ test.describe('step up from settings', () => {
     provider.script = { account };
     const prompt = await askedToConfirm(page, 'GitHub');
     await prompt.getByRole('link', { name: 'Sign in again with Google' }).click();
+    await expect(page.getByRole('heading', { name: 'Fake Google' })).toBeVisible();
     expect(provider.handovers.at(-1)?.searchParams.get('prompt')).toBe('login');
     expect(provider.handovers.at(-1)?.searchParams.get('max_age')).toBe('0');
     await page.getByRole('link', { name: 'Authorize' }).click();
