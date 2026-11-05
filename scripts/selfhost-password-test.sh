@@ -218,10 +218,10 @@ DREFYN_OWNER_PASSWORD="$(secret)"
 
 # The copy's compose file is edited for the next cases and put back after each one.
 cp "$root/deploy/compose.yaml" "$scratch/compose.pristine.yaml"
-hba_command='    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]'
 set_command() {
   local line="$1"
-  awk -v want="$hba_command" -v line="$line" '$0 == want { print line; next } { print }' \
+  awk -v line="$line" \
+    '/^    command: \[postgres, -c, hba_file=\/etc\/drefyn\/pg_hba\.conf[],]/ { print line; next } { print }' \
     "$scratch/compose.pristine.yaml" >"$root/deploy/compose.yaml"
   if ! grep -qF -- "$line" "$root/deploy/compose.yaml"; then
     fail "the test can change the compose command" "$line"

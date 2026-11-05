@@ -51,7 +51,7 @@ loud_command='    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf, -c, 
 make_loud() {
   local file="$root/deploy/compose.yaml"
   awk -v line="$loud_command" \
-    '$0 == "    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]" { print line; next } { print }' \
+    '/^    command: \[postgres, -c, hba_file=\/etc\/drefyn\/pg_hba\.conf[],]/ { print line; next } { print }' \
     "$file" >"$file.loud"
   mv "$file.loud" "$file"
   if ! grep -qF "$loud_command" "$file"; then
