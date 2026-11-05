@@ -57,6 +57,32 @@ export interface AuthRateLimitsTable {
   count: number;
 }
 
+// app.chunk_embeddings
+export interface ChunkEmbeddingsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  body_sha256: Buffer;
+  model_id: string;
+  embedding: string;
+  created_at: Generated<Date>;
+}
+
+// app.chunks
+export interface ChunksTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  ord: number;
+  block_path: string;
+  heading_path: string[];
+  body: string;
+  body_sha256: Buffer;
+  created_at: Generated<Date>;
+}
+
 // app.cli_sign_in_links
 export interface CliSignInLinksTable {
   id: Generated<string>;
@@ -65,6 +91,19 @@ export interface CliSignInLinksTable {
   expires_at: Date;
   consumed_at: Date | null;
   created_at: Generated<Date>;
+}
+
+// app.content_types
+export interface ContentTypesTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  family: string;
+  key: string;
+  current_schema_version: Generated<number>;
+  filter_slots: Generated<JsonValue>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // app.email_challenges
@@ -81,6 +120,18 @@ export interface EmailChallengesTable {
   return_to: string | null;
   expires_at: Date;
   consumed_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.engine_outbox
+export interface EngineOutboxTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  kind: string;
+  done_at: Date | null;
   created_at: Generated<Date>;
 }
 
@@ -138,6 +189,63 @@ export interface MembershipsTable {
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   invitation_id: string | null;
+}
+
+// app.node_filter_rows
+export interface NodeFilterRowsTable {
+  organization_id: string;
+  project_id: string;
+  type_id: string;
+  node_id: string;
+  t1: string | null;
+  t2: string | null;
+  t3: string | null;
+  t4: string | null;
+  t5: string | null;
+  i1: number | null;
+  i2: number | null;
+  i3: number | null;
+  i4: number | null;
+  i5: number | null;
+  d1: Date | null;
+  d2: Date | null;
+}
+
+// app.node_versions
+export interface NodeVersionsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  seq: number;
+  parent_version_id: string | null;
+  schema_version: number;
+  ast_version: number;
+  origin: string;
+  actor: JsonValue;
+  content: JsonValue;
+  content_sha256: Buffer;
+  idempotency_key: string | null;
+  created_at: Generated<Date>;
+}
+
+// app.nodes
+export interface NodesTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  family: string;
+  type_id: string;
+  parent_id: string | null;
+  order_key: string;
+  slug: string | null;
+  head_version_id: string | null;
+  published_version_id: string | null;
+  head_content: JsonValue | null;
+  lifecycle: string;
+  deleted_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // app.oauth_states
@@ -239,13 +347,20 @@ export interface Schema {
   api_key_projects: ApiKeyProjectsTable;
   api_keys: ApiKeysTable;
   auth_rate_limits: AuthRateLimitsTable;
+  chunk_embeddings: ChunkEmbeddingsTable;
+  chunks: ChunksTable;
   cli_sign_in_links: CliSignInLinksTable;
+  content_types: ContentTypesTable;
   email_challenges: EmailChallengesTable;
+  engine_outbox: EngineOutboxTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;
   known_devices: KnownDevicesTable;
   memberships: MembershipsTable;
+  node_filter_rows: NodeFilterRowsTable;
+  node_versions: NodeVersionsTable;
+  nodes: NodesTable;
   oauth_states: OauthStatesTable;
   organization_slugs: OrganizationSlugsTable;
   organizations: OrganizationsTable;

@@ -130,6 +130,21 @@ projects of one organization needs a reviewed entry in the allow list. A publish
 `drefyn_public_reader` and the `published_read` policy, which needs both organization and
 project. It must be added to the published allow list in `src/allow-lists.ts`.
 
+A project table that a composite foreign key points at also needs
+`create statistics (ndistinct, dependencies) on organization_id, project_id`. Without it the
+planner treats the two columns as independent and a foreign key check can walk a whole tenant.
+The catalog check fails with `tenant_statistics` when it is missing.
+
+### Engine tables
+
+`content_types`, `nodes`, `node_versions`, `node_filter_rows`, `chunks`, `chunk_embeddings` and
+`engine_outbox` hold content for all three products. Each is project scoped, and every
+reference carries `organization_id` and `project_id`. `node_filter_rows` has no `id`: its single
+covering primary key is the only filter index, so a filter runs inside the index under the
+policy and never reads content. No GIN index exists, because no GIN operator is leakproof and
+the planner cannot use one under forced row level security. `@drefyn/engine` owns the closed
+sets these tables check.
+
 ### Identity and limiter tables
 
 `users`, `identities`, `sessions`, `password_credentials`, `email_challenges`, `oauth_states`,

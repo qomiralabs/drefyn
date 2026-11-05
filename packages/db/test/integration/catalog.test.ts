@@ -1068,7 +1068,9 @@ describeWithStack('catalog check passes', () => {
       `alter table app.fixture_notes add constraint fixture_notes_tenant_id_key unique (organization_id, project_id, id);
 ${projectTable('ok_fk', ['note_id uuid'])}
 alter table app.ok_fk add foreign key (organization_id, project_id, note_id)
-  references app.fixture_notes (organization_id, project_id, id);`,
+  references app.fixture_notes (organization_id, project_id, id);
+create statistics app.fixture_notes_tenant_stats (ndistinct, dependencies)
+  on organization_id, project_id from app.fixture_notes;`,
     );
     const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
     expect(problems, describeProblems(problems)).toEqual([]);

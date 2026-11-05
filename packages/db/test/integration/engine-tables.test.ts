@@ -846,6 +846,16 @@ describeWithStack('the engine tables', () => {
       );
     });
 
+    it('stores embeddings as the extension halfvec type', async () => {
+      const type = await superuser(
+        `set search_path = pg_catalog;
+         select atttypid::regtype::text from pg_attribute
+          where attrelid = 'app.chunk_embeddings'::regclass and attname = 'embedding';`,
+        db.name,
+      );
+      expect(type.trim()).toBe('extensions.halfvec');
+    });
+
     it('has one index on filter rows, so a save rewrites one key', async () => {
       const indexes = await superuser(
         `select count(*) from pg_index where indrelid = 'app.node_filter_rows'::regclass;`,

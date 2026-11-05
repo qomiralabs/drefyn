@@ -28,7 +28,18 @@ services:
     # The login rules come from a read only file rather than the data directory, so they hold
     # from the first start even when init stops halfway. The image passes these arguments to
     # the temporary init server too.
-    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf]
+    # Filter row lists need the covering key in memory, and checkpoints far enough apart that
+    # steady saves do not stall on full page writes.
+    command:
+      [
+        postgres,
+        -c,
+        hba_file=/etc/drefyn/pg_hba.conf,
+        -c,
+        shared_buffers=256MB,
+        -c,
+        max_wal_size=2GB,
+      ]
     # Passed as secrets so they show up as files in the container, not in docker inspect.
     # Compose copies these into the container before start, which is why the root
     # filesystem cannot be read only.
