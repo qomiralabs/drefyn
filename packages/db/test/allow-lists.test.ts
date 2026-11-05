@@ -137,7 +137,7 @@ describe('allow lists', () => {
   });
 
   // The sign in role reaches the tables sign in needs and nothing after it.
-  it('let drefyn_auth reach the eight sign in tables, never sessions or the API limiter', () => {
+  it('let drefyn_auth reach the sign in tables and the job row, never sessions or the API limiter', () => {
     expect(AUTH_TABLES.map((t) => t.name).sort()).toEqual([
       'app.auth_rate_limits',
       'app.cli_sign_in_links',
@@ -146,16 +146,18 @@ describe('allow lists', () => {
       'app.known_devices',
       'app.oauth_states',
       'app.password_credentials',
+      'app.scheduled_jobs',
       'app.users',
     ]);
   });
 
-  it('keep drefyn_app off the four auth only tables', () => {
+  it('keep drefyn_app off the five auth only tables', () => {
     expect(AUTH_ONLY_TABLES.map((t) => t.name).sort()).toEqual([
       'app.auth_rate_limits',
       'app.cli_sign_in_links',
       'app.email_challenges',
       'app.oauth_states',
+      'app.scheduled_jobs',
     ]);
   });
 
@@ -208,6 +210,7 @@ describe('allow lists', () => {
     expect(AUTH_TENANT_GRANTS.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
       ['app.api_keys', 'drefyn_auth', 'DELETE'],
       ['app.api_keys.ctid', 'drefyn_auth', 'SELECT'],
+      ['app.api_keys.organization_id', 'drefyn_auth', 'SELECT'],
       ['app.api_keys.revoked_at', 'drefyn_auth', 'SELECT'],
     ]);
     for (const grant of AUTH_TENANT_GRANTS) expect(grant.reason.trim()).not.toBe('');
@@ -579,7 +582,7 @@ describe('restrictive policies', () => {
         command: 'update',
         roles: ['drefyn_app'],
         using: '(revoked_at IS NULL)',
-        withCheck: 'true',
+        withCheck: '((revoked_at IS NULL) OR (revoked_at = now()))',
       },
       {
         name: 'app.invitations.invitation_insert_inviter',

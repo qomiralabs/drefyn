@@ -14,6 +14,7 @@ export const TENANCY_FILES: readonly string[] = [
   'src/new-id.ts',
   'src/rate-windows.ts',
   'src/expiry-cleanup.ts',
+  'src/expiry-job.ts',
   'src/identity-columns.ts',
   'src/allow-lists.ts',
 ];
@@ -25,4 +26,5 @@ export const INTEGRATION_COVERED: readonly string[] = [
   'src/catalog-check.ts',
   'src/rate-windows.ts',
   'src/expiry-cleanup.ts',
+  'src/expiry-job.ts',
 ];

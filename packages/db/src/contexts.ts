@@ -25,10 +25,12 @@ type WithColumns<S, Users, Credentials, Devices> = Omit<
 
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
 
-// The one column the cleanup finds old revoked keys by. Kept apart from AuthTableName, which
-// also decides what organization work may not name, and this table is its to name.
+// The cleanup finds old revoked keys by one column and reports them by another. Kept apart
+// from AuthTableName, which also decides what organization work may not name, and this table
+// is its to name.
 interface AuthApiKeysTable {
   revoked_at: ColumnType<SelectOf<ApiKeysTable['revoked_at']>, never, never>;
+  organization_id: ColumnType<SelectOf<ApiKeysTable['organization_id']>, never, never>;
 }
 
 // The identity tables drefyn_auth may touch, before anyone is signed in.

@@ -72,6 +72,8 @@ describe('package shape', () => {
         'deleteExpired',
         'reserveApiKeyFailureWindows',
         'reserveAuthRateWindows',
+        'runExpiryJob',
+        'startExpirySchedule',
         'withApiKeyLimiter',
         'createAuthDatabase',
         'createDatabase',

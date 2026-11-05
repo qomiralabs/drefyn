@@ -102,6 +102,7 @@ describe('identity schema types', () => {
       | 'cli_sign_in_links'
       | 'auth_rate_limits'
       | 'known_devices'
+      | 'scheduled_jobs'
       | 'api_keys'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
@@ -135,7 +136,7 @@ describe('identity schema types', () => {
       'user_id' | 'device_hash' | 'last_seen_at'
     >();
     expectTypeOf<keyof Insertable<AuthSchema['known_devices']>>().toEqualTypeOf<never>();
-    expectTypeOf<keyof AuthSchema['api_keys']>().toEqualTypeOf<'revoked_at'>();
+    expectTypeOf<keyof AuthSchema['api_keys']>().toEqualTypeOf<'revoked_at' | 'organization_id'>();
     expectTypeOf<keyof Insertable<AuthSchema['api_keys']>>().toEqualTypeOf<never>();
     expectTypeOf<keyof Insertable<UserSchema['known_devices']>>().toEqualTypeOf<
       'user_id' | 'device_hash' | 'user_agent_family'

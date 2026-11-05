@@ -21,11 +21,27 @@ export type ExpiryRule<S> = {
     readonly column: TimeColumn<S[T]>;
     // Rows go once the column is this many seconds in the past.
     readonly afterSeconds: number;
+    // On a tenant table, the column a purge is reported under.
+    readonly organizationColumn?: 'organization_id' & keyof S[T];
   };
 }[keyof S & string];
 
 // Deleted rows per table, in the order the rules first name each table.
 export type ExpiryCounts = Readonly<Record<string, number>>;
+
+// Rows one organization lost from a tenant table, for the log. Ids and a count, nothing more.
+export interface OrganizationDeletion {
+  readonly table: string;
+  readonly organizationId: string;
+  readonly deleted: number;
+}
+
+export interface ExpiryResult {
+  readonly counts: ExpiryCounts;
+  readonly organizations: readonly OrganizationDeletion[];
+  // Some rule filled its batch, so rows may be waiting.
+  readonly backlog: boolean;
+}
 
 const DAY = 86_400;
 
@@ -38,7 +54,12 @@ export const AUTH_EXPIRY_RULES: readonly ExpiryRule<AuthSchema>[] = Object.freez
   // Browsers keep a cookie at most 400 days, so an older row can never match one again.
   { table: 'known_devices', column: 'last_seen_at', afterSeconds: 400 * DAY },
   // Revoked keys stay listed this long, then their dead hash and typed name go.
-  { table: 'api_keys', column: 'revoked_at', afterSeconds: 90 * DAY },
+  {
+    table: 'api_keys',
+    column: 'revoked_at',
+    afterSeconds: 90 * DAY,
+    organizationColumn: 'organization_id',
+  },
 ]);
 
 export const API_KEY_EXPIRY_RULES: readonly ExpiryRule<ApiKeyLimiterSchema>[] = Object.freeze([
@@ -59,9 +80,14 @@ function invalid(reason: string): DbError {
 function checkRules<S>(rules: readonly ExpiryRule<S>[]): void {
   if (rules.length === 0) throw invalid('list is empty');
   const seen = new Set<string>();
-  for (const { table, column, afterSeconds } of rules) {
+  for (const { table, column, afterSeconds, organizationColumn } of rules) {
     // Names go into the SQL as identifiers, so they are held to a plain shape first.
-    if (!IDENTIFIER.test(table) || !IDENTIFIER.test(column)) {
+    const named = [
+      table,
+      column,
+      ...(organizationColumn === undefined ? [] : [organizationColumn]),
+    ];
+    if (!named.every((name) => IDENTIFIER.test(name))) {
       throw invalid('names a table or column that is not a plain identifier');
     }
     if (
@@ -95,30 +121,48 @@ export async function deleteExpired<S>(
   rules: readonly ExpiryRule<S>[],
   options: DeleteExpiredOptions = {},
 ): Promise<ExpiryCounts> {
+  return (await deleteExpiredRows(tx, rules, options)).counts;
+}
+
+export async function deleteExpiredRows<S>(
+  tx: Transaction<S>,
+  rules: readonly ExpiryRule<S>[],
+  options: DeleteExpiredOptions = {},
+): Promise<ExpiryResult> {
   checkRules(rules);
   const batch = checkBatch(options.batchSize ?? DEFAULT_BATCH);
   const perRule: { readonly table: string; readonly deleted: number }[] = [];
-  for (const { table, column, afterSeconds } of rules) {
+  const organizations: OrganizationDeletion[] = [];
+  for (const { table, column, afterSeconds, organizationColumn } of rules) {
     const target = sql.table(`app.${table}`);
     const at = sql.ref(column);
-    const result = await sql<{ deleted: number }>`
+    const organization =
+      organizationColumn === undefined ? sql`null::uuid` : sql.ref(organizationColumn);
+    const result = await sql<{ organization_id: string | null; deleted: number }>`
       with gone as (
         delete from ${target}
          where ctid in (select ctid from ${target}
                          where ${at} < now() - make_interval(secs => ${afterSeconds})
                          limit ${batch})
-        returning 1)
-      select count(*)::int as deleted from gone`.execute(tx);
+        returning ${organization} as organization_id)
+      select organization_id, count(*)::int as deleted from gone group by 1`.execute(tx);
     perRule.push({ table, deleted: result.rows.reduce((sum, row) => sum + row.deleted, 0) });
+    for (const { organization_id: organizationId, deleted } of result.rows) {
+      if (organizationId !== null) organizations.push({ table, organizationId, deleted });
+    }
   }
   // Two rules on one table add up under that table's name.
   const tables = [...new Set(rules.map((rule) => rule.table))];
-  return Object.fromEntries(
-    tables.map((table) => [
-      table,
-      perRule.filter((rule) => rule.table === table).reduce((sum, rule) => sum + rule.deleted, 0),
-    ]),
-  );
+  return {
+    counts: Object.fromEntries(
+      tables.map((table) => [
+        table,
+        perRule.filter((rule) => rule.table === table).reduce((sum, rule) => sum + rule.deleted, 0),
+      ]),
+    ),
+    organizations,
+    backlog: perRule.some((rule) => rule.deleted >= batch),
+  };
 }
 
 export interface ExpiryCleanupOptions<S> {

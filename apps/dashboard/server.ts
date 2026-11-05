@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import next from 'next';
+import { startExpiryJob } from './src/server/expiry-job.ts';
 import { logInfo } from './src/server/log.ts';
 import { drainMailer } from './src/server/mail-holder.ts';
 import { markClientIpWrapper } from './src/server/wrapper-marker.ts';
@@ -46,6 +47,10 @@ server.listen(Number(rawPort), hostname, () => {
   logInfo('dashboard.listening', { port });
 });
 
+// Here and not in Next's instrumentation, so it runs only in the production server and stops
+// with it. Every server starts one; the database picks who does the work.
+const expiryJob = startExpiryJob(process.env);
+
 // Inside compose's default 10 s stop grace.
 const MAIL_DRAIN_MS = 8000;
 
@@ -53,6 +58,7 @@ const MAIL_DRAIN_MS = 8000;
 // out after the response, so it gets its own wait once nothing new can queue.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
+    expiryJob.stop();
     server.close(() => {
       void drainMailer(MAIL_DRAIN_MS).then(({ dropped }) => {
         if (dropped > 0) logInfo('dashboard.email_dropped', { dropped });

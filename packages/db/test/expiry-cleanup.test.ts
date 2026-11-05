@@ -32,7 +32,12 @@ describe('expiry rules', () => {
       { table: 'oauth_states', column: 'expires_at', afterSeconds: 86_400 },
       { table: 'cli_sign_in_links', column: 'expires_at', afterSeconds: 86_400 },
       { table: 'known_devices', column: 'last_seen_at', afterSeconds: 400 * 86_400 },
-      { table: 'api_keys', column: 'revoked_at', afterSeconds: 90 * 86_400 },
+      {
+        table: 'api_keys',
+        column: 'revoked_at',
+        afterSeconds: 90 * 86_400,
+        organizationColumn: 'organization_id',
+      },
     ]);
     expect(API_KEY_EXPIRY_RULES).toEqual([
       { table: 'api_key_failures', column: 'window_end', afterSeconds: 0 },

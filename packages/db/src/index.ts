@@ -39,8 +39,19 @@ export {
   type ExpiryCleanup,
   type ExpiryCleanupOptions,
   type ExpiryCounts,
+  type ExpiryResult,
   type ExpiryRule,
+  type OrganizationDeletion,
 } from './expiry-cleanup.ts';
+export {
+  runExpiryJob,
+  startExpirySchedule,
+  type ExpiryJobOptions,
+  type ExpiryJobResult,
+  type ExpiryRun,
+  type ExpirySchedule,
+  type ExpiryScheduleOptions,
+} from './expiry-job.ts';
 export {
   reserveApiKeyFailureWindows,
   reserveAuthRateWindows,
