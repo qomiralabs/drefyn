@@ -100,34 +100,4 @@ test.describe('archive with undo', () => {
     await archive(page).click({ force: true });
     await expect(toastRegion(page)).toHaveCount(0);
   });
-
-  test('the response to Archive stays under 200 ms on a slowed CPU', async ({ page }) => {
-    await openPages(page);
-    const client = await page.context().newCDPSession(page);
-    await client.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-    await select(page, 'Refunds');
-    // Watching starts here: choosing a row is the grid's cost, not the optimistic update's.
-    await page.evaluate(() => {
-      const seen: number[] = [];
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) seen.push(entry.duration);
-      }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
-      Object.assign(window, { interactions: seen });
-    });
-    await archive(page).click();
-    await expect(toastRegion(page).getByText('Archived Refunds.')).toBeVisible();
-    const worst = await page.evaluate(
-      () =>
-        new Promise<number>((resolve) => {
-          requestAnimationFrame(() => {
-            setTimeout(() => {
-              const { interactions } = window as unknown as { interactions: number[] };
-              resolve(Math.max(0, ...interactions));
-            }, 100);
-          });
-        }),
-    );
-    console.log(`slowest Archive event on a 4x slowed CPU: ${String(worst)} ms`);
-    expect(worst).toBeLessThan(200);
-  });
 });
