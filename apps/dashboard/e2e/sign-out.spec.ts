@@ -12,8 +12,12 @@ test.use({ baseURL: OPEN_ORIGIN, storageState: SIGNED_OUT });
 // Mail leaves after the response, so a mail that should not exist is given time to appear.
 const MAIL_SETTLE_MS = 1_000;
 
+// Firefox can keep a cookie that expired the moment it was set and list it until its next
+// purge, though it never sends it again. So an expired entry does not count as held.
 const cookieNames = async (page: Page) =>
-  (await page.context().cookies()).map((cookie) => cookie.name);
+  (await page.context().cookies())
+    .filter(({ expires }) => expires === -1 || expires * 1000 > Date.now())
+    .map((cookie) => cookie.name);
 
 async function signUp(page: Page): Promise<string> {
   const address = uniqueAddress('signout');
@@ -68,22 +72,16 @@ test('Sign out drops its own cookies and leaves every other cookie alone', async
   await signOut(page);
 
   const names = await cookieNames(page);
-  if (names.includes('drefyn_invite') || names.includes('drefyn_oauth')) {
-    const started = Date.now();
-    for (const wait of [0, 100, 400, 1500, 3000]) {
-      await page.waitForTimeout(wait);
-      const held = await page.context().cookies();
-      console.log(
-        `LATE +${String(Date.now() - started)} ${JSON.stringify(held.map(({ name, value, expires, httpOnly, sameSite, path }) => ({ name, value: value.slice(0, 6), expires, httpOnly, sameSite, path })))}`,
-      );
-    }
-    await page.goto('/sign-in');
-    const sent = await page.evaluate(() => document.cookie);
-    console.log(`LATE document ${sent}`);
-  }
   expect(names).not.toContain('drefyn_invite');
   expect(names).not.toContain('drefyn_oauth');
   expect(names).toContain('sso');
+
+  // What the browser sends is the claim that matters, so the store is not the only witness.
+  const response = await page.goto('/sign-in');
+  const sent = (await response?.request().allHeaders())?.['cookie'] ?? '';
+  expect(sent).not.toContain('drefyn_invite=');
+  expect(sent).not.toContain('drefyn_oauth=');
+  expect(sent).not.toContain('drefyn_session=');
 });
 
 test('Signing back in after Sign out mails no new device notice', async ({ page, browser }) => {

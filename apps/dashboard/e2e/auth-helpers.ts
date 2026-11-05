@@ -65,97 +65,11 @@ export const userSql = (id: string, statement: string): Promise<string> =>
 export const uniqueAddress = (label: string): string =>
   `${label}-${randomBytes(5).toString('hex')}@example.dev`;
 
-const watch = () => {
-  const g = globalThis as unknown as { __log?: string[] };
-  if (g.__log !== undefined) return;
-  const log: string[] = [];
-  g.__log = log;
-  const seen = new WeakMap<object, number>();
-  let next = 0;
-  const idOf = (node: object) => {
-    if (!seen.has(node)) seen.set(node, (next += 1));
-    return seen.get(node);
-  };
-  const hydrated = (node: unknown) =>
-    node instanceof Node ? Object.keys(node).some((k) => k.startsWith('__reactFiber')) : false;
-  const note = (text: string) => {
-    const button = document.querySelector('button[type=submit]');
-    log.push(
-      `${performance.now().toFixed(1)} ${text} button#${button === null ? 'none' : String(idOf(button))} fiber=${String(hydrated(button))} active=${document.activeElement?.nodeName ?? ''} ready=${document.readyState}`,
-    );
-  };
-  for (const type of [
-    'pointerdown',
-    'mousedown',
-    'pointerup',
-    'mouseup',
-    'click',
-    'submit',
-    'formdata',
-    'focusin',
-    'focusout',
-  ]) {
-    addEventListener(
-      type,
-      (event) => {
-        const target = event.target as Element;
-        note(
-          `cap ${type} ${target.nodeName}#${String(idOf(target))} conn=${String(target.isConnected)}`,
-        );
-      },
-      true,
-    );
-    addEventListener(type, (event) => {
-      note(`bub ${type} prevented=${String(event.defaultPrevented)}`);
-    });
-  }
-  for (const type of ['DOMContentLoaded', 'load', 'beforeunload', 'pagehide', 'popstate']) {
-    addEventListener(type, () => {
-      note(`win ${type}`);
-    });
-  }
-  addEventListener('securitypolicyviolation', (event) => {
-    note(`csp ${event.violatedDirective} ${event.blockedURI}`);
-  });
-  addEventListener('error', (event) => {
-    note(`error ${event.message}`);
-  });
-  addEventListener('unhandledrejection', (event) => {
-    note(`rejection ${String(event.reason)}`);
-  });
-  for (const name of ['replaceState', 'pushState'] as const) {
-    const original = history[name].bind(history);
-    history[name] = (data: unknown, unused: string, url?: string | URL | null) => {
-      note(`${name} ${String(url)}`);
-      original(data, unused, url);
-    };
-  }
-  new MutationObserver((records) => {
-    for (const record of records) {
-      for (const node of record.removedNodes) {
-        note(`removed ${node.nodeName}#${String(idOf(node))}`);
-      }
-      if (record.type === 'attributes') note(`attr ${record.attributeName ?? ''}`);
-    }
-  }).observe(document, { subtree: true, childList: true, attributes: true });
-};
-
 export async function askForCode(page: Page, address: string): Promise<void> {
-  await page.addInitScript(watch);
-  const posts: string[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST') posts.push(`${String(performance.now())} ${request.url()}`);
-  });
   await page.goto('/sign-in');
   await page.getByLabel('Email address').fill(address);
   await page.getByRole('button', { name: 'Email me a code' }).click();
-  try {
-    await expect(page).toHaveURL(/\/sign-in\/verify/);
-  } catch (error) {
-    const log = await page.evaluate(() => (globalThis as unknown as { __log: string[] }).__log);
-    console.log(`STUCK posts=${posts.join(',')}\n${log.join('\n')}`);
-    throw error;
-  }
+  await expect(page).toHaveURL(/\/sign-in\/verify/);
 }
 
 export async function signInByCode(page: Page, address: string): Promise<void> {
