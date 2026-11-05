@@ -493,12 +493,13 @@ describe('Docs monthly limits waiting for calibration', () => {
   it('refuses any use on a hosted tier and keeps what exists read only', () => {
     fc.assert(
       fc.property(hostedArb, calibrating, positive, (t, k, usage) => {
-        const result = checkLimit(t, k, usage);
-        return (
-          result.status === 'not_entitled' && result.access === 'read_only' && result.limit === 0
-        );
+        expect(checkLimit(t, k, usage)).toMatchObject({
+          status: 'not_entitled',
+          access: 'read_only',
+          limit: 0,
+        });
       }),
-      { numRuns: RUNS },
+      RUNS,
     );
   });
 
@@ -507,7 +508,7 @@ describe('Docs monthly limits waiting for calibration', () => {
       fc.property(calibrating, positive, (k, usage) => {
         return checkLimit('self_hosted', k, usage).status === 'allowed';
       }),
-      { numRuns: RUNS },
+      RUNS,
     );
   });
 
@@ -521,7 +522,7 @@ describe('Docs monthly limits waiting for calibration', () => {
             checkLimit(t, k, raise + 1, { overrides }).status === 'over_limit')
         );
       }),
-      { numRuns: RUNS },
+      RUNS,
     );
   });
 });

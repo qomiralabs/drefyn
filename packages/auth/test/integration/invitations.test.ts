@@ -44,7 +44,7 @@ async function organization(tier = 'self_hosted') {
   if (!made.ok) throw made.error;
   const { access, slug } = made.value;
   const org = access.organizationId;
-  if (tier !== 'self_hosted') await setTier(org, tier);
+  await setTier(org, tier);
   return { owner, org, slug, access };
 }
 

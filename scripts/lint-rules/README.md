@@ -149,6 +149,27 @@ placeholder, or a computed method name; `test/no-select-all.test.ts` pins those 
 database still refuses them at run time. The `tables` list in `eslint.config.js` is held to
 `COLUMN_GRANT_TABLES` by `test/root-config.test.ts`.
 
+### `drefyn/no-tier-literals`
+
+On for every package and app, off inside `packages/entitlements`. A hard coded plan check
+passes every test until the plans change, and then one product silently disagrees with the
+others. For the tier names `free`, `starter`, `growth`, `scale`, `enterprise` and
+`self_hosted` it reports:
+
+- `==`, `===`, `!=` or `!==` against a tier name literal
+- a `switch` case on a tier name literal
+- `includes` or `indexOf` called on an array literal that holds a tier name
+- an object literal keyed by two or more tier names
+
+It leaves alone a tier name passed as an argument, an object with one tier name key, a
+comparison with any other string, a tier name inside a template literal or a longer string,
+and types. `free` is an English word, so that boundary is deliberate and tested. Names built
+at run time, held in a variable or passed through a cast are out of its reach: it guards
+against mistakes, and a determined author can get around it.
+
+`apps/dashboard/src/server/plan-labels.ts` is the one reviewed exception in the root config.
+Its display names decide nothing.
+
 ### `drefyn/no-operator-auth`
 
 On for `apps/` in the root config and the guard. Refuses `issue` and `createOrganizationFor`,

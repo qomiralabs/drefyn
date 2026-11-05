@@ -334,11 +334,13 @@ describeWithStack('organizations against Postgres', () => {
             values (app.current_org(), 'Tier', ${tier})`.execute(tx),
       );
 
+    const INSTALL_TIER = 'self_hosted';
+
     it('accepts the install tier, self_hosted', async () => {
-      await expect(insert('self_hosted')).resolves.toBeDefined();
+      await expect(insert(INSTALL_TIER)).resolves.toBeDefined();
     });
 
-    it.each(TIERS.filter((t) => t !== 'self_hosted').map((t) => [t]))(
+    it.each(TIERS.filter((t) => t !== INSTALL_TIER).map((t) => [t]))(
       'refuses %s with DB_RLS_VIOLATION',
       async (tier) => {
         await expect(insert(tier)).rejects.toMatchObject({ code: 'DB_RLS_VIOLATION' });
