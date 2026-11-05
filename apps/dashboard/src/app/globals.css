@@ -10,6 +10,9 @@
   --height-shell-view: calc(100dvh - var(--dr-shell-bar));
 }
 
+/* The shell in incident mode. The sidebar reads this instead of watching any state. */
+@custom-variant incident (&:where([data-incident='cockpit'] *));
+
 @layer base {
   /* The root keeps the browser's text size, so rem tokens mean what they say. */
   html {
@@ -40,6 +43,42 @@
 
 @utility animate-fade-in {
   animation: dr-fade-in var(--dr-duration-base) var(--dr-ease-enter);
+}
+
+/* Fades in with a small drop. The distance token is zero under reduced motion, so the same
+   rule is a plain fade there. */
+@keyframes dr-settle {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--dr-distance-enter) * -1);
+  }
+}
+
+@utility animate-settle {
+  animation: dr-settle var(--dr-duration-base) var(--dr-ease-enter);
+}
+
+/* The brand's status gutter in the broken mark, on the incident line. */
+@utility incident-gutter {
+  border-inline-start: var(--dr-stroke-gutter) solid var(--dr-state-broken-mark);
+}
+
+/* One column on phones with the draft first, two panes, then three where they fit. */
+@utility incident-panes {
+  grid-template-columns: minmax(0, 1fr);
+
+  @variant sm {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  }
+
+  @variant lg {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) var(--dr-shell-inspector);
+  }
+}
+
+/* The way back: the calm page settles in once, when the shell leaves incident mode. */
+[data-incident='calm'] #main {
+  animation: dr-settle var(--dr-duration-base) var(--dr-ease-enter);
 }
 
 /* The command bar draws its own clear button, so the browser's is hidden. */
