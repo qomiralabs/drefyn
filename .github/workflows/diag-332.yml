@@ -1,0 +1,83 @@
+name: Diag 332
+
+on:
+  push:
+    branches: [test/332-sign-out-flake]
+
+permissions: {}
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  diag:
+    name: diag ${{ matrix.project }} ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [shell-firefox, auth-no-js]
+        shard: [1, 2, 3]
+    env:
+      COMPOSE_PROJECT_NAME: drefyn-dash-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+      DREFYN_POSTGRES_PORT: '55432'
+      DREFYN_DATABASE_SSL: disable
+      DREFYN_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start the compose stack
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 90
+        run: bash scripts/selfhost.sh up
+      - name: Start Mailpit
+        run: docker compose --file deploy/compose.yaml --profile test up --detach --wait mailpit
+      - run: pnpm --filter @drefyn/dashboard build
+      - name: Seed people and sessions
+        env:
+          DREFYN_E2E_SEED: real-stack-e2e
+        run: pnpm --filter @drefyn/dashboard seed:e2e
+      - name: Turn on lock and commit logging
+        run: |
+          docker compose --file deploy/compose.yaml exec -T postgres sh -c '
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "alter system set log_lock_waits = on" \
+              -c "alter system set deadlock_timeout = 100" \
+              -c "alter system set log_min_duration_statement = 150" \
+              -c "alter system set log_checkpoints = on" \
+              -c "select pg_reload_conf()"'
+      - name: playwright ${{ matrix.project }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          docker run --rm --ipc=host --network host \
+            --add-host github.com:127.0.0.1 \
+            --add-host api.github.com:127.0.0.1 \
+            --add-host accounts.google.com:127.0.0.1 \
+            --add-host oauth2.googleapis.com:127.0.0.1 \
+            --add-host www.googleapis.com:127.0.0.1 \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
+            -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
+            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'if [ "$PROJECT" = shell-firefox ]; then F=sign-out; else F=oauth-no-script; fi; node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure --repeat-each=25 "$F"'
+      - name: Postgres log
+        if: always()
+        run: docker compose --file deploy/compose.yaml logs postgres | grep -vE '^postgres-1  \| *$' | tail -400
+      - name: upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diag-${{ matrix.project }}-${{ matrix.shard }}
+          path: apps/dashboard/test-results
+          if-no-files-found: warn
+          retention-days: 7
