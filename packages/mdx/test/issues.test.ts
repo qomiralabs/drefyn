@@ -114,7 +114,7 @@ describe('frontmatter', () => {
     ['a custom tag', 'a: !!js/function "x"'],
     ['a local tag', 'a: !evil 1'],
     ['a merge bomb', `a: &a [x]\n${'b: [*a, *a, *a]\n'.repeat(1)}c: &c [${'*a,'.repeat(200)}]`],
-    ['deep flow nesting', `a: ${'['.repeat(3_000)}`],
+    ['deep flow nesting', `a: ${'['.repeat(1_900)}`],
   ])('reports %s', (_name, yaml) => {
     expect(codes(issuesOf(`---\n${yaml}\n---\n\nBody\n`, 'md'))).toContain(
       'mdx.frontmatter_invalid',

@@ -305,6 +305,12 @@ importers:
       '@types/mdast':
         specifier: 4.0.4
         version: 4.0.4
+      acorn:
+        specifier: 8.19.0
+        version: 8.19.0
+      acorn-jsx:
+        specifier: 5.3.2
+        version: 5.3.2(acorn@8.19.0)
       remark-frontmatter:
         specifier: 5.0.0
         version: 5.0.0
