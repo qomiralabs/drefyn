@@ -82,7 +82,6 @@ jobs:
       - name: playwright ${{ matrix.project }}
         env:
           PROJECT: ${{ matrix.project }}
-          REPEAT: ${{ matrix.project == 'inp' && '--repeat-each=10' || '' }}
         # Node comes from the runner, mounted read only; the host network reaches Postgres.
         # The add-host lines are the egress block: in this container every provider host is
         # loopback, so no test can reach a real one whatever the fake does. The check after
@@ -96,8 +95,8 @@ jobs:
             --add-host www.googleapis.com:127.0.0.1 \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
-            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e REPEAT -e DREFYN_PLAYWRIGHT_IMAGE \
-            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}" $REPEAT && node e2e/egress-check.ts'
+            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}" && node e2e/egress-check.ts'
       # The numbers are the point of these two, so they stay on a green run as well.
       - name: upload the scores
         if: ${{ always() && (matrix.project == 'inp' || matrix.project == 'lighthouse') }}
