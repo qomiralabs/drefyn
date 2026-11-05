@@ -124,6 +124,20 @@ test.describe('entering incident mode', () => {
     await expect(main(page).getByRole('heading', { level: 1 })).toBeFocused();
   });
 
+  test('focus reaches a heading that streams in after the return', async ({ page }) => {
+    await incidentOpen(page);
+    await openShell(page, '/account');
+    await line(page).getByRole('link', { name: 'Open incident' }).click();
+    await expect(heading(page)).toBeFocused();
+    await page.route(/\/account(\?|$)/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.fallback();
+    });
+    await main(page).getByRole('button', { name: 'Resolve incident' }).click();
+    await expect(page).toHaveURL('/account');
+    await expect(main(page).getByRole('heading', { level: 1 })).toBeFocused();
+  });
+
   test('does not take focus or announce when the page is simply opened', async ({ page }) => {
     await openCockpit(page);
     expect(await focused(page)).toBe('body');

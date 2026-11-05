@@ -69,7 +69,7 @@ function browserStorage(): FeedStorage {
 const noFeed = () => () => undefined;
 const notRead = () => undefined;
 
-const HEADING_SETTLES_MS = 2000;
+const HEADING_SETTLES_MS = 5000;
 
 function focusHeading(): void {
   const heading = document.querySelector<HTMLElement>('#main h1');
@@ -89,12 +89,14 @@ function restoreFocus(element: HTMLElement | null): void {
   // A person who left by the link on the line is still on it, and that is a fine place to be.
   if (document.activeElement !== document.body) return;
   focusHeading();
-  // A page that streams swaps its skeleton heading for the real one, and focus falls to the
-  // body with it. Following it for a moment is enough, and never takes focus from elsewhere.
+  // A page that streams may have no heading yet, or swap its skeleton heading for the real
+  // one, and focus falls to main or the body. Following it for a moment is enough, and it
+  // never takes focus from anything a person has moved to.
   const main = document.getElementById('main');
   if (main === null) return;
   const follow = new MutationObserver(() => {
-    if (document.activeElement === document.body) focusHeading();
+    const active = document.activeElement;
+    if (active === document.body || active === main) focusHeading();
   });
   follow.observe(main, { childList: true, subtree: true });
   window.setTimeout(() => {
