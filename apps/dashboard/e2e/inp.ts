@@ -65,15 +65,18 @@ export async function watchInp(page: Page): Promise<void> {
   });
 }
 
-// From here on, so the step being timed reads apart from whatever led up to it. Not buffered, or
-// the browser would hand over earlier presses too.
+// From here on, so the step being timed reads apart from whatever led up to it. A press arrives
+// after it paints, so the one before can land on this observer: only its start tells them apart.
 export async function watchPress(page: Page): Promise<void> {
   await page.evaluate(() => {
     const vitals = window as unknown as VitalsWindow;
     vitals.pressDurations = [];
+    const since = performance.now();
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries() as PerformanceEventTiming[]) {
-        if (entry.interactionId > 0) vitals.pressDurations.push(entry.duration);
+        if (entry.interactionId > 0 && entry.startTime >= since) {
+          vitals.pressDurations.push(entry.duration);
+        }
       }
     }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
   });
