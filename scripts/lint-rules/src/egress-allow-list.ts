@@ -44,6 +44,6 @@ export const egressAllowList = [
     path: 'apps/dashboard/e2e/oauth-preload.ts',
     reason:
       'test preload that narrows the global fetch of the e2e dashboard servers: provider hosts go to the loopback fake and everything else is refused; it widens nothing and no build loads it',
-    only: [{ global: 'fetch' }],
+    only: [{ global: 'fetch', reads: true }],
   },
 ] as const satisfies readonly EgressAllowEntry[];

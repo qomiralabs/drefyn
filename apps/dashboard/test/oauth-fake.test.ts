@@ -71,7 +71,9 @@ function redeem(fake: FakeProvider, provider: ProviderName, code: string, change
   return fake.answer({ method: 'POST', url: TOKEN[provider], body: body.toString() });
 }
 
-const bodyOf = <T = unknown>(answer: { readonly body: string }): T => JSON.parse(answer.body) as T;
+const bodyOf = (answer: { readonly body: string }): unknown => JSON.parse(answer.body);
+const fieldOf = (answer: { readonly body: string }, key: string): string =>
+  (bodyOf(answer) as Record<string, string>)[key] ?? '';
 
 describe('the fake provider', () => {
   it.each(['github', 'google'] as const)('%s asks a person, then returns a code', (provider) => {
@@ -176,9 +178,9 @@ describe('the fake provider', () => {
     const code = visit(fake, 'google').searchParams.get('code') ?? '';
     const token = fieldOf(redeem(fake, 'google', code), 'id_token');
     const [header = '', payload = '', signature = ''] = token.split('.');
-    const { keys } = bodyOf<{ keys: [JsonWebKey] }>(
-      get(fake, '/www.googleapis.com/oauth2/v3/certs'),
-    );
+    const { keys } = bodyOf(get(fake, '/www.googleapis.com/oauth2/v3/certs')) as {
+      keys: [JsonWebKey];
+    };
     const key = createPublicKey({ key: keys[0], format: 'jwk' });
     const signed = Buffer.from(`${header}.${payload}`);
     expect(verify('sha256', signed, key, Buffer.from(signature, 'base64url'))).toBe(true);
