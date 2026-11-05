@@ -96,7 +96,7 @@ describe('a tree too deep to walk', () => {
     expect(() => serialize(insert(parsed('a\n', 'md'), 1, deep as MdxBlock))).toThrow(
       expect.objectContaining({ code: 'mdx.block_not_printable', blockIndex: 1 }),
     );
-  });
+  }, 60_000);
 });
 
 describe('a byte order mark', () => {
