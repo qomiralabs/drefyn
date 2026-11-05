@@ -27,10 +27,11 @@ export const without = (root: MdxRoot, index: number): MdxRoot => ({
 });
 
 // References only resolve beside their definitions, so a lone block reparses next to them.
-export const definitionsOf = (root: MdxRoot): string =>
+export const definitionsOf = (root: MdxRoot, except?: MdxBlock): string =>
   root.children
+    .filter((block) => block !== except)
     .filter((block) => block.type === 'definition' || block.type === 'footnoteDefinition')
-    .map((block) => block.source?.raw ?? '')
+    .map((block) => block.source?.raw.trimStart() ?? '')
     .join('\n\n');
 
 export function changedLines(before: string, after: string): number {

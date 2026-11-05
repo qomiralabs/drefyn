@@ -43,7 +43,7 @@ function targetIn(root: MdxRoot, wanted: (block: MdxBlock) => boolean): Target |
 // Reprinting is whole block, so an edit can only be one line once the block already prints
 // the way it was written. Blocks written another way change more; see the bound below.
 const isCanonical = (block: MdxBlock, dialect: MdxRoot['dialect']) =>
-  block.source !== undefined && printCanonical(block, dialect) === block.source.raw;
+  block.source?.raw === printCanonical(block, dialect);
 
 const corpus = loadCorpus();
 

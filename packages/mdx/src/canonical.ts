@@ -9,7 +9,7 @@ interface Seen {
   data: boolean;
 }
 
-const foldLineEndings = (text: string) =>
+export const foldLineEndings = (text: string) =>
   text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text;
 
 // This runs on every block twice per round trip, so it builds one string and skips the arrays

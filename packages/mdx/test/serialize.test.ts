@@ -76,7 +76,7 @@ describe('serialize', () => {
   });
 
   it('names the block by index and carries no content', () => {
-    const root = insert(parsed(SOURCE, 'md'), 1, { type: 'mdxjsEsm', value: 'Two' } as MdxBlock);
+    const root = insert(parsed(SOURCE, 'md'), 1, { type: 'mdxjsEsm', value: 'Two' });
     try {
       serialize(root);
       expect.unreachable();
@@ -84,6 +84,18 @@ describe('serialize', () => {
       expect(error).toMatchObject({ code: 'mdx.block_not_printable', blockIndex: 1 });
       expect(String(error)).not.toContain('Two');
     }
+  });
+});
+
+describe('a tree too deep to walk', () => {
+  it('refuses with the same error and the block index', () => {
+    let deep: unknown = { type: 'text', value: 'a' };
+    for (let depth = 0; depth < 100_000; depth += 1) {
+      deep = { type: 'blockquote', children: [deep] };
+    }
+    expect(() => serialize(insert(parsed('a\n', 'md'), 1, deep as MdxBlock))).toThrow(
+      expect.objectContaining({ code: 'mdx.block_not_printable', blockIndex: 1 }),
+    );
   });
 });
 
@@ -172,7 +184,117 @@ describe('a gap with no blank line', () => {
   });
 });
 
+describe('which single line gaps are safe', () => {
+  const asParagraph = (block: MdxBlock) =>
+    withText({ ...block, type: 'paragraph' } as MdxBlock, 'x');
+
+  const STAYS: readonly (readonly [string, 'md' | 'mdx', number, string])[] = [
+    ['# a\n## b\n', 'md', 0, 'x\n## b\n'],
+    ['# a\n###### b\n', 'md', 0, 'x\n###### b\n'],
+    ['# a\n#\n', 'md', 0, 'x\n#\n'],
+    ['# a\n   # b\n', 'md', 0, 'x\n   # b\n'],
+    ['# a\n~~~\nb\n~~~\n', 'md', 0, 'x\n~~~\nb\n~~~\n'],
+    ['# a\n- b\n', 'md', 0, 'x\n- b\n'],
+    ['# a\n* b\n', 'md', 0, 'x\n* b\n'],
+    ['# a\n+ b\n', 'md', 0, 'x\n+ b\n'],
+    ['# a\n1. b\n', 'md', 0, 'x\n1. b\n'],
+    ['# a\n1) b\n', 'md', 0, 'x\n1) b\n'],
+    ['# a\n   -  b\n', 'md', 0, 'x\n   -  b\n'],
+  ];
+
+  it.each(STAYS)('%j stays tight', (source, dialect, index, expected) => {
+    expect(serialize(withChild(parsed(source, dialect), index, asParagraph))).toBe(expected);
+  });
+
+  const OPENS: readonly (readonly [string, number, string])[] = [
+    ['# a\n2. b\n', 0, 'x\n\n2. b\n'],
+    ['# a\n-\n', 0, 'x\n\n-\n'],
+    ['# a\n    -  b\n', 0, 'x\n\n    -  b\n'],
+    ['# a\nS # x\n===\n', 0, 'x\n\nS # x\n===\n'],
+    ['# a\n#b\n===\n', 0, 'x\n\n#b\n===\n'],
+    ['# a\n####### b\n', 0, 'x\n\n####### b\n'],
+    ['# a\nS ``` x\n===\n', 0, 'x\n\nS ``` x\n===\n'],
+    ['# a\n> b\n', 0, 'x\n\n> b\n'],
+    ['[a]: b\nc\n', 1, '[a]: b\n\nx\n'],
+    ['    ```\nb\n', 1, '    ```\n\nx\n'],
+  ];
+
+  it.each(OPENS)('%j opens up', (source, index, expected) => {
+    const root = parsed(source, 'md');
+    const edited = index === 0 ? asParagraph : (block: MdxBlock) => withText(block, 'x');
+    expect(serialize(withChild(root, index, edited))).toBe(expected);
+  });
+
+  it('stays after blocks that end themselves in mdx and frontmatter', () => {
+    const page = (source: string) =>
+      serialize(withChild(parsed(source, 'mdx'), 1, (block) => withText(block, 'x')));
+    expect(page('{a}\nb\n')).toBe('{a}\nx\n');
+    expect(page('<A />\nb\n')).toBe('<A />\nx\n');
+    expect(page('---\na: 1\n---\nb\n')).toBe('---\na: 1\n---\nx\n');
+    expect(page('```\na\n```\nb\n')).toBe('```\na\n```\nx\n');
+  });
+
+  it('opens up after esm, which runs to the next blank line', () => {
+    const root = parsed('# a\n\nexport const b = 1\n\nc\n', 'mdx');
+    const moved = { ...root, children: [root.children[1], root.children[2]] as MdxBlock[] };
+    const edited = withChild(moved, 1, (block) => {
+      const { source } = block;
+      if (source === undefined) throw new Error('no source');
+      const gapBefore = '\n';
+      const tree = withText(block, 'x');
+      return {
+        ...tree,
+        source: { ...source, gapBefore, sourceOf: sourceOf(source.rawOf, gapBefore, source.raw) },
+      };
+    });
+    expect(serialize(edited)).toBe('\n\nexport const b = 1\n\nx\n');
+  });
+
+  it('counts a blank line however it is spelled', () => {
+    const edit = (source: string) =>
+      serialize(withChild(parsed(source, 'md'), 1, (block) => withText(block, 'x')));
+    expect(edit('a\r\rb\r')).toBe('a\r\rx\r');
+    expect(edit('a\r \rb\r')).toBe('a\r \rx\r');
+    expect(edit('a\r\n\t\r\nb\r\n')).toBe('a\r\n\t\r\nx\r\n');
+    expect(edit('[a]: b\n \t\nc\n')).toBe('[a]: b\n \t\nx\n');
+  });
+
+  it('keeps a touching pair a delete left when the first does not end in a paragraph', () => {
+    const root = parsed('> # q\n\n# b\nc\n', 'md');
+    expect(serialize(without(root, 1))).toBe('> # q\nc\n');
+  });
+
+  it('keeps a touching pair when the second is not a paragraph', () => {
+    const root = parsed('a\n\n# b\n## c\n', 'md');
+    expect(serialize(without(root, 1))).toBe('a\n## c\n');
+  });
+});
+
+describe('a thematic break', () => {
+  it('prints with stars when it opens a file, where --- would start frontmatter', () => {
+    expect(serialize(allNew(parsed('***\n\n---\n', 'md')))).toBe('***\n\n---\n');
+  });
+
+  it('keeps its bytes at the top of a file when nothing touched it', () => {
+    expect(serialize(parsed('---\n\na\n', 'md'))).toBe('---\n\na\n');
+  });
+});
+
 describe('neighbouring lists', () => {
+  it('reads the marker after an indent and a long number', () => {
+    const root = parsed('  - a\n', 'md');
+    expect(serialize(insert(root, 1, newBlock('- b\n')))).toBe('  - a\n\n* b\n');
+    const numbers = parsed('10. a\n', 'md');
+    expect(serialize(insert(numbers, 1, newBlock('1. b\n')))).toBe('10. a\n\n1) b\n');
+  });
+
+  it('does not take a paragraph that looks like a marker for a list', () => {
+    const root = parsed('-a\n', 'md');
+    expect(serialize(insert(root, 1, newBlock('- b\n')))).toBe('-a\n\n- b\n');
+    const next = parsed('-a\n', 'md');
+    expect(serialize(insert(next, 0, newBlock('- b\n')))).toBe('- b\n\n-a\n');
+  });
+
   it('gives a new list the other marker so it cannot join the one before', () => {
     const root = parsed('- a\n', 'md');
     expect(serialize(insert(root, 1, newBlock('- b\n')))).toBe('- a\n\n* b\n');
@@ -285,6 +407,12 @@ describe('bytes bound to the tree', () => {
   });
 });
 
+describe('gaps as written', () => {
+  it('keeps tabs and spaces', () => {
+    expect(serialize(parsed('a\n\t\n \nb\n', 'md'))).toBe('a\n\t\n \nb\n');
+  });
+});
+
 describe('rawOf', () => {
   const hash = (source: string) => {
     const block = parsed(source, 'md').children[0];
@@ -309,6 +437,48 @@ describe('rawOf', () => {
   it('changes with the content', () => {
     expect(hash('one\n')).not.toBe(hash('two\n'));
     expect(hash('`a\nb`\n')).not.toBe(hash('a b\n'));
+  });
+
+  const paragraph = (extra: object) =>
+    ({ type: 'paragraph', children: [{ type: 'text', value: 'a' }], ...extra }) as MdxBlock;
+
+  it('ignores position and data', () => {
+    const plain = rawOf(paragraph({}));
+    expect(rawOf(paragraph({ position: { start: 1 } }))).toBe(plain);
+    expect(rawOf(paragraph({ data: { hName: 'a' } }))).toBe(plain);
+  });
+
+  it('does not depend on the order or the presence of empty fields', () => {
+    const plain = rawOf({ type: 'code', lang: 'a', value: 'b' });
+    expect(rawOf({ value: 'b', lang: 'a', type: 'code' })).toBe(plain);
+    expect(rawOf({ type: 'code', lang: 'a', value: 'b', meta: null })).toBe(plain);
+    const absent = { type: 'code', lang: 'a', value: 'b', meta: undefined };
+    expect(rawOf(absent as MdxBlock)).toBe(plain);
+  });
+
+  it('tells a list of values from the values, and an object from its fields', () => {
+    const children = (...values: unknown[]) => paragraph({ children: values });
+    const text = { type: 'text', value: 'a' };
+    expect(rawOf(children(text, text))).not.toBe(rawOf(children(text)));
+    expect(rawOf(paragraph({ extra: ['a'] }))).not.toBe(rawOf(paragraph({ extra: 'a' })));
+    expect(rawOf(paragraph({ extra: { a: 'b' } }))).not.toBe(rawOf(paragraph({ a: 'b' })));
+    expect(rawOf(paragraph({ extra: 1 }))).not.toBe(rawOf(paragraph({ extra: '1' })));
+  });
+
+  it('folds a bare CR too', () => {
+    expect(rawOf({ type: 'code', value: 'a\rb' })).toBe(rawOf({ type: 'code', value: 'a\nb' }));
+    expect(rawOf({ type: 'code', value: 'a\tb' })).not.toBe(rawOf({ type: 'code', value: 'ab' }));
+  });
+
+  it('turns line endings into spaces only in the value of a code span', () => {
+    const code = (type: string, value: string) => ({ type, value }) as MdxBlock;
+    expect(rawOf(code('code', 'a\nb'))).not.toBe(rawOf(code('code', 'a b')));
+    const span = (value: string, extra = {}) =>
+      ({ type: 'inlineCode', value, ...extra }) as MdxBlock;
+    expect(rawOf(span('a', { lang: 'b\nc' }))).not.toBe(rawOf(span('a', { lang: 'b c' })));
+    expect(rawOf(span('a b'))).toBe(rawOf(span('a\nb')));
+    const numeric = { type: 'inlineCode', value: 1 } as unknown as MdxBlock;
+    expect(rawOf(numeric)).not.toBe(rawOf(span('1')));
   });
 
   it('does not read the source it sits beside', () => {

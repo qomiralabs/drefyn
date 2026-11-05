@@ -11,10 +11,14 @@ compiler out of every package.
   returns `{ ok: true, value: { ast, issues } }`, with warnings in `issues`, or
   `{ ok: false, error: issues }`. It throws only on a bad policy or dialect, which is our bug
   and not bad content.
-- `serialize(root)` gives back the exact bytes. It throws `MdxPrintError` on a block that has
-  no source, whose tree no longer hashes to `rawOf`, whose bytes no longer hash to `sourceOf`,
-  or that carries `data`, and on text in a gap or the tail. The hashes have no key, so they
-  catch stale bytes and not a writer who recomputes them.
+- `serialize(root)` gives back the exact bytes of every untouched block. A block with no source,
+  or whose tree no longer hashes to `rawOf`, goes through `printCanonical` instead. It throws
+  `MdxPrintError` on bytes that no longer hash to `sourceOf`, on `data` anywhere in a tree, on
+  text in a gap or the tail, and on anything the dialect cannot print. The hashes have no key,
+  so they catch stale bytes and not a writer who recomputes them.
+- `printCanonical(block, dialect)` is the one printer for changed and new blocks. It is pure,
+  idempotent, and returns LF with no final line ending. Its options are fixed in code. Changing
+  them is an `astVersion` bump, and stored blocks are never reprinted because of it.
 - `rawOf(block)` is the SHA-256 of a block's canonical tree. Line endings, positions and
   parser data do not count, so a reformat is not a content change.
 - `DEFAULT_LIMITS` and `AST_VERSION`.
@@ -23,6 +27,18 @@ Each top level block keeps `source: { raw, gapBefore, rawOf, sourceOf }`. `gapBe
 since the previous block, so it ends at a line start and holds a BOM if the file has one. The
 root keeps `tail`, everything after the last block, `tailOf`, its hash, and `eol`, the majority
 line ending.
+
+## Changed blocks
+
+Untouched blocks keep their bytes, so a file never gets reformatted behind its author's back. A
+changed block reprints whole, which means a one word edit is one line only if the block was
+already canonical. A list written with `*` rewrites every line of that list, and no other block.
+
+Reprinting a block moves what sits next to it, so `serialize` handles three cases the tree cannot
+see. A gap with no blank line stays only where both neighbours are safe with one line between
+them, and opens up otherwise. Two neighbouring lists with one marker are one list to a parser, so
+the second takes another marker, even if it was untouched. A file cannot open with a printed `---`,
+which would start frontmatter, so that rule prints as `***`.
 
 ## Issue codes
 
@@ -65,5 +81,8 @@ A page refused by the scan or the budget gets `mdx.too_many_nodes` at line 1.
 
 - `pnpm --filter @drefyn/mdx test`
 - `pnpm --filter @drefyn/mdx test:fuzz` runs 60 s; `-- --seconds 5 --seed 1` narrows it.
+- `pnpm --filter @drefyn/mdx test:mutation` runs Stryker over the printer, `serialize` and the
+  hashes, and fails at 10 percent of mutants surviving. It uses the exact byte tests only, as
+  the corpus and generated suites take minutes a mutant.
 - `pnpm --filter @drefyn/mdx bench` measures parse plus print against the budgets. Run it on
   an idle machine; it prints the load and exits 1 over budget.

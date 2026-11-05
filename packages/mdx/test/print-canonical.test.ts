@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MdxPrintError, printCanonical, serialize } from '../src/index.ts';
+import { MdxPrintError, printCanonical } from '../src/index.ts';
 import type { Dialect, MdastBlock, MdxBlock } from '../src/index.ts';
 import { parsed } from './helpers.ts';
 
@@ -43,6 +43,13 @@ describe('canonical output per block kind', () => {
     ['jsx children', 'mdx', '<A>\n\ntext\n\n</A>\n', '<A>\n  text\n</A>'],
     ['expression', 'mdx', '{1  +  1}\n', '{1  +  1}'],
     ['esm', 'mdx', 'export const a = 1\n', 'export const a = 1'],
+    ['reference link', 'md', '[a][b]\n\n[b]: c\n', '[a][b]'],
+    ['reference image', 'md', '![a][b]\n\n[b]: c\n', '![a][b]'],
+    ['footnote reference', 'md', '[^1]\n\n[^1]: a\n', '[^1]'],
+    ['inline jsx', 'mdx', '<b>x</b> y\n', '<b>x</b> y'],
+    ['inline expression', 'mdx', 'a {b}\n', 'a {b}'],
+    ['emphasis in a tight mdx list', 'mdx', '- *a* b\n', '- *a* b'],
+    ['code holding a frontmatter fence', 'md', '```\n---\n```\n', '```\n---\n```'],
     ['mdx escapes braces', 'mdx', 'a \\{b} \\<c\n', 'a \\{b} \\<c'],
   ];
 
@@ -70,7 +77,7 @@ describe('the faults found in the stock printer', () => {
       name: 'A',
       attributes: [],
       children: [{ type: 'mdxjsEsm', value: 'export const a = 1\n\nexport const b = 2' }],
-    };
+    } as unknown as MdastBlock;
     expect(printCanonical(block, 'mdx')).toBe(
       '<A>\nexport const a = 1\n\nexport const b = 2\n</A>',
     );
@@ -94,6 +101,101 @@ describe('the faults found in the stock printer', () => {
     expect(print('one\r\ntwo\r\n')).toBe('one\ntwo');
   });
 
+  it('folds a CRLF held in a jsx attribute', () => {
+    expect(print('<A b="c\r\nd" {...e\r\n} g={h\r\n+ i} />\r\n', 'mdx')).not.toContain('\r');
+  });
+
+  it('dedents only what JSX added, not the list around it', () => {
+    const source = '- <A>\n    {\n      a\n    }\n  </A>\n';
+    expect(print(source, 'mdx')).toBe(source.trimEnd());
+  });
+
+  it('starts counting JSX depth again inside a list or a quote', () => {
+    const list = '<A>\n  - <B>\n      {\n        c\n      }\n    </B>\n</A>\n';
+    expect(print(list, 'mdx')).toBe(list.trimEnd());
+    const quote = '<A>\n  > <B>\n  >   {\n  >     c\n  >   }\n  > </B>\n</A>\n';
+    expect(print(quote, 'mdx')).toBe(quote.trimEnd());
+  });
+
+  it('keeps the blank line in a quote inside a tight item, where the item cannot see it', () => {
+    const source = '- > <A>\n  >   <B />\n  >\n  >   <C />\n  > </A>\n- d\n';
+    expect(print(source, 'mdx')).toBe(source.trimEnd());
+  });
+
+  it('keeps a blank line inside an attribute value clean', () => {
+    const source = '<A\n  b={[\n\n    1,\n  ]}\n/>\n';
+    expect(print(source, 'mdx')).toBe(source.trimEnd());
+  });
+
+  it('pins each kind of multi line attribute inside JSX', () => {
+    const value = (type: string, text: string) => ({
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      attributes: [],
+      children: [
+        {
+          type: 'mdxJsxFlowElement',
+          name: 'B',
+          children: [],
+          attributes: [
+            type === 'mdxJsxExpressionAttribute'
+              ? { type, value: text }
+              : { type, name: 'c', value: text },
+          ],
+        },
+      ],
+    });
+    const nested = (node: unknown) => printCanonical(node as MdastBlock, 'mdx');
+    expect(nested(value('mdxJsxAttribute', 'd\ne'))).toBe('<A>\n  <B\n    c="d\ne"\n  />\n</A>');
+    expect(nested(value('mdxJsxExpressionAttribute', '...d\ne'))).toBe(
+      '<A>\n  <B\n    {...d\n  e}\n  />\n</A>',
+    );
+    const expression = {
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      children: [],
+      attributes: [
+        { type: 'mdxJsxAttribute', name: 'b' },
+        { type: 'mdxJsxAttribute', name: 'c', value: { type: 'x', value: 'd\ne' } },
+      ],
+    };
+    expect(nested(expression)).toBe('<A\n  b\n  c={d\n  e}\n/>');
+  });
+
+  it('keeps a multi line attribute value at every depth', () => {
+    const top = '<A\n  b={{\n    c: 1,\n  }}\n/>\n';
+    expect(print(top, 'mdx')).toBe(top.trimEnd());
+    const deep = '<A>\n  <B\n    c="d\ne"\n    {...f\n  }\n    h={i\n  + j}\n  />\n</A>\n';
+    const once = print(deep, 'mdx');
+    expect(print(`${once}\n`, 'mdx')).toBe(once);
+  });
+
+  it('keeps a table row shorter or longer than its header as it is', () => {
+    expect(print('| a | b |\n|---|---|\n| c |\n| d | e | f |\n')).toBe(
+      '| a | b |\n| - | - |\n| c |\n| d | e | f |',
+    );
+  });
+
+  it('settles a heading whose only line break sits before html', () => {
+    const once = print('a\n    <!-- b -->\n===\n');
+    expect(once).toBe('# a <!-- b -->');
+    expect(print(`${once}\n`)).toBe(once);
+  });
+
+  it('keeps a line break before html that cannot open a block', () => {
+    expect(print('a\n<b>c\n')).toBe('a\n<b>c');
+  });
+
+  it('prints an escaped pipe in a table cell', () => {
+    expect(print('| a |\n|---|\n| b\\|c |\n| `d\\|e` |\n')).toBe(
+      '| a |\n| - |\n| b\\|c |\n| `d\\|e` |',
+    );
+  });
+
+  it('prints a center aligned column', () => {
+    expect(print('| a |\n|:-:|\n')).toBe('| a |\n| :-: |');
+  });
+
   it('runs in linear time on a run of spaces in a code block', () => {
     const block = first(`\`\`\`\n${' '.repeat(500_000)}x\n\`\`\`\n`, 'mdx');
     const started = performance.now();
@@ -106,21 +208,30 @@ describe('text that looks like the printer', () => {
   const PRIVATE_USE = String.fromCharCode(0xe000);
 
   it('prints private use characters that sit in a value', () => {
-    const value = `{\n  ${PRIVATE_USE}1${PRIVATE_USE}\n}`;
+    const value = `{\n  "${PRIVATE_USE}1${PRIVATE_USE}"\n}`;
     const source = `<A>\n  <B>\n    ${value.replaceAll('\n', '\n    ')}\n  </B>\n</A>\n`;
     expect(print(source, 'mdx')).toContain(`${PRIVATE_USE}1${PRIVATE_USE}`);
   });
 
+  const holding = (last: number): MdastBlock => {
+    let value = '';
+    for (let code = 0xe000; code <= last; code += 1) value += String.fromCharCode(code);
+    return { type: 'code', value };
+  };
+
+  it('uses the last marker when every other one is taken', () => {
+    expect(printCanonical(holding(0xf8fe), 'mdx')).toContain(String.fromCharCode(0xf8fe));
+  });
+
   it('refuses a block that uses every marker it could pick', () => {
-    let every = '';
-    for (let code = 0xe000; code <= 0xf8ff; code += 1) every += String.fromCharCode(code);
-    const block: MdastBlock = {
-      type: 'mdxJsxFlowElement',
-      name: 'A',
-      attributes: [],
-      children: [{ type: 'mdxFlowExpression', value: `a\n${every}` }],
-    };
-    expect(() => printCanonical(block, 'mdx')).toThrow(MdxPrintError);
+    expect(() => printCanonical(holding(0xf8ff), 'mdx')).toThrow(MdxPrintError);
+  });
+
+  it('carries the block index, a name and no content in its error', () => {
+    const error = new MdxPrintError(3);
+    expect(error.name).toBe('MdxPrintError');
+    expect(error.message).toBe('mdx.block_not_printable: block 3');
+    expect(new MdxPrintError().blockIndex).toBe(0);
   });
 });
 
@@ -159,6 +270,17 @@ describe('nodes the dialect cannot hold', () => {
     expect(() => printCanonical(yaml, 'md')).toThrow(MdxPrintError);
   });
 
+  it.each(['---', '--- \t', 'a: 1\n---\t\nb: 2'])(
+    'refuses the frontmatter fence in %j',
+    (value) => {
+      expect(() => printCanonical(block({ type: 'yaml', value }), 'md')).toThrow(MdxPrintError);
+    },
+  );
+
+  it.each(['a---', '---a', ' ---', 'a: ---b'])('prints frontmatter holding %j', (value) => {
+    expect(printCanonical(block({ type: 'yaml', value }), 'md')).toBe(`---\n${value}\n---`);
+  });
+
   it('turns a tree too deep to print into the same error', () => {
     let deep: unknown = { type: 'text', value: 'a' };
     for (let depth = 0; depth < 100_000; depth += 1) {
@@ -168,7 +290,55 @@ describe('nodes the dialect cannot hold', () => {
   });
 });
 
+describe('parser data on a node', () => {
+  it('cannot pose as one of the marks', () => {
+    const block = {
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      attributes: [],
+      data: { tight: true },
+      children: [
+        { type: 'mdxFlowExpression', value: 'a\nb', data: { dedent: '<script>' } },
+        { type: 'mdxFlowExpression', value: 'c' },
+      ],
+    } as unknown as MdastBlock;
+    expect(printCanonical(block, 'mdx')).toBe('<A>\n  {a\n  b}\n\n  {c}\n</A>');
+  });
+});
+
 describe('edited blocks', () => {
+  const paragraph = (value: string): MdastBlock => ({
+    type: 'paragraph',
+    children: [{ type: 'text', value }],
+  });
+
+  it.each(['import the module', 'export const a = 1', 'one\nimport two'])(
+    'keeps text like %j from parsing as esm',
+    (value) => {
+      const printed = printCanonical(paragraph(value), 'mdx');
+      expect(parsed(`${printed}\n`, 'mdx').children.map(({ type }) => type)).toEqual(['paragraph']);
+      expect(printCanonical(paragraph(value), 'md')).toBe(value);
+    },
+  );
+
+  it.each(['important exports', 'example text', 'an import here', 'to export this'])(
+    'leaves %j alone',
+    (value) => {
+      expect(printCanonical(paragraph(value), 'mdx')).toBe(value);
+    },
+  );
+
+  it('only escapes a byte order mark at the start of a line', () => {
+    const value = `a${String.fromCharCode(0xfeff)}b`;
+    expect(printCanonical(paragraph(value), 'md')).toBe(value);
+  });
+
+  it('keeps a byte order mark that opens a block', () => {
+    const value = `${String.fromCharCode(0xfeff)}a`;
+    const printed = printCanonical(paragraph(value), 'md');
+    expect(parsed(printed, 'md').children[0]).toMatchObject({ children: [{ value }] });
+  });
+
   it('escapes what would otherwise change the meaning', () => {
     const edited: MdastBlock = {
       type: 'paragraph',
@@ -177,6 +347,5 @@ describe('edited blocks', () => {
     expect(printCanonical(edited, 'mdx')).toBe(
       '# not a \\*heading\\* \\<script>'.replace('# ', '\\# '),
     );
-    expect(serialize(parsed('a\n', 'md')).length).toBe(2);
   });
 });
