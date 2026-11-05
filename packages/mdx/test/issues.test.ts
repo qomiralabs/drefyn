@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseForStore } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
 import { codes, issuesOf, parsed, policy } from './helpers.ts';
 
 const withNote = policy({ components: new Set(['Note', 'Tabs.Item']) });

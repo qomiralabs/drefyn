@@ -1,13 +1,5 @@
-import { parentPort, workerData } from 'node:worker_threads';
+import { serveJobs } from './worker-host.ts';
 import { parseForStore } from './parse.ts';
-import type { Dialect, RenderPolicy } from './types.ts';
 
-interface ParseJob {
-  readonly source: string;
-  readonly dialect: Dialect;
-  readonly policy: RenderPolicy;
-}
-
-// Checked by zod in the parent before the thread starts.
-const { source, dialect, policy } = workerData as ParseJob;
-parentPort?.postMessage(parseForStore(source, dialect, policy));
+// The page, dialect and policy were checked by zod in the parent before they crossed.
+serveJobs(({ source, dialect, policy }) => parseForStore(source, dialect, policy));

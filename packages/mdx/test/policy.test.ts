@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_LIMITS, parseForStore } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { Dialect, RenderPolicy } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
 import { limits, parsed, policy } from './helpers.ts';
 
 describe('the policy and dialect arguments', () => {
