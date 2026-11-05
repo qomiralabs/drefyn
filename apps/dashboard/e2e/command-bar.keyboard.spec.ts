@@ -4,6 +4,7 @@ import { places } from '../src/shell/places.ts';
 import type { Command } from '../src/shell/commands.ts';
 import { test } from './csp.ts';
 import { commandBar, openShell, ROUTES } from './fixtures.ts';
+import { COCKPIT, STATUS } from './incident-helpers.ts';
 
 // Acme as the seed makes it, so the list below is the registry the owner gets on the page.
 const SEEDED = {
@@ -15,8 +16,13 @@ const SEEDED = {
 
 const REGISTRY = [...places('acme', SEEDED), startIncidentCommand('acme')];
 
-// The one product with a single project goes straight to it.
-const LANDS_ON: Readonly<Record<string, string>> = { '/acme/status': '/acme/status/acme-status' };
+// Where an entry's target hands over. The one product with a single project goes straight to
+// it, and starting an incident passes through its own URL on the way to the cockpit, so that
+// URL is only ever seen for a moment.
+const LANDS_ON: Readonly<Record<string, string>> = {
+  '/acme/status': STATUS,
+  [startIncidentCommand('acme').href]: COCKPIT,
+};
 
 const rowText = (entry: Command) => `${entry.name}, ${entry.kind}`;
 
