@@ -90,6 +90,23 @@ describe('no-tier-literals', () => {
     expect(await lintAt(path, code)).toEqual([]);
   });
 
+  it('knows the package when ESLint runs from inside it, as each package lint does', async () => {
+    const inside = makeEslint(join(root, 'packages/entitlements'), { [RULE]: 'error' });
+    const code = "export const a = (t: string) => t === 'growth';";
+    const results = await inside.lintText(code, {
+      filePath: join(root, 'packages/entitlements/src/table.ts'),
+    });
+    expect(reports(results)).toEqual([]);
+  });
+
+  it('still reports from inside an app, whatever folder ESLint runs from', async () => {
+    const inside = makeEslint(join(root, 'apps/web'), { [RULE]: 'error' });
+    const results = await inside.lintText("export const a = (t: string) => t === 'growth';", {
+      filePath: join(root, 'apps/web/src/check.ts'),
+    });
+    expect(reports(results)).toHaveLength(1);
+  });
+
   it.each(['apps/packages/entitlements/src/x.ts', 'packages/entitlements-extra/src/x.ts'])(
     'does not mistake %s for the entitlements package',
     async (path) => {

@@ -1,6 +1,5 @@
-import { relative, sep } from 'node:path';
 import type { Rule } from 'eslint';
-import { isRecord } from './workspace.ts';
+import { cachedWorkspace, isRecord, ownerOf, workspaceRootFor } from './workspace.ts';
 
 // A hard coded plan check passes every test until the plans change, and then one product
 // silently disagrees with the others. Each form below decides something by plan name, so it
@@ -42,9 +41,11 @@ function keyedByTier(property: unknown): boolean {
   return key['type'] === 'Identifier' ? TIERS.has(key['name']) : isTierLiteral(key);
 }
 
-function inEntitlements(filename: string, cwd: string): boolean {
-  const [first, second] = relative(cwd, filename).split(sep);
-  return first === 'packages' && second === 'entitlements';
+// Asks the workspace, not the path from cwd: each package lints from its own folder.
+function inEntitlements(file: string, settings: unknown): boolean {
+  const root = workspaceRootFor(file, settings);
+  if (root === undefined) return false;
+  return ownerOf(cachedWorkspace(root), file)?.name === '@drefyn/entitlements';
 }
 
 export const noTierLiterals: Rule.RuleModule = {
@@ -58,7 +59,7 @@ export const noTierLiterals: Rule.RuleModule = {
     },
   },
   create(context) {
-    if (inEntitlements(context.filename, context.cwd)) return {};
+    if (inEntitlements(context.filename, context.settings)) return {};
     return {
       BinaryExpression(node) {
         if (!EQUALITY.has(node.operator)) return;
