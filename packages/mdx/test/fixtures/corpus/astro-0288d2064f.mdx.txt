@@ -1,0 +1,16 @@
+---
+title: Astro.clientAddress no se puede usar dentro de rutas prerenderizadas.
+i18nReady: true
+githubURL: https://github.com/withastro/astro/blob/main/packages/astro/src/core/errors/errors-data.ts
+---
+
+> **PrerenderClientAddressNotAvailable**: `Astro.clientAddress` cannot be used inside prerendered route NAME.
+
+## ¿Qué salió mal?
+
+La propiedad `Astro.clientAddress` no se puede usar dentro de rutas prerrenderizadas.
+
+**Ver también:**
+
+-  [Renderizado bajo demanda](/es/guides/on-demand-rendering/)
+-  [`Astro.clientAddress`](/es/reference/api-reference/#clientaddress)

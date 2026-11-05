@@ -68,3 +68,10 @@ Images the repository pulls by digest and never ships. Each digest is the multi 
 | Image                     | Used by                                                                      | Source                               | Licence |
 | ------------------------- | ---------------------------------------------------------------------------- | ------------------------------------ | ------- |
 | `axllent/mailpit:v1.32.0` | `deploy/compose.yaml` test profile, `scripts/email-integration` (tests only) | `https://github.com/axllent/mailpit` | MIT     |
+
+## MDX test corpus
+
+Real Markdown and MDX pages under `packages/mdx/test/fixtures/corpus`, copied unchanged and used
+only by tests and the bench; they never ship. `packages/mdx/test/fixtures/manifest.json` names the
+source repo, commit, path, licence and SHA-256 of each file, and a test fails if one drifts. Each
+source repo's licence file sits in `packages/mdx/test/fixtures/licenses`.
