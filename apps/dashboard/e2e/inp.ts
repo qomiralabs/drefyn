@@ -12,6 +12,8 @@ export interface InpReading {
   readonly inputDelay: number;
   readonly processing: number;
   readonly presentation: number;
+  // The timed step alone, which the session value above can hide behind an earlier press.
+  readonly press: number;
 }
 
 interface VitalsWindow {
@@ -30,7 +32,8 @@ interface VitalsWindow {
       options: { readonly reportAllChanges: true; readonly durationThreshold: number },
     ) => void;
   };
-  inpReadings: InpReading[];
+  inpReadings: Omit<InpReading, 'press'>[];
+  pressDurations: number[];
 }
 
 // By path, because the package's exports leave out the one build a page can evaluate.
@@ -39,10 +42,8 @@ const library = readFileSync(
   'utf8',
 );
 
-// Starts watching now, so what a scenario did to get ready stays out of the value: the browser
-// keeps earlier events only from 104 ms up, and those would count against the scenario, which
-// can only read too high. Every change reports, so the value is there without leaving the page,
-// and 16 ms is the lowest threshold the browser allows, so a fast press still gives a number.
+// Every change reports, so the value is there without leaving the page, and 16 ms is the lowest
+// threshold the browser allows, so a fast press still gives a number.
 export async function watchInp(page: Page): Promise<void> {
   await page.evaluate(`${library}\nglobalThis.webVitals = webVitals;`);
   await page.evaluate(() => {
@@ -64,6 +65,20 @@ export async function watchInp(page: Page): Promise<void> {
   });
 }
 
+// From here on, so the step being timed reads apart from whatever led up to it. Not buffered, or
+// the browser would hand over earlier presses too.
+export async function watchPress(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const vitals = window as unknown as VitalsWindow;
+    vitals.pressDurations = [];
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as PerformanceEventTiming[]) {
+        if (entry.interactionId > 0) vitals.pressDurations.push(entry.duration);
+      }
+    }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
+  });
+}
+
 // Keep the session open: a closed one takes its throttle with it.
 export async function slowCpu(page: Page): Promise<CDPSession> {
   const client = await page.context().newCDPSession(page);
@@ -78,14 +93,19 @@ export async function readInp(page: Page): Promise<InpReading> {
     page.evaluate(
       () =>
         new Promise<InpReading | null>((resolve) => {
-          const { inpReadings } = window as unknown as VitalsWindow;
+          const vitals = window as unknown as VitalsWindow;
           let frames = 4;
           const next = () => {
             frames -= 1;
             if (frames > 0) requestAnimationFrame(next);
             else
               requestIdleCallback(() => {
-                resolve(inpReadings.at(-1) ?? null);
+                const reading = vitals.inpReadings.at(-1);
+                resolve(
+                  reading === undefined
+                    ? null
+                    : { ...reading, press: Math.max(0, ...vitals.pressDurations) },
+                );
               });
           };
           requestAnimationFrame(next);

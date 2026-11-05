@@ -1,6 +1,6 @@
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import { commandBar, openShell, products, ROUTES } from './fixtures.ts';
-import { readInp, recordInp, slowCpu, watchInp, type InpReading } from './inp.ts';
+import { readInp, recordInp, slowCpu, watchInp, watchPress, type InpReading } from './inp.ts';
 import { describeInp, summarize } from './inp-summary.ts';
 import { test } from './test.ts';
 import { archive, openPages, select, toastRegion } from './undo-helpers.ts';
@@ -8,10 +8,13 @@ import { archive, openPages, select, toastRegion } from './undo-helpers.ts';
 const BUDGET_MS = 200;
 const SAMPLES = 7;
 
-// Each scenario gets a fresh page, ready and quiet, then the part that is timed.
+// Each scenario gets a fresh page, ready and quiet. Then the slowdown starts, and whatever a
+// person does first happens under it, because work left over from that step is part of what
+// the timed press competes with.
 interface Scenario {
   readonly name: string;
   readonly ready: (page: Page) => Promise<void>;
+  readonly first?: (page: Page) => Promise<void>;
   readonly act: (page: Page) => Promise<void>;
 }
 
@@ -46,11 +49,8 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'optimistic-archive',
-    ready: async (page) => {
-      await openPages(page);
-      await select(page, 'Refunds');
-      await expect(archive(page)).not.toHaveAttribute('aria-disabled', 'true');
-    },
+    ready: openPages,
+    first: (page) => select(page, 'Refunds'),
     act: async (page) => {
       await archive(page).click();
       await expect(toastRegion(page).getByText('Archived Refunds.')).toBeVisible();
@@ -64,6 +64,8 @@ async function sample(context: BrowserContext, scenario: Scenario): Promise<InpR
   await page.waitForLoadState('networkidle');
   await watchInp(page);
   await slowCpu(page);
+  await scenario.first?.(page);
+  await watchPress(page);
   await scenario.act(page);
   const reading = await readInp(page);
   await page.close();
@@ -77,13 +79,18 @@ for (const scenario of SCENARIOS) {
     test.setTimeout(120_000);
     const readings: InpReading[] = [];
     for (let i = 0; i < SAMPLES; i += 1) readings.push(await sample(context, scenario));
-    const summary = summarize(
+    const session = summarize(
       scenario.name,
       readings.map((r) => r.value),
     );
-    console.log(describeInp(summary));
-    recordInp(summary, readings);
-    expect(summary.median, `median of ${String(SAMPLES)} samples`).toBeLessThan(BUDGET_MS);
+    const press = summarize(
+      `${scenario.name}-press`,
+      readings.map((r) => r.press),
+    );
+    console.log(`${describeInp(session)}\n${describeInp(press)}`);
+    recordInp(session, readings);
+    expect(session.median, `median of ${String(SAMPLES)} samples`).toBeLessThan(BUDGET_MS);
+    expect(press.median, `median press of ${String(SAMPLES)} samples`).toBeLessThan(BUDGET_MS);
   });
 }
 
@@ -92,6 +99,7 @@ test('a handler that blocks for 300 ms reads over budget', async ({ page }) => {
   await openShell(page, ROUTES.overview);
   await page.waitForLoadState('networkidle');
   await watchInp(page);
+  await watchPress(page);
   await page.evaluate(() => {
     document.getElementById('main')?.addEventListener('click', () => {
       const until = performance.now() + 300;
@@ -99,5 +107,7 @@ test('a handler that blocks for 300 ms reads over budget', async ({ page }) => {
     });
   });
   await page.getByRole('main').click({ position: { x: 4, y: 4 } });
-  expect((await readInp(page)).value).toBeGreaterThan(BUDGET_MS);
+  const { value, press } = await readInp(page);
+  expect(value).toBeGreaterThan(BUDGET_MS);
+  expect(press).toBeGreaterThan(BUDGET_MS);
 });

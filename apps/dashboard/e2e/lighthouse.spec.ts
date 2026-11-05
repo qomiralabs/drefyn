@@ -17,7 +17,8 @@ const SETTLE_MS = 1000;
 const REPORTS = fileURLToPath(new URL('../test-results/lighthouse/', import.meta.url));
 const PATHS = Object.values(SHELL_ROUTES).flat();
 
-test.describe.configure({ mode: 'serial' });
+// In order, one theme at a time, and a low score leaves the routes after it still scored.
+test.describe.configure({ mode: 'default' });
 
 const fileName = (path: string, theme: Theme) =>
   `${path.replaceAll('/', '-').replace(/^-/, '')}-${theme}.json`;
