@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_LIMITS } from '../src/index.ts';
 import { startParseThread } from '../src/thread.ts';
+import { maxTreeBytes } from '../src/wire.ts';
+import { honestPage } from './honest-page.ts';
 import { isolatedPolicy, parsed, policy } from './helpers.ts';
 import { allNew } from './print-helpers.ts';
 import { parseForStore } from '../src/parse.ts';
@@ -13,6 +16,49 @@ const KILL_AT_MS = 1_500;
 const ADJACENT_EMPHASIS = `${'*a*_b_'.repeat(3_000)}\n`;
 
 const limits = { timeoutMs: KILL_AT_MS, maxMemoryMb: 256, killGraceMs: 2_000 };
+
+// Time on the thread and not the clock: the kill asks how much work a page is, and on a busy
+// machine a clock measures the machine. The wall clock figure comes from a real host, in the PR.
+const METERED = new URL('./fixtures/workers/metered-print.ts', import.meta.url);
+const DEFAULT_KILL_MS = 2_000;
+
+describe('an honest page at the size limit', () => {
+  const printOn = async (tree: string) => {
+    const thread = startParseThread(METERED, {
+      timeoutMs: SLOW_MS,
+      maxMemoryMb: 512,
+      killGraceMs: 2_000,
+    });
+    const { result } = await thread.run({ tree, policy: isolatedPolicy() });
+    await thread.stop();
+    return result as unknown as { ok: boolean; value: { cpuMs: number; printed: boolean } };
+  };
+
+  it.each(['mdx', 'md'] as const)(
+    'fits inside the default kill as all new blocks in %s',
+    async (dialect) => {
+      const page = honestPage(dialect);
+      expect(Buffer.byteLength(page)).toBe(DEFAULT_LIMITS.maxBytes);
+      const tree = JSON.stringify(allNew(parsed(page, dialect)));
+      const { ok, value } = await printOn(tree);
+      expect(ok).toBe(true);
+      expect(value.printed).toBe(true);
+      expect(value.cpuMs).toBeLessThan(DEFAULT_KILL_MS);
+    },
+    SLOW_MS,
+  );
+
+  it(
+    'fits a tree inside the cap of the wire, with room to spare',
+    () => {
+      for (const dialect of ['mdx', 'md'] as const) {
+        const tree = JSON.stringify(parsed(honestPage(dialect), dialect));
+        expect(Buffer.byteLength(tree) * 2).toBeLessThan(maxTreeBytes(DEFAULT_LIMITS.maxBytes));
+      }
+    },
+    SLOW_MS,
+  );
+});
 
 describe('printing under the kill', () => {
   it(

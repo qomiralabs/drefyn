@@ -1,4 +1,5 @@
 import type { MdxRoot } from '../src/index.ts';
+import { honestPage } from './honest-page.ts';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
@@ -101,6 +102,29 @@ describe('the parse host', () => {
   );
 
   it(
+    'carries an honest page at the size limit across the wire',
+    async () => {
+      // A long kill: this is about the caps and held bytes. Time is proved on the thread.
+      const { url } = start([hostMain], {
+        DREFYN_PARSE_PORT: '0',
+        DREFYN_PARSE_TIMEOUT_MS: '60000',
+        DREFYN_PARSE_ORG_BUDGET_MS: '60000',
+        DREFYN_PARSE_PROJECT_BUDGET_MS: '60000',
+      });
+      const client = createParseClient({ url: await url });
+      const source = honestPage('md');
+      const first = await client.parse(page(source));
+      if (!first.ok) throw new Error('refused');
+      const { tenant, path, policy } = page('');
+      const result = await client.print({ tenant, path, policy, root: first.value.ast });
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error('refused');
+      expect(result.value.text).toBe(source);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
     'answers a hostile page with the kill, and the host lives',
     async () => {
       const { url } = start([hostMain], {
@@ -179,6 +203,27 @@ describe('the parse host', () => {
     },
     TIMEOUT_MS,
   );
+});
+
+describe('the bytes a host may hold', () => {
+  const env = (held: string, memory = '1536') => ({
+    DREFYN_PARSE_MAX_HELD_BYTES: held,
+    DREFYN_PARSE_HOST_MEMORY_MB: memory,
+  });
+
+  it('defaults to 256 MiB, which the default memory limit has room for', () => {
+    expect(parseHostConfig({}).maxHeldBytes).toBe(268_435_456);
+  });
+
+  it('counts them in the memory check at start', () => {
+    expect(() => parseHostConfig(env('536870912'))).toThrow('DREFYN_PARSE_HOST_MEMORY_MB');
+    expect(parseHostConfig(env('536870912', '1792')).maxHeldBytes).toBe(536_870_912);
+  });
+
+  it('refuses a cap too small to hold one page', () => {
+    expect(() => parseHostConfig(env('1'))).toThrow();
+    expect(() => parseHostConfig(env('not a number'))).toThrow();
+  });
 });
 
 describe('the host environment', () => {
@@ -278,8 +323,51 @@ describe('the client', () => {
     });
   });
 
+  const GOOD_ROOT = {
+    type: 'root',
+    astVersion: 1,
+    dialect: 'md',
+    eol: 'lf',
+    children: [{ type: 'paragraph' }],
+    tail: '',
+    tailOf: 'x',
+  };
+
+  it.each([
+    ['no tree', { text: 'a', issues: [] }],
+    ['a tree that is not one', { text: 'a', ast: { type: 'root' }, issues: [] }],
+    ['a list for a tree', { text: 'a', ast: [], issues: [] }],
+    ['the wrong version', { text: 'a', ast: { ...GOOD_ROOT, astVersion: 2 }, issues: [] }],
+    ['a child with no kind', { text: 'a', ast: { ...GOOD_ROOT, children: [{}] }, issues: [] }],
+    ['text that is not text', { text: 1, ast: GOOD_ROOT, issues: [] }],
+  ])('refuses an answer with %s, which a caller would store', async (_name, value) => {
+    const answer = JSON.stringify({ ok: true, value });
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('names the organization in a header on both routes, so the host can refuse early', async () => {
+    const seen: (string | null)[] = [];
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: (_url, init) => {
+        seen.push(new Headers(init?.headers).get('x-drefyn-organization'));
+        return Promise.resolve(new Response('{"ok":false,"error":[]}'));
+      },
+    });
+    await client.parse(page('a'));
+    await client.print(printRequest());
+    const { organizationId } = page('').tenant;
+    expect(seen).toEqual([organizationId, organizationId]);
+  });
+
   it('reads a print answer with bytes in it', async () => {
-    const answer = '{"ok":true,"value":{"text":"a","issues":[]}}';
+    const answer = JSON.stringify({ ok: true, value: { text: 'a', ast: GOOD_ROOT, issues: [] } });
     const client = createParseClient({
       url: 'http://parse.internal',
       fetch: answering(200, answer),

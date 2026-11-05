@@ -54,6 +54,30 @@ describe('what does not change the meaning of a page', () => {
     );
   });
 
+  it('how a list or a table leaves things unsaid', () => {
+    expect(of({ type: 'list', ordered: false, start: null, children: [] })).toBe(
+      of({ type: 'list', children: [] }),
+    );
+    expect(of({ type: 'list', ordered: false, start: 5, children: [] })).toBe(
+      of({ type: 'list', children: [] }),
+    );
+    expect(of({ type: 'list', ordered: true, start: null, children: [] })).toBe(
+      of({ type: 'list', ordered: true, start: 1, children: [] }),
+    );
+    expect(of({ type: 'table', align: [null, null], children: [] })).toBe(
+      of({ type: 'table', children: [] }),
+    );
+    expect(of({ type: 'table', align: ['left', null], children: [] })).toBe(
+      of({ type: 'table', align: ['left'], children: [] }),
+    );
+  });
+
+  it('the case of a definition name, which a parser folds', () => {
+    expect(of({ type: 'definition', identifier: 'A', url: 'b' })).toBe(
+      of({ type: 'definition', identifier: 'a', url: 'b' }),
+    );
+  });
+
   it('a code line of only whitespace', () => {
     expect(of({ type: 'code', value: 'a\n \t \nb' })).toBe(of({ type: 'code', value: 'a\n\nb' }));
   });
@@ -86,6 +110,32 @@ describe('what does', () => {
       'a heading depth',
       { type: 'heading', depth: 1, children: [] },
       { type: 'heading', depth: 2, children: [] },
+    ],
+    [
+      'a definition url',
+      { type: 'definition', identifier: 'a', url: 'b' },
+      { type: 'definition', identifier: 'a', url: 'c' },
+    ],
+    [
+      'a definition name',
+      { type: 'definition', identifier: 'a', url: 'b' },
+      { type: 'definition', identifier: 'c', url: 'b' },
+    ],
+    [
+      'a footnote name',
+      { type: 'footnoteDefinition', identifier: 'a', children: [] },
+      { type: 'footnoteDefinition', identifier: 'b', children: [] },
+    ],
+    ['a list kind', { type: 'list', ordered: true, children: [] }, { type: 'list', children: [] }],
+    [
+      'a list start',
+      { type: 'list', ordered: true, start: 2, children: [] },
+      { type: 'list', ordered: true, start: 3, children: [] },
+    ],
+    [
+      'a column alignment',
+      { type: 'table', align: ['left'], children: [] },
+      { type: 'table', align: ['right'], children: [] },
     ],
     ['a jsx name', jsx({ name: 'A' }), jsx({ name: 'B' })],
     ['a fragment', jsx({ name: null }), jsx({ name: 'null' })],

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { sourceOf } from '../src/canonical.ts';
 import { printPage } from '../src/print-job.ts';
 import type { MdxBlock, MdxIssueCode, MdxRoot, PrintResult } from '../src/index.ts';
 import { rawOf } from '../src/index.ts';
 import { isolatedPolicy, parsed } from './helpers.ts';
-import { allNew, insert, withChild } from './print-helpers.ts';
+import { allNew, insert, without, withChild } from './print-helpers.ts';
 
 const policy = isolatedPolicy();
 const print = (root: unknown, use = policy): PrintResult =>
@@ -52,6 +53,68 @@ describe('printing a page in the host', () => {
   it('ignores an empty paragraph an editor leaves behind', () => {
     const root = parsed('a\n', 'md');
     expect(text(print(insert(root, 1, { type: 'paragraph', children: [] })))).toContain('a');
+  });
+});
+
+describe('a block printing its stored bytes', () => {
+  const CHANGED = 'mdx.print_changed_meaning';
+  const forged = (raw: string, source = 'Safe text\n') => {
+    const root = parsed(source, 'md');
+    return withChild(root, 0, (block) => {
+      const tree = rawOf(block);
+      const gapBefore = block.source?.gapBefore ?? '';
+      const stored = { raw, gapBefore, rawOf: tree, sourceOf: sourceOf(tree, gapBefore, raw) };
+      return { ...block, source: stored };
+    });
+  };
+
+  it.each([
+    ['other words', 'Wire money to Evil'],
+    ['a live link', '[click](https://evil.test)'],
+    ['a remote image', '![x](https://evil.test/t.png)'],
+  ])('refuses forged bytes that only change %s', (_name, raw) => {
+    expect(code(print(forged(raw)))).toBe(CHANGED);
+  });
+
+  it('refuses a forged reference that the tree does not hold', () => {
+    expect(code(print(forged('[x][y]', 'Safe text\n\n[y]: https://evil.test\n')))).toBe(CHANGED);
+  });
+
+  it('holds an edit in the block beside it to the looser check', () => {
+    const root = parsed('old\n\nkept\n', 'md');
+    const edited = withChild(
+      root,
+      0,
+      (block) => ({ ...block, ...paragraph('https://example.com') }) as MdxBlock,
+    );
+    expect(text(print(edited))).toBe('https://example.com\n\nkept\n');
+  });
+
+  it('lets a definition go, though the reference to it now reads as text', () => {
+    const root = parsed('[a]\n\n[a]: b\n', 'md');
+    expect(text(print(without(root, 1)))).toBe('[a]');
+  });
+
+  it('lets a definition arrive, though the text naming it now reads as a reference', () => {
+    const root = parsed('[a]\n', 'md');
+    const definition = { type: 'definition', identifier: 'a', label: 'a', url: 'b' };
+    expect(text(print(insert(root, 1, definition)))).toContain('[a]: b');
+  });
+
+  it('keeps an empty paragraph from shifting which block is compared', () => {
+    const root = parsed('kept\n', 'md');
+    expect(text(print(insert(root, 0, { type: 'paragraph', children: [] })))).toContain('kept');
+  });
+});
+
+describe('a tree that breaks the walks', () => {
+  it.each([
+    ['a null grandchild', { type: 'blockquote', children: [null] }],
+    ['a number for children', { type: 'blockquote', children: 3 }],
+    ['a value that is not text', { type: 'html', value: { a: 1 } }],
+    ['a list for a value', { type: 'code', value: [1] }],
+  ])('refuses %s without ending the thread', (_name, block) => {
+    expect(code(print(insert(parsed('a\n', 'md'), 1, block)))).toMatch(/^mdx\./);
   });
 });
 

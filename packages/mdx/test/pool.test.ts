@@ -595,7 +595,7 @@ describe('printing in the pool', () => {
   it('refuses a tree too big for its limits before the queue', async () => {
     const { pool, threads } = harness();
     const small = {
-      ...printing('x'.repeat(65)),
+      ...printing('x'.repeat(33)),
       policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
     };
     expect(await codeOf(pool.print(small))).toBe('mdx.too_large');
@@ -605,7 +605,7 @@ describe('printing in the pool', () => {
   it('takes a tree at exactly that size', async () => {
     const { pool, threads } = harness();
     const fits = {
-      ...printing('x'.repeat(64)),
+      ...printing('x'.repeat(32)),
       policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
     };
     const printed = pool.print(fits);

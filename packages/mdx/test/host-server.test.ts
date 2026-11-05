@@ -1,3 +1,4 @@
+import { request } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createParseClient } from '../src/client.ts';
 import { startParseHost } from '../src/host.ts';
@@ -6,7 +7,15 @@ import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
 import { refused } from '../src/result.ts';
 import { maxBodyBytes } from '../src/wire.ts';
-import { isolatedPolicy, ORG_A, parsed, poolConfig, PROJECT_A, PROJECT_B } from './helpers.ts';
+import {
+  isolatedPolicy,
+  ORG_A,
+  ORG_B,
+  parsed,
+  poolConfig,
+  PROJECT_A,
+  PROJECT_B,
+} from './helpers.ts';
 
 // The server alone, with threads that answer by rule. Real hosts are in host.test.ts.
 describe('the host server', () => {
@@ -77,7 +86,8 @@ describe('the host server', () => {
 
   it('cuts a body past its cap', async () => {
     const body = 'x'.repeat(maxBodyBytes(DEFAULT_LIMITS.maxBytes) + 1);
-    const answer = await fetch(`${url}/parse`, { method: 'POST', body }).then(
+    const headers = { 'x-drefyn-organization': ORG_A };
+    const answer = await fetch(`${url}/parse`, { method: 'POST', body, headers }).then(
       ({ status }) => status,
       () => 'cut',
     );
@@ -110,7 +120,8 @@ describe('the host server', () => {
   it('has no print on a GET, and cuts a print body past its own cap', async () => {
     expect((await fetch(`${url}/print`)).status).toBe(404);
     const body = 'x'.repeat(maxBodyBytes(DEFAULT_LIMITS.maxBytes) + 1);
-    const small = await fetch(`${url}/print`, { method: 'POST', body });
+    const headers = { 'x-drefyn-organization': ORG_A };
+    const small = await fetch(`${url}/print`, { method: 'POST', body, headers });
     expect(small.status).toBe(400);
   });
 
@@ -126,5 +137,136 @@ describe('the host server', () => {
     await expect.poll(() => hold.length).toBe(1);
     hold.shift()?.(refused('mdx.parse_failed'));
     await queued;
+  });
+});
+
+describe('the bytes a host holds', () => {
+  const SHARE = 4_000;
+  const ORG_HEADER = 'x-drefyn-organization';
+  let host: ParseHost;
+  let url: string;
+  const hold: ((result: ParseResult) => void)[] = [];
+
+  beforeAll(async () => {
+    host = await startParseHost({
+      config: poolConfig({ threads: 4, orgThreads: 3, projectThreads: 3 }),
+      maxHeldBytes: SHARE * 4,
+      port: 0,
+      logger: { warn: () => undefined },
+      startThread: () => ({
+        alive: () => true,
+        stop: () => Promise.resolve(),
+        run: () =>
+          new Promise((resolve) => {
+            hold.push((result) => {
+              resolve({ result, end: 'reusable', workMs: 1 });
+            });
+          }),
+      }),
+    });
+    const address = host.server.address();
+    if (typeof address !== 'object' || address === null) throw new Error('no port');
+    url = `http://127.0.0.1:${address.port}`;
+  });
+  afterAll(async () => {
+    host.server.closeAllConnections();
+    await new Promise((resolve) => host.server.close(resolve));
+  });
+
+  const frame = (organizationId: string, bytes: number) => ({
+    tenant: { organizationId, projectId: PROJECT_A },
+    path: 'docs/page.mdx',
+    source: 'a'.repeat(bytes),
+    dialect: 'md',
+    policy: { ...isolatedPolicy(), components: [] },
+  });
+  const post = (organization: string | undefined, body: string) =>
+    fetch(`${url}/parse`, {
+      method: 'POST',
+      body,
+      headers: organization === undefined ? {} : { [ORG_HEADER]: organization },
+    });
+  const sized = (organizationId: string, bytes: number) =>
+    JSON.stringify(frame(organizationId, bytes));
+  const finishAll = async () => {
+    while (hold.length > 0) {
+      hold.shift()?.(refused('mdx.parse_failed'));
+      await Promise.resolve();
+    }
+    await expect.poll(() => host.pool.stats().busy).toBe(0);
+  };
+
+  it('needs the organization before it reads a body', async () => {
+    expect((await post(undefined, sized(ORG_A, 1))).status).toBe(400);
+    expect((await post('', sized(ORG_A, 1))).status).toBe(400);
+  });
+
+  it('checks the organization against the frame', async () => {
+    expect((await post(ORG_B, sized(ORG_A, 1))).status).toBe(400);
+  });
+
+  it('refuses on a declared length, without reading the body', async () => {
+    const response = await post(ORG_A, sized(ORG_A, SHARE + 1));
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual(refused('mdx.queue_full'));
+    expect(hold).toEqual([]);
+  });
+
+  it('refuses a body with no declared length as soon as it passes the share', async () => {
+    const answer = await new Promise<number>((resolve, reject) => {
+      const { hostname, port } = new URL(url);
+      const sending = request(
+        { hostname, port, path: '/parse', method: 'POST', headers: { [ORG_HEADER]: ORG_A } },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        },
+      );
+      sending.on('error', reject);
+      sending.write('x'.repeat(SHARE + 1));
+    });
+    expect(answer).toBe(429);
+  });
+
+  it('counts a queued job until it finishes, and only against its organization', async () => {
+    const first = post(ORG_A, sized(ORG_A, SHARE / 2));
+    await expect.poll(() => hold.length).toBe(1);
+    expect((await post(ORG_A, sized(ORG_A, SHARE / 2))).status).toBe(429);
+    const other = post(ORG_B, sized(ORG_B, SHARE / 2));
+    await expect.poll(() => hold.length).toBe(2);
+    await finishAll();
+    await first;
+    await other;
+    const again = post(ORG_A, sized(ORG_A, SHARE / 2));
+    await expect.poll(() => hold.length).toBe(1);
+    await finishAll();
+    await again;
+  });
+
+  it('gives back what a frame that fails its checks held', async () => {
+    for (let round = 0; round < 8; round += 1) {
+      expect((await post(ORG_A, 'x'.repeat(SHARE - 1))).status).toBe(400);
+    }
+  });
+
+  it('gives back what a body cut off half way held', async () => {
+    const { hostname, port } = new URL(url);
+    await new Promise<void>((resolve) => {
+      const sending = request({
+        hostname,
+        port,
+        path: '/parse',
+        method: 'POST',
+        headers: { [ORG_HEADER]: ORG_A, 'content-length': String(SHARE) },
+      });
+      sending.on('error', () => {
+        resolve();
+      });
+      sending.write('x'.repeat(SHARE - 10), () => {
+        sending.destroy();
+        resolve();
+      });
+    });
+    await expect.poll(async () => (await post(ORG_A, 'x'.repeat(SHARE - 1))).status).toBe(400);
   });
 });
