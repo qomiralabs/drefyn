@@ -27,6 +27,14 @@ export async function countTo(address: string): Promise<number> {
   return (await messagesTo(address)).length;
 }
 
+// A sign in from a browser the person has not used. The subject is the one place the mail
+// says which notice it is.
+export async function newDeviceNotices(address: string): Promise<number> {
+  const query = new URLSearchParams({ query: `to:"${address}" subject:"New sign in"` });
+  const body = (await api(`search?${query.toString()}`)) as { messages: readonly Summary[] };
+  return body.messages.length;
+}
+
 async function textOf(id: string): Promise<string> {
   return ((await api(`message/${id}`)) as { Text: string }).Text;
 }

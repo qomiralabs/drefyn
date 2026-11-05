@@ -92,11 +92,3 @@ export function servedOverHttps(env: Readonly<Record<string, string | undefined>
   if (!parsed.success) throw new Error('DREFYN_APP_ORIGIN must be an http or https URL');
   return parsed.data?.startsWith('https:') ?? false;
 }
-
-// For the sign out route: the browser drops every cookie for the origin, including any the
-// server no longer knows it set.
-export function withSignOutHeaders(response: Response): Response {
-  response.headers.set('Clear-Site-Data', '"cookies"');
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
-}

@@ -430,13 +430,23 @@ describe('startSession', () => {
 });
 
 describe('sign out and revocation', () => {
-  it('signOut deletes the one row and clears the cookie', async () => {
+  it('signOut deletes the one row and expires the session cookie', async () => {
     const { sessions, scripted } = setup(() => [{ id: SESSION }]);
     const cookies = await sessions.signOut(sessionInfo());
     const [del] = scripted.statements();
     expect(del?.sql).toMatch(/^delete from "sessions" where "id" = \$1/);
     expect(del?.parameters).toEqual([SESSION]);
-    expect(cookies).toEqual([{ name: config.cookies.session, value: '', maxAgeSeconds: 0 }]);
+    expect(cookies).toContainEqual({ name: config.cookies.session, value: '', maxAgeSeconds: 0 });
+  });
+
+  // Read from the config, so a cookie added later is cleared unless someone decides otherwise.
+  it('signOut expires every cookie auth owns except the known device', async () => {
+    const { sessions } = setup(() => [{ id: SESSION }]);
+    const cookies = await sessions.signOut(sessionInfo());
+    const { device, ...rest } = config.cookies;
+    expect(cookies.map((cookie) => cookie.name).sort()).toEqual(Object.values(rest).sort());
+    expect(cookies.map((cookie) => cookie.name)).not.toContain(device);
+    expect(cookies.every((c) => c.value === '' && c.maxAgeSeconds === 0)).toBe(true);
   });
 
   it('signOutEverywhere deletes every row of the user and counts them', async () => {
@@ -487,6 +497,13 @@ describe('sign out and revocation', () => {
     const [select] = scripted.statements();
     expect(select?.sql).toMatch(/now\(\)/);
     expect(select?.sql).not.toMatch(/secret_hash/);
+  });
+
+  it('revokeSession refuses the current session and touches no row', async () => {
+    const { sessions, scripted } = setup(() => [{ id: SESSION }]);
+    const result = await sessions.revokeSession(sessionInfo(), SESSION);
+    expect(!result.ok && result.error.code).toBe('AUTH_FORBIDDEN');
+    expect(scripted.statements()).toEqual([]);
   });
 
   it('revokeSession deletes one row and says when there was none', async () => {
