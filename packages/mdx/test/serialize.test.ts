@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { MdxPrintError, rawOf, serialize } from '../src/index.ts';
+import { rawOf } from '../src/index.ts';
+import { MdxPrintError } from '../src/print.ts';
+import { serialize } from '../src/serialize.ts';
 import type { BlockSource, MdxBlock, MdxRoot } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
 import { sourceOf, tailOf } from '../src/canonical.ts';
 import { parsed } from './helpers.ts';
-import { allNew, without, withChild, withoutSource } from './print-helpers.ts';
+import { allNew, insert, without, withChild, withoutSource } from './print-helpers.ts';
 
 const SOURCE = 'One\n\nTwo\n';
 const BOM = String.fromCharCode(0xfeff);
@@ -16,11 +19,6 @@ const newBlock = (markdown: string, dialect: 'md' | 'mdx' = 'md'): MdxBlock => {
 
 const withText = (block: MdxBlock, value: string): MdxBlock =>
   ({ ...block, children: [{ type: 'text', value }] }) as MdxBlock;
-
-const insert = (root: MdxRoot, index: number, block: MdxBlock): MdxRoot => ({
-  ...root,
-  children: [...root.children.slice(0, index), block, ...root.children.slice(index)],
-});
 
 describe('serialize', () => {
   it('prints a block whose tree moved on from its source', () => {
@@ -84,6 +82,68 @@ describe('serialize', () => {
       expect(error).toMatchObject({ code: 'mdx.block_not_printable', blockIndex: 1 });
       expect(String(error)).not.toContain('Two');
     }
+  });
+});
+
+describe('the limits on a tree', () => {
+  const limited = (overrides: Partial<typeof DEFAULT_LIMITS>) => ({
+    ...DEFAULT_LIMITS,
+    ...overrides,
+  });
+  const NOT_PRINTABLE = expect.objectContaining({ code: 'mdx.block_not_printable' });
+
+  it('refuses more text than maxBytes', () => {
+    const root = parsed('a\n', 'md');
+    const big = { type: 'code', value: 'é'.repeat(6) };
+    expect(() => serialize(insert(root, 1, big), limited({ maxBytes: 12 }))).toThrow(NOT_PRINTABLE);
+    expect(serialize(insert(root, 1, big), limited({ maxBytes: 13 }))).toContain('é');
+  });
+
+  it('counts attribute text too', () => {
+    const element = {
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      children: [],
+      attributes: [{ type: 'mdxJsxAttribute', name: 'b', value: 'x'.repeat(50) }],
+    };
+    const root = insert(parsed('', 'mdx'), 0, element);
+    expect(() => serialize(root, limited({ maxBytes: 40 }))).toThrow(NOT_PRINTABLE);
+  });
+
+  it('refuses a tree deeper than maxDepth', () => {
+    const quote = { type: 'blockquote', children: [{ type: 'blockquote', children: [] }] };
+    const root = insert(parsed('', 'md'), 0, quote);
+    expect(() => serialize(root, limited({ maxDepth: 1 }))).toThrow(NOT_PRINTABLE);
+    expect(serialize(root, limited({ maxDepth: 2 }))).toBe('>\n> >');
+  });
+
+  it('refuses more nodes than maxNodes, attributes included', () => {
+    const element = {
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      children: [],
+      attributes: [{ type: 'mdxJsxAttribute', name: 'b' }],
+    };
+    const root = insert(parsed('', 'mdx'), 0, element);
+    expect(() => serialize(root, limited({ maxNodes: 1 }))).toThrow(NOT_PRINTABLE);
+    expect(serialize(root, limited({ maxNodes: 2 }))).toBe('<A b />');
+  });
+
+  it('refuses a deep tree whose indent would multiply its text', () => {
+    let tree: unknown = { type: 'code', value: 'a\n'.repeat(1_000) };
+    for (let depth = 0; depth < 32; depth += 1) tree = { type: 'blockquote', children: [tree] };
+    const root = insert(parsed('', 'md'), 0, tree);
+    expect(() => serialize(root, limited({ maxBytes: 8_192 }))).toThrow(NOT_PRINTABLE);
+  });
+
+  it('passes every page the parser passed, at its own limits', () => {
+    const page = '> - a *b*\n>\n>   c\n';
+    const root = parsed(page, 'md');
+    expect(serialize(allNew(root), limited({ maxBytes: page.length }))).toContain('c');
+  });
+
+  it('checks untouched text no differently, so a stored page keeps printing', () => {
+    expect(serialize(parsed('a\n', 'md'), limited({ maxBytes: 2 }))).toBe('a\n');
   });
 });
 

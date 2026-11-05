@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { printCanonical, rawOf, serialize } from '../src/index.ts';
+import { rawOf } from '../src/index.ts';
+import { printCanonical } from '../src/print.ts';
+import { serialize } from '../src/serialize.ts';
 import type { MdxBlock, MdxRoot } from '../src/index.ts';
 import { loadCorpus, parsed } from './helpers.ts';
 import { changedLines, withChild } from './print-helpers.ts';

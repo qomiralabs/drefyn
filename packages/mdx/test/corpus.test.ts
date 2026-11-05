@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { rawOf, serialize } from '../src/index.ts';
+import { rawOf } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { parseForStore } from '../src/parse.ts';
 import { loadCorpus, parsed, policy, sha256, VARIANTS } from './helpers.ts';
 

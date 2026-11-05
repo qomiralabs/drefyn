@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createParseClient } from '../src/client.ts';
 import type { ParseClientRequest } from '../src/client.ts';
 import { assertHostEnv, parseHostConfig } from '../src/host-config.ts';
-import { DEFAULT_LIMITS, serialize } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { isolatedPolicy, ORG_A, PROJECT_A } from './helpers.ts';
 
 const TIMEOUT_MS = 60_000;

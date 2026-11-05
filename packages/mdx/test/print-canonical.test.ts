@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MdxPrintError, printCanonical } from '../src/index.ts';
+import { MdxPrintError, printCanonical } from '../src/print.ts';
 import type { Dialect, MdastBlock, MdxBlock } from '../src/index.ts';
 import { parsed } from './helpers.ts';
 
@@ -335,6 +335,121 @@ describe('nodes the dialect cannot hold', () => {
     },
     SLOW_MS,
   );
+});
+
+describe('values that would print live', () => {
+  const inPage = (printed: string, dialect: Dialect) =>
+    parsed(`${printed}\n`, dialect).children.map(({ type }) => type);
+
+  it.each(['md', 'mdx'] as const)(
+    'keeps a line ending in inline code on one line in %s',
+    (dialect) => {
+      const value = 'a\n\n<script>x()</script>';
+      const block: MdastBlock = { type: 'paragraph', children: [{ type: 'inlineCode', value }] };
+      expect(printCanonical(block, dialect)).toBe('`a  <script>x()</script>`');
+      expect(inPage(printCanonical(block, dialect), dialect)).toEqual(['paragraph']);
+    },
+  );
+
+  it('does the same with a backtick in the value and in a heading', () => {
+    const value = '\`\n\n# inj\r\n';
+    const code = { type: 'inlineCode', value };
+    const paragraph = { type: 'paragraph', children: [code] } as MdastBlock;
+    const heading = { type: 'heading', depth: 1, children: [code] } as MdastBlock;
+    expect(inPage(printCanonical(paragraph, 'md'), 'md')).toEqual(['paragraph']);
+    expect(printCanonical(heading, 'md')).toMatch(/^# /);
+    expect(inPage(printCanonical(heading, 'md'), 'md')).toEqual(['heading']);
+  });
+
+  const yaml = { type: 'yaml', value: '<script>x()</script>\n\n# inj' };
+  const CONTAINERS: readonly (readonly [string, Dialect, unknown])[] = [
+    ['a quote', 'md', { type: 'blockquote', children: [yaml] }],
+    ['a list item', 'md', { type: 'list', children: [{ type: 'listItem', children: [yaml] }] }],
+    ['a footnote', 'md', { type: 'footnoteDefinition', identifier: 'a', children: [yaml] }],
+    ['jsx', 'mdx', { type: 'mdxJsxFlowElement', name: 'A', attributes: [], children: [yaml] }],
+  ];
+
+  it.each(CONTAINERS)('refuses frontmatter nested in %s', (_name, dialect, block) => {
+    expect(() => printCanonical(block as MdastBlock, dialect)).toThrow(MdxPrintError);
+  });
+
+  const element = (name: unknown, attribute = 'b') =>
+    ({
+      type: 'mdxJsxFlowElement',
+      name,
+      attributes: [{ type: 'mdxJsxAttribute', name: attribute, value: 'c' }],
+      children: [],
+    }) as MdastBlock;
+
+  it.each(['Note href="javascript:x"', 'a b', 'a>', '1a', 'a.', '.a', 'a:b:c', 'a.b:c', ''])(
+    'refuses %j as a jsx name',
+    (name) => {
+      expect(() => printCanonical(element(name), 'mdx')).toThrow(MdxPrintError);
+    },
+  );
+
+  it.each(['a', 'A', 'a-b', 'a.b.c', 'a:b', '$a', '_a', 'été', 'a1'])(
+    'prints %j as a name',
+    (name) => {
+      expect(printCanonical(element(name), 'mdx')).toContain(`<${name} `);
+    },
+  );
+
+  it('prints a fragment, which has no name', () => {
+    const fragment = { ...element(null), attributes: [] } as MdastBlock;
+    expect(printCanonical(fragment, 'mdx')).toBe('<></>');
+  });
+
+  it.each(['href="javascript:x" b', 'a.b', 'a b', '1a', '', 'a:b:c', 'a='])(
+    'refuses %j as an attribute name',
+    (name) => {
+      expect(() => printCanonical(element('A', name), 'mdx')).toThrow(MdxPrintError);
+    },
+  );
+
+  it.each(['b', 'b-c', 'b:c', 'aria-label'])('prints %j as an attribute name', (name) => {
+    expect(printCanonical(element('A', name), 'mdx')).toBe(`<A ${name}="c" />`);
+  });
+
+  it('checks the names of inline jsx and of nested jsx too', () => {
+    const inline = {
+      type: 'paragraph',
+      children: [{ type: 'mdxJsxTextElement', name: 'a b', attributes: [], children: [] }],
+    } as MdastBlock;
+    expect(() => printCanonical(inline, 'mdx')).toThrow(MdxPrintError);
+    const nested = { ...element('A'), children: [element('a b')] } as MdastBlock;
+    expect(() => printCanonical(nested, 'mdx')).toThrow(MdxPrintError);
+  });
+
+  it('prints an attribute that spreads', () => {
+    const spread = {
+      ...element('A'),
+      attributes: [{ type: 'mdxJsxExpressionAttribute', value: '...b' }],
+    } as MdastBlock;
+    expect(printCanonical(spread, 'mdx')).toBe('<A {...b} />');
+  });
+
+  it('encodes an ampersand in an attribute string, or it would decode on reparse', () => {
+    const block = {
+      ...element('A'),
+      attributes: [{ type: 'mdxJsxAttribute', name: 'b', value: '&lt;script&gt;' }],
+    } as MdastBlock;
+    const once = printCanonical(block, 'mdx');
+    expect(once).toBe('<A b="&amp;lt;script&amp;gt;" />');
+    expect(parsed(`${once}\n`, 'mdx').children[0]).toMatchObject({
+      attributes: [{ value: '&lt;script&gt;' }],
+    });
+  });
+
+  it('never reads a table alignment off the object prototype', () => {
+    const table = {
+      type: 'table',
+      align: ['constructor'],
+      children: [{ type: 'tableRow', children: [{ type: 'tableCell', children: [] }] }],
+    } as MdastBlock;
+    expect(printCanonical(table, 'md')).not.toContain('native code');
+    expect(printCanonical(table, 'md')).toContain('| - |');
+  });
 });
 
 describe('a reference with a colon after it', () => {

@@ -1,4 +1,4 @@
-import { printCanonical } from '../src/index.ts';
+import { printCanonical } from '../src/print.ts';
 import type { MdxBlock, MdxRoot } from '../src/index.ts';
 
 interface Walkable {
@@ -25,6 +25,11 @@ export const withChild = (
 ): MdxRoot => ({
   ...root,
   children: root.children.map((block, at) => (at === index ? change(block) : block)),
+});
+
+export const insert = (root: MdxRoot, index: number, block: unknown): MdxRoot => ({
+  ...root,
+  children: [...root.children.slice(0, index), block as MdxBlock, ...root.children.slice(index)],
 });
 
 export const without = (root: MdxRoot, index: number): MdxRoot => ({

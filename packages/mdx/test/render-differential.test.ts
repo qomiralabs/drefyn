@@ -3,7 +3,7 @@ import { toHtml } from 'hast-util-to-html';
 import type { Root } from 'mdast';
 import { toHast } from 'mdast-util-to-hast';
 import { describe, expect, it } from 'vitest';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import type { Dialect, MdxBlock, MdxRoot } from '../src/index.ts';
 import { loadCorpus, parsed } from './helpers.ts';
 import { allNew } from './print-helpers.ts';

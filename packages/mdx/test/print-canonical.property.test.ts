@@ -1,6 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { printCanonical, rawOf, serialize } from '../src/index.ts';
+import { rawOf } from '../src/index.ts';
+import { printCanonical } from '../src/print.ts';
+import { serialize } from '../src/serialize.ts';
 import type { Dialect, MdxBlock, MdxRoot } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
 import { dialectArbitrary, documentArbitrary } from '../fuzz/documents.ts';
