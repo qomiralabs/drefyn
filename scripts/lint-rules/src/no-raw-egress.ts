@@ -316,7 +316,7 @@ export const noRawEgress: Rule.RuleModule = {
                         type: 'object',
                         additionalProperties: false,
                         required: ['global'],
-                        properties: { global: { enum: ['fetch'] } },
+                        properties: { global: { enum: ['fetch'] }, reads: { enum: [true] } },
                       },
                     ],
                   },
@@ -427,6 +427,7 @@ export const noRawEgress: Rule.RuleModule = {
       if (!typeOnly && isBannedModule(spec)) report(loc, spec);
     });
     const allowsFetch = allowances.some((each) => 'global' in each);
+    const allowsFetchValue = allowances.some((each) => 'global' in each && each.reads === true);
     return {
       ...modules,
       ImportDeclaration: (node) => {
@@ -508,6 +509,7 @@ export const noRawEgress: Rule.RuleModule = {
         for (const reference of references) {
           const { name } = reference.identifier;
           if (!GLOBAL_APIS.has(name) || !isRuntimeReference(reference)) continue;
+          if (name === 'fetch' && allowsFetchValue) continue;
           if (name === 'fetch' && allowsFetch && isDirectCall(reference.identifier)) continue;
           report(reference.identifier.loc, name);
         }

@@ -24,6 +24,22 @@ function leaves(value: string, origin: string): boolean {
   return !onOrigin(value, origin);
 }
 
+// The one redirect that leaves on purpose: a start route to its own provider's fixed page.
+const PROVIDER_PAGES: Readonly<Record<string, string>> = {
+  github: 'https://github.com/login/oauth/authorize',
+  google: 'https://accounts.google.com/o/oauth2/v2/auth',
+};
+
+export function providerHandover(url: string, location: string): boolean {
+  const provider = /^\/auth\/oauth\/(github|google)\/start$/.exec(new URL(url).pathname)?.[1];
+  const target = URL.parse(location);
+  return (
+    provider !== undefined &&
+    target !== null &&
+    `${target.origin}${target.pathname}` === PROVIDER_PAGES[provider]
+  );
+}
+
 export function locationProblem(value: string, origin: string): string | null {
   return leaves(value, origin) ? value : null;
 }

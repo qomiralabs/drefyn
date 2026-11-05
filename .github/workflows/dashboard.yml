@@ -81,12 +81,20 @@ jobs:
         env:
           PROJECT: ${{ matrix.project }}
         # Node comes from the runner, mounted read only; the host network reaches Postgres.
+        # The add-host lines are the egress block: in this container every provider host is
+        # loopback, so no test can reach a real one whatever the fake does. The check after
+        # the tests fails the job if the block is gone or a server tried to leave anyway.
         run: |
           docker run --rm --ipc=host --network host \
+            --add-host github.com:127.0.0.1 \
+            --add-host api.github.com:127.0.0.1 \
+            --add-host accounts.google.com:127.0.0.1 \
+            --add-host oauth2.googleapis.com:127.0.0.1 \
+            --add-host www.googleapis.com:127.0.0.1 \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
             -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
-            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}"'
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}" && node e2e/egress-check.ts'
       - name: Postgres log
         if: failure()
         run: docker compose -f deploy/compose.yaml logs postgres

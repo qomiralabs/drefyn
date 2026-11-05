@@ -26,8 +26,13 @@ test('the whole first run works with scripts off', async ({ page }) => {
 test('Sign out works with scripts off', async ({ page }) => {
   await signInByCode(page, uniqueAddress('noscript'));
   await expect(page).toHaveURL(/\/welcome/);
+  const answered = page.waitForResponse((response) => response.url().endsWith('/sign-out'));
   await page.getByRole('button', { name: 'Sign out' }).click();
+  expect(await (await answered).headerValue('clear-site-data')).toBe('"cookies"');
   await expect(page).toHaveURL(/\/sign-in$/);
+  expect((await page.context().cookies()).map((cookie) => cookie.name)).not.toContain(
+    'drefyn_device',
+  );
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in/);
 });
