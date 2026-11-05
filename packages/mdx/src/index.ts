@@ -1,5 +1,4 @@
 export { rawOf } from './canonical.ts';
-export { parseForStore } from './parse.ts';
 export { DEFAULT_LIMITS } from './policy.ts';
 export { MdxPrintError, printCanonical } from './print.ts';
 export { serialize } from './serialize.ts';
