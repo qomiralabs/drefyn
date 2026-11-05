@@ -50,6 +50,35 @@ describe('input that sends the parser quadratic', () => {
     TIMEOUT_MS,
   );
 
+  // Each came through the first version of this scan.
+  it.each([
+    ['dotted words', 'a.'],
+    ['hyphens', '-a'],
+    ['plus signs', 'a+'],
+    ['tildes', 'a~'],
+    ['setext underlines after a marker', 'a\n- \n'],
+    ['setext underlines after a tab', 'a\n-\t\n'],
+    ['processing instructions', 'a <? '],
+    ['declarations', 'a <!a '],
+    ['comments', 'a <!-- '],
+    ['backticks', '`a '],
+    ['entities', '&a '],
+    ['escapes', '\\a '],
+  ])(
+    'refuses a mebibyte of %s in both dialects',
+    (_name, unit) => {
+      for (const dialect of ['md', 'mdx'] as const) {
+        expect(refuse(fill(unit), dialect)).toEqual(['mdx.too_many_nodes']);
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  it('adds up work across runs, so blank lines cannot spread a bomb out', () => {
+    const run = `${'a.'.repeat(4_000)}\n\n`;
+    expect(refuse(run.repeat(100), 'md')).toEqual(['mdx.too_many_nodes']);
+  });
+
   it.each([
     ['CRLF lines, which must not read as blank ones', 'a*b*\r\n'],
     ['setext underlines, spaced out or not', 'a\n=\n\n'],
@@ -78,10 +107,10 @@ describe('input that sends the parser quadratic', () => {
     TIMEOUT_MS,
   );
 
-  it('counts a run of syntax across lines but not across blank ones', () => {
-    const paragraph = `${'*a* '.repeat(600)}\n`;
-    expect(parsed(`${paragraph}\n`.repeat(2), 'md').children).toHaveLength(2);
+  it('charges one long run far more than the same bytes split by blank lines', () => {
+    const paragraph = `${'*a* '.repeat(5_000)}\n`;
     expect(codes(issuesFor(paragraph.repeat(2)))).toEqual(['mdx.too_many_nodes']);
+    expect(parsed(`${'*a* '.repeat(500)}\n\n`.repeat(4), 'md').children).toHaveLength(4);
   });
 
   it('leaves balanced expressions and plain nesting alone', () => {

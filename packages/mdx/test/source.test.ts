@@ -28,6 +28,12 @@ describe('block source', () => {
     expect(ast.children[1]?.source?.gapBefore).toBe('\n\n');
   });
 
+  it('keeps offsets true after more than one BOM', () => {
+    const ast = parsed(`${BOM}${BOM}# One\n`, 'md');
+    expect(ast.children[0]?.source?.raw).toBe('# One');
+    expect(ast.children[0]?.source?.gapBefore).toBe(`${BOM}${BOM}`);
+  });
+
   it('reads frontmatter after a BOM', () => {
     expect(parsed(`${BOM}---\na: 1\n---\n\nBody\n`, 'mdx').children[0]?.type).toBe('yaml');
   });

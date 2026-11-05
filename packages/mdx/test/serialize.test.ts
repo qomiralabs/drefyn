@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MdxPrintError, rawOf, serialize } from '../src/index.ts';
-import type { MdxBlock, MdxRoot } from '../src/index.ts';
+import type { BlockSource, MdxBlock, MdxRoot } from '../src/index.ts';
+import { sourceOf, tailOf } from '../src/canonical.ts';
 import { parsed } from './helpers.ts';
 
 const SOURCE = 'One\n\nTwo\n';
@@ -48,6 +49,72 @@ describe('serialize', () => {
       expect(error).toMatchObject({ code: 'mdx.block_not_printable', blockIndex: 1 });
       expect(String(error)).not.toContain('Two');
     }
+  });
+});
+
+describe('bytes bound to the tree', () => {
+  const SCRIPT = '<script>steal()</script>';
+  const withSource = (root: MdxRoot, change: (source: BlockSource) => BlockSource) =>
+    withChild(root, 0, (block) => {
+      if (block.source === undefined) throw new Error('no source');
+      return { ...block, source: change(block.source) };
+    });
+
+  it('refuses changed raw text', () => {
+    const changed = withSource(parsed(SOURCE, 'md'), (source) => ({ ...source, raw: SCRIPT }));
+    expect(() => serialize(changed)).toThrow(MdxPrintError);
+  });
+
+  it('refuses a changed gap', () => {
+    const changed = withSource(parsed(SOURCE, 'md'), (source) => ({
+      ...source,
+      gapBefore: '\n',
+    }));
+    expect(() => serialize(changed)).toThrow(MdxPrintError);
+  });
+
+  it('refuses a changed tail, and names the place after the last block', () => {
+    const root = parsed(SOURCE, 'md');
+    expect(() => serialize({ ...root, tail: '\n\n' })).toThrow(
+      expect.objectContaining({ blockIndex: 2 }),
+    );
+  });
+
+  it('refuses a new tree with the old bytes, even with rawOf recomputed', () => {
+    const changed = withChild(parsed(SOURCE, 'md'), 0, (block) => {
+      const tree = { ...block, type: 'thematicBreak' } as MdxBlock;
+      if (block.source === undefined) throw new Error('no source');
+      return { ...tree, source: { ...block.source, rawOf: rawOf(tree) } };
+    });
+    expect(() => serialize(changed)).toThrow(MdxPrintError);
+  });
+
+  it('refuses text in a gap even when every hash was forged to match', () => {
+    const changed = withSource(parsed(SOURCE, 'md'), (source) => ({
+      ...source,
+      gapBefore: SCRIPT,
+      sourceOf: sourceOf(source.rawOf, SCRIPT, source.raw),
+    }));
+    expect(() => serialize(changed)).toThrow(MdxPrintError);
+  });
+
+  it('refuses text in the tail even when its hash was forged to match', () => {
+    const root = parsed(SOURCE, 'md');
+    expect(() => serialize({ ...root, tail: SCRIPT, tailOf: tailOf(SCRIPT) })).toThrow(
+      MdxPrintError,
+    );
+  });
+
+  it('refuses parser data at any depth, which a renderer would honour', () => {
+    const root = parsed(SOURCE, 'md');
+    const nested = withChild(root, 0, (block) => {
+      const copy = structuredClone(block) as MdxBlock & { children: { data?: unknown }[] };
+      const [first] = copy.children;
+      if (first === undefined) throw new Error('no child');
+      first.data = { hName: 'script' };
+      return copy;
+    });
+    expect(() => serialize(nested)).toThrow(MdxPrintError);
   });
 });
 

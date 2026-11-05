@@ -6,6 +6,7 @@ import { documentArbitrary, dialectArbitrary } from '../fuzz/documents.ts';
 import { policy } from './helpers.ts';
 
 const RUNS = 2_000;
+const GAP_SHAPE = new RegExp(`^${String.fromCharCode(0xfeff)}*[ \\t\\r\\n]*$`);
 // Three times the worst seen with the gate testing every package at once under coverage.
 const TIMEOUT_MS = 120_000;
 
@@ -22,8 +23,10 @@ function expectStable(source: string, dialect: Dialect) {
   const pieces = ast.children.map(({ source: block }) => {
     if (block === undefined) throw new Error('a parsed block has no source');
     expect(block.rawOf).toMatch(/^[0-9a-f]{64}$/);
+    expect(block.gapBefore).toMatch(GAP_SHAPE);
     return block.gapBefore + block.raw;
   });
+  expect(ast.tail).toMatch(GAP_SHAPE);
   expect(pieces.join('') + ast.tail).toBe(source);
 }
 
