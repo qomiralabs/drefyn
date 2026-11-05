@@ -53,6 +53,33 @@ describe('self_hosted', () => {
     }
   });
 
+  it.each([
+    'docs.openapi_reference',
+    'docs.mcp',
+    'docs.localization',
+    'docs.remove_badge',
+    'docs.private_password',
+    'docs.private_reader_login',
+    'docs.reader_feedback',
+    'docs.update_drafts',
+    'docs.reader_assistant',
+    'docs.preview_deployments',
+    'docs.instant_rollback',
+    'status.remove_badge',
+  ] as const)('has %s, which needs no hosted service', (feature) => {
+    expect(hasFeature('self_hosted', feature)).toBe(true);
+    expect(featureInfo(feature).openCore).toBe(true);
+  });
+
+  it.each([
+    'docs.mcp_requests_per_month',
+    'docs.feedback_items_per_month',
+    'docs.assistant_questions_per_month',
+  ] as const)('is unlimited on %s while hosted waits for calibration', (key) => {
+    expect(limitFor('self_hosted', key)).toBe(UNLIMITED);
+    expect(checkLimit('self_hosted', key, Number.MAX_SAFE_INTEGER).status).toBe('allowed');
+  });
+
   it('only lacks features that the hosted service runs', () => {
     for (const feature of FEATURE_KEYS) {
       if (hasFeature('self_hosted', feature)) continue;

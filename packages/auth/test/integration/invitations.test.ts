@@ -83,9 +83,9 @@ describeWithStack('invitations against Postgres', () => {
     h = await fresh();
   });
 
-  it('never passes a limit of 5 with 20 parallel invites', async () => {
+  it('never passes a limit of 10 with 20 parallel invites', async () => {
     const { org, access } = await organization('starter');
-    expect(limitFor('starter', 'org.seats')).toBe(5);
+    expect(limitFor('starter', 'org.seats')).toBe(10);
     const invitations = h.invitations({ limiter: unlimited });
     const results = await Promise.all(
       Array.from({ length: 20 }, () =>
@@ -94,23 +94,22 @@ describeWithStack('invitations against Postgres', () => {
     );
     const sent = results.filter((r) => r.ok && r.value.kind === 'sent');
     const refused = results.flatMap((r) => (r.ok ? [] : [r.error.code]));
-    // The owner holds one seat, so four invitations fit.
-    expect(sent).toHaveLength(4);
-    expect(refused).toEqual(Array.from({ length: 16 }, () => 'AUTH_SEAT_LIMIT'));
-    expect(await seats(access)).toBe(5);
-    expect(await count('invitations', `organization_id = '${org}'`)).toBe('4');
+    // The owner holds one seat, so nine invitations fit.
+    expect(sent).toHaveLength(9);
+    expect(refused).toEqual(Array.from({ length: 11 }, () => 'AUTH_SEAT_LIMIT'));
+    expect(await seats(access)).toBe(10);
+    expect(await count('invitations', `organization_id = '${org}'`)).toBe('9');
   });
 
   it('stops counting an expired invitation and lets the seat be used again', async () => {
     const { org, access } = await organization('free');
     const free = Number(limitFor('free', 'org.seats'));
-    const first = address();
-    await invited(access, first);
-    expect(await seats(access)).toBe(2);
+    expect(free).toBe(5);
+    for (let seat = 1; seat < free; seat += 1) await invited(access, address());
+    expect(await seats(access)).toBe(free);
     const refused = await h
       .invitations({ limiter: unlimited })
       .invite(access, { email: address(), role: 'member', defaultProjectRole: null });
-    expect(free).toBe(2);
     expect(refused.ok ? null : refused.error.code).toBe('AUTH_SEAT_LIMIT');
     await h.sql(
       `update app.invitations set expires_at = now() - interval '1 second' where organization_id = '${org}';`,
