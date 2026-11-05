@@ -1,12 +1,16 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { echartsThemes } from '../src/generated/echarts-theme.ts';
+import { surfaceTokensCss } from '../src/generated/surface-tokens.ts';
 import {
+  docsFontFaces,
   generatedFiles,
   renderDtcg,
   renderEchartsTheme,
+  renderSurfaceTokensCss,
   renderTailwindCss,
   renderTokensCss,
 } from '../src/tokens/generate.ts';
@@ -554,5 +558,58 @@ describe('numbers and names', () => {
 
   it('accepts camelCase role names, which become kebab case', () => {
     expect(renderTokensCss(withBorder('ruleFaint'))).toContain('--dr-border-rule-faint:');
+  });
+});
+
+describe('public surface tokens', () => {
+  const status = renderSurfaceTokensCss('status');
+  const docs = renderSurfaceTokensCss('docs');
+
+  it('sets status to the system stacks and names no web font', () => {
+    const root = findRule(parseRules(status), ':root');
+    expect(root.declarations.get('--dr-font-sans')).toBe(
+      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Roboto", "Helvetica Neue", "Arial", sans-serif',
+    );
+    expect(root.declarations.get('--dr-font-mono')).toBe(
+      'ui-monospace, "SF Mono", "Menlo", "Consolas", monospace',
+    );
+    expect(status).not.toMatch(/@font-face|url\(|woff|Inter|JetBrains/);
+  });
+
+  it('keeps tabular figures and every other token on status', () => {
+    expect(status).toContain('font-variant-numeric: tabular-nums');
+    const strip = (css: string) =>
+      css
+        .replace(/@font-face \{[^}]*\}\n/g, '')
+        .replace(/ {2}--dr-font-(sans|mono): [^\n]*\n/g, '')
+        .replace(/^\/\*.*\*\/\n/, '');
+    expect(strip(status)).toBe(strip(renderTokensCss()));
+  });
+
+  it('limits docs to Inter 400 and 600 and JetBrains Mono 400', () => {
+    const files = [...docs.matchAll(/url\("([^"]+)"\)/g)].map((m) => m[1]);
+    expect(files).toEqual([
+      '/fonts/inter-latin-400-normal.woff2',
+      '/fonts/inter-latin-600-normal.woff2',
+      '/fonts/jetbrains-mono-latin-400-normal.woff2',
+    ]);
+    expect(docsFontFaces.map((f) => f.file)).toEqual(files.map((f) => f?.replace('/fonts/', '')));
+  });
+
+  it('lets Chinese and Arabic follow Inter through system fonts', () => {
+    const root = findRule(parseRules(docs), ':root');
+    expect(root.declarations.get('--dr-font-sans')).toMatch(/^"Inter".*system-ui, sans-serif$/);
+  });
+
+  it('leaves the dashboard stylesheet as it was', () => {
+    expect(renderTokensCss()).toContain('inter-latin-500-normal.woff2');
+    expect(renderTokensCss()).toContain('url("../fonts/');
+  });
+
+  it('ships both, each under the token size budget', () => {
+    expect(surfaceTokensCss).toEqual({ docs, status });
+    for (const css of Object.values(surfaceTokensCss)) {
+      expect(gzipSync(css).length).toBeLessThan(2.5 * 1024);
+    }
   });
 });

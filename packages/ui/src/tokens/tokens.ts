@@ -147,6 +147,23 @@ const font = {
   mono: ['JetBrains Mono', 'ui-monospace', 'SF Mono', 'Menlo', 'monospace'],
 } as const;
 
+// Status pages load no web font: it was the only tested setup under their LCP budget, and it
+// removes the layout shift when a long sentence reflows as Inter replaces its fallback. Kept
+// out of `tokens`, so the design tool and Tailwind outputs stay one family per role.
+export const statusFont = {
+  sans: [
+    'ui-sans-serif',
+    'system-ui',
+    '-apple-system',
+    'Segoe UI',
+    'Roboto',
+    'Helvetica Neue',
+    'Arial',
+    'sans-serif',
+  ],
+  mono: ['ui-monospace', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
+} as const;
+
 const weight = { regular: 400, medium: 500, strong: 600 } as const;
 
 export interface TypeStep {

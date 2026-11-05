@@ -25,7 +25,7 @@ describe('tokens cli', () => {
     for (const [name, content] of Object.entries(generatedFiles())) {
       expect(readFileSync(join(dir, name), 'utf8')).toBe(content);
     }
-    expect(out.join('')).toMatch(/wrote 4 files/);
+    expect(out.join('')).toMatch(/wrote 5 files/);
   });
 
   it('--check passes on fresh output and names the stale file otherwise', () => {
