@@ -3,7 +3,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { EngineErrorCode, NodeFamily, NodeLifecycle, Origin } from '../../src/index.ts';
 
-function compileOnly(): void {
+function compileOnly(): readonly string[] {
   // @ts-expect-error a customer type is a row, never a family
   const family: NodeFamily = 'blog_post';
   // @ts-expect-error deleted is deleted_at, not a lifecycle state
@@ -12,7 +12,7 @@ function compileOnly(): void {
   const origin: Origin = 'webhook';
   // @ts-expect-error codes carry the engine prefix
   const code: EngineErrorCode = 'not_found';
-  void [family, lifecycle, origin, code];
+  return [family, lifecycle, origin, code];
 }
 
 describe('the engine unions', () => {
