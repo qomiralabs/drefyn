@@ -303,6 +303,32 @@ describe('nodes the dialect cannot hold', () => {
   );
 });
 
+describe('a reference with a colon after it', () => {
+  it('cannot turn into a footnote definition on its own line', () => {
+    const source = '[^1]: a\n\nb\n    [^1]: c\n';
+    const root = parsed(source, 'md');
+    const printed = printCanonical(root.children[1] as MdxBlock, 'md');
+    expect(printed).toBe('b\n[^1]\\: c');
+    expect(parsed(`[^1]: a\n\n${printed}\n`, 'md').children).toHaveLength(2);
+  });
+
+  it('cannot turn into a link definition at the start of a paragraph', () => {
+    const source = '[a]: b\n\n    c\n\n[a]\\: d\n';
+    const root = parsed(source, 'md');
+    const printed = printCanonical(root.children.at(-1) as MdxBlock, 'md');
+    expect(printed).toBe('[a]\\: d');
+    expect(parsed(`[a]: b\n\n${printed}\n`, 'md').children.map(({ type }) => type)).toEqual([
+      'definition',
+      'paragraph',
+    ]);
+  });
+
+  it('leaves a colon anywhere else alone', () => {
+    expect(print('a: b [c: d\n')).toBe('a: b \\[c: d');
+    expect(print('[a](b): c\n')).toBe('[a](b): c');
+  });
+});
+
 describe('parser data on a node', () => {
   it('cannot pose as one of the marks', () => {
     const block = {
