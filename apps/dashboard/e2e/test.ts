@@ -1,7 +1,7 @@
 import { test as base, type APIResponse, type Response } from '@playwright/test';
-import { absoluteLinkProblems, locationProblem } from './location-check.ts';
+import { absoluteLinkProblems, locationProblem, providerHandover } from './location-check.ts';
 
-const OURS = /^http:\/\/127\.0\.0\.1:310[014]$/;
+const OURS = /^http:\/\/127\.0\.0\.1:310[0145]$/;
 
 export function responseProblems(
   url: string,
@@ -10,7 +10,10 @@ export function responseProblems(
 ): readonly string[] {
   const { origin } = new URL(url);
   if (!OURS.test(origin)) return [];
-  const moved = location === undefined ? null : locationProblem(location, origin);
+  const moved =
+    location === undefined || providerHandover(url, location)
+      ? null
+      : locationProblem(location, origin);
   return [...(moved === null ? [] : [moved]), ...absoluteLinkProblems(html ?? '', origin)];
 }
 

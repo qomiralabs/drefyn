@@ -30,6 +30,8 @@ const SIGNED_OUT_ROUTES = [
   '/auth/pre',
   '/auth/oauth/github/start',
   '/auth/oauth/github/callback',
+  '/auth/oauth/google/start',
+  '/auth/oauth/google/callback',
   '/settings-states/whoami',
 ];
 const paths = [

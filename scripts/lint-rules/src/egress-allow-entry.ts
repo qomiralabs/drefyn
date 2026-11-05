@@ -2,7 +2,8 @@
 // reported in that file, so an exception is exactly as wide as the need.
 export type EgressAllowance =
   | { readonly module: 'node:http'; readonly imports: readonly ['createServer'] }
-  | { readonly global: 'fetch' };
+  // reads: true also lets the file hold fetch as a value, for wrapping it.
+  | { readonly global: 'fetch'; readonly reads?: true };
 
 export interface EgressAllowEntry {
   readonly path: string;

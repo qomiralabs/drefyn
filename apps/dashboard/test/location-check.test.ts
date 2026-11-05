@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteLinkProblems, locationProblem } from '../e2e/location-check.ts';
+import { absoluteLinkProblems, locationProblem, providerHandover } from '../e2e/location-check.ts';
 
 const ORIGIN = 'http://127.0.0.1:3100';
 
@@ -61,5 +61,30 @@ describe('the absolute link check', () => {
     const html = `<a href="/acme">x</a><a href="#main">y</a><a href="${ORIGIN}/z">z</a>
       <a href="mailto:a@b.c">m</a><svg xmlns="http://www.w3.org/2000/svg"></svg>`;
     expect(absoluteLinkProblems(html, ORIGIN)).toEqual([]);
+  });
+});
+
+describe('the OAuth handover', () => {
+  const start = (provider: string) => `${ORIGIN}/auth/oauth/${provider}/start?next=%2Facme`;
+  const GITHUB = 'https://github.com/login/oauth/authorize?client_id=x&state=y';
+  const GOOGLE = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x';
+
+  it('lets each start route send a browser to its own provider', () => {
+    expect(providerHandover(start('github'), GITHUB)).toBe(true);
+    expect(providerHandover(start('google'), GOOGLE)).toBe(true);
+  });
+
+  it.each([
+    ['the other provider', start('github'), GOOGLE],
+    ['another route', `${ORIGIN}/auth/oauth/github/callback`, GITHUB],
+    ['a page', `${ORIGIN}/sign-in`, GITHUB],
+    ['a look alike host', start('github'), 'https://github.com.evil.test/login/oauth/authorize'],
+    ['another path', start('github'), 'https://github.com/login/oauth/authorize/x'],
+    ['http', start('github'), 'http://github.com/login/oauth/authorize'],
+    ['a user part', start('github'), 'https://github.com@evil.test/login/oauth/authorize'],
+    ['a relative target', start('github'), '/login/oauth/authorize'],
+    ['nonsense', start('github'), 'not a url'],
+  ])('refuses %s', (_name, url, location) => {
+    expect(providerHandover(url, location)).toBe(false);
   });
 });

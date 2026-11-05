@@ -54,7 +54,7 @@ Every new entry needs a security review.
 ### Scoped entries
 
 An entry can add `only`, a list of the raw forms that file may use. Everything else in
-the file is reported as usual, so the exception is exactly as wide as the need. Two
+the file is reported as usual, so the exception is exactly as wide as the need. Three
 forms exist:
 
 - `{ module: 'node:http', imports: ['createServer'] }` passes a named
@@ -66,6 +66,9 @@ forms exist:
   `globalThis.fetch` and every other member form, passing or aliasing `fetch`, wrapping
   it in `as`, `fetch.call` and destructuring it from a global object are still reported,
   and so is `WebSocket`.
+- `{ global: 'fetch', reads: true }` also passes holding the global as a value, which a
+  test preload needs to wrap it. A wrapper that calls `fetch` directly would call itself.
+  Member forms and `WebSocket` stay reported.
 
 Other banned modules stay reported in a scoped file. An entry with `only` must name one
 source file, never a directory, and an entry under `apps/` must have `only`; the config

@@ -149,7 +149,6 @@ describe('servedOverHttps', () => {
 });
 
 describe('withSignOutHeaders', () => {
-  // Stands in for the sign out route until it lands: it ends the session and goes to sign in.
   const signOut = (): Response =>
     withSignOutHeaders(new Response(null, { status: 303, headers: { location: '/sign-in' } }));
 

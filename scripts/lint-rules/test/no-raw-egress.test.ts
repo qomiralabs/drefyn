@@ -556,6 +556,7 @@ describe('no-raw-egress scoped entry validation', () => {
       [{ module: 'node:http' }],
       [{ global: 'fetch', module: 'node:http', imports: ['createServer'] }],
       [{ global: 'fetch', extra: true }],
+      [{ global: 'fetch', reads: false }],
       'fetch',
     ];
     for (const only of bad) {
@@ -573,6 +574,40 @@ describe('no-raw-egress scoped entry validation', () => {
     await expect(load({ path: 'apps/dashboard/server.ts', reason: 'r' })).rejects.toThrow(
       "allow list entry 'apps/dashboard/server.ts'",
     );
+  });
+});
+
+describe('reading fetch in a scoped file', () => {
+  const entry = (only: readonly object[]) => [
+    { path: 'scripts/tool/src/scoped.ts', reason: 'r', only },
+  ];
+  const lintWith = async (only: readonly object[], code: string) =>
+    reports(
+      await makeEslint(root, { [RULE]: ['error', { allow: entry(only) }] }).lintText(code, {
+        filePath: join(root, 'scripts/tool/src/scoped.ts'),
+      }),
+    );
+  const READ = 'export const real = fetch;';
+
+  it('stays reported under the plain fetch allowance', async () => {
+    expect(await lintWith([{ global: 'fetch' }], READ)).toHaveLength(1);
+  });
+
+  it('passes only when the entry says reads', async () => {
+    expect(await lintWith([{ global: 'fetch', reads: true }], READ)).toEqual([]);
+  });
+
+  it('leaves globalThis.fetch and WebSocket reported under reads', async () => {
+    const found = await lintWith(
+      [{ global: 'fetch', reads: true }],
+      'export const a = globalThis.fetch; export const b = WebSocket;',
+    );
+    expect(found).toHaveLength(2);
+  });
+
+  it('still needs its entry in any other file', async () => {
+    const found = await lintAs('packages/web/src/a.ts', READ);
+    expect(found.map((r) => r.message)).toEqual([message('fetch', '@drefyn/web')]);
   });
 });
 
