@@ -5,9 +5,9 @@ import { codes, limits, parsed, policy } from './helpers.ts';
 
 const MIB = 1_048_576;
 // A wall clock assertion would fail on a busy CI box, so the guard is the test timeout. The
-// slowest case here took 11 s at load 31; the stock parser needs about 25 minutes for a
-// mebibyte of `a*`, so losing a defence still fails.
-const TIMEOUT_MS = 60_000;
+// slowest case took 11 s at load 31 and all 26 take 73 s on a CI runner; the stock parser
+// needs about 25 minutes for a mebibyte of `a*`, so losing a defence still fails.
+const TIMEOUT_MS = 90_000;
 const BUDGET_BOMB_BYTES = 200_000;
 
 const fill = (unit: string, bytes = MIB) => unit.repeat(Math.floor(bytes / unit.length));

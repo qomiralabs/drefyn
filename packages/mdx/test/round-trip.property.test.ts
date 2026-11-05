@@ -6,8 +6,8 @@ import { documentArbitrary, dialectArbitrary } from '../fuzz/documents.ts';
 import { policy } from './helpers.ts';
 
 const RUNS = 2_000;
-// Under 4 s on a quiet machine, and the gate runs every package at once.
-const TIMEOUT_MS = 60_000;
+// Three times the worst seen with the gate testing every package at once under coverage.
+const TIMEOUT_MS = 120_000;
 
 function expectStable(source: string, dialect: Dialect) {
   const first = parseForStore(source, dialect, policy());
