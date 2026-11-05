@@ -36,6 +36,16 @@ const globalTable = (name: string, columns: readonly string[] = ['body text']) =
 alter table app.${name} enable row level security;
 alter table app.${name} force row level security;`;
 
+// A project table a composite foreign key points at, and the child that points.
+const tenantParent = (parent: string, child: string) =>
+  `${projectTable(parent)}
+alter table app.${parent} add constraint ${parent}_tenant_key
+  unique (organization_id, project_id, id);
+${projectTable(child, ['parent_id uuid not null'])}
+alter table app.${child} add constraint ${child}_parent_fkey
+  foreign key (organization_id, project_id, parent_id)
+  references app.${parent} (organization_id, project_id, id);`;
+
 const reviewed = (name: string) => ({ name, reason: 'test only' });
 
 // The fixture lists with the given global tables, and anything else the case needs.
@@ -174,6 +184,25 @@ create policy published_read on app.bad_published_read for select to drefyn_publ
     up: () => `${projectTable('bad_project_clause')}
 alter policy tenant_isolation on app.bad_project_clause
   using (organization_id = app.current_org()) with check (organization_id = app.current_org());`,
+  },
+  'a composite foreign key target with no tenant statistics': {
+    rule: 'tenant_statistics',
+    object: 'app.bad_stat_parent',
+    up: () => tenantParent('bad_stat_parent', 'bad_stat_child'),
+  },
+  'a composite foreign key target with ndistinct statistics only': {
+    rule: 'tenant_statistics',
+    object: 'app.bad_ndistinct_parent',
+    up: () => `${tenantParent('bad_ndistinct_parent', 'bad_ndistinct_child')}
+create statistics app.bad_ndistinct_stats (ndistinct)
+  on organization_id, project_id from app.bad_ndistinct_parent;`,
+  },
+  'a composite foreign key target with statistics on the wrong columns': {
+    rule: 'tenant_statistics',
+    object: 'app.bad_columns_parent',
+    up: () => `${tenantParent('bad_columns_parent', 'bad_columns_child')}
+create statistics app.bad_columns_stats (ndistinct, dependencies)
+  on organization_id, id from app.bad_columns_parent;`,
   },
   // The old project clause let organization scope read every project.
   'a project table with the old organization scope arm': {
@@ -1039,9 +1068,23 @@ describeWithStack('catalog check passes', () => {
       `alter table app.fixture_notes add constraint fixture_notes_tenant_id_key unique (organization_id, project_id, id);
 ${projectTable('ok_fk', ['note_id uuid'])}
 alter table app.ok_fk add foreign key (organization_id, project_id, note_id)
-  references app.fixture_notes (organization_id, project_id, id);`,
+  references app.fixture_notes (organization_id, project_id, id);
+create statistics app.fixture_notes_tenant_stats (ndistinct, dependencies)
+  on organization_id, project_id from app.fixture_notes;`,
     );
     const problems = await catalogProblems(db.owner, FIXTURE_ALLOW_LISTS);
+    expect(problems, describeProblems(problems)).toEqual([]);
+  });
+
+  it('with tenant statistics on a composite foreign key target', async () => {
+    const db = await fixture();
+    await withBadMigration(
+      db,
+      `${tenantParent('stat_parent', 'stat_child')}
+create statistics app.stat_parent_tenant_stats (ndistinct, dependencies)
+  on organization_id, project_id from app.stat_parent;`,
+    );
+    const problems = await catalogProblems(db.owner);
     expect(problems, describeProblems(problems)).toEqual([]);
   });
 
@@ -1242,6 +1285,7 @@ describe('catalog case list', () => {
       'public_execute',
       'default_privileges',
       'app_privilege',
+      'tenant_statistics',
       'tenant_foreign_key',
       'auth_grant',
       'column_grant',
