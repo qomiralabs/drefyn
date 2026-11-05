@@ -935,8 +935,8 @@ describe('audit lines an investigation reads', () => {
     await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'right' });
     const [line] = eventsOf(lines, 'auth.step_up_passed');
     expect(line?.fields).toMatchObject({ method: 'password' });
-    expect(line?.fields.sessionId).toEqual(expect.any(String));
-    expect(line?.fields.userId).toEqual(expect.any(String));
+    expect(line?.fields['sessionId']).toEqual(expect.any(String));
+    expect(line?.fields['userId']).toEqual(expect.any(String));
     expect(JSON.stringify(line)).not.toContain('right');
     expect(JSON.stringify(line)).not.toContain('person@example.com');
   });
