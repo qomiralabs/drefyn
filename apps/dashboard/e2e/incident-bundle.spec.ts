@@ -8,7 +8,14 @@ function scriptsOf(page: Page): { pending: Promise<{ url: string; text: string }
   const seen = { pending: [] as Promise<{ url: string; text: string }>[] };
   page.on('response', (res) => {
     if (res.request().resourceType() !== 'script') return;
-    seen.pending.push(res.text().then((text) => ({ url: res.url(), text })));
+    // A script still arriving as the test ends has no body to read, and cannot be the chunk
+    // the test already found.
+    seen.pending.push(
+      res
+        .text()
+        .catch(() => '')
+        .then((text) => ({ url: res.url(), text })),
+    );
   });
   return seen;
 }
@@ -54,6 +61,7 @@ test('the cockpit arrives as its own chunk when an incident opens', async ({ pag
   await expect(commandBar(page)).toHaveCount(0);
   await expect(heading(page)).toBeVisible();
   await expect(page).toHaveURL(COCKPIT);
+  await page.waitForLoadState('networkidle');
   const scripts = await Promise.all(seen.pending);
   expect(scripts.filter((s) => s.text.includes(COCKPIT_MARK))).toHaveLength(1);
 });
