@@ -129,7 +129,10 @@ export function visiblePlaces(
   org: string,
   permissions: readonly string[],
   projects: ShellData['projects'],
+  actions: readonly Command[] = [],
 ): readonly Command[] {
   const held = new Set(permissions);
-  return allowed(places(org, projects), (permission) => held.has(permission));
+  return allowed([...places(org, projects), ...defineCommands(actions)], (permission) =>
+    held.has(permission),
+  );
 }

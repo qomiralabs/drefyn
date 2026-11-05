@@ -132,7 +132,7 @@ export default defineConfig({
     {
       name: 'shell-chromium',
       testMatch:
-        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out)\.spec\.ts$/,
+        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out|incident-mode)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
@@ -160,7 +160,7 @@ export default defineConfig({
     { name: 'axe', testMatch: /axe\.spec\.ts$/, use: { ...chromium } },
     {
       name: 'reduced-motion',
-      testMatch: /reduced-motion\.spec\.ts$/,
+      testMatch: /(reduced-motion|incident-mode)\.spec\.ts$/,
       use: { ...chromium, reducedMotion: 'reduce' },
     },
     {

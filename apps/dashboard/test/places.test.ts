@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { startIncidentCommand } from '../src/incident/feed.ts';
 import { commandFilter } from '../src/shell/commands.ts';
-import { places } from '../src/shell/places.ts';
+import { places, visiblePlaces } from '../src/shell/places.ts';
 
-const entries = places('acme', {
+const PROJECTS = {
   'docs/payments-api': { name: 'Payments API docs', product: 'docs' },
   'status/acme-status': { name: 'Acme status', product: 'status' },
   'studio/launch': { name: 'Launch', product: 'studio' },
-});
+} as const;
+
+const entries = places('acme', PROJECTS);
 const filter = commandFilter(entries);
 // What the bar shows for a query: the ids its filter keeps, in registry order.
 const found = (query: string) =>
@@ -41,5 +44,21 @@ describe('command bar search', () => {
 
   it("keeps every place inside the organization or the person's own account", () => {
     for (const entry of entries) expect(entry.href).toMatch(/^\/(acme|account)(\/|$)/);
+  });
+});
+
+describe('actions from outside the list', () => {
+  const start = startIncidentCommand('acme');
+
+  it('are not in the list by themselves', () => {
+    expect(entries.map((e) => e.id)).not.toContain(start.id);
+  });
+
+  it('show only to someone with their permission, and the bar can find them', () => {
+    const ids = (held: string[]) => visiblePlaces('acme', held, PROJECTS, [start]).map((e) => e.id);
+    expect(ids(['org.read'])).not.toContain(start.id);
+    expect(ids(['status.read'])).toContain(start.id);
+    expect(start.href).toBe('/acme/status/acme-status/incidents/new');
+    expect(start.keywords).toContain('outage');
   });
 });
