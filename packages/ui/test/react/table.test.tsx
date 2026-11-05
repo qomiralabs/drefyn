@@ -180,7 +180,12 @@ describe('Table', () => {
       const user = userEvent.setup();
       render(<Pages selectable columns={columns} />);
       cell.mockClear();
-      await user.click(screen.getAllByRole('checkbox')[1] as HTMLElement);
+      await user.click(
+        screen
+          .getByRole('checkbox', { name: 'Select all' })
+          .closest('table')
+          ?.querySelector('tbody input') ?? document.body,
+      );
       expect(screen.getByRole('status').textContent).toBe('1 selected');
       expect(cell).not.toHaveBeenCalled();
     });
