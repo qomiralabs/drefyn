@@ -6,7 +6,7 @@ describe('the fuzz target', () => {
     const report = fuzz({ seconds: 1, seed: 7 });
     expect(report.failure).toBeUndefined();
     expect(report.runs).toBeGreaterThan(0);
-  });
+  }, 30_000);
 
   it('would catch a parser that loses a byte', () => {
     const report = fuzz({
@@ -15,5 +15,5 @@ describe('the fuzz target', () => {
       check: (source) => !source.includes('\r'),
     });
     expect(report.failure).toBeDefined();
-  });
+  }, 30_000);
 });

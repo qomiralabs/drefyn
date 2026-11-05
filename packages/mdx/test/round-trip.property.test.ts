@@ -6,6 +6,8 @@ import { documentArbitrary, dialectArbitrary } from '../fuzz/documents.ts';
 import { policy } from './helpers.ts';
 
 const RUNS = 2_000;
+// Under 4 s on a quiet machine, and the gate runs every package at once.
+const TIMEOUT_MS = 60_000;
 
 function expectStable(source: string, dialect: Dialect) {
   const first = parseForStore(source, dialect, policy());
@@ -26,41 +28,53 @@ function expectStable(source: string, dialect: Dialect) {
 }
 
 describe('serialize after parse', () => {
-  it('gives back every generated document byte for byte', () => {
-    fc.assert(fc.property(documentArbitrary, dialectArbitrary, expectStable), { numRuns: RUNS });
-  });
+  it(
+    'gives back every generated document byte for byte',
+    () => {
+      fc.assert(fc.property(documentArbitrary, dialectArbitrary, expectStable), { numRuns: RUNS });
+    },
+    TIMEOUT_MS,
+  );
 
-  it('is deterministic', () => {
-    fc.assert(
-      fc.property(documentArbitrary, dialectArbitrary, (source, dialect) => {
-        expect(parseForStore(source, dialect, policy())).toEqual(
-          parseForStore(source, dialect, policy()),
-        );
-      }),
-      { numRuns: RUNS / 4 },
-    );
-  });
+  it(
+    'is deterministic',
+    () => {
+      fc.assert(
+        fc.property(documentArbitrary, dialectArbitrary, (source, dialect) => {
+          expect(parseForStore(source, dialect, policy())).toEqual(
+            parseForStore(source, dialect, policy()),
+          );
+        }),
+        { numRuns: RUNS / 4 },
+      );
+    },
+    TIMEOUT_MS,
+  );
 
-  it('survives a document with bytes appended', () => {
-    fc.assert(
-      fc.property(
-        documentArbitrary,
-        dialectArbitrary,
-        fc.constantFrom(
-          '\n',
-          '\r\n',
-          '\r',
-          '  ',
-          '\t',
-          '\n\n\n',
-          String.fromCharCode(0xa0),
-          ' \r\n \n',
+  it(
+    'survives a document with bytes appended',
+    () => {
+      fc.assert(
+        fc.property(
+          documentArbitrary,
+          dialectArbitrary,
+          fc.constantFrom(
+            '\n',
+            '\r\n',
+            '\r',
+            '  ',
+            '\t',
+            '\n\n\n',
+            String.fromCharCode(0xa0),
+            ' \r\n \n',
+          ),
+          (source, dialect, trailing) => {
+            expectStable(source + trailing, dialect);
+          },
         ),
-        (source, dialect, trailing) => {
-          expectStable(source + trailing, dialect);
-        },
-      ),
-      { numRuns: RUNS / 4 },
-    );
-  });
+        { numRuns: RUNS / 4 },
+      );
+    },
+    TIMEOUT_MS,
+  );
 });

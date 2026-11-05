@@ -43,13 +43,17 @@ function markerEnd(text: string, at: number): number {
   return isSpace(text.charCodeAt(end + 1)) ? end + 1 : -1;
 }
 
-function linePrefix(text: string, lineStart: number): { readonly markers: number; end: number } {
+function linePrefix(
+  text: string,
+  lineStart: number,
+  maxMarkers: number,
+): { readonly markers: number; end: number } {
   let at = lineStart;
   let markers = 0;
   for (;;) {
     while (isSpace(text.charCodeAt(at))) at += 1;
     const next = markerEnd(text, at);
-    if (next < 0) return { markers, end: at };
+    if (next < 0 || markers > maxMarkers) return { markers, end: at };
     markers += 1;
     at = next;
   }
@@ -64,7 +68,7 @@ export function prescan(
   let underlines = 0;
   let at = 0;
   while (at < text.length) {
-    const { markers, end } = linePrefix(text, at);
+    const { markers, end } = linePrefix(text, at, maxMarkers);
     if (markers > maxMarkers) return 'mdx.too_deep';
     const first = text.charCodeAt(end);
     let blank = markers === 0;
