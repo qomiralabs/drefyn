@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGIN = 'https://app.drefyn.test';
-const COOKIES = { session: '__Host-drefyn_session' };
+const COOKIES = {
+  session: '__Host-drefyn_session',
+  pre: '__Host-drefyn_pre',
+  device: '__Host-drefyn_device',
+};
 const SESSION = { sessionId: 'ses_1', userId: 'usr_1' };
 const signOut = vi.fn<(session: unknown) => Promise<readonly unknown[]>>();
 
@@ -24,13 +28,17 @@ const call = () => (POST as unknown as () => Promise<Response>)();
 
 beforeEach(() => {
   signOut.mockReset();
-  signOut.mockResolvedValue([{ name: COOKIES.session, value: '', maxAgeSeconds: 0 }]);
+  signOut.mockResolvedValue([
+    { name: COOKIES.session, value: '', maxAgeSeconds: 0 },
+    { name: COOKIES.pre, value: '', maxAgeSeconds: 0 },
+  ]);
 });
 
 describe('POST /sign-out', () => {
-  it('tells the browser to drop every cookie for the site', async () => {
+  // The header would also wipe the known device cookie, and other hosts of the domain.
+  it('sends no Clear-Site-Data', async () => {
     const response = await call();
-    expect(response.headers.get('clear-site-data')).toBe('"cookies"');
+    expect(response.headers.has('clear-site-data')).toBe(false);
   });
 
   it('is never cached', async () => {
@@ -38,10 +46,11 @@ describe('POST /sign-out', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('still clears the session cookie by name, for browsers that ignore the header', async () => {
+  it('expires by name what auth says to expire, and nothing else', async () => {
     const response = await call();
     expect(response.headers.getSetCookie()).toEqual([
       '__Host-drefyn_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax',
+      '__Host-drefyn_pre=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax',
     ]);
   });
 

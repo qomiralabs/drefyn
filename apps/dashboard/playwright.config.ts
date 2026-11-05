@@ -132,17 +132,17 @@ export default defineConfig({
     {
       name: 'shell-chromium',
       testMatch:
-        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out|clear-site-data-probe)\.spec\.ts$/,
+        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'shell-firefox',
-      testMatch: /(keyboard|headers|loading|sign-out|clear-site-data-probe)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'shell-webkit',
-      testMatch: /(keyboard|headers|loading|sign-out|clear-site-data-probe)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     {

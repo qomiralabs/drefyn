@@ -206,6 +206,13 @@ describeWithStack('sessions against Postgres', () => {
     expect(!again.ok && again.error.code).toBe('AUTH_NOT_FOUND');
   });
 
+  it('cannot revoke its own session, which only sign out may end', async () => {
+    const a = await signIn();
+    const result = await a.sessions.revokeSession(a.session, a.session.sessionId);
+    expect(!result.ok && result.error.code).toBe('AUTH_FORBIDDEN');
+    await expect(a.sessions.resolveSession(a.cookie)).resolves.not.toBeNull();
+  });
+
   it('cannot revoke a session of another user', async () => {
     const a = await signIn();
     const b = await signIn();
