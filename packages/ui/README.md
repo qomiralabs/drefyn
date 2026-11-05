@@ -13,6 +13,7 @@ from it:
 | `@drefyn/ui/tailwind.css`     | Apps that use Tailwind. Import it after `tailwindcss`; it resets every Tailwind default so only token utilities exist.                                                                            |
 | `@drefyn/ui/tokens.dtcg.json` | Design tools, in the W3C design tokens format. One way only.                                                                                                                                      |
 | `echartsThemes`               | Dashboard charts. Register `drefyn-light` and `drefyn-dark` with ECharts.                                                                                                                         |
+| `surfaceTokensCss`            | Docs and status pages rendered without a build. One CSS string per surface, for `@drefyn/site` to inline.                                                                                         |
 
 After changing `tokens.ts`, run `pnpm --filter @drefyn/ui tokens` and commit the generated files.
 The tests fail if they drift.
@@ -36,6 +37,9 @@ The tests fail if they drift.
   prints as a pass.
 - `themeScript`, `themeStorageKey`: the inline head script that applies a stored light or dark
   choice before paint. Put it in a `<script>` in `<head>`; it is static, so one CSP hash covers it.
+- `surfaceTokensCss`: `docs` loads Inter 400 and 600 and JetBrains Mono 400 from `/fonts/`, with
+  Chinese and Arabic following Inter through the reader's system fonts. `status` loads no font:
+  `--dr-font-sans` and `--dr-font-mono` are system stacks, and figures stay tabular.
 - `echartsThemes`, `chartMotion(reducedMotion)`, `cubicBezier`: chart themes, and the motion
   options to apply with `chart.setOption(chartMotion(reduced))`. Reduced motion turns chart
   animation off.
