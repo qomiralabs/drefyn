@@ -78,17 +78,17 @@ describe('what search refuses', () => {
 const LETTERS = ['a', 'e', 'o', 'n', 'S', 'I', 'k', 'é', 'ü', 'ñ', 'ß', 'Ø', 'İ', 'ı', 'Σ', 'ς'];
 const SPACES = [' ', '  ', '\t', ' ', ' ', ' \n '];
 
-const word = fc
-  .array(fc.constantFrom(...LETTERS), { minLength: 1, maxLength: 8 })
-  .map((letters) => letters.join(''));
+const letters = fc.array(fc.constantFrom(...LETTERS), { minLength: 1, maxLength: 8 });
+const word = letters.map((chosen) => chosen.join(''));
 const words = fc.array(word, { minLength: 1, maxLength: 4 });
 const respaced = (parts: readonly string[], gap: string) => parts.join(gap);
 const spoken = (parts: readonly string[]) => parts.join(' ');
 const marksRemoved = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '');
 
 describe('search over generated names', () => {
-  const found = (name: string, query: string) =>
+  const found = (name: string, query: string) => {
     expect(search([entry(name)], query), JSON.stringify({ name, query })).toEqual(['entry']);
+  };
 
   it('finds any name typed as written', () => {
     fc.assert(
@@ -138,11 +138,10 @@ describe('search over generated names', () => {
 
   it('finds a part of a name, cut on any letter', () => {
     fc.assert(
-      fc.property(word, fc.nat(), fc.nat(), (name, a, b) => {
-        const letters = [...name];
-        const start = a % letters.length;
-        const end = start + 1 + (b % (letters.length - start));
-        found(name, letters.slice(start, end).join(''));
+      fc.property(letters, fc.nat(), fc.nat(), (chosen, a, b) => {
+        const start = a % chosen.length;
+        const end = start + 1 + (b % (chosen.length - start));
+        found(chosen.join(''), chosen.slice(start, end).join(''));
       }),
       { seed: SEED, numRuns: 500 },
     );
