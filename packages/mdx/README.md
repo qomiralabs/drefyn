@@ -32,13 +32,18 @@ attribute name outside the MDX syntax, on frontmatter anywhere but the first blo
 past the limits in its policy. The hashes have no key, so they catch stale bytes and not a writer
 who recomputes them.
 
+`/parse` and `/print` both name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
+
 Every print is reparsed in the same thread, under the same policy. If any block or live node
 differs from the tree, it refuses with `mdx.print_changed_meaning`: that is how a new block hidden
 by an unclosed fence, or an expression that closes itself early, stops here. Text inside a block
-may settle differently, as a typed URL becomes a link. **Store the `ast` the call hands back, never
-the tree you sent.** Only that one is known to agree with what git will hold, and render policy
+may settle differently, as a typed URL becomes a link. A block printed from stored bytes has to come back as exactly its tree, so forged bytes
+cannot change even its text, though a definition elsewhere can still turn `[a]` into a reference.
+**Store the `ast` the call hands back, never the tree you sent.** Only that one is known to agree with what git will hold, and render policy
 has to run on it. Everything that writes a tree, the editor save and `merge3` included, goes
-through this.
+through this. **`source` comes only from the stored row, never from a client or an editor
+document.** Check that where a tree enters the app: the hashes have no key, and the reparse only
+sees bytes that change what a block says.
 
 Untouched blocks keep their bytes, so a file never gets reformatted behind its author's back. A
 changed block reprints whole, which means a one word edit is one line only if the block was
@@ -137,22 +142,23 @@ Inside a thread there is an empty environment, no arguments, no streams to ours,
 network, child process, worker and debugger entry points. The seal is a seatbelt: it stops no
 code that is determined to get out, and proves nothing about the network.
 
-| Key                              | Default | Meaning                                        |
-| -------------------------------- | ------- | ---------------------------------------------- |
-| `DREFYN_PARSE_TIMEOUT_MS`        | 2000    | A thread is killed this long into a page       |
-| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512     | Heap cap per thread                            |
-| `DREFYN_PARSE_THREADS`           | 2       | Threads per host, at least 2                   |
-| `DREFYN_PARSE_QUEUE_MAX`         | 64      | Pages waiting across all organizations         |
-| `DREFYN_PARSE_ORG_THREADS`       | 1       | Threads one organization can hold, under total |
-| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32      | Pages one organization can have waiting        |
-| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000   | Thread time per window for an organization     |
-| `DREFYN_PARSE_PROJECT_THREADS`   | 1       | Threads one project can hold, inside its org   |
-| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16      | Pages one project can have waiting             |
-| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000   | Thread time per window for a project           |
-| `DREFYN_PARSE_WINDOW_MS`         | 60000   | Length of the budget window                    |
-| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000    | Wait after `terminate` before SIGKILL          |
-| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536    | At least threads times the cap, plus 256       |
-| `DREFYN_PARSE_PORT`              | 8787    | Port the host listens on                       |
+| Key                              | Default   | Meaning                                                   |
+| -------------------------------- | --------- | --------------------------------------------------------- |
+| `DREFYN_PARSE_TIMEOUT_MS`        | 2000      | A thread is killed this long into a page                  |
+| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512       | Heap cap per thread                                       |
+| `DREFYN_PARSE_THREADS`           | 2         | Threads per host, at least 2                              |
+| `DREFYN_PARSE_QUEUE_MAX`         | 64        | Pages waiting across all organizations                    |
+| `DREFYN_PARSE_ORG_THREADS`       | 1         | Threads one organization can hold, under total            |
+| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32        | Pages one organization can have waiting                   |
+| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000     | Thread time per window for an organization                |
+| `DREFYN_PARSE_PROJECT_THREADS`   | 1         | Threads one project can hold, inside its org              |
+| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16        | Pages one project can have waiting                        |
+| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000     | Thread time per window for a project                      |
+| `DREFYN_PARSE_WINDOW_MS`         | 60000     | Length of the budget window                               |
+| `DREFYN_PARSE_MAX_HELD_BYTES`    | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
+| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000      | Wait after `terminate` before SIGKILL                     |
+| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536      | At least threads times the cap, held bytes, plus 256      |
+| `DREFYN_PARSE_PORT`              | 8787      | Port the host listens on                                  |
 
 ### What the limits hold against
 

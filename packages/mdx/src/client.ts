@@ -2,10 +2,11 @@ import type { TenantRef } from '@drefyn/tenancy';
 import { z } from 'zod';
 import { DEFAULT_LIMITS } from './policy.ts';
 import { refused, wireResultSchema } from './result.ts';
+import { rootSchema } from './root-schema.ts';
 import type { JobResult } from './result.ts';
 import type { IsolatedPolicy } from './thread.ts';
 import type { Dialect, MdxRoot, ParseResult, PrintResult } from './types.ts';
-import { maxTreeBytes } from './wire.ts';
+import { maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
 import type { WirePrint, WireRequest } from './wire.ts';
 
 export interface ParseClientRequest {
@@ -53,9 +54,9 @@ const configSchema = z.object({
 
 const BUSY = 429;
 
-const printedSchema = z.object({ text: z.string() });
+const printedSchema = z.object({ text: z.string(), ast: rootSchema });
 
-// Mistaken for a success, a parse answer would hand a caller no bytes at all.
+// A caller stores what this hands back, so a malformed answer must not look like a success.
 function readPrinted(answer: JobResult): PrintResult {
   if (!answer.ok) return answer;
   return printedSchema.safeParse(answer.value).success
@@ -101,11 +102,14 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
   const { url, timeoutMs, maxAnswerBytes } = configSchema.parse(config);
   const send = config.fetch ?? fetch;
 
-  const post = async (path: string, body: string): Promise<JobResult> => {
+  const post = async (path: string, body: string, tenant: TenantRef): Promise<JobResult> => {
     try {
       const response = await send(new URL(path, url), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          [ORGANIZATION_HEADER]: tenant.organizationId,
+        },
         body,
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -126,7 +130,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
         return refused('mdx.too_large');
       }
       const frame: WireRequest = { tenant, path, source, dialect, policy: wireOf(policy) };
-      return await post('/parse', JSON.stringify(frame));
+      return await post('/parse', JSON.stringify(frame), tenant);
     },
     async print(request) {
       const { tenant, path, root, policy } = request;
@@ -141,7 +145,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
         return refused('mdx.too_large');
       }
       const frame: WirePrint = { tenant, path, tree, policy: wireOf(policy) };
-      return readPrinted(await post('/print', JSON.stringify(frame)));
+      return readPrinted(await post('/print', JSON.stringify(frame), tenant));
     },
   };
 }

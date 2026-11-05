@@ -1,4 +1,4 @@
-import { request } from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createParseClient } from '../src/client.ts';
 import { startParseHost } from '../src/host.ts';
@@ -186,6 +186,22 @@ describe('the bytes a host holds', () => {
       body,
       headers: organization === undefined ? {} : { [ORG_HEADER]: organization },
     });
+  // A stream has no declared length, and this one never ends unless the host ends it.
+  const streamed = async (chunks: readonly string[], signal?: AbortSignal) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      },
+    });
+    const init = {
+      method: 'POST',
+      body,
+      duplex: 'half',
+      headers: { [ORG_HEADER]: ORG_A },
+      ...(signal && { signal }),
+    };
+    return (await fetch(`${url}/parse`, init as RequestInit)).status;
+  };
   const sized = (organizationId: string, bytes: number) =>
     JSON.stringify(frame(organizationId, bytes));
   const finishAll = async () => {
@@ -213,18 +229,7 @@ describe('the bytes a host holds', () => {
   });
 
   it('refuses a body with no declared length as soon as it passes the share', async () => {
-    const answer = await new Promise<number>((resolve, reject) => {
-      const { hostname, port } = new URL(url);
-      const sending = request(
-        { hostname, port, path: '/parse', method: 'POST', headers: { [ORG_HEADER]: ORG_A } },
-        (response) => {
-          response.resume();
-          resolve(response.statusCode ?? 0);
-        },
-      );
-      sending.on('error', reject);
-      sending.write('x'.repeat(SHARE + 1));
-    });
+    const answer = await streamed(['x'.repeat(SHARE + 1)]);
     expect(answer).toBe(429);
   });
 
@@ -250,23 +255,11 @@ describe('the bytes a host holds', () => {
   });
 
   it('gives back what a body cut off half way held', async () => {
-    const { hostname, port } = new URL(url);
-    await new Promise<void>((resolve) => {
-      const sending = request({
-        hostname,
-        port,
-        path: '/parse',
-        method: 'POST',
-        headers: { [ORG_HEADER]: ORG_A, 'content-length': String(SHARE) },
-      });
-      sending.on('error', () => {
-        resolve();
-      });
-      sending.write('x'.repeat(SHARE - 10), () => {
-        sending.destroy();
-        resolve();
-      });
-    });
+    const stop = new AbortController();
+    const sending = streamed(['x'.repeat(SHARE - 10)], stop.signal).catch(() => 'cut');
+    await delay(50);
+    stop.abort();
+    await sending;
     await expect.poll(async () => (await post(ORG_A, 'x'.repeat(SHARE - 1))).status).toBe(400);
   });
 });

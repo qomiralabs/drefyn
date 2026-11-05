@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     include: [
       'test/print-canonical.test.ts',
+      'test/held-bytes.test.ts',
       'test/meaning.test.ts',
       'test/print-job.test.ts',
       'test/serialize.test.ts',

@@ -107,9 +107,7 @@ describe('the parse host', () => {
       // A long kill: this is about the caps and held bytes. Time is proved on the thread.
       const { url } = start([hostMain], {
         DREFYN_PARSE_PORT: '0',
-        DREFYN_PARSE_TIMEOUT_MS: '60000',
-        DREFYN_PARSE_ORG_BUDGET_MS: '60000',
-        DREFYN_PARSE_PROJECT_BUDGET_MS: '60000',
+        DREFYN_PARSE_TIMEOUT_MS: '20000',
       });
       const client = createParseClient({ url: await url });
       const source = honestPage('md');
@@ -247,8 +245,7 @@ describe('the host environment', () => {
 
   it('checks the memory floor at start', () => {
     expect(parseHostConfig({}).hostMemoryMb).toBe(1_536);
-    expect(() => parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1279' })).toThrow();
-    expect(parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1280' }).hostMemoryMb).toBe(1_280);
+    expect(() => parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1535' })).toThrow();
     expect(() => parseHostConfig({ DREFYN_PARSE_PORT: '70000' })).toThrow();
   });
 });

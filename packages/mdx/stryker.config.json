@@ -11,7 +11,8 @@
     "src/canonical.ts",
     "src/print-job.ts",
     "src/meaning.ts",
-    "src/tree-limits.ts"
+    "src/tree-limits.ts",
+    "src/held-bytes.ts"
   ],
   "coverageAnalysis": "perTest",
   "concurrency": 2,

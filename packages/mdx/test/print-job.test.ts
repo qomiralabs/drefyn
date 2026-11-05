@@ -87,12 +87,12 @@ describe('a block printing its stored bytes', () => {
       0,
       (block) => ({ ...block, ...paragraph('https://example.com') }) as MdxBlock,
     );
-    expect(text(print(edited))).toBe('https://example.com\n\nkept\n');
+    expect(text(print(edited))).toBe('https\\://example.com\n\nkept\n');
   });
 
   it('lets a definition go, though the reference to it now reads as text', () => {
     const root = parsed('[a]\n\n[a]: b\n', 'md');
-    expect(text(print(without(root, 1)))).toBe('[a]');
+    expect(text(print(without(root, 1)))).toBe('[a]\n');
   });
 
   it('lets a definition arrive, though the text naming it now reads as a reference', () => {
