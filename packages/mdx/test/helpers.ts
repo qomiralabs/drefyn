@@ -106,6 +106,7 @@ export const isolatedPolicy = (components: readonly string[] = []) => ({
 
 export const POOL_CONFIG: ParsePoolConfig = {
   timeoutMs: 1_000,
+  printTimeoutMs: 1_000,
   maxMemoryMb: 256,
   threads: 3,
   maxQueued: 16,

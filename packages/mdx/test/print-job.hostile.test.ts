@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LIMITS } from '../src/index.ts';
+import { DEFAULT_PRINT_TIMEOUT_MS } from '../src/pool-config.ts';
 import { startParseThread } from '../src/thread.ts';
 import { maxTreeBytes } from '../src/wire.ts';
 import { honestPage } from './honest-page.ts';
@@ -20,7 +21,6 @@ const limits = { timeoutMs: KILL_AT_MS, maxMemoryMb: 256, killGraceMs: 2_000 };
 // Time on the thread and not the clock: the kill asks how much work a page is, and on a busy
 // machine a clock measures the machine. The wall clock figure comes from a real host, in the PR.
 const METERED = new URL('./fixtures/workers/metered-print.ts', import.meta.url);
-const DEFAULT_KILL_MS = 2_000;
 
 describe('an honest page at the size limit', () => {
   const printOn = async (tree: string) => {
@@ -35,7 +35,7 @@ describe('an honest page at the size limit', () => {
   };
 
   it.each(['mdx', 'md'] as const)(
-    'fits inside the default kill as all new blocks in %s',
+    'fits inside the print limit as all new blocks in %s',
     async (dialect) => {
       const page = honestPage(dialect);
       expect(Buffer.byteLength(page)).toBe(DEFAULT_LIMITS.maxBytes);
@@ -43,7 +43,7 @@ describe('an honest page at the size limit', () => {
       const { ok, value } = await printOn(tree);
       expect(ok).toBe(true);
       expect(value.printed).toBe(true);
-      expect(value.cpuMs).toBeLessThan(DEFAULT_KILL_MS);
+      expect(value.cpuMs).toBeLessThan(DEFAULT_PRINT_TIMEOUT_MS);
     },
     SLOW_MS,
   );
@@ -61,6 +61,42 @@ describe('an honest page at the size limit', () => {
 });
 
 describe('printing under the kill', () => {
+  it(
+    'runs to the print limit, past the limit a parse gets',
+    async () => {
+      const thread = startParseThread(WORKER, {
+        ...limits,
+        timeoutMs: 100,
+        printTimeoutMs: KILL_AT_MS,
+      });
+      const tree = JSON.stringify(allNew(parsed(ADJACENT_EMPHASIS, 'md')));
+      const answer = await thread.run({ tree, policy: isolatedPolicy() });
+      expect(answer.result).toMatchObject({ error: [{ code: 'mdx.parse_timeout' }] });
+      expect(answer.workMs).toBeGreaterThanOrEqual(KILL_AT_MS);
+      await thread.stop();
+    },
+    SLOW_MS,
+  );
+
+  it(
+    'leaves a parse to its own shorter limit',
+    async () => {
+      const thread = startParseThread(
+        new URL('./fixtures/workers/stall-regex.ts', import.meta.url),
+        {
+          ...limits,
+          timeoutMs: 200,
+          printTimeoutMs: 60_000,
+        },
+      );
+      const answer = await thread.run({ source: 'a', dialect: 'md', policy: isolatedPolicy() });
+      expect(answer.result).toMatchObject({ error: [{ code: 'mdx.parse_timeout' }] });
+      expect(answer.workMs).toBeLessThan(30_000);
+      await thread.stop();
+    },
+    SLOW_MS,
+  );
+
   it(
     'ends a page that would hold the printer for far longer than the limit',
     async () => {

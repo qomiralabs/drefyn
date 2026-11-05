@@ -13,6 +13,8 @@ import { serialize } from '../src/serialize.ts';
 import { isolatedPolicy, ORG_A, PROJECT_A } from './helpers.ts';
 
 const TIMEOUT_MS = 60_000;
+// A parse and a print of the largest page, each several seconds on a busy CI runner.
+const FULL_PAGE_TIMEOUT_MS = 180_000;
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = resolve(here, '../../..');
 const hostMain = resolve(here, '../src/host-main.ts');
@@ -108,6 +110,7 @@ describe('the parse host', () => {
       const { url } = start([hostMain], {
         DREFYN_PARSE_PORT: '0',
         DREFYN_PARSE_TIMEOUT_MS: '20000',
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: '20000',
       });
       const client = createParseClient({ url: await url });
       const source = honestPage('md');
@@ -119,7 +122,7 @@ describe('the parse host', () => {
       if (!result.ok) throw new Error('refused');
       expect(result.value.text).toBe(source);
     },
-    TIMEOUT_MS,
+    FULL_PAGE_TIMEOUT_MS,
   );
 
   it(

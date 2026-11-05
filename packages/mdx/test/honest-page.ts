@@ -18,19 +18,34 @@ const PROSE = `${SENTENCE.repeat(8)}\n\n`;
 
 const bytesOf = (text: string) => Buffer.byteLength(text, 'utf8');
 
-// Dense docs reach maxNodes well before maxBytes, so real pages fill as much as a page can hold
-// and paragraphs of prose fill the rest, landing on the limit exactly. No real page in the
-// corpus is near this long, so this is the honest stand in for one.
-export function honestPage(dialect: Dialect, size = DEFAULT_LIMITS.maxBytes): string {
+function build(dialect: Dialect, size: number): string {
   const wanted = prefixes[dialect];
   const bodies = loadCorpus()
     .filter((file) => file.dialect === dialect)
     .filter((file) => wanted.some((name) => file.file.startsWith(`${name}-`)))
     .map((file) => file.text.replace(FRONTMATTER, '').replace(MODULE_LINES, ''))
     .map((text) => `${text.trimEnd()}\n\n`);
-  let page = '';
+  const pieces: string[] = [];
+  let bytes = 0;
   const real = size * REAL_SHARE[dialect];
-  for (let round = 0; bytesOf(page) < real; round += 1) page += bodies[round % bodies.length] ?? '';
-  while (bytesOf(page) + bytesOf(PROSE) < size) page += PROSE;
-  return `${page}${'a'.repeat(size - bytesOf(page) - 1)}\n`;
+  for (let round = 0; bytes < real; round += 1) {
+    const body = bodies[round % bodies.length] ?? '';
+    pieces.push(body);
+    bytes += bytesOf(body);
+  }
+  const prose = bytesOf(PROSE);
+  for (; bytes + prose < size; bytes += prose) pieces.push(PROSE);
+  pieces.push('a'.repeat(size - bytes - 1), '\n');
+  return pieces.join('');
+}
+
+const built = new Map<Dialect, string>();
+
+// Dense docs reach maxNodes well before maxBytes, so real pages fill as much as a page can hold
+// and paragraphs of prose fill the rest, landing on the limit exactly. No real page in the
+// corpus is near this long, so this is the honest stand in for one.
+export function honestPage(dialect: Dialect): string {
+  const page = built.get(dialect) ?? build(dialect, DEFAULT_LIMITS.maxBytes);
+  built.set(dialect, page);
+  return page;
 }
