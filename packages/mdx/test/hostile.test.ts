@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseForStore } from '../src/index.ts';
 import type { Dialect } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
 import { codes, limits, parsed, policy } from './helpers.ts';
 
 const MIB = 1_048_576;

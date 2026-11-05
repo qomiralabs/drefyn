@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseForStore, rawOf, serialize } from '../src/index.ts';
+import { rawOf, serialize } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
 import { loadCorpus, parsed, policy, sha256, VARIANTS } from './helpers.ts';
 
 const corpus = loadCorpus();
