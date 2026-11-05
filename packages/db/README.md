@@ -153,7 +153,9 @@ list and the `AuthSchema` and `UserSchema` table types are both built from it, s
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
 and return each window's count and seconds until it ends. Each runs in a transaction of its
 own (1 s timeout) and commits before it returns, so the count stands whatever the caller's
-work does and the row lock is held for one statement only. The key is a 32 byte HMAC made by
+work does and the row lock is held for one statement only. The commit does not wait for the
+disk, so one slow flush cannot time out everyone queued on a key; a crash can lose the last
+moment of counts. The key is a 32 byte HMAC made by
 the caller, so no address or IP is stored. Parallel calls on one key queue on its row, so each
 sees its own count. A reservation inside `withAuth` or `withApiKeyLimiter` throws
 `DB_RESERVATION_NESTED` before it takes a connection, since waiting for a second connection

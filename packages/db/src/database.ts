@@ -686,13 +686,17 @@ async function runAlone<R>(
   client.on('error', onError);
   let doubtful = true;
   try {
+    // The commit holds this row's lock until it returns. Waiting for a flush there lets one
+    // slow disk write time out everyone queued on the key, which refuses real sign ins. A
+    // crash can lose the last moment of counts, which only ever allows a few more tries.
     const text = [
       'begin',
       `set local statement_timeout = ${String(timeoutMs)}`,
       `select set_config('drefyn.organization_id', '${settings.organizationId}', true),
               set_config('drefyn.project_id', '${settings.projectId}', true),
               set_config('drefyn.user_id', '${settings.userId}', true),
-              set_config('drefyn.actor_user_id', '${settings.actorUserId}', true)`,
+              set_config('drefyn.actor_user_id', '${settings.actorUserId}', true),
+              set_config('synchronous_commit', 'off', true)`,
       statement,
       'commit',
     ].join(';\n');
