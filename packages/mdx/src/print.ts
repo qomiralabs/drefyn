@@ -10,8 +10,12 @@ import type { Dialect, MdastBlock } from './types.ts';
 
 const BOM = String.fromCharCode(0xfeff);
 
-// A parser drops this at the very start of a file, where a block can land.
-const BOM_AT_BREAK = [{ atBreak: true, character: BOM }];
+const ALWAYS_UNSAFE = [
+  // A parser drops this at the very start of a file, where a block can land.
+  { atBreak: true, character: BOM },
+  // A reference followed by text starting with a colon reads as a definition at a line start.
+  { before: '\\]', character: ':', inConstruct: 'phrasing' as const },
+];
 
 // A stored format. Changing any of this is an astVersion bump, and it never reprints stored
 // blocks: they keep their bytes until someone edits them. Each is spelled out even where it is
@@ -29,7 +33,7 @@ const CANONICAL: Options = {
   // Stryker disable next-line StringLiteral: same
   listItemIndent: 'one',
   incrementListMarker: true,
-  unsafe: BOM_AT_BREAK,
+  unsafe: ALWAYS_UNSAFE,
 };
 
 const MARKDOWN_NODES = [
@@ -141,6 +145,23 @@ function spaceBeforeHtml(children: Prepared[]): Prepared[] {
   });
 }
 
+// The printer has to put a blank line before these, or a rule would make a heading of the text
+// and a definition would join it. That line makes the item spread on reparse, so it has to print
+// spread from the first pass.
+const needsBlankAfterText = ({ children = [] }: Prepared) =>
+  children.some(
+    ({ type }, index) =>
+      (type === 'thematicBreak' || type === 'footnoteDefinition') &&
+      children[index - 1]?.type === 'paragraph',
+  );
+
+// A parser leaves a container's prefix on a line of only whitespace, so inside one such a line
+// in a code block grows on every pass.
+function blankCode(child: Prepared): Prepared {
+  if (child.type !== 'code') return child;
+  return { ...child, value: (child.value as string).replace(/^[ \t]+$/gm, '') };
+}
+
 // A private copy: values lose their CRLF, which the printer would otherwise double, and the
 // marks below go on this and not on the caller's tree.
 function prepare(node: Prepared, dialect: Dialect, tight: boolean): Prepared {
@@ -153,9 +174,10 @@ function prepare(node: Prepared, dialect: Dialect, tight: boolean): Prepared {
   if (node.attributes !== undefined) copy.attributes = node.attributes.map(foldAttribute);
   if (node.children !== undefined) {
     const children = node.children.map((child) => prepare(child, dialect, inTight));
-    copy.children = node.type === 'heading' ? spaceBeforeHtml(children) : children;
+    copy.children = node.type === 'heading' ? spaceBeforeHtml(children) : children.map(blankCode);
   }
   if (node.type === 'mdxJsxFlowElement' && inTight) copy.data = { tight: true };
+  if (node.type === 'listItem' && needsBlankAfterText(node)) copy.spread = true;
   return copy;
 }
 
@@ -218,13 +240,12 @@ function flowExpression(node: Prepared, _parent: unknown, state: PrintState): st
   return `{${body}}`;
 }
 
-// ESM only exists at column one, so it can take no JSX indent at all.
+// ESM only exists at column one, so it can take no JSX indent at all. It also runs until a blank
+// line, so inside JSX it needs one or it takes the closing tag with it.
 function esm(node: Prepared): string {
   const dedent = dedentOf(node);
-  return (node.value as string)
-    .split('\n')
-    .map((line) => `${dedent}${line}`)
-    .join('\n');
+  const lines = (node.value as string).split('\n').map((line) => `${dedent}${line}`);
+  return `${lines.join('\n')}${dedent === '' ? '' : '\n'}`;
 }
 
 const DELIMITERS: Readonly<Record<string, string>> = { left: ':-', right: '-:', center: ':-:' };
@@ -275,7 +296,7 @@ const stringifier = (dialect: Dialect, overrides: Options) => {
   const handlers = { table, mdxFlowExpression: flowExpression, mdxjsEsm: esm, [JOINT]: tightJoint };
   const options = { ...CANONICAL, ...overrides, handlers } as unknown as Options;
   if (dialect === 'md') return markdown.use(remarkStringify, options).freeze();
-  const unsafe = [...BOM_AT_BREAK, ...ESM_LOOKALIKES];
+  const unsafe = [...ALWAYS_UNSAFE, ...ESM_LOOKALIKES];
   return markdown
     .use(remarkMdx)
     .use(remarkStringify, { ...options, unsafe })

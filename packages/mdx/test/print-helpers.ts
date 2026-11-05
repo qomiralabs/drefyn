@@ -1,4 +1,10 @@
+import { printCanonical } from '../src/index.ts';
 import type { MdxBlock, MdxRoot } from '../src/index.ts';
+
+interface Walkable {
+  readonly type: string;
+  readonly children?: readonly Walkable[];
+}
 
 export function withoutSource(block: MdxBlock): MdxBlock {
   const copy = { ...block };
@@ -26,12 +32,18 @@ export const without = (root: MdxRoot, index: number): MdxRoot => ({
   children: root.children.filter((_, at) => at !== index),
 });
 
-// References only resolve beside their definitions, so a lone block reparses next to them.
+function definitionsIn(node: Walkable): readonly Walkable[] {
+  const own = node.type === 'definition' || node.type === 'footnoteDefinition' ? [node] : [];
+  return [...own, ...(node.children ?? []).flatMap(definitionsIn)];
+}
+
+// References only resolve beside their definitions, wherever those sit, so a lone block reparses
+// next to them.
 export const definitionsOf = (root: MdxRoot, except?: MdxBlock): string =>
   root.children
-    .filter((block) => block !== except)
-    .filter((block) => block.type === 'definition' || block.type === 'footnoteDefinition')
-    .map((block) => block.source?.raw.trimStart() ?? '')
+    .flatMap((block) => definitionsIn(block as Walkable))
+    .filter((node) => node !== except)
+    .map((node) => printCanonical(node as MdxBlock, root.dialect))
     .join('\n\n');
 
 export function changedLines(before: string, after: string): number {

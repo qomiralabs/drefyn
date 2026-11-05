@@ -82,8 +82,39 @@ describe('the faults found in the stock printer', () => {
       children: [{ type: 'mdxjsEsm', value: 'export const a = 1\n\nexport const b = 2' }],
     } as unknown as MdastBlock;
     expect(printCanonical(block, 'mdx')).toBe(
-      '<A>\nexport const a = 1\n\nexport const b = 2\n</A>',
+      '<A>\nexport const a = 1\n\nexport const b = 2\n\n</A>',
     );
+  });
+
+  it('ends esm with a blank line, or it runs on into the closing tag', () => {
+    const once = print('<div>\nexport const b = 1\n\n</div>\n', 'mdx');
+    expect(once).toBe('<div>\nexport const b = 1\n\n</div>');
+    expect(print(`${once}\n`, 'mdx')).toBe(once);
+  });
+
+  it('does not grow a whitespace only code line inside a container', () => {
+    const footnote = print('[^1]: a\n\n    ```\n      \n    ```\n');
+    expect(footnote).toBe('[^1]: a\n\n    ```\n    ```');
+    expect(print('- ```\n  a\n     \n  b\n  ```\n')).toBe('- ```\n  a\n\n  b\n  ```');
+  });
+
+  it('keeps a whitespace only code line at the top level', () => {
+    expect(print('```\n  \n```\n')).toBe('```\n  \n```');
+  });
+
+  it('settles an item with a thematic break after its text', () => {
+    const once = print('- item\n    ***\n  </Note>\n');
+    expect(once).toBe('- item\n\n  ---\n\n  </Note>');
+    expect(print(`${once}\n`)).toBe(once);
+  });
+
+  it('settles an item with a footnote definition after its text', () => {
+    const item = '- item\n  [^1]: note\n';
+    expect(parsed(item, 'md').children[0]).toMatchObject({ children: [{ spread: false }] });
+    const once = print(item);
+    expect(print(`${once}\n`)).toBe(once);
+    const nested = print('- item\n[^1]\n\t[^1]: note\n<Note a="1">\n');
+    expect(print(`${nested}\n`)).toBe(nested);
   });
 
   it('does not put a blank line between jsx children in a tight list', () => {
@@ -307,7 +338,9 @@ describe('a reference with a colon after it', () => {
   it('cannot turn into a footnote definition on its own line', () => {
     const source = '[^1]: a\n\nb\n    [^1]: c\n';
     const root = parsed(source, 'md');
-    const printed = printCanonical(root.children[1] as MdxBlock, 'md');
+    const [, block] = root.children;
+    if (block === undefined) throw new Error('no block');
+    const printed = printCanonical(block, 'md');
     expect(printed).toBe('b\n[^1]\\: c');
     expect(parsed(`[^1]: a\n\n${printed}\n`, 'md').children).toHaveLength(2);
   });
@@ -315,7 +348,9 @@ describe('a reference with a colon after it', () => {
   it('cannot turn into a link definition at the start of a paragraph', () => {
     const source = '[a]: b\n\n    c\n\n[a]\\: d\n';
     const root = parsed(source, 'md');
-    const printed = printCanonical(root.children.at(-1) as MdxBlock, 'md');
+    const block = root.children.at(-1);
+    if (block === undefined) throw new Error('no block');
+    const printed = printCanonical(block, 'md');
     expect(printed).toBe('[a]\\: d');
     expect(parsed(`[a]: b\n\n${printed}\n`, 'md').children.map(({ type }) => type)).toEqual([
       'definition',

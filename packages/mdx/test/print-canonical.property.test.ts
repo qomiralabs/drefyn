@@ -16,7 +16,13 @@ const reparse = (source: string, dialect: Dialect): MdxRoot | undefined => {
   return result.ok ? result.value.ast : undefined;
 };
 
+// A parser only leaves html inside a paragraph mid way through one, or just after a definition.
+// Alone it is a block of its own, and nothing can escape it. Every other block has to hold.
+const opensWithHtml = (block: MdxBlock) =>
+  block.type === 'paragraph' && block.children[0]?.type === 'html';
+
 function expectBlockIdempotent(block: MdxBlock, root: MdxRoot) {
+  if (opensWithHtml(block)) return;
   const { dialect } = root;
   // Frontmatter only exists at the very top, so nothing can go in front of it.
   const definitions = block.type === 'yaml' ? '' : definitionsOf(root, block);
