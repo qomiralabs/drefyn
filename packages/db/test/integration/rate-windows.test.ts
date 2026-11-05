@@ -11,6 +11,7 @@ import {
   type AuthDatabase,
   type Database,
 } from '../../src/index.ts';
+import { runAloneOnAuth } from '../../src/database.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
 import { superuser } from './support/stack.ts';
@@ -181,6 +182,18 @@ describeWithStack('rate limit windows', () => {
     await holder;
     expect(outcome).toMatchObject({ code: 'DB_TIMEOUT' });
     expect(total(await storedCounts('auth_rate_limits', keyIs('locked')))).toBe(1);
+  });
+
+  it('skips the wait for the disk inside the reservation and nowhere else', async () => {
+    const setting = "select current_setting('synchronous_commit') as value";
+    expect(await runAloneOnAuth(auth, setting)).toEqual([{ value: 'off' }]);
+    // Every connection of the pool in turn, so a setting left behind on one would show.
+    const after = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        withAuth(auth, async (tx) => (await sql.raw<{ value: string }>(setting).execute(tx)).rows),
+      ),
+    );
+    expect(new Set(after.flat().map((row) => row.value))).toEqual(new Set(['on']));
   });
 
   it('refuses a reservation inside a transaction and counts nothing', async () => {

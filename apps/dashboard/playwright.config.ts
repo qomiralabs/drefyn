@@ -138,7 +138,14 @@ export default defineConfig({
     {
       name: 'shell-firefox',
       testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
-      use: { ...devices['Desktop Firefox'] },
+      use: {
+        ...devices['Desktop Firefox'],
+        // Typing an address this profile has sent before opens Firefox's form history popup a
+        // moment later. A press outside it only closes it, so the button sees a release and
+        // never a click. Contexts share the history, and these tests sign the same person in
+        // twice.
+        launchOptions: { firefoxUserPrefs: { 'browser.formfill.enable': false } },
+      },
     },
     {
       name: 'shell-webkit',
