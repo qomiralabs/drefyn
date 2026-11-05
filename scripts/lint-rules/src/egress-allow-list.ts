@@ -34,4 +34,16 @@ export const egressAllowList = [
       'loopback test server that stands in for Next behind the real wrapper; it accepts connections on 127.0.0.1 and never opens one',
     only: [{ module: 'node:http', imports: ['createServer'] }],
   },
+  {
+    path: 'apps/dashboard/e2e/oauth-fake-server.ts',
+    reason:
+      'fake OAuth provider for the dashboard e2e stack; it accepts connections on 127.0.0.1 and never opens one, and only the Playwright config starts it',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
+    path: 'apps/dashboard/e2e/oauth-preload.ts',
+    reason:
+      'test preload that narrows the global fetch of the e2e dashboard servers: provider hosts go to the loopback fake and everything else is refused; it widens nothing and no build loads it',
+    only: [{ global: 'fetch' }],
+  },
 ] as const satisfies readonly EgressAllowEntry[];

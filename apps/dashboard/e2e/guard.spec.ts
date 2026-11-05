@@ -105,6 +105,8 @@ test.describe('a person with no organization', () => {
   test('sign out refuses another origin', async ({ request }) => {
     const response = await request.post('/sign-out', { headers: { origin: 'https://evil.test' } });
     expect(response.status()).toBe(403);
+    // Another site must not be able to wipe this browser's cookies either.
+    expect(response.headers()['clear-site-data']).toBeUndefined();
   });
 
   test('an organization they are not in is a 404 with a way back', async ({ page }) => {

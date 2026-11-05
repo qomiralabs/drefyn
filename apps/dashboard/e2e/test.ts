@@ -1,7 +1,7 @@
 import { test as base, type APIResponse, type Response } from '@playwright/test';
 import { absoluteLinkProblems, locationProblem } from './location-check.ts';
 
-const OURS = /^http:\/\/127\.0\.0\.1:310[014]$/;
+const OURS = /^http:\/\/127\.0\.0\.1:310[0145]$/;
 
 export function responseProblems(
   url: string,

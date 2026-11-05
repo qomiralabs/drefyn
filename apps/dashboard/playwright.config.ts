@@ -10,6 +10,8 @@ import {
   OPEN_ORIGIN,
   OPEN_PORT,
 } from './e2e/fixtures.ts';
+import { FAKE_CLIENT_ENV, FAKE_ORIGIN, OAUTH_ORIGIN, OAUTH_PORT } from './e2e/oauth-fake.ts';
+import { NO_LOOKUPS } from './e2e/oauth-lookups.ts';
 import { MAYA, SIGNED_OUT, stateFile } from './e2e/people.ts';
 import { serverEnv } from './e2e/stack-env.ts';
 
@@ -71,6 +73,18 @@ const HOPS = {
 // Ready by port: this wrapper answers only the configured Host, and readiness sends none.
 const hopServer = server('on', HOP_SERVER_PORT, HOP_ORIGIN, HOPS, { port: HOP_SERVER_PORT });
 
+// Client ids put the provider buttons on the sign in page, so only these two servers have
+// them and every other baseline stays as it is. The preload sends auth's provider calls to
+// the fake without a setting in the build that could do the same in production.
+const OAUTH = {
+  ...FAKE_CLIENT_ENV,
+  NODE_OPTIONS: '--import ./e2e/oauth-preload.ts',
+};
+// Every spec on this server starts a sign in from one client address.
+const ROOMY_OAUTH = { ...ROOMY, DREFYN_AUTH_RATE_OAUTH_START: '1000/10m' };
+// Chromium only, so these two projects stay on it.
+const noLookups = { launchOptions: { args: [NO_LOOKUPS] } };
+
 export default defineConfig({
   testDir: './e2e',
   outputDir: './test-results',
@@ -97,24 +111,38 @@ export default defineConfig({
   use: { baseURL: ON_ORIGIN, storageState: stateFile(MAYA) },
   webServer: [
     server('on', ON_PORT, ON_ORIGIN, ROOMY),
-    server('off', OFF_PORT, OFF_ORIGIN),
+    server('off', OFF_PORT, OFF_ORIGIN, OAUTH),
     server('on', OPEN_PORT, OPEN_ORIGIN, { ...ROOMY, DREFYN_AUTH_SIGNUP: 'open' }),
     hopServer,
+    server('on', OAUTH_PORT, OAUTH_ORIGIN, {
+      ...ROOMY_OAUTH,
+      ...OAUTH,
+      DREFYN_AUTH_SIGNUP: 'open',
+    }),
+    {
+      command: 'node e2e/oauth-fake-server.ts',
+      url: `${FAKE_ORIGIN}/__health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      stdout: 'ignore' as const,
+      stderr: 'pipe' as const,
+    },
   ],
   projects: [
     {
       name: 'shell-chromium',
-      testMatch: /(shell|states|keyboard|responsive|theme|headers|loading|guard)\.spec\.ts$/,
+      testMatch:
+        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'shell-firefox',
-      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'shell-webkit',
-      testMatch: /(keyboard|headers|loading)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     {
@@ -130,15 +158,15 @@ export default defineConfig({
     },
     {
       name: 'auth',
-      testMatch: /(auth-(email|csrf|invite|cli-link)|first-run)\.spec\.ts$/,
+      testMatch: /(auth-(email|csrf|invite|cli-link|oauth)|first-run)\.spec\.ts$/,
       // These count rows across the whole server, and read one inbox.
       workers: 1,
-      use: { ...chromium, storageState: SIGNED_OUT },
+      use: { ...chromium, storageState: SIGNED_OUT, ...noLookups },
     },
     {
       name: 'auth-no-js',
       testMatch: /(no-script|first-run-no-script)\.spec\.ts$/,
-      use: { ...chromium, storageState: SIGNED_OUT, javaScriptEnabled: false },
+      use: { ...chromium, storageState: SIGNED_OUT, javaScriptEnabled: false, ...noLookups },
     },
     {
       name: 'auth-hop',
