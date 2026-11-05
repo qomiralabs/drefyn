@@ -1,0 +1,98 @@
+name: diag 401
+
+on:
+  push:
+    branches: [test/401-firefox-sign-out]
+
+permissions: {}
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  # How long Mailpit takes to greet with the runner's own resolver.
+  natural:
+    name: natural ${{ matrix.leg }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          docker network create diag
+          docker run --detach --name mailpit --network diag -p 51025:1025 \
+            axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+          docker exec mailpit cat /etc/resolv.conf
+          cat /etc/resolv.conf
+          resolvectl status | grep -i 'dns server' || true
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            docker exec mailpit /mailpit readyz && break
+            sleep 1
+          done
+      - run: node scripts/diag-401/smtp-sampler.mjs 51025 300000
+
+  # The real specs behind a resolver that loses queries, with reverse lookups on and off.
+  forced:
+    name: forced rdns off=${{ matrix.off }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        off: ['false', 'true']
+    env:
+      COMPOSE_PROJECT_NAME: drefyn-dash-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+      DREFYN_POSTGRES_PORT: '55432'
+      DREFYN_DATABASE_SSL: disable
+      DIAG_RDNS_OFF: ${{ matrix.off }}
+      DREFYN_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start the compose stack
+        env:
+          DREFYN_SELFHOST_WAIT_SECONDS: 90
+        run: bash scripts/selfhost.sh up
+      - name: Start the lossy resolver and Mailpit
+        run: |
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
+          nohup node scripts/diag-401/dns-drop.mjs 172.17.0.1 > "$RUNNER_TEMP/dns.log" 2>&1 &
+          docker compose --file deploy/compose.yaml --file scripts/diag-401/dns.yaml --profile test up --detach --wait mailpit
+      - run: pnpm --filter @drefyn/dashboard build
+      - name: Seed people and sessions
+        env:
+          DREFYN_E2E_SEED: real-stack-e2e
+        run: pnpm --filter @drefyn/dashboard seed:e2e
+      - name: sign out spec
+        continue-on-error: true
+        run: |
+          docker run --rm --ipc=host --network host \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
+            -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
+            -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e DREFYN_PLAYWRIGHT_IMAGE \
+            "$DREFYN_PLAYWRIGHT_IMAGE" node_modules/.bin/playwright test --project=shell-firefox e2e/sign-out.spec.ts --repeat-each=6
+      - name: resolver log
+        if: always()
+        run: |
+          wc -l "$RUNNER_TEMP/dns.log"
+          tail -n 30 "$RUNNER_TEMP/dns.log"

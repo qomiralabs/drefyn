@@ -35,7 +35,7 @@ const server = (
   ...ready,
   reuseExistingServer: false,
   timeout: 60_000,
-  stdout: 'ignore' as const,
+  stdout: 'pipe' as const,
   stderr: 'pipe' as const,
   env: {
     NODE_ENV: 'production',

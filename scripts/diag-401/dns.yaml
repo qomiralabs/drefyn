@@ -1,0 +1,5 @@
+services:
+  mailpit:
+    dns: [172.17.0.1]
+    environment:
+      MP_SMTP_DISABLE_RDNS: ${DIAG_RDNS_OFF:-false}
