@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { MdxIssueCode, ParseResult } from '../src/index.ts';
 import { createParsePool } from '../src/isolated.ts';
 import type { ParsePool, ParseRequest } from '../src/isolated.ts';
+import { startParseThread } from '../src/thread.ts';
 import {
   isolatedPolicy,
   ORG_A,
@@ -75,11 +76,17 @@ describe('a stall inside the parser', () => {
   it(
     'ends in the GFM email regular expression, on the largest page the scan lets through',
     async () => {
-      const logger = recordingLogger();
-      const pool = createParsePool({ ...POOL_CONFIG, timeoutMs: 100 }, { logger });
+      // A short timeout on a warm thread, so it lands in the transform and not in the first
+      // parse, which takes over 100 ms on a CI runner.
+      const limits = { ...POOL_CONFIG, timeoutMs: 30_000 };
+      const script = new URL('../src/parse-worker.ts', import.meta.url);
+      const pool = createParsePool(POOL_CONFIG, {
+        logger: recordingLogger(),
+        startThread: () => startParseThread(script, limits),
+      });
       try {
-        // A warm thread, so the timeout is spent in the parse and not on the module load.
         expect(codeOf(await pool.parse(request(honest)))).toBe('ok');
+        limits.timeoutMs = 50;
         const result = await pool.parse(request(sized('', 'a.', 23 * KB)));
         expect(codeOf(result)).toBe('mdx.parse_timeout');
       } finally {
@@ -117,6 +124,8 @@ describe('pages that blow the heap', () => {
   );
 });
 
+// Honest pages here land on cold threads, and a first parse takes over 100 ms on a CI runner,
+// so the timeout stays well above that. The bombs run for many seconds, so it still kills them.
 describe('many hostile files', () => {
   const pools: ParsePool[] = [];
   const open = (config: Partial<typeof POOL_CONFIG>, logger = recordingLogger()) => {
@@ -134,10 +143,10 @@ describe('many hostile files', () => {
       const logger = recordingLogger();
       const pool = open(
         {
-          timeoutMs: 500,
+          timeoutMs: 1_000,
           maxQueued: 16,
           maxQueuedPerProject: 8,
-          projectBudgetMs: 1_500,
+          projectBudgetMs: 3_000,
           projectWindowMs: 60_000,
         },
         logger,
@@ -184,7 +193,12 @@ describe('many hostile files', () => {
   it(
     'many hostile projects at once all settle, and an honest page still gets through',
     async () => {
-      const pool = open({ timeoutMs: 200, maxQueued: 25, maxQueuedPerProject: 3 });
+      const pool = open({
+        timeoutMs: 1_000,
+        maxQueued: 25,
+        maxQueuedPerProject: 3,
+        projectBudgetMs: 1_000,
+      });
       const bomb = lazyLines(60 * KB);
       const flood = Array.from({ length: 8 }, (_, tenant) =>
         Array.from({ length: 5 }, () => pool.parse(request(bomb, projectAt(tenant)))),
@@ -222,7 +236,7 @@ describe('many hostile files', () => {
   it(
     'a killed page changes nothing for the next tenant',
     async () => {
-      const pool = open({ timeoutMs: 300 });
+      const pool = open({ timeoutMs: 1_000 });
       await pool.parse(request(lazyLines(60 * KB), PROJECT_A));
       const result = await pool.parse(request(honest, PROJECT_B));
       expect(result.ok && result.value.ast.children.length).toBe(2);

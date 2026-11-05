@@ -81,7 +81,6 @@ function deadline(ms: number) {
 // regular expressions that never yield. A thread can be killed, and that is the only hard
 // limit on time or memory a customer page has.
 export function startParseThread(script: URL, limits: ThreadLimits): ParseThread {
-  const { timeoutMs, maxMemoryMb } = limits;
   const worker = new Worker(script, {
     env: {},
     argv: [],
@@ -90,7 +89,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
     stdout: true,
     stderr: true,
     resourceLimits: {
-      maxOldGenerationSizeMb: maxMemoryMb,
+      maxOldGenerationSizeMb: limits.maxMemoryMb,
       maxYoungGenerationSizeMb: YOUNG_GENERATION_MB,
     },
   });
@@ -147,7 +146,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
     });
     const began = performance.now();
     worker.postMessage({ id, job });
-    const limit = deadline(timeoutMs);
+    const limit = deadline(limits.timeoutMs);
     const settled = await Promise.race([death, answer, limit.expired]);
     limit.clear();
     const workMs = Math.ceil(performance.now() - began);
