@@ -26,6 +26,45 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 type OrgPermission = Exclude<Permission, `${Product}.read`>;
 
+// What the pages offer on a key. Each product will register its own list; until they ship
+// their APIs the words and the set live here, where the client can read them too. A key can
+// never reach further than this, and the registry refuses any scope not on it.
+export interface ApiKeyScope {
+  readonly scope: string;
+  readonly product: Product;
+  readonly label: string;
+  readonly permission: Permission;
+}
+
+export const API_KEY_SCOPES: readonly ApiKeyScope[] = Object.freeze([
+  { scope: 'docs:pages.read', product: 'docs', label: 'Read pages', permission: 'docs.read' },
+  { scope: 'docs:pages.publish', product: 'docs', label: 'Publish pages', permission: 'docs.read' },
+  {
+    scope: 'studio:content.read',
+    product: 'studio',
+    label: 'Read content',
+    permission: 'studio.read',
+  },
+  {
+    scope: 'studio:content.write',
+    product: 'studio',
+    label: 'Write content',
+    permission: 'studio.read',
+  },
+  {
+    scope: 'status:status.read',
+    product: 'status',
+    label: 'Read status',
+    permission: 'status.read',
+  },
+  {
+    scope: 'status:incidents.write',
+    product: 'status',
+    label: 'Write incidents',
+    permission: 'status.read',
+  },
+]);
+
 const MEMBER: readonly OrgPermission[] = ['org.read'];
 const ADMIN: readonly OrgPermission[] = [
   ...MEMBER,

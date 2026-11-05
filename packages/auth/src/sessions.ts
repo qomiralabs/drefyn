@@ -324,11 +324,16 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
   }
 
   // Ids and a count only: never a cookie, a secret or an address.
-  function logRevoked(user: UserId, scope: 'all' | 'others', revoked: number): void {
+  function logRevoked(
+    user: UserId,
+    scope: 'all' | 'others' | 'one',
+    revoked: number,
+    session?: SessionId,
+  ): void {
     quietInfo(deps.logger, 'auth.sessions_revoked', {
       scope,
       revoked,
-      ...idFields({ userId: ['usr', user] }),
+      ...idFields({ userId: ['usr', user], revokedSessionId: ['ses', session] }),
     });
   }
 
@@ -673,7 +678,9 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .returning('id')
             .execute(),
         );
-        return rows.length === 0 ? fail(new AuthError('AUTH_NOT_FOUND')) : ok(undefined);
+        if (rows.length === 0) return fail(new AuthError('AUTH_NOT_FOUND'));
+        logRevoked(s.userId, 'one', rows.length, id);
+        return ok(undefined);
       } catch (error) {
         return fail(error);
       }

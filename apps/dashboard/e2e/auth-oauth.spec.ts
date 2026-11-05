@@ -1,17 +1,21 @@
 import { expect, type Page } from '@playwright/test';
-import { seedPerson, uniqueAddress } from './auth-helpers.ts';
+import { makeStale, seedPerson, signInByCode, uniqueAddress } from './auth-helpers.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { FAKE_CLIENTS, OAUTH_ORIGIN } from './oauth-fake.ts';
 import {
   expectNoSession,
   fakeLog,
   GITHUB,
+  GOOGLE,
   hasSession,
   identitiesOf,
+  idOf,
   newAccount,
   PROVIDERS,
+  type ProviderRoute,
   sessionsOf,
   signInThrough,
+  stepUpMethodOf,
   test,
   toProvider,
   usersOf,
@@ -31,6 +35,40 @@ async function nameYourself(page: Page) {
   await page.getByLabel('Your name').fill('Maya Okafor');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/organizations\/new$/);
+}
+
+const METHODS = '/account/sign-in';
+
+// The account pages sit in the shell, which needs an organization to draw.
+async function ownOrganization(page: Page, address: string) {
+  await nameYourself(page);
+  const slug = (address.split('@')[0] ?? '').replace(/[^a-z0-9]/g, '').slice(-20);
+  await page.getByLabel('Name', { exact: true }).fill(`Team ${slug}`);
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page).toHaveURL(new RegExp(`/team-${slug}$`));
+}
+const notLinked = (page: Page) => page.getByText('That account was not linked.');
+
+// Signed in by a code, so the person has no provider yet and a recent sign in.
+async function signedInByCode(page: Page, prefix: string): Promise<string> {
+  const address = uniqueAddress(prefix);
+  await signInByCode(page, address);
+  await expect(page).toHaveURL(/\/welcome/);
+  await ownOrganization(page, address);
+  return address;
+}
+
+async function pressLink(page: Page, label: string) {
+  await page.goto(METHODS);
+  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+  await page.getByRole('button', { name: 'Add a method' }).click();
+  await page.getByRole('menuitem', { name: `Link ${label}` }).click();
+}
+
+// A settings press from a stale session, which is what asks for a fresh sign in.
+async function askedToConfirm(page: Page, label: string) {
+  await pressLink(page, label);
+  return page.getByRole('dialog', { name: 'Confirm it is you' });
 }
 
 for (const each of PROVIDERS) {
@@ -372,6 +410,147 @@ for (const each of PROVIDERS) {
     });
   });
 }
+
+test.describe('linking from settings', () => {
+  for (const each of PROVIDERS) {
+    const { name, label } = each;
+
+    test(`${label} links from the methods page, and a notice goes out`, async ({
+      page,
+      provider,
+    }) => {
+      const address = await signedInByCode(page, `oauth-settings-${name}`);
+      const account = newAccount(uniqueAddress(`oauth-linked-${name}`));
+      const seen = await countTo(address);
+      provider.script = { account };
+      await pressLink(page, label);
+      await expect(page.getByRole('heading', { name: `Fake ${label}` })).toBeVisible();
+      await page.getByRole('link', { name: 'Authorize' }).click();
+      await expect(page).toHaveURL(new RegExp(`${METHODS}$`));
+      expect(await identitiesOf(name, account)).toBe('1');
+      await expect.poll(() => countTo(address)).toBeGreaterThan(seen);
+      await expect(page.getByRole('menuitem', { name: `Link ${label}` })).toHaveCount(0);
+    });
+
+    test(`${label} denied at the provider links nothing`, async ({ page, provider }) => {
+      await signedInByCode(page, `oauth-settings-deny-${name}`);
+      const account = newAccount(uniqueAddress(`oauth-linked-deny-${name}`));
+      provider.script = { account };
+      await pressLink(page, label);
+      await page.getByRole('link', { name: 'Cancel' }).click();
+      await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+      await expect(notLinked(page)).toBeVisible();
+      expect(await identitiesOf(name, account)).toBe('0');
+    });
+
+    test(`${label} account held by someone else stays theirs`, async ({ page, provider }) => {
+      const owner = uniqueAddress(`oauth-settings-owner-${name}`);
+      const account = newAccount(owner);
+      await signInThrough(page, provider, each, { account });
+      await expect(page).toHaveURL(/\/welcome$/);
+      await page.context().clearCookies();
+      await signedInByCode(page, `oauth-settings-taker-${name}`);
+      provider.script = { account };
+      await pressLink(page, label);
+      await page.getByRole('link', { name: 'Authorize' }).click();
+      await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+      await expect(notLinked(page)).toBeVisible();
+      expect(await identitiesOf(name, account)).toBe('1');
+    });
+
+    test(`${label} with an unverified address links nothing`, async ({ page, provider }) => {
+      await signedInByCode(page, `oauth-settings-unv-${name}`);
+      const account = newAccount(uniqueAddress(`oauth-linked-unv-${name}`), { verified: false });
+      provider.script = { account };
+      await pressLink(page, label);
+      await page.getByRole('link', { name: 'Authorize' }).click();
+      await expect(notLinked(page)).toBeVisible();
+      expect(await identitiesOf(name, account)).toBe('0');
+    });
+
+    test(`a ${label} link from another site never reaches the provider`, async ({
+      page,
+      provider,
+    }) => {
+      await signedInByCode(page, `oauth-settings-lure-${name}`);
+      // A typed or lured navigation has no same origin Sec-Fetch-Site.
+      await page.goto(`/auth/oauth/${name}/start?purpose=link`);
+      await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+      expect(provider.handovers).toEqual([]);
+    });
+  }
+});
+
+test.describe('step up from settings', () => {
+  // Google can prove a fresh sign in, so it is the provider step up works with.
+  async function staleGooglePerson(page: Page, provider: ProviderRoute) {
+    const address = uniqueAddress('oauth-step');
+    const account = newAccount(address);
+    await signInThrough(page, provider, GOOGLE, { account });
+    await expect(page).toHaveURL(/\/welcome$/);
+    await ownOrganization(page, address);
+    const id = await idOf(address);
+    await makeStale(id);
+    return { account, id };
+  }
+
+  test('Google proves a fresh sign in and comes back to the page it left', async ({
+    page,
+    provider,
+  }) => {
+    const { account, id } = await staleGooglePerson(page, provider);
+    provider.script = { account };
+    const prompt = await askedToConfirm(page, 'GitHub');
+    await prompt.getByRole('link', { name: 'Sign in again with Google' }).click();
+    expect(provider.handovers.at(-1)?.searchParams.get('prompt')).toBe('login');
+    expect(provider.handovers.at(-1)?.searchParams.get('max_age')).toBe('0');
+    await page.getByRole('link', { name: 'Authorize' }).click();
+    await expect(page).toHaveURL(new RegExp(`${METHODS}$`));
+    expect(await stepUpMethodOf(id)).toBe('google');
+  });
+
+  test('another Google account does not step up this one', async ({ page, provider }) => {
+    const { id } = await staleGooglePerson(page, provider);
+    provider.script = { account: newAccount(uniqueAddress('oauth-step-other')) };
+    const prompt = await askedToConfirm(page, 'GitHub');
+    await prompt.getByRole('link', { name: 'Sign in again with Google' }).click();
+    await page.getByRole('link', { name: 'Authorize' }).click();
+    await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+    expect(await stepUpMethodOf(id)).toBe('');
+  });
+
+  test('a Google sign in from an hour ago does not count as fresh', async ({ page, provider }) => {
+    const { account, id } = await staleGooglePerson(page, provider);
+    provider.script = { account, authTimeAgoSeconds: 3600 };
+    const prompt = await askedToConfirm(page, 'GitHub');
+    await prompt.getByRole('link', { name: 'Sign in again with Google' }).click();
+    await page.getByRole('link', { name: 'Authorize' }).click();
+    await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+    expect(await stepUpMethodOf(id)).toBe('');
+  });
+
+  test('GitHub cannot step up while email can, and never leaves for the provider', async ({
+    page,
+    provider,
+  }) => {
+    await signedInByCode(page, 'oauth-step-github');
+    await page.goto(METHODS);
+    // From our own page, so only the rule stops it and not the navigation check.
+    await page.evaluate(() => {
+      window.location.assign('/auth/oauth/github/start?purpose=step_up');
+    });
+    await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+    expect(provider.handovers).toEqual([]);
+  });
+
+  test('a step up from another site never reaches the provider', async ({ page, provider }) => {
+    await staleGooglePerson(page, provider);
+    const before = provider.handovers.length;
+    await page.goto('/auth/oauth/google/start?purpose=step_up');
+    await expect(page).toHaveURL(new RegExp(`${METHODS}\\?error=provider$`));
+    expect(provider.handovers).toHaveLength(before);
+  });
+});
 
 test('a verified GitHub secondary address does not stand in for an unverified primary', async ({
   page,

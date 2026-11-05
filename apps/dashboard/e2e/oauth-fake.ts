@@ -70,6 +70,8 @@ export interface FakeScript {
   readonly tokenEndpoint?: 'up' | 'down';
   // Sends this code back instead of a new one, as a replay would.
   readonly code?: string;
+  // How long ago the person signed in at Google, for a step up. It is what auth_time reports.
+  readonly authTimeAgoSeconds?: number;
 }
 
 export const encodeScript = (script: FakeScript): string =>
@@ -99,6 +101,8 @@ interface Visit {
   readonly state: string;
   readonly challenge: string;
   readonly nonce: string | null;
+  // Google adds auth_time only when asked with max_age, which step up does.
+  readonly maxAge: string | null;
 }
 
 interface Grant {
@@ -155,6 +159,9 @@ export function createFakeProvider(redirectOrigin: string = OAUTH_ORIGIN): FakeP
         email: account.email,
         email_verified: account.verified,
         nonce: visit.nonce,
+        ...(visit.maxAge === null
+          ? {}
+          : { auth_time: now - (visit.script.authTimeAgoSeconds ?? 1) }),
         iat: now,
         exp: now + 3599,
       }),
@@ -191,6 +198,7 @@ export function createFakeProvider(redirectOrigin: string = OAUTH_ORIGIN): FakeP
       state,
       challenge,
       nonce,
+      maxAge: query.get('max_age'),
     });
     return consentPage(provider, ticket);
   }

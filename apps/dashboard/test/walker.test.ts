@@ -597,3 +597,22 @@ describe('the session guard', () => {
     expect(problems('src/app/page.tsx', text)).toEqual(['guard_missing']);
   });
 });
+
+describe('pages with no organization in the URL', () => {
+  const home = "import { guardAccountHome } from '../../server/guard.ts';\n";
+
+  it('take the account guard under /account', () => {
+    expect(
+      problems(
+        'src/app/account/page.tsx',
+        `${home}export default async function P() { await guardAccountHome(); return 1; }`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuse an account page with no guard', () => {
+    expect(
+      problems('src/app/account/page.tsx', 'export default async function P() { return 1; }'),
+    ).toContain('guard_missing');
+  });
+});

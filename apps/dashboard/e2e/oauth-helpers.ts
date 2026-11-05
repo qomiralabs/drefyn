@@ -37,7 +37,9 @@ export class ProviderRoute {
   // The real redirect would leave Playwright's sight, so it becomes a page that moves on by
   // itself. A refresh is a new navigation and comes back through route(). Cookies stay on it.
   private async handOver(route: Route): Promise<void> {
-    const response = await route.fetch({ maxRedirects: 0 });
+    // Every header, Sec-Fetch-Site above all: link and step up refuse a start without it.
+    const headers = await route.request().allHeaders();
+    const response = await route.fetch({ headers, maxRedirects: 0 });
     const location = response.headers()['location'] ?? '/';
     const target = new URL(location, route.request().url());
     if (isAuthorizationUrl(target)) this.handovers.push(target);
@@ -99,7 +101,7 @@ export interface ProviderCase {
 }
 
 export const GITHUB: ProviderCase = { name: 'github', label: 'GitHub', replayError: 'state' };
-const GOOGLE: ProviderCase = { name: 'google', label: 'Google', replayError: 'provider' };
+export const GOOGLE: ProviderCase = { name: 'google', label: 'Google', replayError: 'provider' };
 export const PROVIDERS: readonly ProviderCase[] = [GITHUB, GOOGLE];
 
 // A subject of its own per test: a known subject signs in whoever already holds it.
@@ -138,12 +140,19 @@ export const identitiesOf = (provider: ProviderName, account: FakeAccount): Prom
     `app.identities where provider = '${provider}' and provider_subject = '${account.subject}'`,
   );
 
+export const idOf = (address: string): Promise<string> =>
+  authSql(`select id from app.users where email_normalized = '${address}'`);
+
 // Through the person's own context: the pre sign in role has no grant on sessions.
 export async function sessionsOf(address: string): Promise<string> {
-  const id = await authSql(`select id from app.users where email_normalized = '${address}'`);
+  const id = await idOf(address);
   if (id === '') return '0';
   return userSql(id, `select count(*) from app.sessions where user_id = '${id}'`);
 }
+
+// How this person's sessions last proved themselves, blank if none did.
+export const stepUpMethodOf = (id: string): Promise<string> =>
+  userSql(id, `select coalesce(step_up_method, '') from app.sessions where user_id = '${id}'`);
 
 export const hasSession = async (page: Page): Promise<boolean> =>
   (await page.context().cookies()).some((cookie) => cookie.name === 'drefyn_session');

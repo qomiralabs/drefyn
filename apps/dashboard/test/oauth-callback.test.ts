@@ -9,13 +9,14 @@ const SESSION = { email: 'a@example.com' };
 const COOKIES = { session: '__Host-drefyn_session', oauth: '__Host-drefyn_oauth' };
 const visitorBrowser = vi.fn<() => Promise<unknown>>();
 const guardPublic = vi.fn<() => Promise<void>>();
+const currentSession = vi.fn<() => Promise<unknown>>();
 
 vi.mock('../src/server/auth.ts', () => ({
   dashboardAuth: () => Promise.resolve({ oauth: { completeOAuth } }),
   authConfig: () => ({ cookieSecure: true, cookies: COOKIES }),
 }));
 vi.mock('../src/server/actions.ts', () => ({ visitorBrowser }));
-vi.mock('../src/server/guard.ts', () => ({ guardPublic }));
+vi.mock('../src/server/guard.ts', () => ({ guardPublic, currentSession }));
 vi.mock('../src/server/first-run.ts', () => ({ arrival }));
 vi.mock('../src/server/origin.ts', () => ({
   appOrigin: () => ORIGIN,
@@ -42,6 +43,7 @@ const refused = (code: string) => completeOAuth.mockResolvedValue({ ok: false, e
 beforeEach(() => {
   vi.clearAllMocks();
   guardPublic.mockResolvedValue();
+  currentSession.mockResolvedValue(null);
   visitorBrowser.mockResolvedValue({ ip: '203.0.113.9' });
   arrival.mockResolvedValue('/welcome?next=%2Facme');
 });
@@ -155,6 +157,36 @@ describe('the OAuth callback', () => {
     expect(response.headers.getSetCookie()).toEqual([]);
     expect(arrival).not.toHaveBeenCalled();
     expect(after).not.toHaveBeenCalled();
+  });
+
+  it.each(['AUTH_FORBIDDEN', 'AUTH_STEP_UP_IDENTITY_MISMATCH', 'AUTH_OAUTH_STATE_INVALID'])(
+    'sends someone signed in back to their methods on %s, with no cookies',
+    async (code) => {
+      currentSession.mockResolvedValue(SESSION);
+      refused(code);
+      const response = await call();
+      expect(response.status).toBe(303);
+      expect(response.headers.get('location')).toBe(`${ORIGIN}/account/sign-in?error=provider`);
+      expect(response.headers.getSetCookie()).toEqual([]);
+    },
+  );
+
+  it('sends a finished link back where it came from, with the notice owed', async () => {
+    const send = vi.fn();
+    completeOAuth.mockResolvedValue({
+      ok: true,
+      value: {
+        kind: 'linked',
+        session: SESSION,
+        setCookies: [{ name: COOKIES.oauth, value: '', maxAgeSeconds: 0 }],
+        returnTo: '/account/sign-in',
+        send,
+      },
+    });
+    const response = await call();
+    expect(response.headers.get('location')).toBe(`${ORIGIN}/account/sign-in`);
+    expect(arrival).not.toHaveBeenCalled();
+    expect(after).toHaveBeenCalledExactlyOnceWith(send);
   });
 
   it('sends a browser it cannot read back to sign in without asking auth', async () => {

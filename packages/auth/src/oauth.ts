@@ -37,7 +37,7 @@ import {
   type SessionStore,
 } from './session-support.ts';
 import { createSessions, type Sessions } from './sessions.ts';
-import { recordStepUp, type AuthMailer } from './step-up.ts';
+import { logStepUpFailed, recordStepUp, type AuthMailer } from './step-up.ts';
 import { SECRET_BYTES, decodeSecret, encodeSecret } from './tokens.ts';
 
 export type { OAuthProvider, OAuthPurpose } from './oauth-types.ts';
@@ -472,22 +472,24 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     returnTo: string,
   ): Promise<OAuthCompleted> {
     const session = await sessionOf(b, row.link_user_id);
+    const method = provider === 'google' ? 'google' : 'github_session';
+    const refuse = (code: AuthErrorCode) => {
+      logStepUpFailed(deps.logger, session, method, code);
+      return new Refused(code);
+    };
     const owner = await identityOwner(provider, profile.subject);
-    if (owner !== session.userId) throw new Refused('AUTH_STEP_UP_IDENTITY_MISMATCH');
-    let method: 'google' | 'github_session';
-    if (provider === 'google') {
+    if (owner !== session.userId) throw refuse('AUTH_STEP_UP_IDENTITY_MISMATCH');
+    if (method === 'google') {
       // max_age=0 asked Google for a new sign in; this is what proves it happened.
       const now = Math.floor(Date.now() / 1000);
       if (profile.authTime === null || now - profile.authTime > STEP_UP_SECONDS) {
-        throw new Refused('AUTH_RECENT_AUTH_REQUIRED');
+        throw refuse('AUTH_RECENT_AUTH_REQUIRED');
       }
-      method = 'google';
-    } else {
+    } else if (await hasOtherStepUp(session.userId)) {
       // GitHub cannot be made to ask again, so it proves only a live GitHub session.
-      if (await hasOtherStepUp(session.userId)) throw new Refused('AUTH_FORBIDDEN');
-      method = 'github_session';
+      throw refuse('AUTH_FORBIDDEN');
     }
-    const stepped = await recordStepUp(store, session, method);
+    const stepped = await recordStepUp(store, session, method, deps.logger);
     return {
       kind: 'stepped_up',
       session: stepped,

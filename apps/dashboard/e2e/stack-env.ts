@@ -35,6 +35,7 @@ export function serverEnv(origin: string): Record<string, string> {
     DREFYN_AUTH_COOKIE_SECURE: 'false',
     DREFYN_AUTH_SECRET: required(file, 'DREFYN_AUTH_SECRET'),
     DREFYN_AUTH_INVITATION_BLOCK_KEY: required(file, 'DREFYN_AUTH_INVITATION_BLOCK_KEY'),
+    DREFYN_API_RATE_LIMIT_KEY: required(file, 'DREFYN_API_RATE_LIMIT_KEY'),
     DREFYN_DATABASE_URL: roleUrl(file, 'drefyn_app', 'DREFYN_APP_PASSWORD'),
     DREFYN_AUTH_DATABASE_URL: roleUrl(file, 'drefyn_auth', 'DREFYN_AUTH_PASSWORD'),
     DREFYN_DATABASE_SSL: 'disable',

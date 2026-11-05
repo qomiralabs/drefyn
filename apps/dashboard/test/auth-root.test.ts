@@ -20,8 +20,14 @@ vi.mock('@drefyn/auth', () => ({
   createSessions,
   createOrganizations,
   parseAuthConfig,
+  API_KEY_SCOPES: [],
   createAccount: () => ({}),
+  createApiKeys: () => ({}),
   createCliLinks: () => ({}),
+  createEmailChange: () => ({}),
+  createMembers: () => ({}),
+  createRoles: () => ({}),
+  createScopeRegistry: () => ({}),
   createEmailSignIn: () => ({}),
   createInvitations: () => ({}),
   createOAuth: () => ({}),
@@ -83,22 +89,36 @@ describe('the composition root', () => {
     const { dashboardAuth } = await load();
     const auth = await dashboardAuth();
     expect(Object.keys(auth.sessions).sort()).toEqual([
+      'listSessions',
+      'requireRecentAuth',
       'resolveAccess',
       'resolveSession',
+      'revokeSession',
       'signOut',
+      'signOutOtherSessions',
+      'startStepUpCode',
+      'stepUpWithPassword',
       'touchSession',
+      'verifyStepUpCode',
     ]);
-    expect(Object.keys(auth.organizations)).toEqual(['listMyOrganizations', 'createOrganization']);
+    expect(Object.keys(auth.organizations).sort()).toEqual([
+      'createOrganization',
+      'listMyOrganizations',
+    ]);
     expect(Object.keys(auth).sort()).toEqual([
       'account',
+      'apiKeys',
       'cliLinks',
+      'emailChange',
       'emailSignIn',
       'invitations',
+      'members',
       'methods',
       'oauth',
       'organizations',
       'passwordAccount',
       'passwordSignIn',
+      'roles',
       'sessions',
     ]);
   });

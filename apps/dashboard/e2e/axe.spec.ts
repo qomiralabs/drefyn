@@ -1,7 +1,7 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { expect } from '@playwright/test';
 import { authStatePaths, SELF_HOSTED } from './auth-states.ts';
-import { MOBILE, ROUTES, TABLET, THEMES, useTheme } from './fixtures.ts';
+import { MOBILE, ROUTES, settingsStatePaths, TABLET, THEMES, useTheme } from './fixtures.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
@@ -75,6 +75,22 @@ for (const theme of THEMES) {
       const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
       expect(violations.map((v) => v.id)).toEqual([]);
     });
+  }
+}
+
+// A dialog takes the page's main out of the tree, so these wait for the shell instead.
+for (const [name, path] of settingsStatePaths()) {
+  for (const theme of THEMES) {
+    for (const width of WIDTHS) {
+      test(`settings ${name} has no axe violations in ${theme} at ${width}`, async ({ page }) => {
+        if (width === '390') await page.setViewportSize(MOBILE);
+        await useTheme(page, theme);
+        await page.goto(path);
+        await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+        const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+        expect(violations.map((v) => v.id)).toEqual([]);
+      });
+    }
   }
 }
 

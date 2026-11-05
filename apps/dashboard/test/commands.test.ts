@@ -76,7 +76,16 @@ describe('the command registry', () => {
       visiblePlaces('acme', permissions).map((p) => p.id);
     const member = visible(permissionsFor('member', new Set()));
     const admin = visible(permissionsFor('admin', reach));
-    expect(member).toEqual(['overview', 'plan', 'members', 'settings']);
+    expect(member).toEqual([
+      'overview',
+      'plan',
+      'members',
+      'api-keys',
+      'settings',
+      'account',
+      'sign-in-methods',
+      'sessions',
+    ]);
     expect(admin.length).toBeGreaterThan(member.length);
     expect(visible(permissionsFor('owner', reach))).toEqual(admin);
   });

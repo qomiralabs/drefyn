@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -347,5 +347,23 @@ describe('Dialog', () => {
     );
     const own = <Dialog trigger="Search" defaultOpen title="Search" children="Body" />;
     expect([a, b, c, held, drawnHeld, own]).toHaveLength(6);
+  });
+});
+
+describe('Dialog first focus', () => {
+  it('starts on a control marked data-autofocus before any field', async () => {
+    render(
+      <Dialog
+        trigger="Open"
+        defaultOpen
+        title="Remove"
+        footer={<Button data-autofocus="">Cancel</Button>}
+      >
+        <input aria-label="Field" />
+      </Dialog>,
+    );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+    });
   });
 });

@@ -193,6 +193,22 @@ describe('the fake provider', () => {
     });
   });
 
+  it('reports auth_time only when asked with max_age, as Google does', () => {
+    const claims = (change: object) => {
+      const fake = createFakeProvider();
+      const script = { account: ACCOUNT, authTimeAgoSeconds: 3600 };
+      const page = get(fake, askFor('google', script, change));
+      const ticket = /ticket=([0-9a-f]+)/.exec(page.body)?.[1] ?? '';
+      const moved = get(fake, `${DECIDE.google}?ticket=${ticket}&answer=allow`);
+      const code = new URL(moved.headers['location'] ?? '').searchParams.get('code') ?? '';
+      const payload = fieldOf(redeem(fake, 'google', code), 'id_token').split('.')[1] ?? '';
+      return JSON.parse(Buffer.from(payload, 'base64url').toString()) as Record<string, number>;
+    };
+    expect(claims({})).not.toHaveProperty('auth_time');
+    const stepped = claims({ max_age: '0' });
+    expect((stepped['iat'] ?? 0) - (stepped['auth_time'] ?? 0)).toBe(3600);
+  });
+
   it('logs what it saw, for the spec that proves the stack came here', () => {
     const fake = createFakeProvider();
     get(fake, '/api.github.com/user');

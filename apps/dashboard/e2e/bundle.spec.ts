@@ -51,7 +51,17 @@ test('every shell route stays under 150 KB beyond the framework baseline', async
   const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
   expect(baseline.length, 'the baseline route loads the framework').toBeGreaterThan(0);
   const reports: RouteReport[] = [];
-  for (const path of [ROUTES.overview, ROUTES.project, ROUTES.empty, ROUTES.error]) {
+  for (const path of [
+    ROUTES.overview,
+    ROUTES.project,
+    ROUTES.empty,
+    ROUTES.error,
+    '/acme/settings/members',
+    '/acme/settings/api-keys',
+    '/account',
+    '/account/sign-in',
+    '/account/sessions',
+  ]) {
     reports.push(routeReport(path, await coldLoad(browser, path, stateFile(MAYA)), baseline));
   }
   console.log(
