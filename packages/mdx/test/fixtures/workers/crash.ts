@@ -1,1 +1,5 @@
-throw new Error('page text must not reach the caller');
+import { serveJobs } from '../../../src/worker-host.ts';
+
+serveJobs((job) => {
+  throw new Error(job.source);
+});

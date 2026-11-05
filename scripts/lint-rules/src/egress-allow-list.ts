@@ -17,6 +17,26 @@ export const egressAllowList = [
       'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',
   },
   {
+    path: 'packages/mdx/src/seal-thread.ts',
+    reason:
+      'imports the network modules only to disable them inside a parse thread; it opens nothing, and it runs before any customer page reaches the thread',
+  },
+  {
+    path: 'packages/mdx/test/fixtures/workers/probe.ts',
+    reason:
+      'test fixture that tries every network path from a sealed parse thread to prove each is refused; its only target is the loopback server of the test, never customer input',
+  },
+  {
+    path: 'packages/mdx/test/seal-thread.test.ts',
+    reason:
+      'test that the seal refuses each network entry point; every call is expected to throw, and the targets are loopback or port 1',
+  },
+  {
+    path: 'packages/mdx/test/isolated.test.ts',
+    reason:
+      'loopback test server that counts connections from a sealed parse thread; it binds 127.0.0.1 and never opens a connection',
+  },
+  {
     path: 'packages/auth/src/oauth/fetch.ts',
     reason:
       'OAuth token, user and JWKS calls to four provider hosts fixed in code; https only, no redirects, 5 s and 1 MiB caps; no customer input reaches the URL',
