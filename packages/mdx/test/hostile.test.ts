@@ -74,6 +74,19 @@ describe('input that sends the parser quadratic', () => {
     TIMEOUT_MS,
   );
 
+  it('refuses deep lines spaced out across a page', () => {
+    expect(refuse(`${'>'.repeat(243)}\n\n`.repeat(4_000), 'md')).toEqual(['mdx.too_deep']);
+  });
+
+  it.each([
+    ['quotes', '> a\n\n'],
+    ['shallow nesting', '> > > a\n\n'],
+    ['list items', '- a\n'],
+    ['nested list items', '- - - a\n\n'],
+  ])('refuses a mebibyte of %s spread across the page', (_name, unit) => {
+    expect(refuse(fill(unit), 'md')).toEqual(['mdx.too_many_nodes']);
+  });
+
   it('adds up work across runs, so blank lines cannot spread a bomb out', () => {
     const run = `${'a.'.repeat(4_000)}\n\n`;
     expect(refuse(run.repeat(100), 'md')).toEqual(['mdx.too_many_nodes']);
@@ -115,7 +128,7 @@ describe('input that sends the parser quadratic', () => {
 
   it('leaves balanced expressions and plain nesting alone', () => {
     expect(parsed('{{ a: 1 }}\n\n{{ b: 2 }}\n', 'mdx').children).toHaveLength(2);
-    expect(parsed(`\`\`\`\n${'>'.repeat(200)}\n\`\`\`\n`, 'md').children).toHaveLength(1);
+    expect(parsed(`\`\`\`\n${'>'.repeat(60)}\n\`\`\`\n`, 'md').children).toHaveLength(1);
     expect(parsed(`\`\`\`\n${'{'.repeat(2_000)}\n\`\`\`\n`, 'md').tail).toBe('\n');
   });
 

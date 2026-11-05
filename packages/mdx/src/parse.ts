@@ -5,7 +5,7 @@ import remarkMdx from 'remark-mdx';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 import { acornBudget } from './acorn-budget.ts';
-import { rawOf } from './canonical.ts';
+import { rawOf, sourceOf, tailOf } from './canonical.ts';
 import { inspect, issue, LOOKS_LIKE_COMPONENT } from './inspect.ts';
 import { parseInputSchema } from './policy.ts';
 import { prescan } from './prescan.ts';
@@ -20,6 +20,13 @@ const CR = 13;
 
 const markdown = () => unified().use(remarkParse).use(remarkFrontmatter, ['yaml']).use(remarkGfm);
 const markdownParser = markdown().freeze();
+// The parser skips a second BOM too, and counts neither, so all of them come off first.
+function leadingBoms(source: string): string {
+  let end = 0;
+  while (source.startsWith(BOM, end)) end += BOM.length;
+  return source.slice(0, end);
+}
+
 const refused = (issues: readonly MdxIssue[]): ParseResult => ({ ok: false, error: issues });
 
 // The unclosed tag error only has its place in the message, as "(3:1-3:7)" at the end.
@@ -91,7 +98,9 @@ function slice(tree: Root, spans: readonly Span[], text: string, bom: string): S
       start -= 1;
     }
     const gapBefore = (at === 0 ? bom : '') + text.slice(at, start);
-    const source = { raw: text.slice(start, end), gapBefore, rawOf: rawOf(node) };
+    const raw = text.slice(start, end);
+    const tree = rawOf(node);
+    const source = { raw, gapBefore, rawOf: tree, sourceOf: sourceOf(tree, gapBefore, raw) };
     children.push({ ...node, source });
     at = end;
   }
@@ -105,7 +114,7 @@ export function parseForStore(source: string, dialect: Dialect, policy: RenderPo
     return refused([issue('mdx.too_large', 'error')]);
   }
 
-  const bom = source.startsWith(BOM) ? BOM : '';
+  const bom = leadingBoms(source);
   const text = source.slice(bom.length);
   const shape = prescan(text, policy.limits);
   if (shape !== undefined) return refused([issue(shape, 'error')]);
@@ -146,6 +155,7 @@ export function parseForStore(source: string, dialect: Dialect, policy: RenderPo
     eol: lineEnding(text),
     children: slices.children,
     tail: slices.tail,
+    tailOf: tailOf(slices.tail),
   };
   return { ok: true, value: { ast, issues } };
 }

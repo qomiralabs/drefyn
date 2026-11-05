@@ -16,6 +16,8 @@ export interface BlockSource {
   readonly gapBefore: string;
   // sha256 of the canonical tree. A block prints its raw text only while this still matches.
   readonly rawOf: string;
+  // sha256 over rawOf, gapBefore and raw, so the printed bytes are bound to that tree.
+  readonly sourceOf: string;
 }
 
 // New blocks have no source until something prints them.
@@ -32,6 +34,7 @@ export interface MdxRoot {
   readonly children: readonly MdxBlock[];
   // Everything after the last block.
   readonly tail: string;
+  readonly tailOf: string;
 }
 
 export type MdxIssueCode =
@@ -44,7 +47,9 @@ export type MdxIssueCode =
   | 'mdx.unknown_component'
   | 'mdx.prop_not_literal'
   | 'mdx.frontmatter_invalid'
-  | 'mdx.dialect_mismatch';
+  | 'mdx.dialect_mismatch'
+  | 'mdx.parse_timeout'
+  | 'mdx.out_of_memory';
 
 // Codes and places only: an issue can reach a log, and customer text must not.
 export interface MdxIssue {
