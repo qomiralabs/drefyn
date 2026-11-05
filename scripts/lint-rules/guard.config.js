@@ -17,6 +17,7 @@ export default [
     rules: {
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
+      'drefyn/no-mdx-evaluate': 'error',
     },
   },
   {

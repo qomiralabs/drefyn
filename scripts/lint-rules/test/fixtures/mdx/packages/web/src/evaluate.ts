@@ -1,0 +1,12 @@
+import { evaluate } from '@mdx-js/mdx';
+import { compile as build } from '@mdx-js/mdx';
+import * as mdx from '@mdx-js/mdx';
+import '@mdx-js/mdx/lib/run.js';
+import type { CompileOptions } from '@mdx-js/mdx';
+export { run } from '@mdx-js/mdx';
+export * from '@mdx-js/mdx';
+const lazy = import('@mdx-js/mdx');
+const template = import(`@mdx-js/mdx`);
+const required = require('@mdx-js/mdx');
+export const all = [evaluate, build, mdx, lazy, template, required];
+export type Options = CompileOptions;

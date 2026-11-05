@@ -1,0 +1,1748 @@
+[
+  {
+    "file": "antd-03e1259ae4.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/common-props.en-US.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "0aedf7880f302c2cca6dcd8edf4468b596a4db9c954cc7876cbeb7ec47594d7a"
+  },
+  {
+    "file": "antd-06cdc7e771.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-with-vite.en-US.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "d444ca5faf0d363b36dd4f21ac6b55b8461758766b4b52e999cab1717a17e109"
+  },
+  {
+    "file": "antd-0ea3be532c.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-with-umi.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "ccda1b0090fa46326dbf2030c5aabb6cb25d74504d34449f9428cb6ec07673a3"
+  },
+  {
+    "file": "antd-0fd00a08f0.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/llms.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "7ecec0ef11e573afdd64b8b75240db9db3c9dbacd8a759546be6b418a8dd2fef"
+  },
+  {
+    "file": "antd-15c844ac2d.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "components/color-picker/index.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "c38d4e8a80832ddf07d39f8e8a9e0e62f56d4d90d627f1b76671bcc4c7401afe"
+  },
+  {
+    "file": "antd-18c347c4c9.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "components/overview/index.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "1cdfd5c9144a5d0f7ca9e76472ed5e1ede003ecebe11858b1a0b668a2bcc6ded"
+  },
+  {
+    "file": "antd-26a75a8cef.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/sponsor.en-US.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "e8194c96020b2bc34039cffd3661b77035fcfd5cfb071c900c1bb9e88b5f97a3"
+  },
+  {
+    "file": "antd-2b469f7419.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/introduce.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "ecfd80f7eae45821eb697c31c941e402ceb838dcd233bec448aeb6a0f0ff11bf"
+  },
+  {
+    "file": "antd-3c71cd403c.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-custom-date-library.en-US.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "f1d2103999e5cb5b0ec61dec5a65a7641d0ae4d299b3629f455b9cffeddcd266"
+  },
+  {
+    "file": "antd-3cd7909cce.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/_demo/dynamic-theme.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a3f04cf218b1665bc486ea381a8e52b1b1da8a2055886748b7e791ea3a838ba9"
+  },
+  {
+    "file": "antd-59b3a8ec00.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/getting-started.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "f5ccc5ce6975d54f217d3e3391765c860eb8f86870a9b8a0baf7a41bff2c4663"
+  },
+  {
+    "file": "antd-5b06b0d6e2.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/_demo/preset-algorithm.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "0d3c5c3bd99d5ee90640502b13cb570a60258fbe323d120e56218b70260de464"
+  },
+  {
+    "file": "antd-65902ef545.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/i18n.en-US.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "2162cf14739ce6d92af69b6d85b78ae5cd4fbc658c6c54df27d2366dfb709d06"
+  },
+  {
+    "file": "antd-80f25a5526.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/_demo/first-example.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "4beb5b530ddaf0a2c505b8b904c531a5fe125d2cb6cdfb638be3ba04193c1724"
+  },
+  {
+    "file": "antd-957acf3163.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-with-refine.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "4df5d0b8efbf71f48f4db6480541386e41fddfd4a4660778169492420d7e9496"
+  },
+  {
+    "file": "antd-b38675417e.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-with-vite.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "e05aaec8dba7b97c11ea956abe4c0c2e13a61ea163ba31bdbef227a46fdf14ba"
+  },
+  {
+    "file": "antd-be47f0db80.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/sponsor.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "c1ff2cb7a12c444b21379f687155876b9cc4a80c4548487865769996464789d0"
+  },
+  {
+    "file": "antd-c4cffc8751.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/use-custom-date-library.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "6153bdc026b638378ddcc582ab162bd38916c748ebec64831d3901cd92157c0a"
+  },
+  {
+    "file": "antd-c601d2699d.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/compatible-style.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "2dbcd1ba15362f9464a2313709ec4d7fe62a53ed3e8f1e0cff4ad45ed88136e5"
+  },
+  {
+    "file": "antd-c8f93bc2e1.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "components/_util/index.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "02abb40917f4fd6c5e8d9b46dbeb3c08ec34fa68f48467114501bfe6eb9f8622"
+  },
+  {
+    "file": "antd-d5b215fe13.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/migration-v6.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "066a847119686d1eb89a7c9976e6c9cb588d3318b43cd1534f7bf4eabab9e00e"
+  },
+  {
+    "file": "antd-d7ec665759.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/common-props.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "6ec3132313284c19e6d14b8895847baaba8f099b4904e9653630e59260d5f90c"
+  },
+  {
+    "file": "antd-d82c67f0a1.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/recommendation.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "506d4322a8894f8040246587a00a895fa46033ad7c818d1b5e4e23061ed3f3a3"
+  },
+  {
+    "file": "antd-dfcc3ff1aa.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "components/affix/index.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "9f27a1398345176635b721adf2e937ab99115bade674dbf536c7c4b1c10a0840"
+  },
+  {
+    "file": "antd-ef4a84377d.md.txt",
+    "repo": "ant-design/ant-design",
+    "commit": "550d75d",
+    "path": "docs/react/i18n.zh-CN.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "0b2860c174e4ae0e4efbbc9d4314242657d6c33264cc2d8fe157ea39448236f9"
+  },
+  {
+    "file": "astro-0029552e5f.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/fr/reference/modules/astro-app.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "fb4057630e914b7a04d865b3396b6641cc3326513a002ed53ae0bd12073425ef"
+  },
+  {
+    "file": "astro-005d4d934e.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/es/reference/errors/locals-reassigned.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "cf553a2da632371d1c2adec55ebce49f5d0a2037558cd0ffdba7d21ddec9af22"
+  },
+  {
+    "file": "astro-007624bc42.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/backend/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "5326aa0e35365a87ce0a4203abe88e4226fedced162d4d4938b3b5d2af2605ba"
+  },
+  {
+    "file": "astro-00b001c598.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/es/reference/errors/action-query-string-invalid-error.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "5f785eb3edbf6b652657debaa50d4613895212457d250d43ac539fd74ac9cee5"
+  },
+  {
+    "file": "astro-00b2518096.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ja/guides/integrations-guide/partytown.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "678c99485d542b146de46375639287255beeda0e266e72b98c4ebb849b59c55d"
+  },
+  {
+    "file": "astro-00b7df1db0.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/migrate-to-astro/from-gitbook.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d17f4172d1566fcdd5f7ce128692a90bd048938f3366c8b727de15303b7f4bcc"
+  },
+  {
+    "file": "astro-00bc65d46b.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ko/reference/errors/config-legacy-key.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "1a3c3b97beae7237d8f62121a57911c3e1c760eb0aa6f2b7d117baf2c0f2a2e4"
+  },
+  {
+    "file": "astro-00e43bb2c0.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/pt-br/reference/errors/no-client-entrypoint.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "34dd569223ef7a6f05825c32e7a73f5546c6c2bddf3def22067994db93a830ba"
+  },
+  {
+    "file": "astro-00e447ba98.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ar/basics/layouts.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "905973503003d40e7c7220ec4bf93ee5f65bb4dad6a3bd2d9a5008a12c72fbbd"
+  },
+  {
+    "file": "astro-00e7c6306f.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/fr/reference/errors/generate-content-types-error.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0ed2ed6e8e3ed8bd6f2771166a9fc92b81c6c5a3efad559198e27234226c0c17"
+  },
+  {
+    "file": "astro-0112bfe0fa.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ja/guides/configuring-astro.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "a030caf7da1a7b06e94f7878a77d4eb4d51bbc8de3aecaf22b1cd37af40de2bf"
+  },
+  {
+    "file": "astro-012191866f.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/zh-cn/reference/errors/live-content-config-error.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "2b6d8a15713479cf4944c485c62eefbd499f727a46a861039be203cf75ecf15e"
+  },
+  {
+    "file": "astro-012fa8bd91.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/fr/tutorial/0-introduction/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b1393ed804d122d111167269a7307f9e9b0b640cbbe507de206dfeb5cb54d0cb"
+  },
+  {
+    "file": "astro-0136432036.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ko/guides/migrate-to-astro/from-gatsby.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ab5e4b24702e65118d2ec106b3cb95b110f605033742d3731c1d1ce9d4ce4fde"
+  },
+  {
+    "file": "astro-01585adc15.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/fr/reference/errors/missing-get-font-file-request-url.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b106c1982140d55c2c0531dc015b09b68f5ecc9deaade9e15edbeb98a42e0118"
+  },
+  {
+    "file": "astro-016caefa38.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/es/reference/errors/no-matching-renderer.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "f8cdf1889a4b322f42eea48c87e5093b2db707dc3f71de3b43177d532134830d"
+  },
+  {
+    "file": "astro-0178feebb9.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/fr/guides/caching.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "8676bb47207af8321effc9f35c32287eda2b5a1a804b6e66bd736ade4ca8c244"
+  },
+  {
+    "file": "astro-0189b87207.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/integrations-guide/netlify.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "87384a3161416024583792bd61b2b22facc4e8a91f36dfbf2efe3dfd9c85bb64"
+  },
+  {
+    "file": "astro-01bf2b63df.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ja/tutorial/2-pages/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "828d49759177e69eb1f8ac83d282ac0ed2debd2ec2fb7d6192fb36babd5ab3ab"
+  },
+  {
+    "file": "astro-01c559bf1e.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/cms/craft-cms.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0371569093c9de65f448b738f0bd91d349881353c3353877bb7fce51bd732bbe"
+  },
+  {
+    "file": "astro-01fb845dd5.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/backend/appwrite.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "fa4338189bd1211ed30f6642e9e237b2e8970fc6a0d806c0f2157e89fa28b950"
+  },
+  {
+    "file": "astro-020134a632.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/reference/legacy-flags.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b9ddc913c8b078e4ceef7c94195ec14b14ad25d164427917c4e48ca25609c6c3"
+  },
+  {
+    "file": "astro-021af21e36.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/zh-cn/guides/upgrade-to/v3.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "1d44dc3fcaae1103a3e978272ed4b55c0a8c09ae938cf5280cb9bd27b7542efd"
+  },
+  {
+    "file": "astro-02333f1d4f.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/client-side-scripts.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d2f60037d327249fa12f110abd7ce043e3c681b33fde16451de315eb88428875"
+  },
+  {
+    "file": "astro-0288d2064f.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/es/reference/errors/prerender-client-address-not-available.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "41f8679194e1d9cd43247d6e2b784ddb193a0f46f268a7c2be499ee404cd4390"
+  },
+  {
+    "file": "astro-02d60bd28b.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/es/reference/errors/unavailable-astro-global.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b9464ec00b66851c408410af23358b137cc230cfdc8d2f45043a09cf38e0e726"
+  },
+  {
+    "file": "astro-02e61c1dd5.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/guides/cms/keystonejs.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "3dbe7f4ce4c02a7f291783055d3db962f18f838fda9a739f15999f2c6e5c0438"
+  },
+  {
+    "file": "astro-031b974d95.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/zh-cn/reference/errors/missing-locale.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "8806a15f89128bbee51df305bd29fc445104edc10cf5793bbbb30e4f97f2286a"
+  },
+  {
+    "file": "astro-03686d3acd.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/en/reference/errors/route-not-found.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d3fce1a40fa1d55a943e145761db8f76890b44db27bc9ecc6ca36e53dfdf0e3b"
+  },
+  {
+    "file": "astro-048b2929e0.mdx.txt",
+    "repo": "withastro/docs",
+    "commit": "c73a3be",
+    "path": "src/content/docs/ko/reference/errors/locals-reassigned.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "8dff60630984ef6af08dac1e31302c44d7e28d4b95cb9f4a9a636910bf8b8d36"
+  },
+  {
+    "file": "mdx-05ea9b0121.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/blog/shortcodes.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d2ad0f7f557e68fe6c45d60f79fb327ee22a8fb0328f8d2ee997c9eb5ad4e4fc"
+  },
+  {
+    "file": "mdx-08ee75250e.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/community/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b5a2b40e172ae7dd2434f168fb44aac96d7444bdac5ea8d82774ea7583eba5b0"
+  },
+  {
+    "file": "mdx-19906ce502.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/404.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "38a0b5de0787a9b156e96f6b9b1bfc78b724ca7a6a1bcbe1c69223ab8b34c12a"
+  },
+  {
+    "file": "mdx-22fe2e5c7f.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/blog/conf.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "268850fb554ddca56f5ab3624e758282013ffcfea047e7d3daf3a93e041aaaae"
+  },
+  {
+    "file": "mdx-2944d96e58.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/community/contribute.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "77128f41cc68cfeab9055699b7e6006e915927add3183c958e7de9465747b9ba"
+  },
+  {
+    "file": "mdx-3fab2b3bfd.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/guides/syntax-highlighting.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "2419428f4b3e505a6c3399c85137fba295b8141ff8465af0ce821b9941a26ee7"
+  },
+  {
+    "file": "mdx-41b12a9ccc.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/guides/gfm.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "e577596cbe42d907fd63d40e5ecb752385aa94177e46658a16cf84c7430bf0f1"
+  },
+  {
+    "file": "mdx-577ee3b85e.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/community/sponsor.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ea2a22c02aab726ea260fa8ce2f9963dd216961556eb2f96b63f6fcb67672a21"
+  },
+  {
+    "file": "mdx-737623c5cd.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/migrating/v1.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "dd013391a7e107942faf6583723cae52e733daaf672487e168cfd5875ab130bd"
+  },
+  {
+    "file": "mdx-73b5fe8ff8.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/guides/mdx-on-demand.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "7f5d7d97ed147b9348595cbf7859e4dca86cb80b77f924bef66fb0d5549a2d1d"
+  },
+  {
+    "file": "mdx-746d26c667.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/community/support.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b1790bbe20d33a4bd3e3fac21372445329d694d452d5418fc4453dcfbc3f69ed"
+  },
+  {
+    "file": "mdx-79dc798077.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/playground.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "3247f60e711447bf646cb44508dee051309835c1c08551d279793f6772f5b576"
+  },
+  {
+    "file": "mdx-90eef7be64.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/community/about.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "a93d5c0f8ca2e538f6f62267373f51bcac763f6659832863a128e8635704df83"
+  },
+  {
+    "file": "mdx-98f3dc4b8c.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/docs/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ce3eea4c40ff27affcd4d9d0749a0f699deb288372bfbdcb47fca2678338163d"
+  },
+  {
+    "file": "mdx-b2d1daaec4.mdx.txt",
+    "repo": "mdx-js/mdx",
+    "commit": "52285a6",
+    "path": "docs/packages/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "69552679e521b0e6338c9a961e7626383ff6715cb0dd4549cdb002ca021b3334"
+  },
+  {
+    "file": "mui-04d20d0bb0.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/breakpoints/breakpoints.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "10dcdddc137a8189349e495f69b0558c8584d7ad95f2e217187e1cc23b2c14ec"
+  },
+  {
+    "file": "mui-094cd0b904.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/creating-themed-components/creating-themed-components.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "2708b9a854077a833b07b9a756cb0103d27752a372585694d37f4a9058699166"
+  },
+  {
+    "file": "mui-10aeb787c6.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/templates/checkout/README.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "614dbfb09099ed1dc097dbf20db810ef266c8f46c7e68c8cc414e835d7d34124"
+  },
+  {
+    "file": "mui-14cc6487cc.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/how-to-customize/how-to-customize.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "541a6d30f684206b5b2164d864a62bcc3e3bea09d317427d93ebabd563c2a342"
+  },
+  {
+    "file": "mui-213baf8001.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/transitions/transitions.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "882d473e0c19103d3f1ec7d9120aacaf3f7be3623aab0ac6b58cf305a64cae66"
+  },
+  {
+    "file": "mui-245db1e011.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/supported-components/supported-components.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "f97653692325701cbb45d7b2f1e299d47bcda9563977a1f02a6688f2793d7818"
+  },
+  {
+    "file": "mui-278e54a160.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/z-index/z-index.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "4397e277363691e535091fa63e0c9740068bdc9a40a4ab38d59d4caa58341912"
+  },
+  {
+    "file": "mui-3ebb20461b.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/templates/dashboard/README.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "48bb40458a4478acb03a872d438429219b5fae4e872e432332d02fe303a377dc"
+  },
+  {
+    "file": "mui-45671542c5.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/example-projects/example-projects.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a1b6769caceaa1e5728e2634ecc47bae643f226230f2b4c08b54d95320a99310"
+  },
+  {
+    "file": "mui-4752688bc1.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/templates/sign-in-side/README.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "d8b6d3d20ea4690548e39cf48977bfd51253f631f7891699d84af2f4e9fab894"
+  },
+  {
+    "file": "mui-5a08f45f0c.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/customization/density/density.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "55f8cd1073124214a8c4afbe011db58fedabdb94c172feadc82cc2686301537f"
+  },
+  {
+    "file": "mui-5b31586d74.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/templates/sign-in/README.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "449e5b4c02e92cf9220871119e095e6789856eca6637785f55e9bc145c6e7d0e"
+  },
+  {
+    "file": "mui-66f1ed947c.md.txt",
+    "repo": "mui/material-ui",
+    "commit": "403986a",
+    "path": "docs/data/material/getting-started/templates/blog/README.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a0c57ff1d100232a6a98c06600db531c6dc6bba6c7d676e08b2b056756ce67ed"
+  },
+  {
+    "file": "next-00e4ff3d68.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/custom-webpack.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "30c6e43ac2de1d1027f12f9da437c5b50b2fe616ae242314dc3005274bfb8bd5"
+  },
+  {
+    "file": "next-01348c3e4a.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/authInterrupts.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ba5c966a8e32f057aceb4efb33c4ac80e208b61d9200ada15097b7a8985e5c8f"
+  },
+  {
+    "file": "next-022ffc39ca.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/04-functions/revalidateTag.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "82045b5b9bb7f68ba5ef6d01981a12b84d9e2b694fcaf9545bf5c7f944d0c045"
+  },
+  {
+    "file": "next-0300405d0b.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/04-functions/unauthorized.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "a2753c0c7b9292dcb4c116fe00eca491c971e64f95b9196cad4ebe0c461e350f"
+  },
+  {
+    "file": "next-03b96fd34c.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/testing/cypress.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "680ae3ff0bbbb1703c0057a1cba0f78a98486bf85ec24dedd473a04141003b52"
+  },
+  {
+    "file": "next-057b59b2d3.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/adapterPath.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "68d9eb4252b2e89e720b596714b8272d37a0e9764e9c1fcf7324ef2170d0d8e4"
+  },
+  {
+    "file": "next-063bcc931a.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/06-adapters/04-testing-adapters.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ce2b3d8f24e46867fb6e84654029d158c8a10670240f1459781480729b78196d"
+  },
+  {
+    "file": "next-06f780a1ad.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/01-getting-started/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0f042cec3080eed568ade7f740aa930ac2d6c7cbeae20e8dd515c039dfdc56ba"
+  },
+  {
+    "file": "next-071b890f2d.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/01-components/script.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "233530ad6c91fc9fbb55911964648c2f8fe41e60159b1c350a3d54d4aa21a55b"
+  },
+  {
+    "file": "next-0818eec60d.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/testing/vitest.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0698c4235cbb5db5c663e07f6d6b793b53466509a2a18e945ac3cd30a20d21f8"
+  },
+  {
+    "file": "next-08430d27b0.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/03-file-conventions/page.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "63cbb7aa79f3c375ce838bf35ac317f6a26749cf9ddf547eb841f04b986e607b"
+  },
+  {
+    "file": "next-0a016b7bbc.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/turbopackLazyDynamicImportsSSR.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "be733bc6f814cd448770b5061918798d90eb4b211f1608b1b93421c2199be62a"
+  },
+  {
+    "file": "next-0b0e152e32.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/prefetchInlining.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "53d03df55948aa02e28b0961705af50f7fb0d9e363a70d008574bf0dfcfba2ab"
+  },
+  {
+    "file": "next-0b7d7b49d9.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/testing/jest.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "44e3a1565ec416ad859ef074fc3f2c22f3980d19695fed469702dcb3b87c8a12"
+  },
+  {
+    "file": "next-0c42ecc703.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/06-adapters/03-api-reference.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "cee9c2d2fdf079c2b3a1b4b8b20401dbaded439469eac166be113d2a03c2da77"
+  },
+  {
+    "file": "next-0c4480577f.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/04-functions/headers.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "2512b0ee174877876c8e2a8d9fd8fb71e2afb82957e1ddd8267b506ee68df8c7"
+  },
+  {
+    "file": "next-0c7d0b6789.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/local-development.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "65b5d46564310fbb45f33582c7948cfe97d440c83c70aac148a9aea0a64046d4"
+  },
+  {
+    "file": "next-0cadd30250.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/04-config/01-next-config-js/serverExternalPackages.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "55492b832f620c8021179875f442de508b7ae95b28a2884fd77c3f41fedf41e5"
+  },
+  {
+    "file": "next-0f7f2d601d.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/incremental-static-regeneration.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "1e9eda23d9d2e092849a229b54e9c9961294544a7bbba5e5a8680e87a71124b1"
+  },
+  {
+    "file": "next-0fd67e6d7c.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/07-adapters/03-api-reference.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "99df8dbd17d5946a176685934e06c28798467768a5f40c33de3b266fc74f15f4"
+  },
+  {
+    "file": "next-106fce47b4.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/server-actions.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "3b5d4db7e730c89df837872ebb506be4511869a265678086dab68a475de91d0d"
+  },
+  {
+    "file": "next-10a2cb2e7a.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/internationalization.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "97230f21b5cc46f59a62b57c5e677fca73f72b8de5244e50f428dd97033bf22b"
+  },
+  {
+    "file": "next-10efd4d2f9.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/instrumentation.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "38f2de216e6b1fff42a518353ab55d9685bca4029d0088693710d3a3e7ee7c00"
+  },
+  {
+    "file": "next-10f7cfb519.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/03-file-conventions/01-metadata/manifest.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "a4842e4d553204ebda72bd025fc279cc2d5882795d6e73168ccb91a0e13a6e95"
+  },
+  {
+    "file": "next-11efb1f878.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/04-functions/cacheTag.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d18dcc42d93567062253c04b68e06beb5a1aa3af865be56dd9ca60a755fc217b"
+  },
+  {
+    "file": "next-12121fb016.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/03-building-your-application/02-rendering/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "71d0542062ad400a899e316f31e1ef595d13c4c6be298b11455396ea07e1128d"
+  },
+  {
+    "file": "next-121995ec0c.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/02-file-conventions/public-folder.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "9452925899afc6892a2246069ea53171de528f1d1985173d90f4ee3b20b49415"
+  },
+  {
+    "file": "next-12dbe464c4.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/distDir.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0e292aa5b58fc6c56eee0887b6b658256ac7790703f0afe696829ad4af3ead7c"
+  },
+  {
+    "file": "next-1364030530.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/06-adapters/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "6f7b0cd98f86f40bb6c319e7bd32242719743842cd55adffa6280091b9c9ee2e"
+  },
+  {
+    "file": "next-139d650730.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/04-config/01-next-config-js/urlImports.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b491b6df08dbf2e0368cbcf1b507bdd74020acdd7f10fad079e47469052b48b4"
+  },
+  {
+    "file": "next-13a5e20333.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/sass.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "03ac896a264701cd819059ee7b7b2f81339f3b991d9b0af6fbd2dbfc374339cf"
+  },
+  {
+    "file": "next-14c41e84d9.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/03-building-your-application/02-rendering/05-client-side-rendering.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0e05a5ae4c2e259cd0bcc9bc918b833e51b6c4c3da4361042be1318780f4c41a"
+  },
+  {
+    "file": "next-1537a24dc8.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/04-functions/use-report-web-vitals.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "2aa45d980f53c788cd790dc1570ab41462d04195cdfa4f4b7b843834765a3712"
+  },
+  {
+    "file": "next-157f4d6147.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/serverExternalPackages.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "25de4f010b10654324b0217e705c84b0e58fb977459d033120559542220b3311"
+  },
+  {
+    "file": "next-1594776013.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/03-file-conventions/01-metadata/app-icons.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0f3b7b862f4c4bec9da16ab39df1d8b800194fb0346efeeee1eb4f5575c381cb"
+  },
+  {
+    "file": "next-16045dc39a.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/instrumentation.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b3799683bee889e5f32a46da8f721c7113656262277f4149e98b6bdfbf327021"
+  },
+  {
+    "file": "next-162d1e9dc1.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/onDemandEntries.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "a2ae74ffcfb18d3b2acfdb351e44d390a6d6764e8b1d76335820e398501c1c02"
+  },
+  {
+    "file": "next-187c4c9611.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/04-config/01-next-config-js/proxyClientMaxBodySize.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "4dc6e442ad731fd597d80c3425545bce179355d933f9cb3518cdae71189aeb72"
+  },
+  {
+    "file": "next-1b3d783edc.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/02-guides/multi-tenant.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b0e0a42f633c3b29c408a989cb7de597f64d41a0ce4519b0e97d4fd7647f442a"
+  },
+  {
+    "file": "next-1b8aa1e957.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/04-config/01-next-config-js/allowedDevOrigins.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "004a62b2643968252f73ee8abbc6c56a1aafca6226f07ef67af9b053f31989b2"
+  },
+  {
+    "file": "next-1bf8574299.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/01-app/03-api-reference/05-config/01-next-config-js/pageExtensions.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "2a6db806b295ffcffcc4a621120ef29f583b9fa4af935a56a2dd50727d6e83dd"
+  },
+  {
+    "file": "next-1c8098e08f.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/06-adapters/08-output-types.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "9aa0b32da5a3f7ee01312ab53ef0ad90ec23906024b66117589efb3e6a869a58"
+  },
+  {
+    "file": "next-1d27a4f0a2.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/06-adapters/06-runtime-integration.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "23c28bcec8b062293c74a1afca6a1f8d11fa09a8ebb54e66980079c41484284f"
+  },
+  {
+    "file": "next-1da654df74.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/04-api-reference/04-config/01-next-config-js/redirects.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "359c5e05e11ca16a8d365f5ebfb86f398acc304a09af7e10d2545d65e08332a0"
+  },
+  {
+    "file": "next-21e5366a35.mdx.txt",
+    "repo": "vercel/next.js",
+    "commit": "d2defa0",
+    "path": "docs/02-pages/02-guides/upgrading/index.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "21c4da08dd836c384d34afa9d03116ababfa48fc1e6aeb86b4af9997d77f64dd"
+  },
+  {
+    "file": "roslyn-0035609889.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/API-Changes.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "ce1a26ce7d3a8d9c5753cdb34794c656c1ed940fcc6e543d8106ac7f52047478"
+  },
+  {
+    "file": "roslyn-02db570214.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Visual Basic/CommandLine.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "ec044fd296f8338af9e6522a683ee66694d151a98f8b3767f4edbba68df817f8"
+  },
+  {
+    "file": "roslyn-05507a687b.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/Static Type Constraints.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "48e13927501ba3ac955022a437e724c829aa18d8d1ee2a4a1510d0b7d5268206"
+  },
+  {
+    "file": "roslyn-061aa5447d.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/deconstruction.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "1b21a9a2151255822b2573c07f1061e06e06c5f704af168dbf84f54b59c8db03"
+  },
+  {
+    "file": "roslyn-07bcb33049.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Deterministic Inputs.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "0520d8ebe81d980d4034bcec30b7dc358f6a6f2de104ecffcd98b5bb6e4a135d"
+  },
+  {
+    "file": "roslyn-0930d2eeb4.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/file-based-programs-vscode.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "8c57117208fa5935d012b6e9f9267f3c0c8a66e3af39b501e4f40774bf44bc43"
+  },
+  {
+    "file": "roslyn-0a5dea1df6.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Troubleshooting-tips.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "6a19fe76c488526afd32e8d81073bb79c3b2adb6ce2adb06b3553f4c8c77e286"
+  },
+  {
+    "file": "roslyn-0b29071d4f.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Languages-features-in-C#-6-and-VB-14.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "0801a1bc869028cdd479d4233aa08fbd5bba294dd053b75a81a2414267329eb9"
+  },
+  {
+    "file": "roslyn-0bcd24233c.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Compiler-supporting-types.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "3505e9c8b1e55eb4db3f03bf874dd340be7036a1bca051fe4d73a213fb5b0048"
+  },
+  {
+    "file": "roslyn-0c086dd1e8.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/analyzers/Analyzer Samples.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "78ac42b099925c438565b92b7f77ddffd5b59743477565fdf5b2c9dca7c714f4"
+  },
+  {
+    "file": "roslyn-0c867bf0f6.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Design/Sequence Points.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "6e0ed6696b4ae85b81866d8463fcd3244c004a0696be5320a36803e281c6d9b6"
+  },
+  {
+    "file": "roslyn-0e51f67602.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Getting-Started-on-Visual-Studio-2015-Preview.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a98b9a9e5c72db1612c069aa9591ffe94b96cf3f151e530106d33188fa33e941"
+  },
+  {
+    "file": "roslyn-10f8bf0bef.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/nullable-metadata.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "84003cc7f1da425fb9f66332b10e23d8a503c6c4e16bd75146b1886a14eeab3b"
+  },
+  {
+    "file": "roslyn-1400109dba.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Error Log Format.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "cc9e32664dd03881f54c032fc3a72c75e706be8150b7b026275aad4b266e6b63"
+  },
+  {
+    "file": "roslyn-15726e6375.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/StaticAbstractMembersInInterfaces.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "9e2c3c798077b80d6cd3278e0a057cfb88d7346cfccbcc746873f55addce3604"
+  },
+  {
+    "file": "roslyn-1749a7c0a4.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Visual Basic/Compiler Breaking Changes - DotNet 7.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "74bef1bcb3603b67786ca830552cd7349053c402d06bf17558a46b43a42f32df"
+  },
+  {
+    "file": "roslyn-1b304a59a0.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/async-main.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "49a36664577748cfcd770f86799eed106929e28d2b57a29b19f81a5e6906bf79"
+  },
+  {
+    "file": "roslyn-1d17ee51f7.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/contributing/target-framework-strategy.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "07a94a51fdceea0848406333edf874e98663b5a2b28b54e8b880cdfd55b3544a"
+  },
+  {
+    "file": "roslyn-1d90dec8e4.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/Multiple Inheritance Lookup Ambuguity.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "c899068616621fae854db28221b48d0ab0ea39526e237e56963b5c927f0754c8"
+  },
+  {
+    "file": "roslyn-1e54696320.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Getting-Started-on-Visual-Studio-2015-CTP-5.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "f42c770514773afa488835eec8ffc81336d09d082b0f9d11118cff1e59cdf496"
+  },
+  {
+    "file": "roslyn-20ebf6e102.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Analyzer-Runner.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a3ea81cdd01b5254ee109ee455e0c15a5686d7ee60b5bed2d6203b0454d0f65e"
+  },
+  {
+    "file": "roslyn-226480a1dc.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Compiler-Queries.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "1f58ffe6100f0d5fe3c85da8e478d25f36e5d6a374b1c3393f782f98c3b0ea74"
+  },
+  {
+    "file": "roslyn-22968df5d5.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Measuring-Compiler-Performance.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "d0aacb106bb36aa441ac7a530350e61c2ad917b91eaeb977495caef231d0fbe2"
+  },
+  {
+    "file": "roslyn-23fea4956f.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/readme.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "039b6c746c3c15050c10d07d6f37700a73b8da292ce3ef96a59dd3e394bb1f87"
+  },
+  {
+    "file": "roslyn-245571120e.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/ExpressionVariables.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "3088d046a3f5e4d9cf30b457307bf83b9782c2293f65f0c66a77eaff66c0fd40"
+  },
+  {
+    "file": "roslyn-26e4b70c9f.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/ide/glossary.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "e896833173c7f62525f69f0f85bd997bedea8b44c27c1193b7f18d111be42729"
+  },
+  {
+    "file": "roslyn-2807bf6522.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/Internal Access.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a0ddd1d2c2f072e4f525677bcd23939a746a6e70e185e7bbae22530afdb00fa9"
+  },
+  {
+    "file": "roslyn-2a62238336.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/Win32 Resources.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "1424fd5dda29fab880b511793d08280aae96394da07db20aa07127d42b96a9f9"
+  },
+  {
+    "file": "roslyn-2b809fe4ef.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Getting-Started-on-Visual-Studio-2015-RC.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "91d0c5c91930ae458352592e480703ffd2ea5f28dc6b45e0be4fd8dd6e14eaf7"
+  },
+  {
+    "file": "roslyn-30c67158ab.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/Visual Basic/Compiler Breaking Changes - post VS2017.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "ebc86971bac59776a35986aae6d16cc7297f6e899b998cc04c4010fc80eb21bb"
+  },
+  {
+    "file": "roslyn-31daef522a.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/wildcards.work.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "43316e413300b36ba367192331c47bf4d49489401c581c1187b55b62e7f8d5ba"
+  },
+  {
+    "file": "roslyn-34c338c5da.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/features/local-functions.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "880421c1f71332035c3a640d0ab627c68daf52515de633864f2232a4123c45b0"
+  },
+  {
+    "file": "roslyn-35bb4d3da6.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/razor/CohostingTroubleshooting.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "5a786952b396b015eeaf00cd0797b0ceda28905ba934eb7c4253e8f3b6135033"
+  },
+  {
+    "file": "roslyn-369e8e1d86.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/C#-Interactive-Walkthrough.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "9a3424b3e15c202e2ec318daf79bfba7cc100dff4c485e11c4faff0af3a12855"
+  },
+  {
+    "file": "roslyn-36fc15a6a9.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/CSharp/Compiler Breaking Changes - VS2017.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "3cc40d16fa49fe8710550f27086b0570b4ca5ae37d1f42ab65f7306a53d171aa"
+  },
+  {
+    "file": "roslyn-3c02735a40.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/wiki/Reporting-Visual-Studio-crashes-and-performance-issues.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a6033af2e91924d08d0f8c876b45dfa25535e449f818810a3fdca24531a47bf4"
+  },
+  {
+    "file": "roslyn-5b75c87dfd.md.txt",
+    "repo": "dotnet/roslyn",
+    "commit": "535114b",
+    "path": "docs/compilers/API Notes/10-29-19.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "b386c56e644bc59836bdcf06fa271731e3d264226938349fe7871f711339bf85"
+  },
+  {
+    "file": "shadcn-002dae0549.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/ai-elements/aria/chat.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d92d2ac0a381ec38e7b3a594bc85393c544c93b1d8c650c1b50bcacf1e718753"
+  },
+  {
+    "file": "shadcn-01344efa0f.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/radix/sheet.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "ace9cb8de350243680807314a022cd346c10088e62967e62952c98802b6721a7"
+  },
+  {
+    "file": "shadcn-0281beb5c3.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/radix/input-group.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "d9478533d22a67ef2793bfe2a16f12bd9a4fd0a0f34757f0fbb35c5bf7797a20"
+  },
+  {
+    "file": "shadcn-02be2462f7.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/aria/scroll-area.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "0115742868fa082ea3692970c4c6c2137831b3408ac2656cff53cab56dbe80ad"
+  },
+  {
+    "file": "shadcn-036132809e.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/aria/carousel.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "50be865ddeb0ffff7f38ec3e99c763d2b1e87cdfbf174e0ba858bd6a470d4676"
+  },
+  {
+    "file": "shadcn-0640ea1c51.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/rtl/start.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "53739fa35942b4890d3818f09b03b339038029f9ae91e2fe30db18fbe77df59d"
+  },
+  {
+    "file": "shadcn-064d21c1ee.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/(root)/monorepo.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b1f58c3d736bccbacdb5df0bf23c25e85e2874fde533ed920fb45f8db89e831d"
+  },
+  {
+    "file": "shadcn-06d2700124.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/aria/calendar.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "7f8adaada2b8fb50b183ce92c2b7f8b961b554c88562dd05b727947262004f6f"
+  },
+  {
+    "file": "shadcn-089b0a64fa.mdx.txt",
+    "repo": "shadcn-ui/ui",
+    "commit": "8a35366",
+    "path": "apps/v4/content/docs/components/aria/popover.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "b3bbc26f70e2e6f866c8d1960efe9f418cc3b06f2cc8edbf98afbbf6c41f45b8"
+  },
+  {
+    "file": "storybook-001a82be56.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/component-test-with-testing-library.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a3a93c8b27b9599bde6da9f017562463d59c1df9221ea18a52e54c3f5b000985"
+  },
+  {
+    "file": "storybook-00ade12af0.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/web-components-vite-install.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "8284b01a8f1ee0c6f565cb65e389223f1d69211ed645126ee5d473bc9509042b"
+  },
+  {
+    "file": "storybook-01917e34fa.mdx.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/api/doc-blocks/doc-block-colorpalette.mdx",
+    "license": "MIT",
+    "dialect": "mdx",
+    "sha256": "bf6e0962590015efad32664634d0546f6f6ab1ec3949d9c029bcd7e52c48031d"
+  },
+  {
+    "file": "storybook-0216f5f73c.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/my-component-disable-toc.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "f603c85a08187d9d364ff20823b38b49370ad33ea95a3cd7c05a3c15cd3126a2"
+  },
+  {
+    "file": "storybook-02fabbc3fa.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/main-config-typical.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "e0cc9a7fe36bda07522cdc61f1934e6937919b8016c7978958f202ef30fb7613"
+  },
+  {
+    "file": "storybook-0321ab1cfd.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/document-screen-fetch.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "8d810c01497a8c244b500196d37dffe739aca90ff9b8d630c446ecc0a0b6d8b7"
+  },
+  {
+    "file": "storybook-03a2605d1c.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/multiple-stories-test.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "d035b5e33ee6035a591b4248ddd19f18064837e7d34351d66296ff042dee6a54"
+  },
+  {
+    "file": "storybook-03dda561b5.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/storybook-main-rdt-monorepo-include.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "cf5777147e34033f8e39b7691fdd2335c195315bbb9dea0c797ba6ede65ad6e5"
+  },
+  {
+    "file": "storybook-04722ee805.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/main-config-features-experimental-code-examples.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "e53a1bdd19c0e849fb570ff9b81cde140e663044c44313cbedf8102726f930df"
+  },
+  {
+    "file": "storybook-067b01ce5f.md.txt",
+    "repo": "storybookjs/storybook",
+    "commit": "c3033d0",
+    "path": "docs/_snippets/storybook-read-environment-variables.md",
+    "license": "MIT",
+    "dialect": "md",
+    "sha256": "a9dae9c5d486d93a59fa7cb509578a9cbb0267ddcaa752d9e0ecd87e41dfa55e"
+  },
+  {
+    "file": "supabase-020d8a636d.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/auth/quickstarts/react-native.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "5ea705bcde1de3399d13a0fb49ebdb6b674fbeca8d288b380950cff4d7aa7fc3"
+  },
+  {
+    "file": "supabase-06a67dcdf6.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/postgres/timeouts.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "633a59f866b4623f8f4cf9155c9dab0ac3f2dc3e4bf9f103f5e8dc47cc033a3b"
+  },
+  {
+    "file": "supabase-09fef0c9c5.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/extensions/pgroonga.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "7f35dafd86299c0a23232b1f833f27ba48b75287e5ec621911f3f7bd977d56c5"
+  },
+  {
+    "file": "supabase-0c0f03cf78.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/multigres/compatibility.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "b229284457094dcc8130ee3d1c20ed23b66d32ca5244bfb6da88053f436a93de"
+  },
+  {
+    "file": "supabase-0ddb7073d9.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/postgres/enums.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "8413b7eec7590cf9d083e20e68fc39fccd6a489794ec46a2fef8cebc31859211"
+  },
+  {
+    "file": "supabase-160ec3c232.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/connection-management.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "84ef430953473830775de7fc1262cfb98ddeb085cd36d52334e64e1b89998a50"
+  },
+  {
+    "file": "supabase-21441e9085.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/replication/manual-replication-monitoring.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "d7df1912f142502f9753e609662185741fbef7e5a6a919276b6350b9ea55fb40"
+  },
+  {
+    "file": "supabase-34391a0629.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/postgres/roles-superuser.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "703a178f4b61ec8009009c4214e524eff82d2fbe519ac3ccd3d12396fa2f5a9b"
+  },
+  {
+    "file": "supabase-78246aa82b.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/psql.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "aa4f32b201ad1f68c892b8cc463adaaa4c8c8db18eb0e14a6bbdfa80a063b5aa"
+  },
+  {
+    "file": "supabase-ddf7e342ad.mdx.txt",
+    "repo": "supabase/supabase",
+    "commit": "bef73a7",
+    "path": "apps/docs/content/guides/database/extensions/pg_cron.mdx",
+    "license": "Apache-2.0",
+    "dialect": "mdx",
+    "sha256": "d5aafda77ad60ebadcd9fb454e246bc0c52e318b92d624ddd0d6c87cccba5fea"
+  }
+]
