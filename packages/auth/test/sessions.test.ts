@@ -923,3 +923,68 @@ describe('logs', () => {
     expect(out).toContain(REDACTED);
   });
 });
+
+describe('audit lines an investigation reads', () => {
+  const eventsOf = (lines: readonly { event: string }[], name: string) =>
+    lines.filter((line) => line.event === name);
+
+  it('records a passed step up by password, with ids and the method only', async () => {
+    const { sessions, lines } = setup(stepUpResponder(), {
+      passwords: { verify: () => Promise.resolve(true) },
+    });
+    await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'right' });
+    const [line] = eventsOf(lines, 'auth.step_up_passed');
+    expect(line?.fields).toMatchObject({ method: 'password' });
+    expect(line?.fields['sessionId']).toEqual(expect.any(String));
+    expect(line?.fields['userId']).toEqual(expect.any(String));
+    expect(JSON.stringify(line)).not.toContain('right');
+    expect(JSON.stringify(line)).not.toContain('person@example.com');
+  });
+
+  it('records a failed step up by password with its outcome', async () => {
+    const { sessions, lines } = setup(stepUpResponder(), {
+      passwords: { verify: () => Promise.resolve(false) },
+    });
+    await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'wrong' });
+    expect(eventsOf(lines, 'auth.step_up_failed')[0]?.fields).toMatchObject({
+      method: 'password',
+      outcome: 'AUTH_CREDENTIALS_INVALID',
+    });
+    expect(eventsOf(lines, 'auth.step_up_passed')).toEqual([]);
+    expect(JSON.stringify(lines)).not.toContain('wrong"');
+  });
+
+  it('records a refused step up when the limiter stops it', async () => {
+    const { sessions, lines, limiter } = setup(stepUpResponder(), {
+      passwords: { verify: () => Promise.resolve(true) },
+    });
+    limiter.reserve = () =>
+      Promise.reject(new AuthError('AUTH_RATE_LIMITED', { retryAfterSeconds: 60 }));
+    await sessions.stepUpWithPassword(browser(), sessionInfo(), { password: 'x' });
+    expect(eventsOf(lines, 'auth.step_up_failed')[0]?.fields).toMatchObject({
+      outcome: 'AUTH_RATE_LIMITED',
+    });
+  });
+
+  it('records a failed step up by code, even for a code that cannot parse', async () => {
+    const { sessions, lines } = setup(stepUpResponder());
+    await sessions.verifyStepUpCode(browser(), sessionInfo(), { challenge: 'nope', code: 'nope' });
+    expect(eventsOf(lines, 'auth.step_up_failed')[0]?.fields).toMatchObject({
+      method: 'email',
+      outcome: 'AUTH_CODE_INVALID',
+    });
+  });
+
+  it('records one revoked session by its id, and nothing when none went', async () => {
+    const hit = setup(() => [{ id: OTHER_SESSION }]);
+    await hit.sessions.revokeSession(sessionInfo(), OTHER_SESSION);
+    expect(eventsOf(hit.lines, 'auth.sessions_revoked')[0]?.fields).toMatchObject({
+      scope: 'one',
+      revoked: 1,
+      revokedSessionId: expect.any(String) as string,
+    });
+    const miss = setup(() => []);
+    await miss.sessions.revokeSession(sessionInfo(), OTHER_SESSION);
+    expect(eventsOf(miss.lines, 'auth.sessions_revoked')).toEqual([]);
+  });
+});

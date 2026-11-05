@@ -7,6 +7,7 @@ import {
   keyFiltersFrom,
   keyFilterSearch,
   keyListInput,
+  keyRowTone,
   methodsFrom,
   needsTypedName,
   projectAccessWords,
@@ -159,6 +160,18 @@ describe('the list input', () => {
       lastUsed: '7d',
       cursor: 'abc',
     });
+  });
+});
+
+describe('a key row', () => {
+  it('greys a revoked key, and only a revoked key', () => {
+    expect(keyRowTone('revoked')).toEqual({
+      row: 'bg-sunken text-secondary',
+      name: 'text-secondary',
+    });
+    for (const state of ['live', 'expired'] as const) {
+      expect(keyRowTone(state)).toEqual({ row: undefined, name: 'text-ink' });
+    }
   });
 });
 

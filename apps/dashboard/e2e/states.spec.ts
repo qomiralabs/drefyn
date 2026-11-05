@@ -77,3 +77,19 @@ test('the product home gives each project its own answer and says which is read 
   await expect(partner.getByRole('img', { name: 'Read only' })).toBeVisible();
   await expect(main(page).getByText('Docs project', { exact: true })).toHaveCount(0);
 });
+
+test('a revoked key reads as greyed, keeps its label and has no Revoke', async ({ page }) => {
+  await page.goto('/settings-states/keys/ready');
+  const revoked = page.getByRole('row', { name: /^old-sync/ });
+  const live = page.getByRole('row', { name: /^ci-deploy/ });
+  await expect(revoked).toContainText('Revoked');
+  await expect(revoked.getByRole('button', { name: /Revoke/ })).toHaveCount(0);
+  const paint = (row: typeof live) =>
+    row.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.color, ground: style.backgroundColor };
+    });
+  const [greyed, plain] = [await paint(revoked), await paint(live)];
+  expect(greyed.color).not.toBe(plain.color);
+  expect(greyed.ground).not.toBe(plain.ground);
+});
