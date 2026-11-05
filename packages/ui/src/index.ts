@@ -1,5 +1,6 @@
 export { chartMotion, cubicBezier, type ChartMotion, type Easing } from './charts.ts';
 export { echartsThemes } from './generated/echarts-theme.ts';
+export { surfaceTokensCss } from './generated/surface-tokens.ts';
 export { themeScript, themeStorageKey } from './theme-script.ts';
 export { composite, contrast, floor2, luminance } from './tokens/contrast.ts';
 export {

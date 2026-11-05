@@ -3,6 +3,7 @@
 
 import {
   reducedFadeCapMs,
+  statusFont,
   tokens as source,
   type Hex,
   type Mode,
@@ -22,6 +23,16 @@ export const fontFaces = [
   { family: 'JetBrains Mono', weight: 500, file: 'jetbrains-mono-latin-500-normal.woff2' },
 ] as const;
 
+// Inter 500 and JetBrains Mono 500 fall to their 400 face here: five faces missed the docs LCP
+// budget and three reached it. Chinese and Arabic carry on past Inter to the reader's system
+// fonts at no cost.
+export const docsFontFaces = fontFaces.filter((f) => f.weight !== 500);
+
+// Public pages inline this CSS, so no relative path survives. Served by the app from the root.
+export const publicFontPath = '/fonts/';
+
+export type PublicSurface = 'docs' | 'status';
+
 // Arial stretched to Inter's metrics, so text does not reflow when Inter arrives.
 const interFallback = {
   local: 'Arial',
@@ -36,6 +47,7 @@ const GENERIC_FAMILIES = new Set([
   'sans-serif',
   'monospace',
   'system-ui',
+  '-apple-system',
   'ui-sans-serif',
   'ui-monospace',
 ]);
@@ -153,10 +165,15 @@ function modeEntries(t: Tokens, mode: Mode): Entry[] {
   return entries;
 }
 
-function sharedEntries(t: Tokens): Entry[] {
+interface FontStacks {
+  readonly sans: readonly string[];
+  readonly mono: readonly string[];
+}
+
+function sharedEntries(t: Tokens, font: FontStacks = t.font): Entry[] {
   const entries: Entry[] = [
-    ['--dr-font-sans', family(t.font.sans)],
-    ['--dr-font-mono', family(t.font.mono)],
+    ['--dr-font-sans', family(font.sans)],
+    ['--dr-font-mono', family(font.mono)],
   ];
   for (const [step, s] of Object.entries(t.type)) {
     const name = `--dr-type-${kebab(step)}`;
@@ -218,18 +235,17 @@ function block(selector: string, lines: string[], indent = ''): string {
 
 const declarations = (entries: Entry[]) => entries.map(([n, v]) => `${n}: ${v}`);
 
-export function renderTokensCss(t: Tokens = source): string {
-  validate(t);
-  const faces = fontFaces.map((f) =>
-    block('@font-face', [
-      `font-family: "${f.family}"`,
-      'font-style: normal',
-      `font-weight: ${f.weight}`,
-      'font-display: swap',
-      `src: url("../fonts/${f.file}") format("woff2")`,
-    ]),
-  );
-  faces.push(
+function faceBlocks(faces: readonly (typeof fontFaces)[number][], path: string): string[] {
+  return [
+    ...faces.map((f) =>
+      block('@font-face', [
+        `font-family: "${f.family}"`,
+        'font-style: normal',
+        `font-weight: ${f.weight}`,
+        'font-display: swap',
+        `src: url("${path}${f.file}") format("woff2")`,
+      ]),
+    ),
     block('@font-face', [
       'font-family: "Inter fallback"',
       `src: local("${interFallback.local}")`,
@@ -238,7 +254,22 @@ export function renderTokensCss(t: Tokens = source): string {
       `descent-override: ${interFallback.descent}`,
       `line-gap-override: ${interFallback.lineGap}`,
     ]),
-  );
+  ];
+}
+
+export function renderTokensCss(t: Tokens = source): string {
+  return tokensCss(t, faceBlocks(fontFaces, '../fonts/'), t.font);
+}
+
+// Status names no web font at all, not even the local fallback: nothing may load, so a state
+// change can never move the layout.
+export function renderSurfaceTokensCss(surface: PublicSurface, t: Tokens = source): string {
+  if (surface === 'status') return tokensCss(t, [], statusFont);
+  return tokensCss(t, faceBlocks(docsFontFaces, publicFontPath), t.font);
+}
+
+function tokensCss(t: Tokens, faces: readonly string[], font: FontStacks): string {
+  validate(t);
   const dark = ['color-scheme: dark', ...declarations(modeEntries(t, 'dark'))];
   return [
     `/* ${HEADER} */\n`,
@@ -246,7 +277,7 @@ export function renderTokensCss(t: Tokens = source): string {
     block(':root', [
       'color-scheme: light',
       ...declarations(modeEntries(t, 'light')),
-      ...declarations(sharedEntries(t)),
+      ...declarations(sharedEntries(t, font)),
     ]),
     // Numbers line up in tables, times and counters. :where keeps it overridable.
     block(':where(time, data, output, td, th, [data-numeric])', [
@@ -577,11 +608,26 @@ export function renderEchartsTheme(t: Tokens = source): string {
   ].join('');
 }
 
+// A module rather than two stylesheets: public pages inline this text at render time, and a
+// server has no bundler to turn a CSS import into a string.
+export function renderSurfaceTokensModule(t: Tokens = source): string {
+  const docs = JSON.stringify(renderSurfaceTokensCss('docs', t));
+  const status = JSON.stringify(renderSurfaceTokensCss('status', t));
+  return [
+    `// ${HEADER}\n`,
+    '// Token CSS for the pages rendered without a build, one string per surface.\n\n',
+    `const docs = ${docs};\n\n`,
+    `const status = ${status};\n\n`,
+    'export const surfaceTokensCss = { docs, status } as const;\n',
+  ].join('');
+}
+
 export function generatedFiles(t: Tokens = source): Record<string, string> {
   return {
     'tokens.css': renderTokensCss(t),
     'tailwind.css': renderTailwindCss(t),
     'tokens.dtcg.json': renderDtcg(t),
     'echarts-theme.ts': renderEchartsTheme(t),
+    'surface-tokens.ts': renderSurfaceTokensModule(t),
   };
 }
