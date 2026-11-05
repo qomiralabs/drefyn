@@ -67,22 +67,41 @@ export function allowed(
   return entries.filter((entry) => can(entry.permission));
 }
 
-// The text a query matches against, lower cased once rather than on every key.
+const MARKS = /\p{M}/gu;
+const SPACES = /\s+/gu;
+
+// Reduces text to what a person means by it, so a query finds a name however either was typed:
+// accents as one code point or two, or left out, any case, any run of spaces. Upper first
+// because lower alone leaves pairs apart (ß and SS, ı and I). Final sigma becomes plain sigma,
+// or a query cut at that letter would miss the rest of the word.
+function fold(text: string): string {
+  return text
+    .normalize('NFKD')
+    .replace(MARKS, '')
+    .toUpperCase()
+    .toLowerCase()
+    .replace(MARKS, '')
+    .replaceAll('\u03c2', '\u03c3')
+    .replace(SPACES, ' ')
+    .trim();
+}
+
+// The text a query matches against, folded once rather than on every key.
 export function searchText(entry: Command): string {
-  return [entry.name, entry.kind, ...(entry.keywords ?? [])].join(' ').toLowerCase();
+  return fold([entry.name, entry.kind, ...(entry.keywords ?? [])].join(' '));
 }
 
 // The filter the command bar's autocomplete runs: the query against each entry's search text,
 // so keywords count as well as the row's words. A node it does not know falls back to the row
-// text. Case is ignored and an empty query keeps everything.
+// text. An empty query keeps everything.
 export function commandFilter(
   entries: readonly Command[],
 ): (text: string, input: string, node: { key: unknown }) => boolean {
   const index = new Map(entries.map((entry) => [entry.id, searchText(entry)]));
   return (text, input, node) => {
-    const query = input.trim().toLowerCase();
+    const query = fold(input);
     if (query === '') return true;
-    const haystack = index.get(String(node.key)) ?? text.toLowerCase();
+    const haystack = index.get(String(node.key)) ?? fold(text);
     return haystack.includes(query);
   };
 }

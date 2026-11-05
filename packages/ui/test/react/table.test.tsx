@@ -174,6 +174,33 @@ describe('Table', () => {
       expect(screen.getByRole('status').textContent).toBe('1 selected');
     });
 
+    it('leaves the cells alone when only the choice changes', async () => {
+      const cell = vi.fn((p: Page) => p.title);
+      const columns = [{ id: 'title', label: 'Page', rowHeader: true, cell }];
+      const user = userEvent.setup();
+      render(<Pages selectable columns={columns} />);
+      cell.mockClear();
+      await user.click(
+        screen
+          .getByRole('checkbox', { name: 'Select all' })
+          .closest('table')
+          ?.querySelector('tbody input') ?? document.body,
+      );
+      expect(screen.getByRole('status').textContent).toBe('1 selected');
+      expect(cell).not.toHaveBeenCalled();
+    });
+
+    it('draws new rows when the rows change, and keeps a held sort', () => {
+      const { rerender } = render(<Pages sort={{ column: 'views', direction: 'descending' }} />);
+      rerender(
+        <Pages
+          rows={[...PAGES, { id: 'late', title: 'Late', views: 9_000 }]}
+          sort={{ column: 'views', direction: 'descending' }}
+        />,
+      );
+      expect(screen.getAllByRole('rowheader')[0]?.textContent).toBe('Late');
+    });
+
     it('select all picks every row but a disabled one', async () => {
       const onSelectionChange = vi.fn();
       const user = userEvent.setup();

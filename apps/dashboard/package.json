@@ -19,7 +19,7 @@
     "test": "vitest run --coverage",
     "bench:wrapper": "node bench/wrapper.ts",
     "test:server": "vitest run --config vitest.server.config.ts",
-    "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle --project=auth --project=auth-no-js --project=auth-hop",
+    "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle --project=inp --project=lighthouse --project=auth --project=auth-no-js --project=auth-hop",
     "test:visual": "playwright test --project=visual",
     "seed:e2e": "node e2e/seed.ts"
   },
@@ -48,8 +48,10 @@
     "@types/react-dom": "19.3.0",
     "fast-check": "4.10.2",
     "kysely": "0.29.7",
+    "lighthouse": "13.6.0",
     "pg": "8.23.1",
     "tailwindcss": "4.3.3",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "web-vitals": "6.2.3"
   }
 }
