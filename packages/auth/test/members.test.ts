@@ -174,6 +174,73 @@ describe('listProjects', () => {
   });
 });
 
+describe('listReachableProjects', () => {
+  const row = {
+    id: PROJECT_A,
+    slug: 'payments-api',
+    name: 'Payments API docs',
+    product: 'docs',
+    read_only_since: null,
+  };
+  const read = (over: object = {}) => {
+    const store = scriptedStore(() => [{ ...row, ...over }]);
+    const { logger } = capturingLogger();
+    return { members: createMembers({ store: store.store, logger }), store };
+  };
+
+  it('reads under the organization and returns what the shell draws', async () => {
+    const { members, store } = read();
+    expect(await members.listReachableProjects(access('admin'))).toEqual({
+      ok: true,
+      value: [
+        {
+          projectId: PROJECT_A,
+          slug: 'payments-api',
+          name: 'Payments API docs',
+          product: 'docs',
+          readOnly: false,
+        },
+      ],
+    });
+    expect(store.events[0]).toEqual({ kind: 'begin', scope: 'organization', organizationId: ORG });
+    expect(store.writes()).toEqual([]);
+  });
+
+  it('carries read only state from the project row', async () => {
+    const { members } = read({ read_only_since: JOINED });
+    const list = await members.listReachableProjects(access('admin'));
+    expect(list.ok && list.value[0]?.readOnly).toBe(true);
+  });
+
+  it('asks for every product the person may read', async () => {
+    const { members, store } = read();
+    await members.listReachableProjects(access('owner'));
+    const parameters = store.statements()[0]?.parameters;
+    expect(parameters).toEqual(expect.arrayContaining(['docs', 'studio', 'status']));
+  });
+
+  it('holds a person with no product to their own project roles', async () => {
+    const { members, store } = read();
+    await members.listReachableProjects(access('member'));
+    const statement = store.statements()[0];
+    expect(statement?.sql).toContain('"project_roles"');
+    expect(statement?.parameters).toEqual(expect.arrayContaining([USER]));
+    expect(statement?.parameters).not.toEqual(expect.arrayContaining(['docs']));
+  });
+
+  it('turns a database failure into unavailable', async () => {
+    const { members } = setup({ fail: true });
+    const list = await members.listReachableProjects(access());
+    expect(!list.ok && list.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+
+  it('refuses a product it does not know instead of drawing it', async () => {
+    const { members } = read({ product: 'blog' });
+    const list = await members.listReachableProjects(access());
+    expect(!list.ok && list.error.code).toBe('AUTH_UNAVAILABLE');
+  });
+});
+
 describe('withdrawInvitation', () => {
   it('deletes the row and returns what an undo needs', async () => {
     const { members, lines } = setup();

@@ -61,6 +61,16 @@ describe('parseShellPath', () => {
     expect(parseShellPath(path)).toBeNull();
   });
 
+  it('reads the state gallery like a project, and only below a product', () => {
+    expect(parseShellPath('/shell-states/docs/payments-api')).toEqual({
+      org: 'shell-states',
+      product: 'docs',
+      project: 'payments-api',
+    });
+    expect(parseShellPath('/shell-states')).toBeNull();
+    expect(parseShellPath('/settings-states/docs/x')).toBeNull();
+  });
+
   it('reserves the bundle baseline route so no organization can shadow it', () => {
     expect(RESERVED_SLUGS).toContain('bundle-baseline');
     expect(RESERVED_SLUGS).toContain('api');

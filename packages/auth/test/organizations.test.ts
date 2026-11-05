@@ -10,6 +10,7 @@ import {
   type OrganizationsDeps,
   type RateLimiter,
 } from '../src/index.ts';
+import { access } from './api-key-fixtures.ts';
 import { scriptedStore, type Responder, type Statement } from './scripted-store.ts';
 import {
   AUTHENTICATED_AT,
@@ -371,6 +372,68 @@ describe('createOrganization', () => {
     await orgs.createOrganization(sessionInfo(), { name: NAME });
     await orgs.createOrganization(sessionInfo(), { name: NAME });
     expect(new Set(ids).size).toBe(2);
+  });
+});
+
+describe('listMyOrganizationSeats', () => {
+  const OTHER = idOf('org', '01890a5d-ac96-774b-bcce-b302099a8299');
+  const row = (organization_id: string, name: string, plan_tier: string) => ({
+    organization_id,
+    name,
+    slug: name.toLowerCase(),
+    role: 'owner',
+    plan_tier,
+    read_only_since: null,
+  });
+  const answer = (statement: { readonly sql: string; readonly parameters: readonly unknown[] }) => {
+    if (statement.sql.includes('app.current_user_id()')) {
+      return [row(ORG, 'Acme', 'starter'), row(OTHER, 'Beta', 'self_hosted')];
+    }
+    const tier = statement.parameters.includes(ORG) ? 'starter' : 'self_hosted';
+    return [{ plan_tier: tier, used: statement.parameters.includes(ORG) ? 4 : 2 }];
+  };
+
+  it('counts each organization under its own context and reads limits from the plan', async () => {
+    const { orgs, scripted } = setup(answer);
+    const list = await orgs.listMyOrganizationSeats(access());
+    expect(list.map((o) => [o.slug, o.seats])).toEqual([
+      ['acme', { used: 4, limit: 5 }],
+      ['beta', { used: 2, limit: 'unlimited' }],
+    ]);
+    const begins = scripted.events.filter((e) => e.kind === 'begin');
+    expect(begins).toEqual([
+      { kind: 'begin', scope: 'user', userId: USER },
+      { kind: 'begin', scope: 'organization', organizationId: ORG },
+      { kind: 'begin', scope: 'organization', organizationId: OTHER },
+    ]);
+    expect(scripted.writes()).toEqual([]);
+  });
+
+  it('counts no more than a bounded number, and says nothing about the rest', async () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      row(
+        `01890a5d-ac96-774b-bcce-b302099a82${String(i).padStart(2, '0')}`,
+        `O${String(i)}`,
+        'free',
+      ),
+    );
+    const { orgs, scripted } = setup((statement) =>
+      statement.sql.includes('app.current_user_id()') ? many : [{ plan_tier: 'free', used: 1 }],
+    );
+    const list = await orgs.listMyOrganizationSeats(access());
+    expect(list).toHaveLength(30);
+    expect(list.filter((o) => o.seats === null)).toHaveLength(5);
+    expect(scripted.events.filter((e) => e.kind === 'begin')).toHaveLength(26);
+  });
+
+  it('answers AUTH_UNAVAILABLE when a count fails', async () => {
+    const { orgs } = setup((statement) => {
+      if (statement.sql.includes('app.current_user_id()')) return [row(ORG, 'Acme', 'starter')];
+      throw new Error('down');
+    });
+    await expect(orgs.listMyOrganizationSeats(access())).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
   });
 });
 

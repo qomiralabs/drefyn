@@ -134,6 +134,36 @@ describeWithStack('account and members', () => {
     expect(list.value).toHaveLength(2);
   });
 
+  it('reaches every project with product reach and only granted ones without', async () => {
+    const org = await newOrg(h);
+    const projects = await addProjects(h, org.organizationId, 2);
+    const member = await join(org, 'member');
+    const withDefault = await join(org, 'member', 'viewer');
+    const ids = async (access: typeof org.owner) => {
+      const list = await h.members().listReachableProjects(access);
+      if (!list.ok) throw list.error;
+      return list.value.map((p) => p.projectId).toSorted();
+    };
+    const every = [...projects].toSorted();
+    expect(await ids(org.owner)).toEqual(every);
+    expect(await ids(withDefault.access)).toEqual(every);
+    expect(await ids(member.access)).toEqual([]);
+    const granted = projects[0];
+    if (granted === undefined) throw new Error('no project');
+    const set = await h.roles().setProjectRole(org.owner, member.membership, granted, 'viewer');
+    if (!set.ok) throw set.error;
+    expect(await ids(member.access)).toEqual([granted]);
+  });
+
+  it('reaches nothing of another organization', async () => {
+    const mine = await newOrg(h);
+    const theirs = await newOrg(h);
+    await addProjects(h, theirs.organizationId, 2);
+    const list = await h.members().listReachableProjects(mine.owner);
+    if (!list.ok) throw list.error;
+    expect(list.value).toEqual([]);
+  });
+
   it('finds the keys a removal will revoke through the list filter', async () => {
     const org = await newOrg(h);
     const admin = await join(org, 'admin');

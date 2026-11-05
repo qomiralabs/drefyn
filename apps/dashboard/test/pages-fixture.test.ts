@@ -32,6 +32,15 @@ describe('placeholder pages', () => {
   });
 });
 
+describe('the write action', () => {
+  it('stays shut unless the server opted in to the test states', async () => {
+    const { pagesAreOpen } = await import('../src/server/pages-fixture.ts');
+    expect(pagesAreOpen({})).toBe(false);
+    expect(pagesAreOpen({ DREFYN_DASHBOARD_STATES: 'off' })).toBe(false);
+    expect(pagesAreOpen({ DREFYN_DASHBOARD_STATES: 'on' })).toBe(true);
+  });
+});
+
 describe('the fixture server', () => {
   it('answers with the pages as they now stand', () => {
     expect(updatePages(access(), body())).toEqual({
