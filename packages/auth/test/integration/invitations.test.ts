@@ -131,17 +131,17 @@ describeWithStack('invitations against Postgres', () => {
 
   it('keeps everyone after a downgrade and refuses invites until the count fits', async () => {
     const { org, access } = await organization('starter');
-    const people = [await person(), await person(), await person()];
-    for (const p of people) {
+    for (let invite = 0; invite < 5; invite += 1) {
+      const p = await person();
       const { token } = await invited(access, p.email);
       const accepted = await h.invitations().acceptInvitation(p.session, token);
       if (!accepted.ok) throw accepted.error;
     }
-    expect(await seats(access)).toBe(4);
+    expect(await seats(access)).toBe(6);
     await setTier(org, 'free');
     // Nobody is removed and nothing is deleted.
-    expect(await count('memberships', `organization_id = '${org}'`)).toBe('4');
-    expect(await seats(access)).toBe(4);
+    expect(await count('memberships', `organization_id = '${org}'`)).toBe('6');
+    expect(await seats(access)).toBe(6);
     const refused = await h
       .invitations({ limiter: unlimited })
       .invite(access, { email: address(), role: 'member', defaultProjectRole: null });
