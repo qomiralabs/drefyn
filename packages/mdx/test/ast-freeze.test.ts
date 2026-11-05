@@ -131,7 +131,7 @@ describe('a change without a bump', () => {
   });
 
   it('fails on a case dropped from the pin or missing from it', () => {
-    const { empty: _gone, ...rest } = trees;
+    const rest = Object.fromEntries(Object.entries(trees).filter(([name]) => name !== 'empty'));
     expect(check({ trees: rest })).toEqual(['case empty is pinned but no longer exists']);
     expect(check({ trees: { ...trees, added: {} } })).toEqual(['case added has no pin']);
   });
