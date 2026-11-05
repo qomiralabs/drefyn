@@ -328,3 +328,50 @@ describe('Tab in an open Menu', () => {
     expect(document.activeElement).toBe(item);
   });
 });
+
+describe('Menu with selection', () => {
+  function Filter({ onChange }: { onChange: (ids: string[]) => void }) {
+    return (
+      <Menu
+        trigger="Role"
+        selectionMode="multiple"
+        selected={['owner']}
+        onSelectionChange={onChange}
+      >
+        <MenuItem id="owner">Owner</MenuItem>
+        <MenuItem id="admin" meta="2">
+          Admin
+        </MenuItem>
+      </Menu>
+    );
+  }
+
+  it('reads a chosen item as checked and stays open while choosing several', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<Filter onChange={onChange} />);
+    await user.click(screen.getByRole('button', { name: 'Role' }));
+    const owner = screen.getByRole('menuitemcheckbox', { name: 'Owner' });
+    const admin = screen.getByRole('menuitemcheckbox', { name: 'Admin' });
+    expect(owner.getAttribute('aria-checked')).toBe('true');
+    expect(admin.getAttribute('aria-checked')).toBe('false');
+    await user.click(admin);
+    expect(onChange).toHaveBeenCalledWith(['owner', 'admin']);
+    expect(screen.getByRole('menu')).toBeTruthy();
+  });
+
+  it('closes after one choice in a single choice menu', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Menu trigger="Sort" selectionMode="single" selected={['name']} onSelectionChange={onChange}>
+        <MenuItem id="name">Name</MenuItem>
+        <MenuItem id="joined">Joined</MenuItem>
+      </Menu>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Sort' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Joined' }));
+    expect(onChange).toHaveBeenCalledWith(['joined']);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+});

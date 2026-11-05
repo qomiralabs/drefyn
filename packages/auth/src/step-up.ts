@@ -5,7 +5,7 @@ import { normalizeAddress } from './address.ts';
 import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import type { BrowserContext } from './cookies.ts';
-import { AuthError } from './errors.ts';
+import { AuthError, type AuthErrorCode } from './errors.ts';
 import { lengthPrefixed, sha256 } from './keys.ts';
 import { PASSWORD_RAW_MAX_BYTES } from './password-input.ts';
 import type { AuthLogger, RateLimiter } from './rate-limiter.ts';
@@ -13,6 +13,7 @@ import {
   fail,
   idFields,
   ok,
+  quietInfo,
   quietWarn,
   unavailable,
   type SessionInfo,
@@ -117,6 +118,7 @@ export async function recordStepUp(
   store: SessionStore,
   s: SessionInfo,
   method: StepUpMethod,
+  logger: AuthLogger,
 ): Promise<SessionInfo> {
   const row = await store.user(s.userId, (tx) =>
     tx
@@ -129,12 +131,32 @@ export async function recordStepUp(
       .executeTakeFirst(),
   );
   if (row === undefined) throw new AuthError('AUTH_SESSION_INVALID');
+  quietInfo(logger, 'auth.step_up_passed', { method, ...stepUpIds(s) });
   return { ...s, authenticatedAt: row.authenticated_at, stepUpMethod: method };
+}
+
+// After a takeover this is what shows who passed the check and who tried. Ids and codes only.
+const stepUpIds = (s: SessionInfo) =>
+  idFields({ userId: ['usr', s.userId], sessionId: ['ses', s.sessionId] });
+
+export function logStepUpFailed(
+  logger: AuthLogger,
+  s: SessionInfo,
+  method: StepUpMethod,
+  outcome: AuthErrorCode,
+): void {
+  quietWarn(logger, 'auth.step_up_failed', { method, outcome, ...stepUpIds(s) });
 }
 
 export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
   const { store, limiter } = deps;
-  const mark = (s: SessionInfo, method: StepUpMethod) => recordStepUp(store, s, method);
+  const mark = (s: SessionInfo, method: StepUpMethod) =>
+    recordStepUp(store, s, method, deps.logger);
+  const refused = <T>(s: SessionInfo, method: StepUpMethod, error: unknown) => {
+    const result = fail<T>(error);
+    if (!result.ok) logStepUpFailed(deps.logger, s, method, result.error.code);
+    return result;
+  };
 
   return {
     requireRecentAuth: (s) => checkRecentAuth(store, s),
@@ -170,7 +192,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         if (!matched || row === undefined) throw new AuthError('AUTH_CREDENTIALS_INVALID');
         return ok(await mark(s, 'password'));
       } catch (error) {
-        return fail(error);
+        return refused(s, 'password', error);
       }
     },
 
@@ -230,7 +252,9 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
     async verifyStepUpCode(b, s, input) {
       const id = parseChallengeId(input.challenge);
       const code = parseCode(input.code.replace(TYPED_GAPS, ''));
-      if (id === null || code === null) return fail(new AuthError('AUTH_CODE_INVALID'));
+      if (id === null || code === null) {
+        return refused(s, 'email', new AuthError('AUTH_CODE_INVALID'));
+      }
       try {
         const binding = bindingOf(s);
         await limiter.reserve('code_verify', [address(s), binding]);
@@ -260,10 +284,10 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
             .executeTakeFirst();
           return consumed !== undefined;
         });
-        if (!proved) return fail(new AuthError('AUTH_CODE_INVALID'));
+        if (!proved) return refused(s, 'email', new AuthError('AUTH_CODE_INVALID'));
         return ok(await mark(s, 'email'));
       } catch (error) {
-        return fail(error);
+        return refused(s, 'email', error);
       }
     },
   };

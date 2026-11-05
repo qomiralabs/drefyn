@@ -17,11 +17,10 @@ export const DEVICES_PER_USER = 20;
 // A device unseen this long counts as new again for the notice. The row itself stays for
 // the full cookie lifetime, because it also keeps the device's own send allowance.
 export const NEW_DEVICE_AFTER_DAYS = 90;
-// Where the notice sends people to end sessions. The account settings pages own the real
-// route; this stands in until they land.
 // A fixed number, so it can sit in the statement as a literal.
 const NEW_DEVICE_INTERVAL = sql.raw(`interval '${String(NEW_DEVICE_AFTER_DAYS)} days'`);
-export const SESSIONS_PAGE_PLACEHOLDER_PATH = '/account/sessions';
+// Where the notice sends people to end sessions.
+export const SESSIONS_PAGE_PATH = '/account/sessions';
 // Looked up when the browser has no device cookie, so the lookup always runs.
 const NO_DEVICE = Buffer.alloc(32);
 const NO_USER = '00000000-0000-0000-0000-000000000000';
@@ -180,7 +179,7 @@ export function newDeviceNotice(
         method: input.method,
         device: input.seen.device,
         at: input.seen.at,
-        sessionsLink: new URL(SESSIONS_PAGE_PLACEHOLDER_PATH, config.appOrigin),
+        sessionsLink: new URL(SESSIONS_PAGE_PATH, config.appOrigin),
       });
     } catch {
       quietWarn(logger, 'auth.device_notice_failed', idFields({ userId: ['usr', input.userId] }));

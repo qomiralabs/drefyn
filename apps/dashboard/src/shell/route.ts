@@ -11,12 +11,14 @@ export interface ShellLocation {
 
 // Top level paths the app owns, so no organization can take them as its slug.
 export const RESERVED_SLUGS: readonly string[] = [
+  'account',
   'bundle-baseline',
   'api',
   'auth',
   'auth-states',
   'invite',
   'organizations',
+  'settings-states',
   'sign-in',
   'sign-out',
   'sign-up',

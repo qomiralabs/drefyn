@@ -17,6 +17,8 @@ import {
   createApiKeys,
   createInvitations,
   createOrganizations,
+  createAccount,
+  createMembers,
   createRoles,
   createScopeRegistry,
   createSessions,
@@ -67,6 +69,8 @@ export interface Harness {
   sessions(extra?: Partial<SessionsDeps>): ReturnType<typeof createSessions>;
   organizations(extra?: Partial<OrganizationsDeps>): ReturnType<typeof createOrganizations>;
   apiKeys(extra?: Partial<ApiKeysDeps>): ApiKeys;
+  account(): ReturnType<typeof createAccount>;
+  members(): ReturnType<typeof createMembers>;
   // The API service's side: drefyn_app only, with its own failure key.
   verifier(extra?: Partial<ApiKeyVerifierDeps>, env?: Env): ApiKeyVerifier;
   readonly mail: TestAuthMailer;
@@ -155,6 +159,8 @@ export function harness(pools: { readonly app?: number; readonly auth?: number }
       apiKeys: (extra = {}) =>
         createApiKeys({ db, authDb, logger, scopes: TEST_SCOPES, mailer: mail.mailer, ...extra }),
       roles: (extra = {}) => createRoles({ db, logger, mailer: mail.mailer, ...extra }),
+      account: () => createAccount({ db, authDb, logger }),
+      members: () => createMembers({ db, logger }),
       verifier: (extra = {}, env = { DREFYN_API_RATE_LIMIT_KEY: API_RATE_KEY }) =>
         createApiKeyVerifier(env, { db, logger, ...extra }),
       invitations: (extra = {}, other = config) =>

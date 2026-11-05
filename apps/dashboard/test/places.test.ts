@@ -35,7 +35,7 @@ describe('command bar search', () => {
     for (const entry of entries) expect(found(entry.name), entry.id).toContain(entry.name);
   });
 
-  it('keeps every place inside the organization', () => {
-    for (const entry of entries) expect(entry.href).toMatch(/^\/acme(\/|$)/);
+  it("keeps every place inside the organization or the person's own account", () => {
+    for (const entry of entries) expect(entry.href).toMatch(/^\/(acme|account)(\/|$)/);
   });
 });

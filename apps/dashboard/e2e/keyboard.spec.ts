@@ -324,3 +324,46 @@ test.describe('signed out pages', () => {
     await expect(page.locator('#main')).toBeFocused();
   });
 });
+
+test.describe('settings', () => {
+  test('a dialog that cannot be undone opens on Cancel, and Escape closes it', async ({
+    page,
+    browserName,
+  }) => {
+    await openShell(page, '/settings-states/sessions/ready');
+    const everywhere = page.getByRole('button', { name: 'Sign out everywhere else' });
+    await everywhere.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Sign out everywhere else?' });
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press(tabKey(browserName));
+    await expect(dialog.getByRole('button', { name: 'Sign out 2 sessions' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(everywhere).toBeFocused();
+  });
+
+  test('a filter opens by keyboard and reads what is chosen', async ({ page }) => {
+    await openShell(page, '/settings-states/members/ready');
+    const role = page.getByRole('button', { name: /^Role/ }).first();
+    await role.focus();
+    await page.keyboard.press('Enter');
+    const admin = page.getByRole('menuitemcheckbox', { name: 'Admin' });
+    await page.keyboard.press('ArrowDown');
+    await expect(admin).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(admin).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    await expect(role).toBeFocused();
+    await expect(role).toContainText('Admin');
+  });
+
+  test('an action that cannot run stays focusable and says why', async ({ page }) => {
+    await openShell(page, '/settings-states/methods/only-one');
+    const unlink = page.getByRole('button', { name: 'Unlink GitHub' });
+    await unlink.focus();
+    await expect(unlink).toBeFocused();
+    await expect(unlink).toHaveAttribute('aria-disabled', 'true');
+    await expect(unlink).toHaveAccessibleDescription(/only way to sign in/);
+  });
+});

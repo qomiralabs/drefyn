@@ -1,28 +1,38 @@
 import {
+  API_KEY_SCOPES,
   createAccount,
+  createApiKeys,
   createCliLinks,
+  createEmailChange,
   createEmailSignIn,
   createInvitations,
+  createMembers,
   createOAuth,
   createOrganizations,
   createPasswordAccount,
   createPasswordHasher,
   createPasswordSignIn,
   createRateLimiter,
+  createRoles,
+  createScopeRegistry,
   createSessions,
   loadBreachedPasswords,
   parseAuthConfig,
   type Account,
+  type ApiKeys,
   type AuthConfig,
   type AuthLogger,
   type CliLinks,
+  type EmailChange,
   type EmailSignIn,
   type Env,
   type Invitations,
+  type Members,
   type OAuth,
   type Organizations,
   type PasswordAccount,
   type PasswordSignIn,
+  type Roles,
   type Sessions,
 } from '@drefyn/auth';
 import {
@@ -46,14 +56,28 @@ import { logInfo, logWarn, type LogContext } from './log.ts';
 export interface DashboardAuth {
   readonly sessions: Pick<
     Sessions,
-    'resolveAccess' | 'resolveSession' | 'touchSession' | 'signOut'
+    | 'resolveAccess'
+    | 'resolveSession'
+    | 'touchSession'
+    | 'signOut'
+    | 'listSessions'
+    | 'revokeSession'
+    | 'signOutOtherSessions'
+    | 'requireRecentAuth'
+    | 'stepUpWithPassword'
+    | 'startStepUpCode'
+    | 'verifyStepUpCode'
   >;
   readonly organizations: Pick<Organizations, 'listMyOrganizations' | 'createOrganization'>;
   readonly account: Pick<Account, 'readAccount' | 'setDisplayName'>;
   readonly emailSignIn: EmailSignIn;
+  readonly emailChange: EmailChange;
   readonly passwordSignIn: Pick<PasswordSignIn, 'signInWithPassword' | 'setPassword'>;
-  readonly passwordAccount: Pick<PasswordAccount, 'startPasswordReset' | 'completePasswordReset'>;
-  readonly oauth: Pick<OAuth, 'startOAuth' | 'completeOAuth'>;
+  readonly passwordAccount: Pick<
+    PasswordAccount,
+    'startPasswordReset' | 'completePasswordReset' | 'changePassword' | 'removePassword'
+  >;
+  readonly oauth: Pick<OAuth, 'startOAuth' | 'completeOAuth' | 'unlinkIdentity'>;
   readonly invitations: Pick<
     Invitations,
     | 'acceptInvitation'
@@ -61,8 +85,13 @@ export interface DashboardAuth {
     | 'holdInvitation'
     | 'readInvitation'
     | 'readInvitationBlock'
+    | 'invite'
+    | 'seatUsage'
   >;
   readonly cliLinks: Pick<CliLinks, 'redeem'>;
+  readonly members: Members;
+  readonly roles: Pick<Roles, 'changeRole' | 'removeMember' | 'setProjectRole'>;
+  readonly apiKeys: Pick<ApiKeys, 'createApiKey' | 'revokeApiKey' | 'listApiKeys'>;
   readonly methods: SignInMethods;
 }
 
@@ -153,8 +182,20 @@ async function compose(): Promise<DashboardAuth> {
   });
   const invitations = createInvitations(parsed, { db, authDb, logger, mailer, limiter });
   const shared = { db, authDb, logger, mailer, limiter, sessions };
-  const emailSignIn = createEmailSignIn(parsed, { ...shared, invitations });
+  const emailChange = createEmailChange(parsed, { db, authDb, logger, mailer, limiter });
   const account = createAccount({ db, authDb, logger });
+  const members = createMembers({ db, logger });
+  const roles = createRoles({ db, logger, mailer });
+  const apiKeys = createApiKeys({
+    db,
+    authDb,
+    logger,
+    mailer,
+    scopes: createScopeRegistry(
+      API_KEY_SCOPES.map(({ scope, permission }) => ({ scope, permission })),
+    ),
+  });
+  const emailSignIn = createEmailSignIn(parsed, { ...shared, invitations });
   const passwordSignIn = createPasswordSignIn(parsed, {
     ...shared,
     hasher,
@@ -177,6 +218,13 @@ async function compose(): Promise<DashboardAuth> {
       resolveSession: (cookie) => sessions.resolveSession(cookie),
       touchSession: (ref) => sessions.touchSession(ref),
       signOut: (session) => sessions.signOut(session),
+      listSessions: (session) => sessions.listSessions(session),
+      revokeSession: (session, id) => sessions.revokeSession(session, id),
+      signOutOtherSessions: (session, b) => sessions.signOutOtherSessions(session, b),
+      requireRecentAuth: (session) => sessions.requireRecentAuth(session),
+      stepUpWithPassword: (b, session, input) => sessions.stepUpWithPassword(b, session, input),
+      startStepUpCode: (b, session) => sessions.startStepUpCode(b, session),
+      verifyStepUpCode: (b, session, input) => sessions.verifyStepUpCode(b, session, input),
     },
     organizations: {
       listMyOrganizations: (session) => organizations.listMyOrganizations(session),
@@ -187,6 +235,7 @@ async function compose(): Promise<DashboardAuth> {
       setDisplayName: (session, input) => account.setDisplayName(session, input),
     },
     emailSignIn,
+    emailChange,
     passwordSignIn: {
       signInWithPassword: (b, input) => passwordSignIn.signInWithPassword(b, input),
       setPassword: (session, input) => passwordSignIn.setPassword(session, input),
@@ -194,10 +243,13 @@ async function compose(): Promise<DashboardAuth> {
     passwordAccount: {
       startPasswordReset: (b, input) => passwordAccount.startPasswordReset(b, input),
       completePasswordReset: (b, input) => passwordAccount.completePasswordReset(b, input),
+      changePassword: (b, session, input) => passwordAccount.changePassword(b, session, input),
+      removePassword: (session) => passwordAccount.removePassword(session),
     },
     oauth: {
       startOAuth: (b, input) => oauth.startOAuth(b, input),
       completeOAuth: (b, input) => oauth.completeOAuth(b, input),
+      unlinkIdentity: (session, input) => oauth.unlinkIdentity(session, input),
     },
     invitations: {
       acceptInvitation: (s, token) => invitations.acceptInvitation(s, token),
@@ -205,8 +257,22 @@ async function compose(): Promise<DashboardAuth> {
       holdInvitation: (b, token) => invitations.holdInvitation(b, token),
       readInvitation: (token) => invitations.readInvitation(token),
       readInvitationBlock: (token) => invitations.readInvitationBlock(token),
+      invite: (access, input) => invitations.invite(access, input),
+      seatUsage: (access) => invitations.seatUsage(access),
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
+    members,
+    roles: {
+      changeRole: (access, member, role) => roles.changeRole(access, member, role),
+      removeMember: (access, member) => roles.removeMember(access, member),
+      setProjectRole: (access, member, project, role) =>
+        roles.setProjectRole(access, member, project, role),
+    },
+    apiKeys: {
+      createApiKey: (access, input) => apiKeys.createApiKey(access, input),
+      revokeApiKey: (access, id) => apiKeys.revokeApiKey(access, id),
+      listApiKeys: (access, input) => apiKeys.listApiKeys(access, input),
+    },
     methods: signInMethods(parsed, mail.configured),
   };
 }

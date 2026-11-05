@@ -1,0 +1,73 @@
+/* Rows on hairlines, never cards. Below 40rem a table stacks, each cell keeping its column
+   name from data-label, so nothing scrolls sideways on a phone. */
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-table th {
+  padding: var(--dr-space-8) var(--dr-space-12);
+  border-bottom: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-label);
+  text-align: start;
+  text-transform: uppercase;
+}
+
+.settings-table td {
+  padding: var(--dr-space-8) var(--dr-space-12);
+  border-bottom: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  vertical-align: middle;
+}
+
+.settings-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.settings-frame {
+  overflow: hidden;
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-md);
+}
+
+@media (width < 40rem) {
+  .settings-table thead {
+    position: absolute;
+    overflow: hidden;
+    width: var(--dr-stroke-hairline);
+    height: var(--dr-stroke-hairline);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .settings-table tr {
+    display: block;
+    padding: var(--dr-space-8) 0;
+    border-bottom: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  }
+
+  .settings-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .settings-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--dr-space-12);
+    padding: var(--dr-space-4) var(--dr-space-12);
+    border-bottom: 0;
+  }
+
+  .settings-table td:empty,
+  .settings-table [data-wide] {
+    display: none;
+  }
+
+  .settings-table td[data-label]::before {
+    color: var(--dr-text-secondary);
+    content: attr(data-label);
+    font: var(--dr-type-caption);
+  }
+}

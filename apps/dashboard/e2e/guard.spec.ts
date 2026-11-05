@@ -130,7 +130,8 @@ test.describe('command bar by role', () => {
       request,
     }) => {
       const entries = await barEntries(page);
-      expect(entries).toHaveLength(4);
+      // The organization's four places, API keys, and the person's own three.
+      expect(entries).toHaveLength(8);
       expect(entries.join(' ')).not.toContain('Payments API');
       expect((await request.get('/acme/docs', { maxRedirects: 0 })).status()).toBe(404);
       const project = await request.get('/acme/docs/payments-api', { maxRedirects: 0 });
@@ -142,7 +143,7 @@ test.describe('command bar by role', () => {
     test.use({ storageState: stateFile(ADA) });
 
     test('sees more than a member', async ({ page }) => {
-      expect((await barEntries(page)).length).toBeGreaterThan(4);
+      expect((await barEntries(page)).length).toBeGreaterThan(8);
     });
   });
 });

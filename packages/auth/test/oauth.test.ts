@@ -726,6 +726,9 @@ describe('step up', () => {
     const unknown = await stepUp(t, me, googleAccount(address('nobody')));
     expect(codeOf(unknown.done)).toBe('AUTH_STEP_UP_IDENTITY_MISMATCH');
     expect(writesTo(t, 'sessions').filter((s) => /^\s*update/i.test(s.sql))).toEqual([]);
+    expect(JSON.stringify(t.logs)).toContain('auth.step_up_failed');
+    expect(JSON.stringify(t.logs)).toContain('AUTH_STEP_UP_IDENTITY_MISMATCH');
+    expect(JSON.stringify(t.logs)).not.toContain('auth.step_up_passed');
   });
 
   it('with Google sends prompt=login and max_age=0 and records google', async () => {
@@ -740,6 +743,7 @@ describe('step up', () => {
     if (!done.ok) throw done.error;
     expect(done.value.kind).toBe('stepped_up');
     expect(done.value.kind === 'stepped_up' && done.value.session.stepUpMethod).toBe('google');
+    expect(JSON.stringify(t.logs)).toContain('auth.step_up_passed');
   });
 
   it('with Google refuses an auth_time older than 5 minutes', async () => {

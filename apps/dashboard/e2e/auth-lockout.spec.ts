@@ -107,6 +107,8 @@ for (const count of [4, 16]) {
     await page.getByLabel('8 digit code').fill(held.code);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect.poll(() => hasSession(own)).toBe(true);
+    // The cookie lands before the redirect does, and a navigation now would race it.
+    await expect(page).toHaveURL(/\/welcome/);
     await own.clearCookies({ name: /session/ });
     await signIn(page, victim);
     await Promise.all([...attackers, second, stranger, own].map((c) => c.close()));

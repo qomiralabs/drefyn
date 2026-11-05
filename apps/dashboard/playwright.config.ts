@@ -130,7 +130,7 @@ export default defineConfig({
     },
     {
       name: 'auth',
-      testMatch: /(auth-(email|csrf|invite|cli-link)|first-run)\.spec\.ts$/,
+      testMatch: /(auth-(email|csrf|invite|cli-link|settings)|first-run)\.spec\.ts$/,
       // These count rows across the whole server, and read one inbox.
       workers: 1,
       use: { ...chromium, storageState: SIGNED_OUT },
@@ -151,6 +151,11 @@ export default defineConfig({
       },
     },
     { name: 'bundle', testMatch: /bundle\.spec\.ts$/, use: { ...chromium } },
-    { name: 'visual', testMatch: /visual\.spec\.ts$/, use: { ...chromium } },
+    {
+      name: 'visual',
+      testMatch: /visual\.spec\.ts$/,
+      // Without it overlays differ by a few raster pixels between captures of one frame.
+      use: { ...chromium, launchOptions: { args: ['--disable-partial-raster'] } },
+    },
   ],
 });

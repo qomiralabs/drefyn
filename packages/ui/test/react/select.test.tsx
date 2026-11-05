@@ -265,3 +265,15 @@ describe('a disabled Select', () => {
     expect(listbox()).toBeDefined();
   });
 });
+
+describe('Select in a table row', () => {
+  it('keeps its name when the label is hidden from sight', () => {
+    render(
+      <Select label="Role for Sam" labelHidden value="admin">
+        <SelectOption value="admin">Admin</SelectOption>
+      </Select>,
+    );
+    expect(screen.getAllByText('Role for Sam')[0]?.className).toContain('sr-only');
+    expect(screen.getByRole('button', { name: /Role for Sam/ })).toBeTruthy();
+  });
+});

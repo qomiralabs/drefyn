@@ -11,7 +11,11 @@ export type SectionIcon =
   | 'pulse'
   | 'globe'
   | 'users'
-  | 'card';
+  | 'card'
+  | 'key'
+  | 'person'
+  | 'lock'
+  | 'laptop';
 
 // One entry in a sidebar list. An empty slug is the project home.
 export interface Section {
@@ -47,7 +51,16 @@ export const ORG_SECTIONS: readonly Section[] = [
   { slug: '', label: 'Overview', icon: 'home' },
   { slug: 'settings/plan', label: 'Plan and usage', icon: 'card' },
   { slug: 'settings/members', label: 'Members', icon: 'users' },
+  { slug: 'settings/api-keys', label: 'API keys', icon: 'key' },
   { slug: 'settings', label: 'Settings', icon: 'settings' },
+];
+
+// A person's own pages. They span organizations, so they sit above the organization's list
+// wherever settings are open.
+export const ACCOUNT_SECTIONS: readonly Section[] = [
+  { slug: 'account', label: 'Profile and email', icon: 'person' },
+  { slug: 'account/sign-in', label: 'Sign in methods', icon: 'lock' },
+  { slug: 'account/sessions', label: 'Sessions', icon: 'laptop' },
 ];
 
 export const sectionOf = (product: ProductId, slug: string): Section | undefined =>
