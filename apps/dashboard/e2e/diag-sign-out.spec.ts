@@ -24,9 +24,9 @@ const watch = () => {
   }
   for (const name of ['replaceState', 'pushState'] as const) {
     const original = history[name].bind(history);
-    history[name] = (...args: Parameters<typeof original>) => {
-      note(`${name} ${String(args[2])}`);
-      original(...args);
+    history[name] = (data: unknown, unused: string, url?: string | URL | null) => {
+      note(`${name} ${String(url)}`);
+      original(data, unused, url);
     };
   }
 };
