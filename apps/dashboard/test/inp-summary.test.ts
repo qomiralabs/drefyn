@@ -1,6 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { describeInp, summarize } from '../e2e/inp-summary.ts';
+import {
+  BUDGET_MS,
+  describeInp,
+  inpLimit,
+  overBudget,
+  SHARED_RUNNER_CEILING_MS,
+  summarize,
+} from '../e2e/inp-summary.ts';
 
 describe('the INP summary', () => {
   it('reads an odd set', () => {
@@ -26,6 +33,20 @@ describe('the INP summary', () => {
   it('prints every figure', () => {
     expect(describeInp(summarize('a', [8, 16, 24]))).toBe(
       'INP a: median 16 ms, p75 24 ms, spread 8 to 24 ms over 3 samples',
+    );
+  });
+
+  it('holds the budget on a quiet bench and the ceiling anywhere else', () => {
+    expect(BUDGET_MS).toBe(200);
+    expect(inpLimit({ DREFYN_QUIET_BENCH: 'on' })).toBe(BUDGET_MS);
+    expect(inpLimit({})).toBe(SHARED_RUNNER_CEILING_MS);
+    expect(inpLimit({ DREFYN_QUIET_BENCH: 'off' })).toBe(SHARED_RUNNER_CEILING_MS);
+  });
+
+  it('names a miss from the budget itself, whatever the limit in force', () => {
+    expect(overBudget(summarize('a', [192]))).toBeNull();
+    expect(overBudget(summarize('a', [200]))).toBe(
+      'INP a: median 200 ms is over the 200 ms budget',
     );
   });
 

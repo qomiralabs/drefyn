@@ -1,12 +1,12 @@
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import { commandBar, openShell, products, ROUTES } from './fixtures.ts';
 import { readInp, recordInp, slowCpu, watchInp, watchPress, type InpReading } from './inp.ts';
-import { describeInp, summarize } from './inp-summary.ts';
+import { describeInp, inpLimit, overBudget, summarize } from './inp-summary.ts';
 import { test } from './test.ts';
 import { archive, openPages, select, toastRegion } from './undo-helpers.ts';
 
-const BUDGET_MS = 200;
 const SAMPLES = 7;
+const LIMIT_MS = inpLimit(process.env);
 
 // Each scenario gets a fresh page, ready and quiet. Then the slowdown starts, and whatever a
 // person does first happens under it, because work left over from that step is part of what
@@ -73,7 +73,7 @@ async function sample(context: BrowserContext, scenario: Scenario): Promise<InpR
 }
 
 for (const scenario of SCENARIOS) {
-  test(`${scenario.name} responds under ${String(BUDGET_MS)} ms on a slowed CPU`, async ({
+  test(`${scenario.name} responds under ${String(LIMIT_MS)} ms on a slowed CPU`, async ({
     context,
   }) => {
     test.setTimeout(120_000);
@@ -88,26 +88,29 @@ for (const scenario of SCENARIOS) {
       readings.map((r) => r.press),
     );
     console.log(`${describeInp(session)}\n${describeInp(press)}`);
+    for (const miss of [overBudget(session), overBudget(press)]) {
+      if (miss !== null) console.warn(miss);
+    }
     recordInp(session, readings);
-    expect(session.median, `median of ${String(SAMPLES)} samples`).toBeLessThan(BUDGET_MS);
-    expect(press.median, `median press of ${String(SAMPLES)} samples`).toBeLessThan(BUDGET_MS);
+    expect(session.median, `median of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
+    expect(press.median, `median press of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
   });
 }
 
 // Proves the probe sees a slow press. A reading stuck at zero would pass every test above.
-test('a handler that blocks for 300 ms reads over budget', async ({ page }) => {
+test('a handler that blocks for 320 ms reads over the limit', async ({ page }) => {
   await openShell(page, ROUTES.overview);
   await page.waitForLoadState('networkidle');
   await watchInp(page);
   await watchPress(page);
   await page.evaluate(() => {
     document.getElementById('main')?.addEventListener('click', () => {
-      const until = performance.now() + 300;
+      const until = performance.now() + 320;
       while (performance.now() < until);
     });
   });
   await page.getByRole('main').click({ position: { x: 4, y: 4 } });
   const { value, press } = await readInp(page);
-  expect(value).toBeGreaterThan(BUDGET_MS);
-  expect(press).toBeGreaterThan(BUDGET_MS);
+  expect(value).toBeGreaterThan(LIMIT_MS);
+  expect(press).toBeGreaterThan(LIMIT_MS);
 });

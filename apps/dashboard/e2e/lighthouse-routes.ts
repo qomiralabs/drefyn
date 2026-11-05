@@ -5,6 +5,9 @@ export const SHELL_ROUTES: Readonly<Record<string, readonly string[]>> = {
   '/[org]/[product]': ['/acme/docs'],
   '/[org]/[product]/[project]': ['/acme/docs/payments-api', '/acme/docs/new-docs'],
   '/[org]/[product]/[project]/[section]': ['/acme/docs/payments-api/changes'],
+  '/[org]/[product]/[project]/incidents/[incident]': [
+    '/acme/status/acme-status/incidents/inc-payments-europe',
+  ],
   '/[org]/settings': ['/acme/settings'],
   '/[org]/settings/[page]': ['/acme/settings/plan'],
   '/[org]/settings/api-keys': ['/acme/settings/api-keys'],
