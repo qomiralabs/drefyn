@@ -3,16 +3,15 @@ import type { TenantRef } from '@drefyn/tenancy';
 import { organizationId as toOrganizationId, projectId as toProjectId } from '@drefyn/tenancy';
 import { z } from 'zod';
 import { parseInputSchema } from './policy.ts';
-import { parsePoolConfig, poolConfigSchema } from './pool-config.ts';
+import { poolConfigSchema } from './pool-config.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
-import { RECYCLE_AFTER_JOBS, refused, startParseThread } from './thread.ts';
+import { refused } from './result.ts';
+import { RECYCLE_AFTER_JOBS, startParseThread } from './thread.ts';
 import type { IsolatedPolicy, ParseThread, ThreadAnswer } from './thread.ts';
 import type { Dialect, MdxIssueCode, ParseResult } from './types.ts';
 
-export { parsePoolConfig };
-export type { IsolatedPolicy, ParsePoolConfig };
-
-export interface ParseRequest extends TenantRef {
+export interface ParseRequest {
+  readonly tenant: TenantRef;
   // Where the page lives. Logged, so it never holds page text.
   readonly path: string;
   readonly source: string;
@@ -20,7 +19,7 @@ export interface ParseRequest extends TenantRef {
   readonly policy: IsolatedPolicy;
 }
 
-type LogFields = Readonly<Record<string, string | number | boolean>>;
+export type LogFields = Readonly<Record<string, string | number | boolean>>;
 
 export interface ParseLogger {
   warn(event: string, fields: LogFields): void;
@@ -30,6 +29,9 @@ export interface ParseLogger {
 
 export interface ParsePoolDeps {
   readonly logger: ParseLogger;
+  // Called when terminate could not end a thread. Only ending the process stops it now, and
+  // the host does exactly that, so the pool keeps no state for a thread it cannot end.
+  readonly onStuck: () => void;
   readonly now?: () => number;
   readonly startThread?: () => ParseThread;
 }
@@ -38,7 +40,7 @@ export interface ParsePoolStats {
   readonly threads: number;
   readonly busy: number;
   readonly queued: number;
-  readonly stuck: number;
+  readonly organizations: number;
   readonly projects: number;
 }
 
@@ -53,8 +55,10 @@ export interface ParsePool {
 
 // The brand on a tenant id is only a type, so it is checked again at this edge.
 const requestSchema = z.object({
-  organizationId: z.string().transform((value) => toOrganizationId(value)),
-  projectId: z.string().transform((value) => toProjectId(value)),
+  tenant: z.object({
+    organizationId: z.string().transform((value) => toOrganizationId(value)),
+    projectId: z.string().transform((value) => toProjectId(value)),
+  }),
   path: z.string().min(1).max(4_096),
   policy: z.object({ components: z.set(z.string()) }).loose(),
 });
@@ -66,12 +70,22 @@ interface Waiting {
   readonly resolve: (result: ParseResult) => void;
 }
 
-interface Project {
-  readonly key: string;
-  readonly waiting: Waiting[];
+interface Budget {
   active: number;
   windowStart: number;
   spentMs: number;
+}
+
+interface Project extends Budget {
+  readonly key: string;
+  readonly waiting: Waiting[];
+}
+
+interface Organization extends Budget {
+  readonly key: string;
+  // Insertion order is the turn order here too.
+  readonly projects: Map<string, Project>;
+  queued: number;
 }
 
 interface Slot {
@@ -86,12 +100,12 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     deps.startThread ??
     (() => startParseThread(new URL('./parse-worker.ts', import.meta.url), settings));
 
-  // Insertion order is the turn order: a served project goes to the back.
-  const projects = new Map<string, Project>();
+  // Insertion order is the turn order: a served organization goes to the back, so a tenant
+  // gets the same turns however many projects it makes.
+  const organizations = new Map<string, Organization>();
   const idle: Slot[] = [];
   const running = new Set<Promise<void>>();
   let busy = 0;
-  let stuck = 0;
   let queued = 0;
   let closed = false;
   let lastSweep = now();
@@ -116,35 +130,50 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     }
   };
 
-  const rollWindow = (project: Project) => {
-    if (now() - project.windowStart >= settings.projectWindowMs) {
-      project.windowStart = now();
-      project.spentMs = 0;
+  const rollWindow = (budget: Budget) => {
+    if (now() - budget.windowStart >= settings.windowMs) {
+      budget.windowStart = now();
+      budget.spentMs = 0;
     }
   };
 
-  const overBudget = (project: Project) => {
-    rollWindow(project);
-    return project.spentMs >= settings.projectBudgetMs;
+  const spent = (budget: Budget, limitMs: number) => {
+    rollWindow(budget);
+    return budget.spentMs >= limitMs;
   };
 
-  const refuseWaiting = (project: Project, code: MdxIssueCode) => {
+  const refuseProject = (organization: Organization, project: Project, code: MdxIssueCode) => {
     for (const item of project.waiting.splice(0)) {
       queued -= 1;
+      organization.queued -= 1;
       const result = refused(code);
       report(item.fields, result);
       item.resolve(result);
     }
   };
 
-  // Drops what the budget no longer needs, so the map follows live tenants and not all time.
+  const refuseOrganization = (organization: Organization, code: MdxIssueCode) => {
+    for (const project of organization.projects.values()) {
+      refuseProject(organization, project, code);
+    }
+  };
+
+  // Drops what the budgets no longer need, so the maps follow live tenants and not all time.
   const sweep = () => {
-    if (now() - lastSweep < settings.projectWindowMs) return;
+    if (now() - lastSweep < settings.windowMs) return;
     lastSweep = now();
-    for (const project of projects.values()) {
-      rollWindow(project);
-      if (project.active === 0 && project.waiting.length === 0 && project.spentMs === 0) {
-        projects.delete(project.key);
+    const finished = (budget: Budget) => {
+      rollWindow(budget);
+      return budget.active === 0 && budget.spentMs === 0;
+    };
+    for (const organization of organizations.values()) {
+      for (const project of organization.projects.values()) {
+        if (finished(project) && project.waiting.length === 0) {
+          organization.projects.delete(project.key);
+        }
+      }
+      if (finished(organization) && organization.projects.size === 0) {
+        organizations.delete(organization.key);
       }
     }
   };
@@ -158,13 +187,8 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
 
   const release = (slot: Slot, end: ThreadAnswer['end'], fields: LogFields) => {
     if (end === 'stuck') {
-      // A replacement would pile threads on top of one that is still running.
-      stuck += 1;
       log('warn', 'mdx.parse_thread_stuck', fields);
-      void slot.thread.gone.then(() => {
-        stuck -= 1;
-        pump();
-      });
+      deps.onStuck();
       return;
     }
     if (end === 'killed') {
@@ -176,7 +200,7 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     else idle.push(slot);
   };
 
-  const runJob = async (project: Project, item: Waiting) => {
+  const runJob = async (organization: Organization, project: Project, item: Waiting) => {
     const waitedMs = Math.round(now() - item.queuedAt);
     const { source, dialect, policy } = item.request;
     let slot: Slot | undefined;
@@ -188,61 +212,95 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
       // Whatever the failure said can quote the page, so only the fact crosses.
       outcome = { result: refused('mdx.parse_unavailable'), end: 'killed', workMs: 0 };
     }
-    project.active -= 1;
     busy -= 1;
-    rollWindow(project);
-    project.spentMs += outcome.workMs;
+    for (const budget of [organization, project]) {
+      budget.active -= 1;
+      rollWindow(budget);
+      budget.spentMs += outcome.workMs;
+    }
     if (slot !== undefined) release(slot, outcome.end, item.fields);
     report({ ...item.fields, waitedMs, tookMs: outcome.workMs }, outcome.result);
     item.resolve(outcome.result);
     pump();
   };
 
-  const nextProject = (): Project | undefined => {
-    for (const project of projects.values()) {
+  const nextProject = (organization: Organization): Project | undefined => {
+    for (const project of organization.projects.values()) {
       if (project.waiting.length === 0) continue;
-      if (overBudget(project)) refuseWaiting(project, 'mdx.project_limit');
-      else if (project.active < settings.projectThreads) return project;
+      if (spent(project, settings.projectBudgetMs)) {
+        refuseProject(organization, project, 'mdx.project_limit');
+      } else if (project.active < settings.projectThreads) {
+        return project;
+      }
+    }
+    return undefined;
+  };
+
+  const nextJob = (): readonly [Organization, Project] | undefined => {
+    for (const organization of organizations.values()) {
+      if (organization.queued === 0) continue;
+      if (spent(organization, settings.orgBudgetMs)) {
+        refuseOrganization(organization, 'mdx.organization_limit');
+      } else if (organization.active < settings.orgThreads) {
+        const project = nextProject(organization);
+        if (project !== undefined) return [organization, project];
+      }
     }
     return undefined;
   };
 
   function pump() {
-    if (stuck >= settings.threads) {
-      for (const project of projects.values()) refuseWaiting(project, 'mdx.parse_unavailable');
-      return;
-    }
-    while (busy + stuck < settings.threads) {
-      const project = nextProject();
-      const item = project?.waiting.shift();
-      if (project === undefined || item === undefined) return;
+    while (busy < settings.threads) {
+      const next = nextJob();
+      if (next === undefined) return;
+      const [organization, project] = next;
+      const item = project.waiting.shift();
+      if (item === undefined) return;
       queued -= 1;
+      organization.queued -= 1;
       busy += 1;
+      organization.active += 1;
       project.active += 1;
-      projects.delete(project.key);
-      projects.set(project.key, project);
-      const job: Promise<void> = runJob(project, item).finally(() => {
+      organizations.delete(organization.key);
+      organizations.set(organization.key, organization);
+      organization.projects.delete(project.key);
+      organization.projects.set(project.key, project);
+      const job: Promise<void> = runJob(organization, project, item).finally(() => {
         running.delete(job);
       });
       running.add(job);
     }
   }
 
-  const projectOf = (tenant: TenantRef): Project => {
-    const key = `${tenant.organizationId}:${tenant.projectId}`;
-    const known = projects.get(key);
+  const organizationOf = (key: string): Organization => {
+    const known = organizations.get(key);
+    if (known !== undefined) return known;
+    const organization = {
+      key,
+      projects: new Map<string, Project>(),
+      queued: 0,
+      active: 0,
+      windowStart: now(),
+      spentMs: 0,
+    };
+    organizations.set(key, organization);
+    return organization;
+  };
+
+  const projectOf = (organization: Organization, key: string): Project => {
+    const known = organization.projects.get(key);
     if (known !== undefined) return known;
     const project = { key, waiting: [], active: 0, windowStart: now(), spentMs: 0 };
-    projects.set(key, project);
+    organization.projects.set(key, project);
     return project;
   };
 
   const parse = async (request: ParseRequest): Promise<ParseResult> => {
-    const tenant = requestSchema.parse(request);
+    const { tenant } = requestSchema.parse(request);
     parseInputSchema.parse(request);
     const { source, path, policy } = request;
-    const bytes = Buffer.byteLength(source, 'utf8');
     const { organizationId, projectId } = tenant;
+    const bytes = Buffer.byteLength(source, 'utf8');
     const base = { organizationId, projectId, path, bytes };
     const instant = (code: MdxIssueCode, fields: LogFields) => {
       const result = refused(code);
@@ -253,11 +311,21 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     // Before the queue, so its length also bounds the bytes it can hold.
     if (bytes > policy.limits.maxBytes) return instant('mdx.too_large', base);
     const fields = { ...base, sha256: createHash('sha256').update(source).digest('hex') };
-    if (closed || stuck >= settings.threads) return instant('mdx.parse_unavailable', fields);
+    if (closed) return instant('mdx.parse_unavailable', fields);
 
     sweep();
-    const project = projectOf(tenant);
-    if (overBudget(project) || project.waiting.length >= settings.maxQueuedPerProject) {
+    const organization = organizationOf(organizationId);
+    if (spent(organization, settings.orgBudgetMs)) {
+      return instant('mdx.organization_limit', fields);
+    }
+    if (organization.queued >= settings.maxQueuedPerOrg) {
+      return instant('mdx.organization_limit', fields);
+    }
+    const project = projectOf(organization, projectId);
+    if (
+      spent(project, settings.projectBudgetMs) ||
+      project.waiting.length >= settings.maxQueuedPerProject
+    ) {
       return instant('mdx.project_limit', fields);
     }
     if (queued >= settings.maxQueued) return instant('mdx.queue_full', fields);
@@ -265,22 +333,28 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     return new Promise((resolve) => {
       project.waiting.push({ request, fields, queuedAt: now(), resolve });
       queued += 1;
+      organization.queued += 1;
       pump();
     });
   };
 
+  const allProjects = () =>
+    [...organizations.values()].reduce((sum, { projects }) => sum + projects.size, 0);
+
   return {
     parse,
     stats: () => ({
-      threads: idle.length + busy + stuck,
+      threads: idle.length + busy,
       busy,
       queued,
-      stuck,
-      projects: projects.size,
+      organizations: organizations.size,
+      projects: allProjects(),
     }),
     async close() {
       closed = true;
-      for (const project of projects.values()) refuseWaiting(project, 'mdx.parse_unavailable');
+      for (const organization of organizations.values()) {
+        refuseOrganization(organization, 'mdx.parse_unavailable');
+      }
       await Promise.all(running);
       await Promise.all(idle.splice(0).map(({ thread }) => thread.stop()));
     },

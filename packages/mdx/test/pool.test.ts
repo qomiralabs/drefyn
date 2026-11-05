@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
-import { createParsePool } from '../src/isolated.ts';
-import type { ParseRequest } from '../src/isolated.ts';
+import { createParsePool } from '../src/pool.ts';
+import type { ParseRequest } from '../src/pool.ts';
+import type { ParsePoolConfig } from '../src/pool-config.ts';
 import { RECYCLE_AFTER_JOBS } from '../src/thread.ts';
 import type { ParseThread, ThreadAnswer } from '../src/thread.ts';
 import {
   isolatedPolicy,
   ORG_A,
+  ORG_B,
+  orgAt,
+  poolConfig,
   POOL_CONFIG,
   PROJECT_A,
   PROJECT_B,
@@ -37,10 +41,6 @@ class FakeThread implements ParseThread {
   readonly sources: string[] = [];
   isAlive = true;
   stopped = 0;
-  leaveGone: () => void = () => undefined;
-  readonly gone = new Promise<void>((resolve) => {
-    this.leaveGone = resolve;
-  });
 
   run(job: { source: string }) {
     this.sources.push(job.source);
@@ -57,22 +57,21 @@ class FakeThread implements ParseThread {
   }
 }
 
-function harness(config: Partial<typeof POOL_CONFIG> = {}) {
+function harness(config: Partial<ParsePoolConfig> = {}) {
   const threads: FakeThread[] = [];
   const logger = recordingLogger();
   const clock = { now: 0 };
-  const pool = createParsePool(
-    { ...POOL_CONFIG, ...config },
-    {
-      logger,
-      now: () => clock.now,
-      startThread: () => {
-        const thread = new FakeThread();
-        threads.push(thread);
-        return thread;
-      },
+  const onStuck = vi.fn();
+  const pool = createParsePool(poolConfig(config), {
+    logger,
+    onStuck,
+    now: () => clock.now,
+    startThread: () => {
+      const thread = new FakeThread();
+      threads.push(thread);
+      return thread;
     },
-  );
+  });
   // The oldest job still waiting on any thread.
   const finish = async (answer: ThreadAnswer = done) => {
     const thread = threads.find(({ jobs }) => jobs.length > 0);
@@ -81,12 +80,11 @@ function harness(config: Partial<typeof POOL_CONFIG> = {}) {
     job(answer);
     await flush();
   };
-  return { pool, threads, logger, clock, finish };
+  return { pool, threads, logger, clock, finish, onStuck };
 }
 
-const request = (projectId = PROJECT_A, source = 'page'): ParseRequest => ({
-  organizationId: ORG_A,
-  projectId,
+const request = (projectId = PROJECT_A, source = 'page', organizationId = ORG_A): ParseRequest => ({
+  tenant: { organizationId, projectId },
   path: 'docs/page.md',
   source,
   dialect: 'md',
@@ -107,21 +105,21 @@ describe('the queue', () => {
   it('takes jobs up to its limit and refuses the next one', async () => {
     const { pool, threads, finish } = harness({
       threads: 3,
-      projectThreads: 2,
+      orgThreads: 1,
       maxQueued: 2,
-      maxQueuedPerProject: 2,
+      maxQueuedPerOrg: 1,
+      maxQueuedPerProject: 1,
     });
-    const running = [pool.parse(request(PROJECT_A)), pool.parse(request(PROJECT_A))];
-    const other = pool.parse(request(PROJECT_B));
+    const running = [0, 1, 2].map((org) => pool.parse(request(PROJECT_A, 'page', orgAt(org))));
     await flush();
     expect(threads).toHaveLength(3);
-    const queued = [pool.parse(request(PROJECT_A)), pool.parse(request(PROJECT_B))];
+    const queued = [0, 1].map((org) => pool.parse(request(PROJECT_A, 'page', orgAt(org))));
     await flush();
     expect(pool.stats().queued).toBe(2);
-    expect(await codeOf(pool.parse(request(projectAt(1))))).toBe('mdx.queue_full');
+    expect(await codeOf(pool.parse(request(PROJECT_A, 'page', orgAt(2))))).toBe('mdx.queue_full');
     expect(pool.stats().queued).toBe(2);
     for (let left = 5; left > 0; left -= 1) await finish();
-    await Promise.all([...running, other, ...queued]);
+    await Promise.all([...running, ...queued]);
     expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
   });
 
@@ -142,6 +140,114 @@ describe('page size', () => {
     expect(await fits).toBe(OK);
     const over = { ...request(), source: '\u00e9\u00e9', policy: limitsPolicy() };
     await expect(codeOf(pool.parse(over))).resolves.toBe('mdx.too_large');
+  });
+});
+
+describe('the per organization limits', () => {
+  it('keeps one organization on its share of the threads across projects', async () => {
+    const { pool, threads, finish } = harness({ threads: 3, orgThreads: 1 });
+    const pages = [0, 1, 2].map((index) => pool.parse(request(projectAt(index))));
+    await flush();
+    expect(threads).toHaveLength(1);
+    const neighbour = pool.parse(request(PROJECT_B, 'page', ORG_B));
+    await flush();
+    expect(threads).toHaveLength(2);
+    for (let left = 4; left > 0; left -= 1) await finish();
+    await Promise.all([...pages, neighbour]);
+  });
+
+  it('takes an organization up to its queue limit, whatever the project', async () => {
+    const { pool, finish } = harness({
+      orgThreads: 1,
+      maxQueued: 4,
+      maxQueuedPerOrg: 2,
+      maxQueuedPerProject: 2,
+    });
+    const running = pool.parse(request(projectAt(0)));
+    const queued = [pool.parse(request(projectAt(1))), pool.parse(request(projectAt(2)))];
+    await flush();
+    expect(await codeOf(pool.parse(request(projectAt(3))))).toBe('mdx.organization_limit');
+    const neighbour = pool.parse(request(PROJECT_A, 'page', ORG_B));
+    await flush();
+    for (let left = 4; left > 0; left -= 1) await finish();
+    await Promise.all([running, ...queued, neighbour]);
+  });
+
+  it('always leaves a place in the queue for another organization', async () => {
+    const { pool, finish } = harness({
+      orgThreads: 1,
+      maxQueued: 8,
+      maxQueuedPerOrg: 7,
+      maxQueuedPerProject: 1,
+    });
+    const flood = Array.from({ length: 12 }, (_, index) => pool.parse(request(projectAt(index))));
+    await flush();
+    const neighbour = pool.parse(request(PROJECT_A, 'page', ORG_B));
+    await flush();
+    expect(pool.stats().busy).toBe(2);
+    for (let left = 9; left > 0; left -= 1) await finish();
+    expect(await neighbour).toBe(OK);
+    await Promise.all(flood);
+  });
+
+  it('spends one budget across every project, then refuses only that organization', async () => {
+    const { pool, finish } = harness({
+      orgBudgetMs: 2_000,
+      projectBudgetMs: 2_000,
+      windowMs: 10_000,
+    });
+    const first = pool.parse(request(projectAt(0)));
+    await flush();
+    await finish(spending(1_000));
+    await first;
+    const second = pool.parse(request(projectAt(1)));
+    await flush();
+    await finish(spending(1_000));
+    await second;
+
+    expect(await codeOf(pool.parse(request(projectAt(2))))).toBe('mdx.organization_limit');
+    const neighbour = pool.parse(request(PROJECT_A, 'page', ORG_B));
+    await flush();
+    await finish();
+    expect(await neighbour).toBe(OK);
+  });
+
+  it('refuses waiting pages of every project once the budget runs out', async () => {
+    const { pool, threads, finish } = harness({
+      orgThreads: 1,
+      orgBudgetMs: 1_000,
+      projectBudgetMs: 1_000,
+      windowMs: 10_000,
+    });
+    const first = pool.parse(request(projectAt(0)));
+    const queued = [pool.parse(request(projectAt(1))), pool.parse(request(projectAt(2)))];
+    await flush();
+    await finish(spending(1_000));
+    await first;
+    expect(await Promise.all(queued.map(codeOf))).toEqual([
+      'mdx.organization_limit',
+      'mdx.organization_limit',
+    ]);
+    expect(threads.flatMap(({ sources }) => sources)).toHaveLength(1);
+  });
+
+  it('takes turns by organization, so many projects earn no extra turns', async () => {
+    const { pool, threads, finish } = harness({ threads: 2, orgThreads: 1 });
+    const running = [
+      pool.parse(request(projectAt(0), 'a0')),
+      pool.parse(request(PROJECT_A, 'x', orgAt(1))),
+    ];
+    await flush();
+    const big = [1, 2, 3].map((index) => pool.parse(request(projectAt(index), `a${index}`)));
+    const small = pool.parse(request(PROJECT_B, 'b0', ORG_B));
+    await flush();
+    await finish();
+    await finish();
+    const order = threads.flatMap(({ sources }) => sources);
+    expect(order).toContain('b0');
+    expect(order.filter((source) => source.startsWith('a'))).toHaveLength(2);
+    for (let left = 4; left > 0; left -= 1) await finish();
+    await Promise.all([...running, ...big, small]);
   });
 });
 
@@ -172,30 +278,25 @@ describe('the per project limits', () => {
   });
 
   it('serves projects in turn, so a big repo cannot starve a small one', async () => {
-    const { pool, threads, finish } = harness({
-      threads: 2,
-      maxQueuedPerProject: 8,
-      maxQueued: 16,
-    });
-    const blockers = [pool.parse(request(PROJECT_A, 'a0')), pool.parse(request(projectAt(1)))];
+    const { pool, threads, finish } = harness({ maxQueuedPerProject: 8 });
+    const blockers = [pool.parse(request(PROJECT_A, 'a0')), pool.parse(request(projectAt(1), 'x'))];
     await flush();
     const big = [1, 2, 3].map((index) => pool.parse(request(PROJECT_A, `a${index}`)));
     const small = pool.parse(request(PROJECT_B, 'b0'));
     await flush();
     await finish();
     await finish();
-    await finish();
     const order = threads.flatMap(({ sources }) => sources);
-    expect(order.indexOf('b0')).toBeGreaterThan(-1);
-    expect(order).not.toContain('a3');
-    for (let left = 3; left > 0; left -= 1) await finish();
+    expect(order).toContain('b0');
+    expect(order).not.toContain('a2');
+    for (let left = 4; left > 0; left -= 1) await finish();
     await Promise.all([...blockers, ...big, small]);
   });
 
   it('refuses a project that spent its budget, and only that project', async () => {
     const { pool, finish } = harness({
       projectBudgetMs: 2_000,
-      projectWindowMs: 10_000,
+      windowMs: 10_000,
       timeoutMs: 1_000,
     });
     const first = pool.parse(request());
@@ -216,7 +317,7 @@ describe('the per project limits', () => {
   it('refuses waiting pages once the budget runs out, without a thread', async () => {
     const { pool, threads, finish } = harness({
       projectBudgetMs: 1_000,
-      projectWindowMs: 10_000,
+      windowMs: 10_000,
     });
     const first = pool.parse(request());
     const queued = [pool.parse(request()), pool.parse(request())];
@@ -232,7 +333,7 @@ describe('the per project limits', () => {
   });
 
   it('gives the budget back in the next window', async () => {
-    const { pool, clock, finish } = harness({ projectBudgetMs: 1_000, projectWindowMs: 10_000 });
+    const { pool, clock, finish } = harness({ projectBudgetMs: 1_000, windowMs: 10_000 });
     const first = pool.parse(request());
     await flush();
     clock.now += 1_000;
@@ -247,7 +348,7 @@ describe('the per project limits', () => {
   });
 
   it('does not charge a project for a thread that was slow to start', async () => {
-    const { pool, clock, finish } = harness({ projectBudgetMs: 1_000, projectWindowMs: 10_000 });
+    const { pool, clock, finish } = harness({ projectBudgetMs: 1_000, windowMs: 10_000 });
     const first = pool.parse(request());
     await flush();
     clock.now += 5_000;
@@ -260,7 +361,7 @@ describe('the per project limits', () => {
   });
 
   it('forgets a project once its window has passed', async () => {
-    const { pool, clock, finish } = harness({ projectWindowMs: 10_000, projectBudgetMs: 5_000 });
+    const { pool, clock, finish } = harness({ windowMs: 10_000, projectBudgetMs: 5_000 });
     for (let index = 0; index < 20; index += 1) {
       const page = pool.parse(request(projectAt(index)));
       await flush();
@@ -335,6 +436,7 @@ describe('threads', () => {
     const logger = recordingLogger();
     const pool = createParsePool(POOL_CONFIG, {
       logger,
+      onStuck: () => undefined,
       startThread: () => {
         throw new Error('out of threads');
       },
@@ -349,49 +451,25 @@ describe('threads', () => {
     vi.spyOn(thread, 'run').mockRejectedValue(new Error('broken'));
     const pool = createParsePool(POOL_CONFIG, {
       logger: recordingLogger(),
+      onStuck: () => undefined,
       startThread: () => thread,
     });
     expect(await codeOf(pool.parse(request()))).toBe('mdx.parse_unavailable');
   });
 
-  it('keeps the slot of a thread that will not die, so threads never pile up', async () => {
+  it('hands a thread that will not die to the host, after saying so', async () => {
     const stuck: ThreadAnswer = { ...timedOut, end: 'stuck' };
-    const { pool, threads, logger, finish } = harness();
-    const first = pool.parse(request());
+    const { pool, logger, finish, onStuck } = harness();
+    const events: string[] = [];
+    onStuck.mockImplementation(() => {
+      events.push(...logger.entries.map(({ event }) => event));
+    });
+    const page = pool.parse(request());
     await flush();
     await finish(stuck);
-    expect(await codeOf(first)).toBe('mdx.parse_timeout');
-    expect(pool.stats()).toMatchObject({ stuck: 1, threads: 1 });
-    expect(logger.entries.map(({ event }) => event)).toContain('mdx.parse_thread_stuck');
-
-    const second = pool.parse(request());
-    await flush();
-    expect(threads).toHaveLength(2);
-    const third = pool.parse(request(PROJECT_B));
-    await flush();
-    expect(threads).toHaveLength(2);
-    expect(pool.stats()).toMatchObject({ busy: 1, queued: 1 });
-
-    threads[0]?.leaveGone();
-    await flush();
-    expect(pool.stats()).toMatchObject({ stuck: 0, busy: 2, queued: 0 });
-    await finish();
-    await finish();
-    await Promise.all([second, third]);
-  });
-
-  it('refuses rather than hangs when every thread is stuck', async () => {
-    const stuck: ThreadAnswer = { ...timedOut, end: 'stuck' };
-    const { pool, finish } = harness();
-    const pages = [pool.parse(request()), pool.parse(request(PROJECT_B))];
-    const waiting = pool.parse(request());
-    await flush();
-    await finish(stuck);
-    await finish(stuck);
-    await Promise.all(pages);
-    await flush();
-    expect(await codeOf(waiting)).toBe('mdx.parse_unavailable');
-    expect(await codeOf(pool.parse(request(projectAt(1))))).toBe('mdx.parse_unavailable');
+    await page;
+    expect(onStuck).toHaveBeenCalledOnce();
+    expect(events).toContain('mdx.parse_thread_stuck');
   });
 });
 
@@ -454,6 +532,7 @@ describe('logs', () => {
           throw new Error('sink down');
         },
       },
+      onStuck: () => undefined,
       startThread: () => new FakeThread(),
     });
     const small = { ...request(), source: 'four', policy: limitsPolicy() };
@@ -463,8 +542,11 @@ describe('logs', () => {
 
 describe('input', () => {
   const bad: readonly [string, Partial<Record<keyof ParseRequest, unknown>>][] = [
-    ['an organization id that is not one', { organizationId: 'x:y' }],
-    ['a project id that is not one', { projectId: 'x:y' }],
+    [
+      'an organization id that is not one',
+      { tenant: { organizationId: 'x:y', projectId: PROJECT_A } },
+    ],
+    ['a project id that is not one', { tenant: { organizationId: ORG_A, projectId: 'x:y' } }],
     ['an empty path', { path: '' }],
     ['an endless path', { path: 'a'.repeat(4_097) }],
     ['a bad dialect', { dialect: 'html' }],

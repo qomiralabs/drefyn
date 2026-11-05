@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as main from '../src/index.ts';
-import * as isolated from '../src/isolated.ts';
+import * as client from '../src/client.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspace = resolve(root, '../..');
@@ -43,20 +43,22 @@ function sources(dir: string): string[] {
 describe('the way into the parser', () => {
   it('is not exported to any caller', () => {
     expect(Object.keys(main)).not.toContain('parseForStore');
-    expect(Object.keys(isolated).sort()).toEqual(['createParsePool', 'parsePoolConfig']);
+    expect(Object.keys(client)).toEqual(['createParseClient']);
   });
 
   it('is limited to these entries', () => {
-    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './isolated', './package.json']);
+    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './client', './package.json']);
   });
 
   it('is out of the import graph of every exported entry', () => {
     const parser = join(root, 'src/parse.ts');
+    const pool = join(root, 'src/pool.ts');
     for (const target of Object.values(manifest.exports)) {
       if (!target.endsWith('.ts')) continue;
       const graph = reach(join(root, target));
       expect(graph.size).toBeGreaterThan(1);
       expect(graph).not.toContain(parser);
+      expect(graph).not.toContain(pool);
     }
   });
 

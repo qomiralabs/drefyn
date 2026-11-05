@@ -17,6 +17,24 @@ export const egressAllowList = [
       'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',
   },
   {
+    path: 'packages/mdx/src/client.ts',
+    reason:
+      'calls the parse host on the private network; the URL is DREFYN_PARSE_HOST_URL from deployment config, never customer input, with a timeout and a size cap on the answer',
+    only: [{ global: 'fetch', reads: true }],
+  },
+  {
+    path: 'packages/mdx/src/host.ts',
+    reason:
+      'inbound server of the parse host; it accepts connections from the app tier and never opens one, and the platform closes its egress',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
+    path: 'packages/mdx/test/host-server.test.ts',
+    reason:
+      'calls a parse host server the same test started on 127.0.0.1 to check its routes and refusals; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
     path: 'packages/mdx/src/seal-thread.ts',
     reason:
       'imports the network modules only to disable them inside a parse thread; it opens nothing, and it runs before any customer page reaches the thread',

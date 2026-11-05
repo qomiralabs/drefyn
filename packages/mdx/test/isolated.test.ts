@@ -2,30 +2,33 @@ import { createServer } from 'node:net';
 import type { Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { serialize } from '../src/index.ts';
-import { createParsePool } from '../src/isolated.ts';
-import type { ParsePool, ParsePoolConfig } from '../src/isolated.ts';
+import { createParsePool } from '../src/pool.ts';
+import type { ParsePool } from '../src/pool.ts';
+import type { ParsePoolConfig } from '../src/pool-config.ts';
 import { startParseThread } from '../src/thread.ts';
 import {
   isolatedPolicy,
   ORG_A,
-  POOL_CONFIG,
+  poolConfig,
   PROJECT_A,
   PROJECT_B,
   recordingLogger,
 } from './helpers.ts';
 
-const LONG = { ...POOL_CONFIG, timeoutMs: 20_000 };
-const SHORT = { ...POOL_CONFIG, timeoutMs: 500 };
+const LONG = poolConfig({ timeoutMs: 20_000 });
+const SHORT = poolConfig({ timeoutMs: 500 });
 // Workers start slowly on a loaded runner, so the proof is that the promise settles at all.
 const TIMEOUT_MS = 60_000;
 const worker = (name: string) => new URL(`./fixtures/workers/${name}.ts`, import.meta.url);
 
 const pools: ParsePool[] = [];
 const logger = recordingLogger();
+const onStuck = vi.fn();
 const open = (config: ParsePoolConfig = LONG, fixture?: string) => {
   const script = fixture === undefined ? undefined : worker(fixture);
   const pool = createParsePool(config, {
     logger,
+    onStuck,
     ...(script && { startThread: () => startParseThread(script, config) }),
   });
   pools.push(pool);
@@ -33,8 +36,7 @@ const open = (config: ParsePoolConfig = LONG, fixture?: string) => {
 };
 
 const page = (source: string, dialect: 'md' | 'mdx' = 'mdx', projectId = PROJECT_A) => ({
-  organizationId: ORG_A,
-  projectId,
+  tenant: { organizationId: ORG_A, projectId },
   path: 'docs/page.mdx',
   source,
   dialect,
@@ -100,7 +102,7 @@ describe('the kill path', () => {
   it(
     'ends a thread that runs out of its heap, and the process lives',
     async () => {
-      const pool = open({ ...POOL_CONFIG, timeoutMs: 45_000, maxMemoryMb: 32 }, 'allocate');
+      const pool = open(poolConfig({ timeoutMs: 45_000, maxMemoryMb: 32 }), 'allocate');
       await expect(pool.parse(page('a'))).resolves.toEqual({
         ok: false,
         error: [{ code: 'mdx.out_of_memory', severity: 'error', line: 1, column: 1 }],
@@ -171,6 +173,16 @@ describe('the kill path', () => {
   );
 
   it(
+    'reports a stall terminate cannot end, inside native code',
+    async () => {
+      const pool = open(poolConfig({ timeoutMs: 200, killGraceMs: 300 }), 'native-stall');
+      await pool.parse(page('a'));
+      expect(onStuck).toHaveBeenCalledOnce();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
     'does not let thread output reach the process streams',
     async () => {
       const stderr = vi.spyOn(process.stderr, 'write');
@@ -210,6 +222,12 @@ describe('what a thread can reach', () => {
           resolve: 'refused',
           binding: 'refused',
           child: 'refused',
+          spawnSync: 'refused',
+          execSync: 'refused',
+          execFileSync: 'refused',
+          worker: 'refused',
+          inspector: 'refused',
+          kill: 'refused',
         });
         expect(sockets).toEqual([]);
       } finally {

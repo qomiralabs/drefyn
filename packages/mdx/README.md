@@ -7,7 +7,8 @@ compiler out of every package.
 
 ## Public API
 
-Parsing lives in `@drefyn/mdx/isolated` and nowhere else; see "Parsing customer content".
+Parsing lives in the parse host and nowhere else. `@drefyn/mdx/client` is the only way in; see
+"Parsing customer content".
 
 - `serialize(root)` gives back the exact bytes. It throws `MdxPrintError` on a block that has
   no source, whose tree no longer hashes to `rawOf`, whose bytes no longer hash to `sourceOf`,
@@ -38,6 +39,7 @@ line ending.
 | `mdx.dialect_mismatch`    | warning  | Looks like the other dialect                           |
 | `mdx.parse_timeout`       | error    | Killed at the timeout                                  |
 | `mdx.out_of_memory`       | error    | Ended by the heap cap                                  |
+| `mdx.organization_limit`  | error    | Organization queue full or budget spent, try later     |
 | `mdx.project_limit`       | error    | Project queue full or budget spent, try later          |
 | `mdx.queue_full`          | error    | Pool queue full, try later                             |
 | `mdx.parse_unavailable`   | error    | No thread could run it, says nothing about the page    |
@@ -65,41 +67,73 @@ A page refused by the scan or the budget gets `mdx.too_many_nodes` at line 1.
 
 ## Parsing customer content
 
-`parseForStore` is not exported, so a request thread cannot call it. Every path that takes
-customer content goes through one pool per process:
+`parseForStore` is not exported, and nothing a caller can import reaches it. Every path that
+takes customer content calls the parse host, a separate process. There is no in process
+fallback: if the host is down, a save refuses and the last good version stays.
 
 ```ts
-const pool = createParsePool(parsePoolConfig(process.env), { logger });
-const result = await pool.parse({ organizationId, projectId, path, source, dialect, policy });
+const client = createParseClient({ url: process.env.DREFYN_PARSE_HOST_URL });
+const result = await client.parse({ tenant, path, source, dialect, policy });
 ```
 
-`parse` resolves with `{ ok: true, value }` or `{ ok: false, error }` for anything about the
-page or the load, and rejects only on a malformed request, which is our bug. Nothing is stored
-on a refusal. It never retries: a second try of a bomb is a second bomb. `mdx.project_limit`,
-`mdx.queue_full` and `mdx.parse_unavailable` say nothing about the page, so the caller can
-try again later, with its own backoff. A sync should feed pages in as earlier ones finish.
+`parse` resolves with `{ ok: true, value }` or `{ ok: false, error }` and does not throw. Nothing
+is stored on a refusal, and nothing retries: a second try of a bomb is a second bomb.
+`mdx.organization_limit`, `mdx.project_limit`, `mdx.queue_full` and `mdx.parse_unavailable` say
+nothing about the page, so the caller can try later, with its own backoff. A sync should feed
+pages in as earlier ones finish.
 
-A thread starts on demand, runs one page at a time and is reused until it has served 256 pages.
-A timeout, a heap overrun or a crash kills it, and the answer waits for the kill. A thread gets
-an empty environment, no arguments and no streams, and gives up its network entry points before
-it loads the parser. That last part is a seatbelt: a thread shares its process, so it can still
-read what the process can read, and a real boundary is a process with a network policy.
+### The host
 
-| Key                              | Default | Meaning                                       |
-| -------------------------------- | ------- | --------------------------------------------- |
-| `DREFYN_PARSE_TIMEOUT_MS`        | 2000    | A thread is killed this long into a page      |
-| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512     | Heap cap per thread                           |
-| `DREFYN_PARSE_THREADS`           | 2       | Threads per process, at least 2               |
-| `DREFYN_PARSE_QUEUE_MAX`         | 64      | Pages waiting across all projects             |
-| `DREFYN_PARSE_PROJECT_THREADS`   | 1       | Threads one project can hold, under the total |
-| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16      | Pages one project can have waiting            |
-| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 30000   | Thread time one project can spend per window  |
-| `DREFYN_PARSE_PROJECT_WINDOW_MS` | 60000   | Length of that window                         |
+```sh
+node --permission --allow-fs-read=<code dir> --allow-worker packages/mdx/src/host-main.ts
+```
 
-Projects take turns for a free thread, and a killed page spends its full timeout from the
-budget, so a repo of bombs holds one thread for about fifteen pages a minute and is refused
-past that. These limits are per process. The heap cap covers the JavaScript heap only, so
-plan for threads times the cap and some native memory on top.
+The host is the boundary, not its threads. It refuses to start without `--permission`, or with
+any environment key outside `DREFYN_PARSE_*` and the few a container sets for itself, so it holds
+no credentials. Egress has to be closed by the platform: Node has no network permission, and a
+loopback connect works under `--permission`. **The compose service and security group that close
+it are separate work, and no customer content may reach this until they exist.** Set a hard OS
+memory limit of `DREFYN_PARSE_HOST_MEMORY_MB` on the service; the heap cap does not cover native
+memory.
+
+A thread runs one page and is reused for up to 256 pages, between tenants. A timeout, a heap
+overrun or a crash kills it, and the answer waits for the kill. If `terminate` has not finished
+after the grace, the stall is in native code and only the process can end it, so the host
+SIGKILLs itself. Pages in flight get `mdx.parse_unavailable`, and the supervisor restarts it.
+
+Inside a thread there is an empty environment, no arguments, no streams to ours, and a seal over
+network, child process, worker and debugger entry points. The seal is a seatbelt: it stops no
+code that is determined to get out, and proves nothing about the network.
+
+| Key                              | Default | Meaning                                        |
+| -------------------------------- | ------- | ---------------------------------------------- |
+| `DREFYN_PARSE_TIMEOUT_MS`        | 2000    | A thread is killed this long into a page       |
+| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512     | Heap cap per thread                            |
+| `DREFYN_PARSE_THREADS`           | 2       | Threads per host, at least 2                   |
+| `DREFYN_PARSE_QUEUE_MAX`         | 64      | Pages waiting across all organizations         |
+| `DREFYN_PARSE_ORG_THREADS`       | 1       | Threads one organization can hold, under total |
+| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32      | Pages one organization can have waiting        |
+| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000   | Thread time per window for an organization     |
+| `DREFYN_PARSE_PROJECT_THREADS`   | 1       | Threads one project can hold, inside its org   |
+| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16      | Pages one project can have waiting             |
+| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000   | Thread time per window for a project           |
+| `DREFYN_PARSE_WINDOW_MS`         | 60000   | Length of the budget window                    |
+| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000    | Wait after `terminate` before SIGKILL          |
+| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536    | At least threads times the cap, plus 256       |
+| `DREFYN_PARSE_PORT`              | 8787    | Port the host listens on                       |
+
+### What the limits hold against
+
+Organizations take turns for a free thread, and projects take turns inside one, so a tenant
+gets the same share however many projects it makes. One organization can never hold every
+thread or fill the queue, so one bad tenant leaves a thread and queue places free.
+
+Limits are per host. Several organizations acting together can still fill the threads and the
+queue; two can at these defaults, each at the cost of its own budget. With several hosts every
+budget is per replica, so a cluster wide bound needs a shared counter.
+
+The 512 MB cap refuses some plain 1 MiB pages with `mdx.out_of_memory`, so 1 MiB is an upper
+limit and not a size this pool accepts in general.
 
 Each page logs `mdx.parse_finished` or `mdx.parse_refused`, and a kill logs
 `mdx.parse_thread_killed` or `mdx.parse_thread_stuck`, with organization, project, path, byte

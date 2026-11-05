@@ -1,12 +1,13 @@
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
-import type { Dialect, MdxIssue, MdxIssueCode, ParseResult, RenderPolicy } from './types.ts';
+import { refused, resultSchema } from './result.ts';
+import type { Dialect, MdxIssueCode, ParseResult, RenderPolicy } from './types.ts';
 
 export interface ThreadLimits {
   readonly timeoutMs: number;
   readonly maxMemoryMb: number;
+  readonly killGraceMs: number;
   readonly startTimeoutMs?: number;
-  readonly killGraceMs?: number;
 }
 
 export type IsolatedPolicy = Omit<RenderPolicy, 'components'> & {
@@ -23,7 +24,7 @@ export interface ThreadJob {
 export interface ThreadAnswer {
   readonly result: ParseResult;
   // reusable: the thread can take another job. killed: it is gone. stuck: terminate has not
-  // finished, so the thread may still be running and must keep holding its slot.
+  // finished, which only native code can cause, so only ending the process will stop it.
   readonly end: 'reusable' | 'killed' | 'stuck';
   // Time the page held the thread. A slow thread start is the host's cost, not the project's.
   readonly workMs: number;
@@ -33,7 +34,6 @@ export interface ParseThread {
   run(job: ThreadJob): Promise<ThreadAnswer>;
   alive(): boolean;
   stop(): Promise<unknown>;
-  readonly gone: Promise<unknown>;
 }
 
 // A thread serves many tenants. Retiring it caps what a parser leak can carry between them.
@@ -43,24 +43,10 @@ export const RECYCLE_AFTER_JOBS = 256;
 const YOUNG_GENERATION_MB = 16;
 // A module load, not a parse, so a slow start on a loaded host does not bill the page.
 const START_TIMEOUT_MS = 30_000;
-const KILL_GRACE_MS = 5_000;
 const WORKER_OOM = 'ERR_WORKER_OUT_OF_MEMORY';
 
-const shapeSchema = z.union([
-  z.object({ ok: z.literal(true), value: z.object({ issues: z.array(z.unknown()) }) }),
-  z.object({ ok: z.literal(false), error: z.array(z.unknown()) }),
-]);
-
-// The tree is not walked: it costs a parse, and the page's own limits already bound it. The
-// outer shape has to hold, since the pool reads it to log and to answer.
-const resultSchema = z.custom<ParseResult>((value) => shapeSchema.safeParse(value).success);
 const answerSchema = z.object({ id: z.int(), result: resultSchema });
 const readySchema = z.object({ ready: z.literal(true) });
-
-export const refused = (code: MdxIssueCode): ParseResult => {
-  const issue: MdxIssue = { code, severity: 'error', line: 1, column: 1 };
-  return { ok: false, error: [issue] };
-};
 
 function deadline(ms: number) {
   let timer: NodeJS.Timeout | undefined;
@@ -84,7 +70,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
   const worker = new Worker(script, {
     env: {},
     argv: [],
-    execArgv: [],
+    // No execArgv here: an empty list would drop --permission for the thread.
     // Crash text can quote the page, so nothing a thread prints reaches our streams.
     stdout: true,
     stderr: true,
@@ -109,11 +95,6 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
       resolve('mdx.parse_failed');
     });
   });
-  const gone = new Promise<void>((resolve) => {
-    worker.once('exit', () => {
-      resolve();
-    });
-  });
   const ready = new Promise<boolean>((resolve) => {
     worker.once('message', (message: unknown) => {
       resolve(readySchema.safeParse(message).success);
@@ -122,7 +103,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
 
   // The answer waits for the kill, so a caller never queues on top of a live stall.
   const kill = async (result: ParseResult, workMs = 0): Promise<ThreadAnswer> => {
-    const grace = deadline(limits.killGraceMs ?? KILL_GRACE_MS);
+    const grace = deadline(limits.killGraceMs);
     const ended = await Promise.race([worker.terminate(), grace.expired]);
     grace.clear();
     return { result, end: ended === 'expired' ? 'stuck' : 'killed', workMs };
@@ -160,6 +141,5 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
     run,
     alive: () => !exited,
     stop: () => worker.terminate(),
-    gone,
   };
 }

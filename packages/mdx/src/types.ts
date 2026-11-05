@@ -51,6 +51,7 @@ export type MdxIssueCode =
   | 'mdx.parse_timeout'
   | 'mdx.out_of_memory'
   | 'mdx.queue_full'
+  | 'mdx.organization_limit'
   | 'mdx.project_limit'
   | 'mdx.parse_unavailable';
 

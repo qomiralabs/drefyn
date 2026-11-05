@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
 import http from 'node:http';
+import inspector from 'node:inspector';
 import net from 'node:net';
 import tls from 'node:tls';
+import { Worker } from 'node:worker_threads';
 import { serveJobs } from '../../../src/worker-host.ts';
 
 // Each attempt reports only whether it got anywhere. The server in the test counts what
@@ -53,6 +55,17 @@ serveJobs(async ({ source }) => {
       (process as unknown as { binding(name: string): unknown }).binding('tcp_wrap'),
     ),
     child: await attempt(() => spawn('true').pid ?? Promise.reject(new Error('no child'))),
+    spawnSync: await attempt(() => {
+      const { error } = spawnSync('true');
+      if (error !== undefined) throw error;
+    }),
+    execSync: await attempt(() => execSync('true')),
+    execFileSync: await attempt(() => execFileSync('true')),
+    worker: await attempt(() => new Worker('0', { eval: true })),
+    inspector: await attempt(() => {
+      inspector.open(0, '127.0.0.1');
+    }),
+    kill: await attempt(() => process.kill(process.pid, 0)),
   };
   return { ok: true, value };
 });

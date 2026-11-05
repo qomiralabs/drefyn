@@ -1,0 +1,70 @@
+import { z } from 'zod';
+import { envSchema, poolConfigSchema } from './pool-config.ts';
+import type { ParsePoolConfig } from './pool-config.ts';
+
+export interface ParseHostConfig {
+  readonly pool: ParsePoolConfig;
+  readonly port: number;
+  readonly hostMemoryMb: number;
+}
+
+// Room for the runtime and native memory on top of every thread at its cap.
+const HOST_OVERHEAD_MB = 256;
+
+const hostSchema = z.object({
+  DREFYN_PARSE_PORT: z
+    .string()
+    .regex(/^[0-9]{1,5}$/)
+    .default('8787')
+    .transform(Number)
+    .pipe(z.int().max(65_535)),
+  DREFYN_PARSE_HOST_MEMORY_MB: z
+    .string()
+    .regex(/^[0-9]{1,6}$/)
+    .default('1536')
+    .transform(Number),
+});
+
+export function parseHostConfig(
+  env: Readonly<Record<string, string | undefined>>,
+): ParseHostConfig {
+  const host = hostSchema.parse(env);
+  const pool = poolConfigSchema.parse(envSchema.parse(env));
+  const floor = pool.threads * pool.maxMemoryMb + HOST_OVERHEAD_MB;
+  if (host.DREFYN_PARSE_HOST_MEMORY_MB < floor) {
+    throw new Error(`DREFYN_PARSE_HOST_MEMORY_MB must be at least ${floor}`);
+  }
+  return {
+    pool,
+    port: host.DREFYN_PARSE_PORT,
+    hostMemoryMb: host.DREFYN_PARSE_HOST_MEMORY_MB,
+  };
+}
+
+// A list of what may be here, not of what may not: a new secret must fail closed. These are
+// what a container or a Node image sets for itself.
+const PLATFORM_KEYS = new Set([
+  'HOME',
+  'HOSTNAME',
+  'LANG',
+  'NODE_ENV',
+  'NODE_VERSION',
+  'PATH',
+  'PWD',
+  'SHLVL',
+  'TERM',
+  'TZ',
+  'YARN_VERSION',
+  // macOS adds this to every process, even one started with an empty environment.
+  '__CF_USER_TEXT_ENCODING',
+]);
+
+export function assertHostEnv(env: Readonly<Record<string, string | undefined>>): void {
+  const extra = Object.keys(env).filter(
+    (key) => !PLATFORM_KEYS.has(key) && !key.startsWith('DREFYN_PARSE_'),
+  );
+  // Names only: a value here could be the very secret that should not have come.
+  if (extra.length > 0) {
+    throw new Error(`the parse host refuses these environment keys: ${extra.join(', ')}`);
+  }
+}

@@ -2,11 +2,11 @@ import fc from 'fast-check';
 import { afterAll, describe, expect, it } from 'vitest';
 import { serialize } from '../src/index.ts';
 import type { Dialect, MdxIssueCode } from '../src/index.ts';
-import { createParsePool } from '../src/isolated.ts';
-import { isolatedPolicy, ORG_A, POOL_CONFIG, projectAt, recordingLogger } from './helpers.ts';
+import { createParsePool } from '../src/pool.ts';
+import { isolatedPolicy, ORG_A, poolConfig, projectAt, recordingLogger } from './helpers.ts';
 
 const BYTES = 200_000;
-const LIMITS = { ...POOL_CONFIG, timeoutMs: 3_000 };
+const LIMITS = poolConfig({ timeoutMs: 3_000 });
 // The bound under test is the timeout. The grace covers a loaded runner starting and stopping
 // a thread, and is still far below the minutes these inputs take with no kill.
 const GRACE_MS = 15_000;
@@ -33,7 +33,7 @@ const unit = fc.string({
 const page = fc.record({ start: unit, repeated: unit, gap: fc.constantFrom('', '\n\n', '\n') });
 
 describe('generated hostile pages', () => {
-  const pool = createParsePool(LIMITS, { logger: recordingLogger() });
+  const pool = createParsePool(LIMITS, { logger: recordingLogger(), onStuck: () => undefined });
   afterAll(() => pool.close());
   let run = 0;
 
@@ -47,8 +47,7 @@ describe('generated hostile pages', () => {
           const source = start + body.repeat(Math.ceil(BYTES / body.length));
           const began = performance.now();
           const result = await pool.parse({
-            organizationId: ORG_A,
-            projectId: projectAt(run++),
+            tenant: { organizationId: ORG_A, projectId: projectAt(run++) },
             path: 'docs/generated.mdx',
             source,
             dialect,

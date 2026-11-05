@@ -1,7 +1,9 @@
-import { spawn } from 'node:child_process';
+import { exec, execFile, execFileSync, execSync, fork, spawn, spawnSync } from 'node:child_process';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
+import inspector from 'node:inspector';
 import net from 'node:net';
+import { Worker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import '../src/seal-thread.ts';
 
@@ -25,6 +27,15 @@ describe('the seal', () => {
     ['a promised lookup', () => dns.promises.lookup('localhost')],
     ['a resolver', () => new dns.Resolver()],
     ['a child process', () => spawn('true')],
+    ['spawnSync, which never passes through spawn', () => spawnSync('true')],
+    ['execSync', () => execSync('true')],
+    ['execFileSync', () => execFileSync('true')],
+    ['exec', () => exec('true')],
+    ['execFile', () => execFile('true')],
+    ['fork', () => fork('x')],
+    ['an unsealed thread', () => new Worker('0', { eval: true })],
+    ['a debugger port', () => inspector.open(0, '127.0.0.1')],
+    ['a signal to the host', () => process.kill(process.pid, 0)],
     [
       'a native binding',
       () => {

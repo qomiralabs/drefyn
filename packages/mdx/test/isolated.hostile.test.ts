@@ -1,11 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { MdxIssueCode, ParseResult } from '../src/index.ts';
-import { createParsePool } from '../src/isolated.ts';
-import type { ParsePool, ParseRequest } from '../src/isolated.ts';
+import { createParsePool } from '../src/pool.ts';
+import type { ParsePool, ParseRequest } from '../src/pool.ts';
+import { parsePoolConfig } from '../src/pool-config.ts';
+import type { ParsePoolConfig } from '../src/pool-config.ts';
 import { startParseThread } from '../src/thread.ts';
 import {
   isolatedPolicy,
   ORG_A,
+  ORG_B,
+  orgAt,
+  poolConfig,
   POOL_CONFIG,
   PROJECT_A,
   PROJECT_B,
@@ -30,9 +35,9 @@ const request = (
   source: string,
   projectId = PROJECT_A,
   dialect: 'md' | 'mdx' = 'md',
+  organizationId = ORG_A,
 ): ParseRequest => ({
-  organizationId: ORG_A,
-  projectId,
+  tenant: { organizationId, projectId },
   path: 'docs/hostile.md',
   source,
   dialect,
@@ -47,7 +52,10 @@ describe('pages only the kill can stop', () => {
   let pool: ParsePool;
   let project = 0;
   beforeAll(() => {
-    pool = createParsePool({ ...POOL_CONFIG, timeoutMs: 1_000, maxMemoryMb: 512 }, { logger });
+    pool = createParsePool(poolConfig({ timeoutMs: 1_000, maxMemoryMb: 512 }), {
+      logger,
+      onStuck: () => undefined,
+    });
   });
   afterAll(() => pool.close());
 
@@ -82,6 +90,7 @@ describe('a stall inside the parser', () => {
       const script = new URL('../src/parse-worker.ts', import.meta.url);
       const pool = createParsePool(POOL_CONFIG, {
         logger: recordingLogger(),
+        onStuck: () => undefined,
         startThread: () => startParseThread(script, limits),
       });
       try {
@@ -101,12 +110,10 @@ describe('pages that blow the heap', () => {
   const logger = recordingLogger();
   let pool: ParsePool;
   beforeAll(() => {
-    pool = createParsePool(
-      { ...POOL_CONFIG, timeoutMs: 45_000, maxMemoryMb: 64 },
-      {
-        logger,
-      },
-    );
+    pool = createParsePool(poolConfig({ timeoutMs: 45_000, maxMemoryMb: 64 }), {
+      logger,
+      onStuck: () => undefined,
+    });
   });
   afterAll(() => pool.close());
 
@@ -128,8 +135,8 @@ describe('pages that blow the heap', () => {
 // so the timeout stays well above that. The bombs run for many seconds, so it still kills them.
 describe('many hostile files', () => {
   const pools: ParsePool[] = [];
-  const open = (config: Partial<typeof POOL_CONFIG>, logger = recordingLogger()) => {
-    const pool = createParsePool({ ...POOL_CONFIG, ...config }, { logger });
+  const open = (config: Partial<ParsePoolConfig>, logger = recordingLogger()) => {
+    const pool = createParsePool(poolConfig(config), { logger, onStuck: () => undefined });
     pools.push(pool);
     return pool;
   };
@@ -145,9 +152,11 @@ describe('many hostile files', () => {
         {
           timeoutMs: 1_000,
           maxQueued: 16,
+          maxQueuedPerOrg: 8,
           maxQueuedPerProject: 8,
+          orgBudgetMs: 3_000,
           projectBudgetMs: 3_000,
-          projectWindowMs: 60_000,
+          windowMs: 60_000,
         },
         logger,
       );
@@ -163,8 +172,8 @@ describe('many hostile files', () => {
 
       const neighbour: ParseResult[] = [];
       for (let index = 0; index < 5; index += 1) {
-        neighbour.push(await pool.parse(request(honest, PROJECT_B)));
-        expect(pool.stats().threads).toBeLessThanOrEqual(2);
+        neighbour.push(await pool.parse(request(honest, PROJECT_B, 'md', ORG_B)));
+        expect(pool.stats().threads).toBeLessThanOrEqual(POOL_CONFIG.threads);
       }
       const results = await Promise.all(bombs);
       clearInterval(ticker);
@@ -175,17 +184,17 @@ describe('many hostile files', () => {
       // The budget admits three full timeouts; anything past that is refused without a thread.
       expect(killed).toBeGreaterThanOrEqual(1);
       expect(killed).toBeLessThanOrEqual(4);
-      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.project_limit']));
+      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.organization_limit']));
       expect(ticks).toBeGreaterThan(5);
 
       expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
       expect(JSON.stringify(logger.entries)).not.toContain('CANARY');
       expect(JSON.stringify(results)).not.toContain('CANARY');
       for (const { fields } of logger.entries) {
-        expect(fields['organizationId']).toBe(ORG_A);
+        expect([ORG_A, ORG_B]).toContain(fields['organizationId']);
         expect([PROJECT_A, PROJECT_B]).toContain(fields['projectId']);
       }
-      expect(codeOf(await pool.parse(request(honest, PROJECT_B)))).toBe('ok');
+      expect(codeOf(await pool.parse(request(honest, PROJECT_B, 'md', ORG_B)))).toBe('ok');
     },
     TIMEOUT_MS,
   );
@@ -195,26 +204,74 @@ describe('many hostile files', () => {
     async () => {
       const pool = open({
         timeoutMs: 1_000,
+        threads: 2,
+        orgThreads: 1,
         maxQueued: 25,
+        maxQueuedPerOrg: 3,
         maxQueuedPerProject: 3,
+        orgBudgetMs: 1_000,
         projectBudgetMs: 1_000,
       });
       const bomb = lazyLines(60 * KB);
       const flood = Array.from({ length: 8 }, (_, tenant) =>
-        Array.from({ length: 5 }, () => pool.parse(request(bomb, projectAt(tenant)))),
+        Array.from({ length: 5 }, () => pool.parse(request(bomb, PROJECT_A, 'md', orgAt(tenant)))),
       ).flat();
       // Eight projects hold 24 places, so this one takes the last and the next bomb finds none.
       expect(pool.stats().queued).toBe(24);
-      const honestPage = pool.parse(request(honest, projectAt(99)));
-      const late = pool.parse(request(bomb, projectAt(8)));
+      const honestPage = pool.parse(request(honest, PROJECT_A, 'md', orgAt(99)));
+      const late = pool.parse(request(bomb, PROJECT_A, 'md', orgAt(8)));
       expect(codeOf(await late)).toBe('mdx.queue_full');
 
       const codes = (await Promise.all(flood)).map(codeOf);
-      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.project_limit']));
+      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.organization_limit']));
       expect(codeOf(await honestPage)).toBe('ok');
       expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
       expect(pool.stats().threads).toBeLessThanOrEqual(2);
-      expect(codeOf(await pool.parse(request(honest, projectAt(99))))).toBe('ok');
+      expect(codeOf(await pool.parse(request(honest, PROJECT_A, 'md', orgAt(99))))).toBe('ok');
+    },
+    TIMEOUT_MS,
+  );
+
+  // Security's measured case: 0 of 374 honest pages at these defaults before the outer limits.
+  it(
+    'one organization with eight projects at the default limits leaves a neighbour parsing',
+    async () => {
+      const pool = createParsePool(parsePoolConfig({}), {
+        logger: recordingLogger(),
+        onStuck: () => undefined,
+      });
+      pools.push(pool);
+      const bomb = lazyLines(60 * KB);
+      const until = performance.now() + 6_000;
+      const pace = (ms: number) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+
+      const attacker = async (project: number) => {
+        while (performance.now() < until) {
+          await pool.parse(request(bomb, projectAt(project)));
+          await pace(50);
+        }
+      };
+      const saves: { code: string; ms: number }[] = [];
+      const honestSaves = async () => {
+        while (performance.now() < until) {
+          const began = performance.now();
+          const result = await pool.parse(request(honest, PROJECT_B, 'md', ORG_B));
+          saves.push({ code: codeOf(result), ms: performance.now() - began });
+          await pace(200);
+        }
+      };
+      await Promise.all([
+        ...Array.from({ length: 8 }, (_, index) => attacker(index)),
+        honestSaves(),
+      ]);
+
+      expect(saves.length).toBeGreaterThan(5);
+      expect(saves.filter(({ code }) => code !== 'ok')).toEqual([]);
+      // A thread stays free for other organizations, so a save never waits on a bomb.
+      expect(Math.max(...saves.map(({ ms }) => ms))).toBeLessThan(5_000);
     },
     TIMEOUT_MS,
   );
@@ -238,7 +295,7 @@ describe('many hostile files', () => {
     async () => {
       const pool = open({ timeoutMs: 1_000 });
       await pool.parse(request(lazyLines(60 * KB), PROJECT_A));
-      const result = await pool.parse(request(honest, PROJECT_B));
+      const result = await pool.parse(request(honest, PROJECT_B, 'md', ORG_B));
       expect(result.ok && result.value.ast.children.length).toBe(2);
     },
     TIMEOUT_MS,

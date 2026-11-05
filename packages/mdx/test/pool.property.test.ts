@@ -1,16 +1,16 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { ParseResult } from '../src/index.ts';
-import { createParsePool } from '../src/isolated.ts';
+import { createParsePool } from '../src/pool.ts';
 import type { ParseThread, ThreadAnswer } from '../src/thread.ts';
-import { isolatedPolicy, ORG_A, POOL_CONFIG, projectAt, recordingLogger } from './helpers.ts';
+import { isolatedPolicy, orgAt, poolConfig, projectAt, recordingLogger } from './helpers.ts';
 
 const flush = async () => {
   for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
 };
 
 const step = fc.oneof(
-  fc.record({ kind: fc.constant('submit' as const), project: fc.nat(5) }),
+  fc.record({ kind: fc.constant('submit' as const), org: fc.nat(2), project: fc.nat(5) }),
   fc.record({
     kind: fc.constant('finish' as const),
     end: fc.constantFrom<ThreadAnswer['end']>('reusable', 'killed'),
@@ -25,16 +25,16 @@ describe('the scheduler', () => {
     await fc.assert(
       fc.asyncProperty(fc.array(step, { maxLength: 80 }), async (steps) => {
         const clock = { now: 0 };
-        const running: { project: string; resolve: (answer: ThreadAnswer) => void }[] = [];
+        const running: { key: string; resolve: (answer: ThreadAnswer) => void }[] = [];
         const live = new Set<ParseThread>();
-        const config = { ...POOL_CONFIG, projectBudgetMs: 4_000, projectWindowMs: 10_000 };
+        const config = poolConfig({ projectBudgetMs: 4_000, windowMs: 10_000 });
 
         const pool = createParsePool(config, {
           logger: recordingLogger(),
+          onStuck: () => undefined,
           now: () => clock.now,
           startThread: () => {
             const thread: ParseThread = {
-              gone: Promise.resolve(),
               alive: () => true,
               stop: () => {
                 live.delete(thread);
@@ -43,7 +43,7 @@ describe('the scheduler', () => {
               run: (job) =>
                 new Promise((resolve) => {
                   running.push({
-                    project: job.source,
+                    key: job.source,
                     resolve: (answer) => {
                       if (answer.end === 'killed') live.delete(thread);
                       resolve(answer);
@@ -60,19 +60,26 @@ describe('the scheduler', () => {
         const check = () => {
           expect(live.size).toBeLessThanOrEqual(config.threads);
           expect(running.length).toBeLessThanOrEqual(config.threads);
-          expect(new Set(running.map(({ project }) => project)).size).toBe(running.length);
+          // The source carries org:project, so these are the two limits as the threads see them.
+          expect(new Set(running.map(({ key }) => key)).size).toBe(running.length);
+          const orgs = running.map(({ key }) => key.split(':')[0] ?? '');
+          for (const org of orgs) {
+            expect(orgs.filter((other) => other === org).length).toBeLessThanOrEqual(
+              config.orgThreads,
+            );
+          }
           expect(pool.stats().queued).toBeLessThanOrEqual(config.maxQueued);
         };
 
         for (const item of steps) {
           if (item.kind === 'submit') {
+            const organizationId = orgAt(item.org);
             const projectId = projectAt(item.project);
             pages.push(
               pool.parse({
-                organizationId: ORG_A,
-                projectId,
+                tenant: { organizationId, projectId },
                 path: 'a.md',
-                source: projectId,
+                source: `${organizationId}:${projectId}`,
                 dialect: 'md',
                 policy: isolatedPolicy(),
               }),
