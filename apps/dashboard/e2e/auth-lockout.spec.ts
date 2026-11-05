@@ -40,10 +40,50 @@ async function signIn(page: Page, address: string): Promise<void> {
   await page.getByLabel('8 digit code').fill(code);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect.poll(() => hasSession(page.context())).toBe(true);
+  // The cookie lands before the redirect does, and a navigation now would race it.
+  await expect(page).toHaveURL(/\/welcome/);
+}
+
+// The real button, because what the response does to the browser's cookies is the point.
+async function signOut(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect.poll(() => hasSession(page.context())).toBe(false);
 }
 
 const prefixes = (n: number) =>
   Array.from({ length: n }, (_, i) => `2001:db8:${(i + 16).toString(16)}::1`);
+
+// Spends the shared ceiling from the given prefixes, past it whatever their number.
+async function spendCeiling(
+  browser: Browser,
+  address: string,
+  count: number,
+): Promise<readonly BrowserContext[]> {
+  const attackers = await Promise.all(prefixes(count).map((ip) => client(browser, ip)));
+  let sends = 0;
+  while (sends < CEILING + 2) {
+    for (const attacker of attackers) {
+      const tab = await attacker.newPage();
+      await ask(tab, address);
+      await tab.close();
+      sends += 1;
+    }
+  }
+  return attackers;
+}
+
+// Not vacuous: a stranger on a fresh prefix now gets nothing for this address.
+async function expectStrangerRefused(browser: Browser, address: string): Promise<BrowserContext> {
+  const stranger = await client(browser, '2001:db8:ffff::1');
+  const seen = await countTo(address);
+  const page = await stranger.newPage();
+  await ask(page, address);
+  await expect.poll(async () => authSql(CEILING_ROWS)).not.toBe('0');
+  await page.waitForTimeout(MAIL_SETTLE_MS);
+  expect(await countTo(address)).toBe(seen);
+  return stranger;
+}
 
 for (const count of [4, 16]) {
   test(`${String(count)} prefixes and a second browser do not stop the victim`, async ({
@@ -56,7 +96,7 @@ for (const count of [4, 16]) {
     const own = await client(browser, VICTIM_IP);
     const page = await own.newPage();
     await signIn(page, victim);
-    await own.clearCookies({ name: /session/ });
+    await signOut(page);
 
     // A challenge from before the attack, which the attack must not cost the victim.
     const before = await countTo(victim);
@@ -68,17 +108,7 @@ for (const count of [4, 16]) {
            where email_normalized = '${victim}' and consumed_at is null
            order by created_at limit 1`);
 
-    const attackers = await Promise.all(prefixes(count).map((ip) => client(browser, ip)));
-    let sends = 0;
-    // Past the shared ceiling, whatever the prefix count.
-    while (sends < CEILING + 2) {
-      for (const attacker of attackers) {
-        const tab = await attacker.newPage();
-        await ask(tab, victim);
-        await tab.close();
-        sends += 1;
-      }
-    }
+    const attackers = await spendCeiling(browser, victim, count);
 
     // Browser B opens the victim's link: no binding, so no attempt is spent.
     const attempts = await attemptsOfNewest();
@@ -94,23 +124,39 @@ for (const count of [4, 16]) {
     );
     expect(await attemptsOfNewest()).toBe(attempts);
 
-    // Not vacuous: a stranger on a fresh prefix now gets nothing for this address.
-    const stranger = await client(browser, '2001:db8:ffff::1');
-    const seen = await countTo(victim);
-    const strangerPage = await stranger.newPage();
-    await ask(strangerPage, victim);
-    await expect.poll(async () => authSql(CEILING_ROWS)).not.toBe('0');
-    await strangerPage.waitForTimeout(MAIL_SETTLE_MS);
-    expect(await countTo(victim)).toBe(seen);
+    const stranger = await expectStrangerRefused(browser, victim);
 
     // The challenge from before the attack still works, then a fresh sign in does.
     await page.getByLabel('8 digit code').fill(held.code);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect.poll(() => hasSession(own)).toBe(true);
-    // The cookie lands before the redirect does, and a navigation now would race it.
     await expect(page).toHaveURL(/\/welcome/);
-    await own.clearCookies({ name: /session/ });
+    await signOut(page);
     await signIn(page, victim);
     await Promise.all([...attackers, second, stranger, own].map((c) => c.close()));
   });
 }
+
+// Signing out must not turn the person's own browser into a stranger: a code only account
+// would have no way back in for the rest of the day.
+test('Signing out and back in keeps working while the ceiling is spent', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const victim = uniqueAddress('returning');
+  await seedPerson(victim);
+  const own = await client(browser, VICTIM_IP);
+  const page = await own.newPage();
+  await signIn(page, victim);
+  await signOut(page);
+
+  const attackers = await spendCeiling(browser, victim, 4);
+  const stranger = await expectStrangerRefused(browser, victim);
+
+  // Twice, which with the first sign in is all the per address limit allows in ten minutes.
+  for (const round of [1, 2]) {
+    await test.step(`sign in ${String(round)} after the attack`, async () => {
+      await signIn(page, victim);
+      await signOut(page);
+    });
+  }
+  await Promise.all([...attackers, stranger, own].map((c) => c.close()));
+});
