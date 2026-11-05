@@ -68,6 +68,19 @@ test('Sign out drops its own cookies and leaves every other cookie alone', async
   await signOut(page);
 
   const names = await cookieNames(page);
+  if (names.includes('drefyn_invite') || names.includes('drefyn_oauth')) {
+    const started = Date.now();
+    for (const wait of [0, 100, 400, 1500, 3000]) {
+      await page.waitForTimeout(wait);
+      const held = await page.context().cookies();
+      console.log(
+        `LATE +${String(Date.now() - started)} ${JSON.stringify(held.map(({ name, value, expires, httpOnly, sameSite, path }) => ({ name, value: value.slice(0, 6), expires, httpOnly, sameSite, path })))}`,
+      );
+    }
+    await page.goto('/sign-in');
+    const sent = await page.evaluate(() => document.cookie);
+    console.log(`LATE document ${sent}`);
+  }
   expect(names).not.toContain('drefyn_invite');
   expect(names).not.toContain('drefyn_oauth');
   expect(names).toContain('sso');

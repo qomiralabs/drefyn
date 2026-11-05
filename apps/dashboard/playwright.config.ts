@@ -140,15 +140,11 @@ export default defineConfig({
       testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
       use: {
         ...devices['Desktop Firefox'],
-        // Firefox drops a mouse press that lands within a few frames of a new page, so nobody
-        // clicks something they never saw. Only a robot is that quick: under load the press
-        // vanished, the release still fired, and no click followed.
-        launchOptions: {
-          firefoxUserPrefs: {
-            'dom.input_events.security.minNumTicks': 0,
-            'dom.input_events.security.minTimeElapsedInMS': 0,
-          },
-        },
+        // Typing an address this profile has sent before opens Firefox's form history popup a
+        // moment later. A press outside it only closes it, so the button sees a release and
+        // never a click. Contexts share the history, and these tests sign the same person in
+        // twice.
+        launchOptions: { firefoxUserPrefs: { 'browser.formfill.enable': false } },
       },
     },
     {
