@@ -59,7 +59,7 @@ export const organizationSql = (organizationId: string, statement: string): Prom
     statement,
   );
 
-const userSql = (id: string, statement: string): Promise<string> =>
+export const userSql = (id: string, statement: string): Promise<string> =>
   appSql((db, query) => withUser(db, { userId: userId(id) }, (tx) => query.execute(tx)), statement);
 
 export const uniqueAddress = (label: string): string =>

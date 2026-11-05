@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { expect, request, type BrowserContext, type Page, type Route } from '@playwright/test';
-import { authSql } from './auth-helpers.ts';
+import { authSql, userSql } from './auth-helpers.ts';
 import { test as base } from './test.ts';
 import {
   BROWSER_HOSTS,
@@ -138,9 +138,12 @@ export const identitiesOf = (provider: ProviderName, account: FakeAccount): Prom
     `app.identities where provider = '${provider}' and provider_subject = '${account.subject}'`,
   );
 
-export const sessionsOf = (address: string): Promise<string> =>
-  count(`app.sessions s join app.users u on u.id = s.user_id
-         where u.email_normalized = '${address}'`);
+// Through the person's own context: the pre sign in role has no grant on sessions.
+export async function sessionsOf(address: string): Promise<string> {
+  const id = await authSql(`select id from app.users where email_normalized = '${address}'`);
+  if (id === '') return '0';
+  return userSql(id, `select count(*) from app.sessions where user_id = '${id}'`);
+}
 
 export const hasSession = async (page: Page): Promise<boolean> =>
   (await page.context().cookies()).some((cookie) => cookie.name === 'drefyn_session');
