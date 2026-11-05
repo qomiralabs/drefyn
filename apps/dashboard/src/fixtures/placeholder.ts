@@ -11,6 +11,7 @@ export const PLACEHOLDER = {
       product: 'docs',
       name: 'Payments API docs',
       answer: '3 pages are out of date.',
+      state: { state: 'stale', word: 'Out of date' },
     },
     // Empty: no pages yet.
     'new-docs': { id: 'prj_new', product: 'docs', name: 'New docs', answer: 'No pages yet.' },
@@ -35,6 +36,7 @@ export const PLACEHOLDER = {
       product: 'status',
       name: 'Acme status',
       answer: 'Everything is running.',
+      state: { state: 'fresh', word: 'Running' },
     },
   },
 } as const;

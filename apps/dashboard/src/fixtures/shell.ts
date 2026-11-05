@@ -1,4 +1,4 @@
-import type { InboxItem, ShellData } from '../shell/data.ts';
+import { projectKey, type InboxItem, type ShellData } from '../shell/data.ts';
 import { PLACEHOLDER } from './placeholder.ts';
 
 const org = PLACEHOLDER.organization.slug;
@@ -22,22 +22,6 @@ export const NEEDS_YOU: readonly InboxItem[] = [
   },
 ];
 
-const COUNT_WORDS = [
-  'Nothing',
-  'One thing',
-  'Two things',
-  'Three things',
-  'Four things',
-  'Five things',
-];
-
-// "Two things need you." The sentence that opens the overview.
-export function needsYouSentence(count: number): string {
-  if (count === 0) return 'Nothing needs you.';
-  const words = COUNT_WORDS[count] ?? `${count} things`;
-  return `${words} ${count === 1 ? 'needs' : 'need'} you.`;
-}
-
 // The shell's view of the placeholder organization.
 export const PLACEHOLDER_SHELL: ShellData = {
   organization: {
@@ -46,12 +30,13 @@ export const PLACEHOLDER_SHELL: ShellData = {
     plan: PLACEHOLDER.organization.plan,
   },
   person: PLACEHOLDER.person,
-  seats: { used: 4, included: 5 },
+  seats: { used: 4, limit: 5 },
+  organizations: [],
   inbox: NEEDS_YOU,
   projects: Object.fromEntries(
     Object.entries(PLACEHOLDER.projects).map(([slug, p]) => [
-      slug,
-      { name: p.name, product: p.product },
+      projectKey(p.product, slug),
+      { name: p.name, product: p.product, ...('state' in p ? { state: p.state } : {}) },
     ]),
   ),
   opens: {},

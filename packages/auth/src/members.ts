@@ -1,6 +1,6 @@
 import type { Result } from '@drefyn/address';
 import { withOrganization, withUser, type Database, type OrganizationSchema } from '@drefyn/db';
-import type { Product } from '@drefyn/entitlements';
+import { PRODUCTS, type Product } from '@drefyn/entitlements';
 import { idOf, type IdOf, type ProjectId } from '@drefyn/tenancy';
 import { sql, type Transaction } from 'kysely';
 import { storedRole, type AccessContext } from './access.ts';
@@ -53,6 +53,12 @@ export interface ProjectSummary {
   readonly product: Product;
 }
 
+// A project this person may open, with what the shell needs to draw it.
+export interface ReachableProject extends ProjectSummary {
+  readonly slug: string;
+  readonly readOnly: boolean;
+}
+
 export interface WithdrawnInvitation {
   readonly email: string;
   readonly role: OrgRole;
@@ -63,6 +69,8 @@ export interface Members {
   listMembers(a: AccessContext): Promise<Result<MemberList, AuthError>>;
   // For choosing projects, so only for people who hand out access.
   listProjects(a: AccessContext): Promise<Result<readonly ProjectSummary[], AuthError>>;
+  // Every project of a product the person reads, plus the ones they hold a role on.
+  listReachableProjects(a: AccessContext): Promise<Result<readonly ReachableProject[], AuthError>>;
   // Returns what a fresh invitation would need, for Undo.
   withdrawInvitation(
     a: AccessContext,
@@ -206,6 +214,54 @@ export function createMembers(deps: MembersDeps): Members {
               })),
             ),
           }),
+        );
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    async listReachableProjects(a) {
+      const products = PRODUCTS.filter((product) => a.permissions.includes(`${product}.read`));
+      try {
+        const rows = await store.organization(a.organizationId, (tx) =>
+          tx
+            .selectFrom('projects as p')
+            .select(['p.id', 'p.slug', 'p.name', 'p.product', 'p.read_only_since'])
+            .where('p.organization_id', '=', a.organizationId)
+            .where((eb) =>
+              eb.or([
+                ...(products.length === 0 ? [] : [eb('p.product', 'in', products)]),
+                eb.exists(
+                  eb
+                    .selectFrom('project_roles as r')
+                    .innerJoin('memberships as m', (join) =>
+                      join
+                        .onRef('m.organization_id', '=', 'r.organization_id')
+                        .onRef('m.id', '=', 'r.membership_id'),
+                    )
+                    .select('r.role')
+                    .whereRef('r.target_project_id', '=', 'p.id')
+                    .where('m.user_id', '=', a.userId),
+                ),
+              ]),
+            )
+            .orderBy('p.name')
+            .orderBy('p.id')
+            .limit(LIST_MAX)
+            .execute(),
+        );
+        return ok(
+          Object.freeze(
+            rows.map((row) =>
+              Object.freeze({
+                projectId: idOf('prj', row.id),
+                slug: row.slug,
+                name: row.name,
+                product: asProduct(row.product),
+                readOnly: row.read_only_since !== null,
+              }),
+            ),
+          ),
         );
       } catch (error) {
         return fail(error);

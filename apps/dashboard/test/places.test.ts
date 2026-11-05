@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { commandFilter } from '../src/shell/commands.ts';
 import { places } from '../src/shell/places.ts';
 
-const entries = places('acme');
+const entries = places('acme', {
+  'docs/payments-api': { name: 'Payments API docs', product: 'docs' },
+  'status/acme-status': { name: 'Acme status', product: 'status' },
+  'studio/launch': { name: 'Launch', product: 'studio' },
+});
 const filter = commandFilter(entries);
 // What the bar shows for a query: the ids its filter keeps, in registry order.
 const found = (query: string) =>

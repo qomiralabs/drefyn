@@ -3,7 +3,7 @@ import { IconCross, IconPage, IconPulse, IconSchema, useLandmark } from '@drefyn
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import type { ShellData } from './data.ts';
+import { projectKey, seatMeta, type ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
@@ -81,7 +81,10 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const { org, drawerOpen, setDrawerOpen } = useShell();
   const closeRef = useRef<HTMLButtonElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  const project = here?.project === undefined ? undefined : data.projects[here.project];
+  const project =
+    here?.product === undefined || here.project === undefined
+      ? undefined
+      : data.projects[projectKey(here.product, here.project)];
   const product = project === undefined ? undefined : here?.product;
 
   const items: Item[] =
@@ -90,8 +93,8 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           href: s.slug === '' ? `/${org}` : `/${org}/${s.slug}`,
           label: s.label,
           icon: s.icon,
-          ...(s.slug === 'settings/members'
-            ? { meta: `${data.seats.used} of ${data.seats.included}` }
+          ...(s.slug === 'settings/members' && data.seats !== null
+            ? { meta: seatMeta(data.seats) }
             : {}),
         }))
       : SECTIONS[product].map((s) => ({
@@ -104,6 +107,8 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           label: s.label,
           icon: s.icon,
         }));
+  // Links carry the organization, and the state gallery's URL does not.
+  const currentHref = here === null ? pathname : shellHref({ ...here, org });
   const productLabel = PRODUCTS.find((p) => p.id === product)?.label;
   const label = project?.name ?? data.organization.name;
   // A closed drawer is display none, which cannot take focus, so F6 passes it by.
@@ -235,7 +240,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
             <ul className="flex flex-col gap-2">
               {items.map((item) => (
                 <li key={item.href}>
-                  <NavLink item={item} current={item.href === pathname} />
+                  <NavLink item={item} current={item.href === currentHref} />
                 </li>
               ))}
             </ul>

@@ -2,6 +2,7 @@
 import type { AccessContext } from '@drefyn/auth';
 import { describe, expectTypeOf, it } from 'vitest';
 import { findProject, mayRead, projectsOf } from '../src/fixtures/projects.ts';
+import * as real from '../src/server/projects.ts';
 
 describe('data functions', () => {
   it('cannot be called without an AccessContext', () => {
@@ -16,6 +17,12 @@ describe('data functions', () => {
       mayRead('docs');
       // @ts-expect-error a look alike has no brand, so only the guard can make one
       findProject({ organizationId, permissions: ['docs.read'] }, 'docs', 'payments-api');
+      // @ts-expect-error the real read needs an access context too
+      void real.findProject('docs', 'payments-api');
+      // @ts-expect-error the real read needs an access context too
+      void real.projectsOf('docs');
+      // @ts-expect-error a look alike has no brand, so only the guard can make one
+      void real.projectsInReach({ organizationId, permissions: ['docs.read'] });
     };
     expectTypeOf(typeOnly).toBeFunction();
   });

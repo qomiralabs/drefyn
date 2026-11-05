@@ -22,13 +22,15 @@ export const DESKTOP = { width: 1440, height: 900 };
 export type Theme = 'light' | 'dark';
 export const THEMES: readonly Theme[] = ['light', 'dark'];
 
-// The placeholder routes. Each project slug is one state of the project home.
+// Real seeded projects first, then the gallery, which draws what no product feeds yet from
+// fixed words. Each gallery slug is one state of the project home.
 export const ROUTES = {
   overview: '/acme',
   project: '/acme/docs/payments-api',
   empty: '/acme/docs/new-docs',
-  error: '/acme/docs/unreachable',
-  loading: '/acme/docs/pending',
+  success: '/shell-states/docs/payments-api',
+  error: '/shell-states/docs/unreachable',
+  loading: '/shell-states/docs/pending',
 } as const;
 
 // Every state of the settings pages, drawn from fixed words with no account.
@@ -66,13 +68,12 @@ export const settingsStatePaths = (): readonly (readonly [string, string])[] =>
     states.map((state) => [`${screen}-${state}`, `/settings-states/${screen}/${state}`] as const),
   );
 
-// What needs the person on the overview. The inbox count, the overview sentence and the
-// Needs you list all say this number.
+// What the gallery's inbox holds. Nothing feeds a real inbox yet, so it is empty everywhere else.
 export const NEEDS_YOU = 2;
 
 export const ANSWERS = {
-  overview: 'Two things need you. Everything else is fresh and running.',
-  project: '3 pages are out of date. The other 47 match your API.',
+  overview: 'Nothing needs you. Each product reports here as it opens.',
+  success: '3 pages are out of date. The other 47 match your API.',
   empty: 'No pages yet. Generate them from your repository, or write the first one.',
   error:
     'We could not load this project. Your docs site is still online; only the dashboard is affected.',

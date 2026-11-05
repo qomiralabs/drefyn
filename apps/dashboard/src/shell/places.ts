@@ -1,7 +1,26 @@
-import { allowed, defineCommands, type Command } from './commands.ts';
+import { allowed, defineCommands, type Command, type CommandIcon } from './commands.ts';
+import type { ShellData, ShellProject } from './data.ts';
+import type { ProductId } from './products.ts';
+
+const PROJECT_LOOK: Readonly<Record<ProductId, { icon: CommandIcon; kind: string }>> = {
+  docs: { icon: 'page', kind: 'Docs project' },
+  studio: { icon: 'schema', kind: 'Studio project' },
+  status: { icon: 'pulse', kind: 'status page' },
+};
+
+// The server sent only projects this person reaches, and a role on one project grants no
+// product permission, so organization read is all the bar should ask for here.
+const projectPlace = (org: string, key: string, project: ShellProject): Command => ({
+  id: `project-${key}`,
+  name: project.name,
+  ...PROJECT_LOOK[project.product],
+  ...(project.state === undefined ? {} : { state: project.state }),
+  href: `/${org}/${key}`,
+  permission: 'org.read',
+});
 
 // Places the shell knows without asking a server, so they work even when search is down.
-export function places(org: string): readonly Command[] {
+export function places(org: string, projects: ShellData['projects']): readonly Command[] {
   const at = (path: string) => `/${org}${path}`;
   return defineCommands([
     {
@@ -40,33 +59,7 @@ export function places(org: string): readonly Command[] {
       permission: 'status.read',
       shortcut: 'G 3',
     },
-    {
-      id: 'payments-api',
-      icon: 'page',
-      state: { state: 'stale', word: 'Out of date' },
-      name: 'Payments API docs',
-      kind: 'Docs project',
-      href: at('/docs/payments-api'),
-      permission: 'docs.read',
-    },
-    {
-      id: 'pages',
-      icon: 'page',
-      name: 'Pages in Payments API docs',
-      kind: 'Docs section',
-      keywords: ['pages'],
-      href: at('/docs/payments-api/pages'),
-      permission: 'docs.read',
-    },
-    {
-      id: 'acme-status',
-      icon: 'pulse',
-      state: { state: 'fresh', word: 'Running' },
-      name: 'Acme status',
-      kind: 'status page',
-      href: at('/status/acme-status'),
-      permission: 'status.read',
-    },
+    ...Object.entries(projects).map(([key, project]) => projectPlace(org, key, project)),
     {
       id: 'plan',
       icon: 'card',
@@ -132,7 +125,11 @@ export function places(org: string): readonly Command[] {
 }
 
 // What the bar offers this person. It only hides: the server refuses the rest on its own.
-export function visiblePlaces(org: string, permissions: readonly string[]): readonly Command[] {
+export function visiblePlaces(
+  org: string,
+  permissions: readonly string[],
+  projects: ShellData['projects'],
+): readonly Command[] {
   const held = new Set(permissions);
-  return allowed(places(org), (permission) => held.has(permission));
+  return allowed(places(org, projects), (permission) => held.has(permission));
 }

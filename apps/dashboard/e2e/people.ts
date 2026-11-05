@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
-// Fixed ids, because the flag file targets beta by id. The acme values match the placeholder
-// shell, so an owner sees every entry and the screenshots do not move.
+// Fixed ids, because the flag file targets beta by id.
 export const ACME_ID = '01900000-0000-7000-8000-000000000a01';
 export const BETA_ID = '01900000-0000-7000-8000-000000000b01';
 // The settings spec changes people and keys here, so no other spec reads this organization.
@@ -36,7 +35,10 @@ export const OMAR = person('omar', '0006', 'Omar Bello', 'omar@kestrel.dev');
 export const TESS = person('tess', '0007', 'Tess Moore', 'tess@kestrel.dev');
 export const RAFA = person('rafa', '0008', 'Rafa Dias', 'rafa@kestrel.dev');
 
-export const PEOPLE: readonly Person[] = [MAYA, ADA, SAM, NOOR, ZARA, OMAR, TESS, RAFA];
+// A member of acme with one project role and no default, so one project is all they reach.
+export const LIV = person('liv', '0009', 'Liv Berg', 'liv@acme.dev');
+
+export const PEOPLE: readonly Person[] = [MAYA, ADA, SAM, NOOR, ZARA, OMAR, TESS, RAFA, LIV];
 
 export const stateFile = (who: Person): string =>
   fileURLToPath(new URL(`./.auth/${who.key}.json`, import.meta.url));

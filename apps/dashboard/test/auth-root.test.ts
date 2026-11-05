@@ -103,6 +103,7 @@ describe('the composition root', () => {
     ]);
     expect(Object.keys(auth.organizations).sort()).toEqual([
       'createOrganization',
+      'listMyOrganizationSeats',
       'listMyOrganizations',
     ]);
     expect(Object.keys(auth).sort()).toEqual([

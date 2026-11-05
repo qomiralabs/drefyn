@@ -55,6 +55,7 @@ test('every shell route stays under 150 KB beyond the framework baseline', async
     ROUTES.overview,
     ROUTES.project,
     ROUTES.empty,
+    ROUTES.success,
     ROUTES.error,
     '/acme/settings/members',
     '/acme/settings/api-keys',

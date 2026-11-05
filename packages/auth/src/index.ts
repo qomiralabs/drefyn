@@ -92,6 +92,7 @@ export {
   type OrganizationSummary,
   type Organizations,
   type OrganizationsDeps,
+  type OrganizationSeats,
 } from './organizations.ts';
 export {
   createInvitations,
@@ -124,6 +125,7 @@ export {
   type PendingInvitation,
   type ProjectSummary,
   type WithdrawnInvitation,
+  type ReachableProject,
 } from './members.ts';
 export { countSeats, type SeatHolder } from './seats.ts';
 export {

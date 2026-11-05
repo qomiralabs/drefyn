@@ -26,7 +26,7 @@ import {
 } from './invitation-links.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import { UNNAMED_PERSON, checkedDisplayName, memberName, noticeEach } from './notices.ts';
-import type { OrganizationStore } from './organizations.ts';
+import { countUsed, type OrganizationStore } from './organizations.ts';
 import { ORG_ROLES, canAssign, permissionsFor, type OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
 import {
@@ -210,26 +210,6 @@ export async function proveInvitation(
     invitedBy: row.invited_by,
     expiresAt: row.expires_at,
   };
-}
-
-// Pending invitations that have not expired, plus every membership. The invited address
-// can be left out, so a resend never asks for a second seat.
-async function countUsed(
-  tx: Transaction<OrganizationSchema>,
-  organizationId: OrganizationId,
-  except: string | null,
-): Promise<{ used: number; tier: string }> {
-  const leaveOut = except === null ? sql`` : sql`and email_normalized <> ${except}`;
-  const { rows } = await sql<{ used: number; plan_tier: string }>`
-    select o.plan_tier,
-      ((select count(*) from memberships where organization_id = ${organizationId})
-       + (select count(*) from invitations
-           where organization_id = ${organizationId} and expires_at > now() ${leaveOut}))::int
-        as used
-    from organizations o where o.organization_id = ${organizationId}`.execute(tx);
-  const row = rows[0];
-  if (row === undefined) throw new Error('organization row is missing');
-  return { used: row.used, tier: row.plan_tier };
 }
 
 // Read inside the transaction that made the owner, so the row is there to name them, and the
