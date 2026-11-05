@@ -28,7 +28,11 @@ export interface CheckResult {
   files: number;
 }
 
-export const GUARDED_RULES = ['drefyn/no-cross-package-internals', 'drefyn/no-raw-egress'];
+export const GUARDED_RULES = [
+  'drefyn/no-cross-package-internals',
+  'drefyn/no-raw-egress',
+  'drefyn/no-mdx-evaluate',
+];
 
 // Only these trees hold product packages; scripts/* are repo tooling with no API.
 const LAYOUT_ROOTS = ['packages/', 'apps/'];
