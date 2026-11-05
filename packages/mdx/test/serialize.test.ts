@@ -90,7 +90,7 @@ describe('the limits on a tree', () => {
     ...DEFAULT_LIMITS,
     ...overrides,
   });
-  const NOT_PRINTABLE = expect.objectContaining({ code: 'mdx.block_not_printable' });
+  const NOT_PRINTABLE = new MdxPrintError(0).message;
 
   it('refuses more text than maxBytes', () => {
     const root = parsed('a\n', 'md');
@@ -110,11 +110,54 @@ describe('the limits on a tree', () => {
     expect(() => serialize(root, limited({ maxBytes: 40 }))).toThrow(NOT_PRINTABLE);
   });
 
+  it('counts the text of an expression in an attribute', () => {
+    const element = {
+      type: 'mdxJsxFlowElement',
+      name: 'A',
+      children: [],
+      attributes: [
+        {
+          type: 'mdxJsxAttribute',
+          name: 'b',
+          value: { type: 'mdxJsxAttributeValueExpression', value: 'x'.repeat(50) },
+        },
+      ],
+    };
+    const root = insert(parsed('', 'mdx'), 0, element);
+    expect(() => serialize(root, limited({ maxBytes: 40 }))).toThrow(NOT_PRINTABLE);
+    expect(serialize(root, limited({ maxBytes: 80 }))).toContain('xxx');
+  });
+
+  it('counts an attribute once it has walked the node, and names the block', () => {
+    const root = insert(parsed('a\n', 'md'), 1, { type: 'code', value: 'x'.repeat(50) });
+    expect(() => serialize(root, limited({ maxBytes: 40 }))).toThrow(
+      expect.objectContaining({ blockIndex: 1 }),
+    );
+  });
+
+  it('does not count what never prints', () => {
+    const block = { type: 'thematicBreak', position: { file: 'x'.repeat(50) } };
+    const root = insert(parsed('', 'md'), 0, block);
+    expect(serialize(root, limited({ maxBytes: 4 }))).toContain('*');
+    const stored = parsed('a\n', 'md');
+    const source = stored.children[0]?.source;
+    expect(source?.raw).toBe('a');
+    expect(serialize(stored, limited({ maxBytes: 1 }))).toBe('a\n');
+  });
+
+  it('counts two bytes of indent for each container on each line', () => {
+    const code = { type: 'code', value: 'a\nb' };
+    const quote = { type: 'blockquote', children: [code] };
+    const root = insert(parsed('', 'md'), 0, quote);
+    expect(serialize(root, limited({ maxBytes: 7 }))).toContain('> a');
+    expect(() => serialize(root, limited({ maxBytes: 6 }))).toThrow(NOT_PRINTABLE);
+  });
+
   it('refuses a tree deeper than maxDepth', () => {
     const quote = { type: 'blockquote', children: [{ type: 'blockquote', children: [] }] };
     const root = insert(parsed('', 'md'), 0, quote);
     expect(() => serialize(root, limited({ maxDepth: 1 }))).toThrow(NOT_PRINTABLE);
-    expect(serialize(root, limited({ maxDepth: 2 }))).toBe('>\n> >');
+    expect(serialize(root, limited({ maxDepth: 2 }))).toBe('> >');
   });
 
   it('refuses more nodes than maxNodes, attributes included', () => {

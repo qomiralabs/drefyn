@@ -55,6 +55,12 @@ describe('printing a page in the host', () => {
   });
 });
 
+describe('a page in CRLF', () => {
+  it('prints in its own line ending', () => {
+    expect(text(print(parsed('a\r\n\r\nb\r\n', 'md')))).toBe('a\r\n\r\nb\r\n');
+  });
+});
+
 describe('a tree that is not a page', () => {
   it.each([
     ['not json', '{'],
@@ -63,6 +69,7 @@ describe('a tree that is not a page', () => {
     ['null', 'null'],
     ['the wrong version', JSON.stringify({ ...parsed('a\n', 'md'), astVersion: 2 })],
     ['children that are not nodes', JSON.stringify({ ...parsed('a\n', 'md'), children: [1] })],
+    ['a child with no kind', JSON.stringify({ ...parsed('a\n', 'md'), children: [{}] })],
   ])('refuses %s', (_name, tree) => {
     expect(code(printPage({ tree, policy }))).toBe('mdx.block_not_printable');
   });
@@ -125,9 +132,10 @@ describe('a tree whose print means something else', () => {
     expect(code(print(insert(parsed('', 'mdx'), 0, esm)))).toBe(CHANGED);
   });
 
-  it('refuses a changed code value, which is what a fence escape looks like', () => {
+  it('holds a fence against a line ending in its info string', () => {
     const block = { type: 'code', value: 'a', lang: 'x\ny' };
-    expect(code(print(insert(parsed('', 'md'), 0, block)))).toBe(CHANGED);
+    const result = print(insert(parsed('', 'md'), 0, block));
+    expect(result).toMatchObject({ ok: true, value: { ast: { children: [{ lang: 'x\ny' }] } } });
   });
 
   it('sees a changed jsx attribute', () => {

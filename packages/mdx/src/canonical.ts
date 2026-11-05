@@ -12,6 +12,9 @@ interface Seen {
 export const foldLineEndings = (text: string) =>
   text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text;
 
+// CommonMark renders a line ending in a code span as a space, so both are one value.
+export const spanValue = (text: string) => foldLineEndings(text).replaceAll('\n', ' ');
+
 // This runs on every block twice per round trip, so it builds one string and skips the arrays
 // a generic walker would allocate.
 function canonical(value: unknown, seen: Seen): string {
@@ -29,10 +32,9 @@ function canonical(value: unknown, seen: Seen): string {
     if (field === null || field === undefined) continue;
     if (key === 'data') seen.data = true;
     if (isIgnored(key)) continue;
-    // CommonMark renders a line ending in a code span as a space, so both are one value.
     const text =
       node['type'] === 'inlineCode' && key === 'value' && typeof field === 'string'
-        ? JSON.stringify(foldLineEndings(field).replaceAll('\n', ' '))
+        ? JSON.stringify(spanValue(field))
         : canonical(field, seen);
     fields += `${JSON.stringify(key)}:${text},`;
   }

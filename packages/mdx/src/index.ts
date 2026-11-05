@@ -1,7 +1,5 @@
 export { rawOf } from './canonical.ts';
 export { DEFAULT_LIMITS } from './policy.ts';
-export { MdxPrintError, printCanonical } from './print.ts';
-export { serialize } from './serialize.ts';
 export { AST_VERSION } from './types.ts';
 export type {
   BlockSource,
@@ -14,6 +12,7 @@ export type {
   MdxLimits,
   MdxRoot,
   ParseResult,
+  PrintResult,
   RenderPolicy,
   Result,
 } from './types.ts';

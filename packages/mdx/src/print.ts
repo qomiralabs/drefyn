@@ -5,7 +5,7 @@ import remarkMdx from 'remark-mdx';
 import remarkStringify from 'remark-stringify';
 import type { Options } from 'remark-stringify';
 import { unified } from 'unified';
-import { foldLineEndings } from './canonical.ts';
+import { foldLineEndings, spanValue } from './canonical.ts';
 import type { Dialect, MdastBlock } from './types.ts';
 
 const BOM = String.fromCharCode(0xfeff);
@@ -89,6 +89,7 @@ export class MdxPrintError extends Error {
 
 interface Attribute {
   readonly type?: string;
+  readonly name?: unknown;
   readonly value?: string | { readonly value?: unknown } | null;
 }
 
@@ -122,6 +123,23 @@ const JOINT = 'tightJoint';
 // Stryker disable next-line StringLiteral: any label that is not a depth
 const TIGHT = 't';
 
+const IDENTIFIER = '[$_\\p{ID_Start}][-$_\\u{200c}\\u{200d}\\p{ID_Continue}]*';
+const JSX_NAME = new RegExp(`^${IDENTIFIER}(?:(?:\\.${IDENTIFIER})+|:${IDENTIFIER})?$`, 'u');
+const ATTRIBUTE_NAME = new RegExp(`^${IDENTIFIER}(?::${IDENTIFIER})?$`, 'u');
+
+// A name prints as it is, so one holding a space and a quote would be a new prop.
+function checkNames({ name, attributes = [] }: Prepared): void {
+  if (typeof name === 'string' ? !JSX_NAME.test(name) : (name ?? null) !== null) {
+    throw new MdxPrintError();
+  }
+  for (const { type, name: attribute } of attributes) {
+    if (type !== 'mdxJsxAttribute') continue;
+    if (typeof attribute !== 'string' || !ATTRIBUTE_NAME.test(attribute)) {
+      throw new MdxPrintError();
+    }
+  }
+}
+
 function foldAttribute(attribute: Attribute): Attribute {
   const { value } = attribute;
   if (typeof value === 'string') return { ...attribute, value: foldLineEndings(value) };
@@ -137,10 +155,12 @@ function isTightInside(node: Prepared, tight: boolean): boolean {
 
 // At a line start, html can become a block of its own, so the stock printer swaps that line
 // ending for a space. By then a heading has already picked two lines for its break, and on the
-// next pass it has none. So in a heading the swap happens up front.
+// next pass it has none. So in a heading the swap happens up front, for a hard break as well.
 function spaceBeforeHtml(children: Prepared[]): Prepared[] {
   return children.map((child, index) => {
-    if (child.type !== 'text' || children[index + 1]?.type !== 'html') return child;
+    if (children[index + 1]?.type !== 'html') return child;
+    if (child.type === 'break') return { type: 'text', value: ' ' };
+    if (child.type !== 'text') return child;
     return { ...child, value: (child.value as string).replace(/\n$/, ' ') };
   });
 }
@@ -169,16 +189,22 @@ function settleChildren(type: string, children: Prepared[]): Prepared[] {
 
 // A private copy: values lose their CRLF, which the printer would otherwise double, and the
 // marks below go on this and not on the caller's tree.
-function prepare(node: Prepared, dialect: Dialect, tight: boolean): Prepared {
+function prepare(node: Prepared, dialect: Dialect, tight: boolean, top: boolean): Prepared {
   if (!PRINTABLE[dialect].has(node.type)) throw new MdxPrintError();
+  // Only the first block of a file is frontmatter. Anywhere else its fences mean nothing.
+  if (node.type === 'yaml' && !top) throw new MdxPrintError();
+  checkNames(node);
   const inTight = isTightInside(node, tight);
   const copy: Prepared = { ...node };
   // Marks live here, so nothing a caller put on a node can pose as one.
   delete copy.data;
-  if (typeof node.value === 'string') copy.value = foldLineEndings(node.value);
+  if (typeof node.value === 'string') {
+    // Left in, a line ending in a code span lets the next line start a block on reparse.
+    copy.value = node.type === 'inlineCode' ? spanValue(node.value) : foldLineEndings(node.value);
+  }
   if (node.attributes !== undefined) copy.attributes = node.attributes.map(foldAttribute);
   if (node.children !== undefined) {
-    const children = node.children.map((child) => prepare(child, dialect, inTight));
+    const children = node.children.map((child) => prepare(child, dialect, inTight, false));
     copy.children = settleChildren(node.type, children);
   }
   if (node.type === 'mdxJsxFlowElement' && inTight) copy.data = { tight: true };
@@ -196,9 +222,12 @@ const indentAfterFirst = (value: string, prefix: string) =>
 // each line of an expression. A string is not an expression, so nothing is eaten there.
 function markAttribute(attribute: Attribute, dedent: string): Attribute {
   const { type, value } = attribute;
+  if (type === 'mdxJsxExpressionAttribute') {
+    return { ...attribute, value: indentAfterFirst(value as string, `${dedent}  `) };
+  }
+  // The parser decodes character references here, so a bare & would change the value.
   if (typeof value === 'string') {
-    const prefix = type === 'mdxJsxExpressionAttribute' ? `${dedent}  ` : dedent;
-    return { ...attribute, value: indentAfterFirst(value, prefix) };
+    return { ...attribute, value: indentAfterFirst(value.replaceAll('&', '&amp;'), dedent) };
   }
   if (typeof value?.value !== 'string') return attribute;
   return { ...attribute, value: { ...value, value: indentAfterFirst(value.value, `${dedent}  `) } };
@@ -253,7 +282,11 @@ function esm(node: Prepared): string {
   return `${lines.join('\n')}${dedent === '' ? '' : '\n'}`;
 }
 
-const DELIMITERS: Readonly<Record<string, string>> = { left: ':-', right: '-:', center: ':-:' };
+const DELIMITERS: ReadonlyMap<unknown, string> = new Map([
+  ['left', ':-'],
+  ['right', '-:'],
+  ['center', ':-:'],
+]);
 
 // The stock printer pads every row to the widest one, which adds cells the tree never had and
 // makes a one word edit move every row.
@@ -263,7 +296,7 @@ function table(node: Prepared, _parent: unknown, state: PrintState, info: unknow
   const columns = rows[0]?.children?.length ?? 0;
   const delimiters = Array.from(
     { length: columns },
-    (_, index) => DELIMITERS[node.align?.[index] ?? ''] ?? '-',
+    (_, index) => DELIMITERS.get(node.align?.[index]) ?? '-',
   );
   lines.splice(1, 0, `| ${delimiters.join(' | ')} |`);
   return lines.join('\n');
@@ -327,7 +360,7 @@ const CLOSING_FENCE = /^---[ \t]*$/m;
 
 export function printWith(block: MdastBlock, dialect: Dialect, overrides: Override): string {
   try {
-    const copy = prepare(block as unknown as Prepared, dialect, false);
+    const copy = prepare(block as unknown as Prepared, dialect, false, true);
     if (copy.type === 'yaml' && CLOSING_FENCE.test(copy.value as string)) {
       throw new MdxPrintError();
     }

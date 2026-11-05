@@ -1,7 +1,8 @@
 import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
 import { refused, resultSchema } from './result.ts';
-import type { Dialect, MdxIssueCode, ParseResult, RenderPolicy } from './types.ts';
+import type { JobResult } from './result.ts';
+import type { Dialect, MdxIssueCode, RenderPolicy } from './types.ts';
 
 export interface ThreadLimits {
   readonly timeoutMs: number;
@@ -15,14 +16,23 @@ export type IsolatedPolicy = Omit<RenderPolicy, 'components'> & {
   readonly components: ReadonlySet<string>;
 };
 
-export interface ThreadJob {
+export interface ParseJob {
   readonly source: string;
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
 }
 
+export interface PrintJob {
+  // Text, not a tree: JSON.parse then runs under the kill, and a deep tree never has to survive
+  // a structured clone or a walk on the host's own thread.
+  readonly tree: string;
+  readonly policy: IsolatedPolicy;
+}
+
+export type ThreadJob = ParseJob | PrintJob;
+
 export interface ThreadAnswer {
-  readonly result: ParseResult;
+  readonly result: JobResult;
   // reusable: the thread can take another job. killed: it is gone. stuck: terminate has not
   // finished, which only native code can cause, so only ending the process will stop it.
   readonly end: 'reusable' | 'killed' | 'stuck';
@@ -102,7 +112,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
   });
 
   // The answer waits for the kill, so a caller never queues on top of a live stall.
-  const kill = async (result: ParseResult, workMs = 0): Promise<ThreadAnswer> => {
+  const kill = async (result: JobResult, workMs = 0): Promise<ThreadAnswer> => {
     const grace = deadline(limits.killGraceMs);
     const ended = await Promise.race([worker.terminate(), grace.expired]);
     grace.clear();
@@ -118,7 +128,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
 
     lastId += 1;
     const id = lastId;
-    const answer = new Promise<ParseResult | 'unexpected'>((resolve) => {
+    const answer = new Promise<JobResult | 'unexpected'>((resolve) => {
       worker.once('message', (message: unknown) => {
         const parsed = answerSchema.safeParse(message);
         // A late answer must never land on the next tenant's page.

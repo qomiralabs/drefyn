@@ -1,6 +1,8 @@
 import { digest, sourceOf, tailOf } from './canonical.ts';
 import { MdxPrintError, printCanonical, printWith } from './print.ts';
-import type { MdxBlock, MdxRoot } from './types.ts';
+import { DEFAULT_LIMITS } from './policy.ts';
+import { checkTree } from './tree-limits.ts';
+import type { MdxBlock, MdxLimits, MdxRoot } from './types.ts';
 
 const BOM = String.fromCharCode(0xfeff);
 
@@ -164,7 +166,8 @@ function placeOrRefuse(
 // Pure: the same tree always gives the same bytes. A block prints its raw text only while its
 // tree still hashes to rawOf, so stale bytes cannot reach git; anything else takes the one
 // canonical printer. Gaps stay as written unless the blocks beside them have changed.
-export function serialize(root: MdxRoot): string {
+export function serialize(root: MdxRoot, limits: MdxLimits = DEFAULT_LIMITS): string {
+  checkTree(root.children, limits);
   const newline = root.eol === 'crlf' ? '\r\n' : '\n';
   const blank = newline + newline;
   let bom = '';

@@ -6,8 +6,9 @@ import { createParsePool } from './pool.ts';
 import type { ParseLogger, ParsePool } from './pool.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
 import type { ParseThread } from './thread.ts';
-import type { MdxIssueCode, ParseResult } from './types.ts';
-import { maxBodyBytes, wireRequestSchema } from './wire.ts';
+import type { JobResult } from './result.ts';
+import type { MdxIssueCode } from './types.ts';
+import { maxBodyBytes, maxTreeBytes, wirePrintSchema, wireRequestSchema } from './wire.ts';
 
 export interface ParseHostOptions {
   readonly config: ParsePoolConfig;
@@ -21,7 +22,8 @@ export interface ParseHost {
   readonly server: Server;
 }
 
-const MAX_BODY_BYTES = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
+const MAX_PARSE_BODY = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
+const MAX_PRINT_BODY = maxBodyBytes(maxTreeBytes(DEFAULT_LIMITS.maxBytes));
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_CONNECTIONS = 256;
 
@@ -31,20 +33,20 @@ const BUSY: ReadonlySet<MdxIssueCode> = new Set([
   'mdx.project_limit',
 ]);
 
-const statusOf = (result: ParseResult) =>
+const statusOf = (result: JobResult) =>
   !result.ok && result.error[0] !== undefined && BUSY.has(result.error[0].code) ? 429 : 200;
 
 const empty = (response: ServerResponse, status: number) => {
   response.writeHead(status).end();
 };
 
-function readBody(request: IncomingMessage): Promise<string | undefined> {
+function readBody(request: IncomingMessage, cap: number): Promise<string | undefined> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
     request.on('data', (chunk: Buffer) => {
       bytes += chunk.byteLength;
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > cap) {
         resolve(undefined);
         request.destroy();
       } else chunks.push(chunk);
@@ -58,27 +60,41 @@ function readBody(request: IncomingMessage): Promise<string | undefined> {
   });
 }
 
+function jobFor(pool: ParsePool, url: string, body: string): Promise<JobResult> {
+  const json: unknown = JSON.parse(body);
+  if (url === '/print') {
+    const frame = wirePrintSchema.parse(json);
+    return pool.print({
+      ...frame,
+      tenant: frame.tenant as TenantRef,
+      policy: { ...frame.policy, components: new Set(frame.policy.components) },
+    });
+  }
+  const frame = wireRequestSchema.parse(json);
+  return pool.parse({
+    ...frame,
+    tenant: frame.tenant as TenantRef,
+    policy: { ...frame.policy, components: new Set(frame.policy.components) },
+  });
+}
+
 async function serve(pool: ParsePool, request: IncomingMessage, response: ServerResponse) {
-  if (request.url === '/health') {
+  const { url = '', method } = request;
+  if (url === '/health') {
     empty(response, 200);
     return;
   }
-  if (request.method !== 'POST' || request.url !== '/parse') {
+  if (method !== 'POST' || (url !== '/parse' && url !== '/print')) {
     empty(response, 404);
     return;
   }
-  const body = await readBody(request);
+  const body = await readBody(request, url === '/print' ? MAX_PRINT_BODY : MAX_PARSE_BODY);
   if (body === undefined) {
     empty(response, 413);
     return;
   }
   try {
-    const frame = wireRequestSchema.parse(JSON.parse(body));
-    const result = await pool.parse({
-      ...frame,
-      tenant: frame.tenant as TenantRef,
-      policy: { ...frame.policy, components: new Set(frame.policy.components) },
-    });
+    const result = await jobFor(pool, url, body);
     response
       .writeHead(statusOf(result), { 'content-type': 'application/json' })
       .end(JSON.stringify(result));

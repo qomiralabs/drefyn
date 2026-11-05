@@ -5,7 +5,12 @@ import { defineConfig } from 'vitest/config';
 // a survivor is a gap in what the printer is pinned to.
 export default defineConfig({
   test: {
-    include: ['test/print-canonical.test.ts', 'test/serialize.test.ts'],
+    include: [
+      'test/print-canonical.test.ts',
+      'test/meaning.test.ts',
+      'test/print-job.test.ts',
+      'test/serialize.test.ts',
+    ],
     restoreMocks: true,
   },
 });

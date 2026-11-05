@@ -2,14 +2,31 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/api/schema/stryker-core.schema.json",
   "testRunner": "vitest",
   "plugins": ["@stryker-mutator/vitest-runner"],
-  "vitest": { "configFile": "vitest.mutation.config.ts" },
-  "mutate": ["src/print.ts", "src/serialize.ts", "src/canonical.ts"],
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  },
+  "mutate": [
+    "src/print.ts",
+    "src/serialize.ts",
+    "src/canonical.ts",
+    "src/print-job.ts",
+    "src/meaning.ts",
+    "src/tree-limits.ts"
+  ],
   "coverageAnalysis": "perTest",
   "concurrency": 2,
   "timeoutMS": 30000,
   "reporters": ["clear-text", "progress-append-only"],
-  "clearTextReporter": { "allowColor": false, "logTests": false, "reportTests": false },
-  "thresholds": { "high": 95, "low": 90, "break": 90 },
+  "clearTextReporter": {
+    "allowColor": false,
+    "logTests": false,
+    "reportTests": false
+  },
+  "thresholds": {
+    "high": 95,
+    "low": 90,
+    "break": 90
+  },
   "tempDirName": ".stryker-tmp",
   "cleanTempDir": "always"
 }

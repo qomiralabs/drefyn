@@ -7,17 +7,9 @@ compiler out of every package.
 
 ## Public API
 
-Parsing lives in the parse host and nowhere else. `@drefyn/mdx/client` is the only way in; see
-"Parsing customer content".
+Parsing and printing live in the parse host and nowhere else. `@drefyn/mdx/client` is the only
+way in; see "Parsing customer content".
 
-- `serialize(root)` gives back the exact bytes of every untouched block. A block with no source,
-  or whose tree no longer hashes to `rawOf`, goes through `printCanonical` instead. It throws
-  `MdxPrintError` on bytes that no longer hash to `sourceOf`, on `data` anywhere in a tree, on
-  text in a gap or the tail, and on anything the dialect cannot print. The hashes have no key,
-  so they catch stale bytes and not a writer who recomputes them.
-- `printCanonical(block, dialect)` is the one printer for changed and new blocks. It is pure,
-  idempotent, and returns LF with no final line ending. Its options are fixed in code. Changing
-  them is an `astVersion` bump, and stored blocks are never reprinted because of it.
 - `rawOf(block)` is the SHA-256 of a block's canonical tree. Line endings, positions and
   parser data do not count, so a reformat is not a content change.
 - `DEFAULT_LIMITS` and `AST_VERSION`.
@@ -28,6 +20,25 @@ root keeps `tail`, everything after the last block, `tailOf`, its hash, and `eol
 line ending.
 
 ## Changed blocks
+
+`client.print({ tenant, path, root, policy })` gives back the bytes of a tree. A block prints its
+stored bytes only while its tree still hashes to `rawOf`. A block with no source, or one that
+moved on, goes through the one canonical printer, whose options are fixed in code. Changing them
+is an `astVersion` bump, and stored blocks are never reprinted because of it.
+
+It refuses with `mdx.block_not_printable` on bytes that no longer hash to `sourceOf`, on `data`
+anywhere in a tree, on text in a gap or the tail, on a node the dialect cannot hold, on a JSX or
+attribute name outside the MDX syntax, on frontmatter anywhere but the first block, and on a tree
+past the limits in its policy. The hashes have no key, so they catch stale bytes and not a writer
+who recomputes them.
+
+Every print is reparsed in the same thread, under the same policy. If any block or live node
+differs from the tree, it refuses with `mdx.print_changed_meaning`: that is how a new block hidden
+by an unclosed fence, or an expression that closes itself early, stops here. Text inside a block
+may settle differently, as a typed URL becomes a link. **Store the `ast` the call hands back, never
+the tree you sent.** Only that one is known to agree with what git will hold, and render policy
+has to run on it. Everything that writes a tree, the editor save and `merge3` included, goes
+through this.
 
 Untouched blocks keep their bytes, so a file never gets reformatted behind its author's back. A
 changed block reprints whole, which means a one word edit is one line only if the block was
@@ -41,24 +52,26 @@ which would start frontmatter, so that rule prints as `***`.
 
 ## Issue codes
 
-| Code                      | Severity | Meaning                                                |
-| ------------------------- | -------- | ------------------------------------------------------ |
-| `mdx.parse_failed`        | error    | Not valid in this dialect                              |
-| `mdx.too_large`           | error    | Over `maxBytes`, counted in UTF-8 bytes                |
-| `mdx.too_deep`            | error    | Over `maxDepth`, or nesting that overflowed the parser |
-| `mdx.too_many_nodes`      | error    | Over `maxNodes`, or past a scan or acorn budget        |
-| `mdx.prop_not_literal`    | error    | A registry component with a prop that is not a literal |
-| `mdx.esm_inert`           | warning  | ESM kept as text, never run                            |
-| `mdx.expression_inert`    | warning  | Expression kept as text, never run                     |
-| `mdx.unknown_component`   | warning  | Not in the registry, so it stays inert                 |
-| `mdx.frontmatter_invalid` | warning  | Not core schema YAML; the bytes are still kept         |
-| `mdx.dialect_mismatch`    | warning  | Looks like the other dialect                           |
-| `mdx.parse_timeout`       | error    | Killed at the timeout                                  |
-| `mdx.out_of_memory`       | error    | Ended by the heap cap                                  |
-| `mdx.organization_limit`  | error    | Organization queue full or budget spent, try later     |
-| `mdx.project_limit`       | error    | Project queue full or budget spent, try later          |
-| `mdx.queue_full`          | error    | Pool queue full, try later                             |
-| `mdx.parse_unavailable`   | error    | No thread could run it, says nothing about the page    |
+| Code                        | Severity | Meaning                                                |
+| --------------------------- | -------- | ------------------------------------------------------ |
+| `mdx.parse_failed`          | error    | Not valid in this dialect                              |
+| `mdx.too_large`             | error    | Over `maxBytes`, counted in UTF-8 bytes                |
+| `mdx.too_deep`              | error    | Over `maxDepth`, or nesting that overflowed the parser |
+| `mdx.too_many_nodes`        | error    | Over `maxNodes`, or past a scan or acorn budget        |
+| `mdx.prop_not_literal`      | error    | A registry component with a prop that is not a literal |
+| `mdx.esm_inert`             | warning  | ESM kept as text, never run                            |
+| `mdx.expression_inert`      | warning  | Expression kept as text, never run                     |
+| `mdx.unknown_component`     | warning  | Not in the registry, so it stays inert                 |
+| `mdx.frontmatter_invalid`   | warning  | Not core schema YAML; the bytes are still kept         |
+| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect                           |
+| `mdx.parse_timeout`         | error    | Killed at the timeout                                  |
+| `mdx.out_of_memory`         | error    | Ended by the heap cap                                  |
+| `mdx.organization_limit`    | error    | Organization queue full or budget spent, try later     |
+| `mdx.project_limit`         | error    | Project queue full or budget spent, try later          |
+| `mdx.queue_full`            | error    | Pool queue full, try later                             |
+| `mdx.block_not_printable`   | error    | A tree that cannot be printed; see "Changed blocks"    |
+| `mdx.print_changed_meaning` | error    | Its print would parse as something else                |
+| `mdx.parse_unavailable`     | error    | No thread could run it, says nothing about the page    |
 
 Issues carry a code, severity, line and column, and never customer text.
 
@@ -83,8 +96,11 @@ A page refused by the scan or the budget gets `mdx.too_many_nodes` at line 1.
 
 ## Parsing customer content
 
-`parseForStore` is not exported, and nothing a caller can import reaches it. Every path that
-takes customer content calls the parse host, a separate process. There is no in process
+`parseForStore` and the printer are not exported, and nothing a caller can import reaches them.
+The printer has the same problem as the parser: a third party attention solver retries a render
+per mistake and never yields, so a 9 KB page that parses in 75 ms held it for 11 s. Limits on a
+tree only make most refusals cheap. Every path that takes customer content calls the parse host,
+a separate process, and prints and parses share its threads, queues, budgets and kill. There is no in process
 fallback: if the host is down, a save refuses and the last good version stays.
 
 ```ts
@@ -159,8 +175,8 @@ count, SHA-256 and timings. Page text never reaches a log, a result or a process
 
 - `pnpm --filter @drefyn/mdx test`
 - `pnpm --filter @drefyn/mdx test:fuzz` runs 60 s; `-- --seconds 5 --seed 1` narrows it.
-- `pnpm --filter @drefyn/mdx test:mutation` runs Stryker over the printer, `serialize` and the
-  hashes, and fails at 10 percent of mutants surviving. It uses the exact byte tests only, as
+- `pnpm --filter @drefyn/mdx test:mutation` runs Stryker over the printer, `serialize`, the print
+  job, its checks and the hashes, and fails at 10 percent of mutants surviving. It uses the exact byte tests only, as
   the corpus and generated suites take minutes a mutant.
 - `pnpm --filter @drefyn/mdx bench` measures parse plus print against the budgets. Run it on
   an idle machine; it prints the load and exits 1 over budget.

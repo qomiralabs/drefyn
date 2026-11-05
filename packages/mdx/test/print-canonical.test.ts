@@ -219,6 +219,12 @@ describe('the faults found in the stock printer', () => {
     expect(print(`${once}\n`)).toBe(once);
   });
 
+  it('settles a heading whose hard break sits before html', () => {
+    const once = print('a\\\n    <!-- b -->\n===\n');
+    expect(once).toBe('# a <!-- b -->');
+    expect(print(`${once}\n`)).toBe(once);
+  });
+
   it('keeps a line break before html that cannot open a block', () => {
     expect(print('a\n<b>c\n')).toBe('a\n<b>c');
   });
@@ -352,7 +358,7 @@ describe('values that would print live', () => {
   );
 
   it('does the same with a backtick in the value and in a heading', () => {
-    const value = '\`\n\n# inj\r\n';
+    const value = '`\n\n# inj\r\n';
     const code = { type: 'inlineCode', value };
     const paragraph = { type: 'paragraph', children: [code] } as MdastBlock;
     const heading = { type: 'heading', depth: 1, children: [code] } as MdastBlock;
@@ -444,7 +450,7 @@ describe('values that would print live', () => {
   it('never reads a table alignment off the object prototype', () => {
     const table = {
       type: 'table',
-      align: ['constructor'],
+      align: ['constructor'] as unknown as null[],
       children: [{ type: 'tableRow', children: [{ type: 'tableCell', children: [] }] }],
     } as MdastBlock;
     expect(printCanonical(table, 'md')).not.toContain('native code');

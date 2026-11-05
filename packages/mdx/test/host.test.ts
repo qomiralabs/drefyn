@@ -1,3 +1,4 @@
+import type { MdxRoot } from '../src/index.ts';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
@@ -71,6 +72,30 @@ describe('the parse host', () => {
       const result = await client.parse(page(source));
       if (!result.ok) throw new Error('refused');
       expect(serialize(result.value.ast)).toBe(source);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'prints for a client across the wire, and hands back the parser tree',
+    async () => {
+      const { url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
+      const client = createParseClient({ url: await url });
+      const parsed = await client.parse(page('old\n'));
+      if (!parsed.ok) throw new Error('refused');
+      const { ast } = parsed.value;
+      const edited = {
+        ...ast,
+        children: ast.children.map((block) => ({
+          ...block,
+          children: [{ type: 'text', value: 'new' }],
+        })),
+      } as unknown as MdxRoot;
+      const { tenant, path, policy } = page('');
+      const result = await client.print({ tenant, path, policy, root: edited });
+      expect(result).toMatchObject({ ok: true, value: { text: 'new\n' } });
+      if (!result.ok) throw new Error('refused');
+      expect(result.value.ast.children[0]?.source?.raw).toBe('new');
     },
     TIMEOUT_MS,
   );
@@ -197,6 +222,69 @@ describe('the client', () => {
       policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
     };
     await expect(client.parse(over)).resolves.toMatchObject({ error: [{ code: 'mdx.too_large' }] });
+  });
+
+  const root = { type: 'root', children: [] } as unknown as MdxRoot;
+  const printRequest = (overrides = {}) => ({
+    tenant: page('').tenant,
+    path: 'docs/page.mdx',
+    root,
+    policy: isolatedPolicy(),
+    ...overrides,
+  });
+
+  it('refuses an oversized tree without a call', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    const policy = { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 1 } };
+    await expect(client.print(printRequest({ policy }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_large' }],
+    });
+  });
+
+  it('refuses a tree too deep to send, without a call', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    let deep: unknown = {};
+    for (let depth = 0; depth < 200_000; depth += 1) deep = { deep };
+    await expect(client.print(printRequest({ root: deep }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_deep' }],
+    });
+  });
+
+  it('refuses an answer to a print that holds no bytes', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, '{"ok":true,"value":{"issues":[]}}'),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('passes a refusal from the host through', async () => {
+    const answer =
+      '{"ok":false,"error":[{"code":"mdx.print_changed_meaning","severity":"error","line":1,"column":1}]}';
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.print_changed_meaning' }],
+    });
+  });
+
+  it('reads a print answer with bytes in it', async () => {
+    const answer = '{"ok":true,"value":{"text":"a","issues":[]}}';
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({ ok: true });
   });
 
   it.each([

@@ -6,7 +6,7 @@ import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
 import { refused } from '../src/result.ts';
 import { maxBodyBytes } from '../src/wire.ts';
-import { isolatedPolicy, ORG_A, poolConfig, PROJECT_A, PROJECT_B } from './helpers.ts';
+import { isolatedPolicy, ORG_A, parsed, poolConfig, PROJECT_A, PROJECT_B } from './helpers.ts';
 
 // The server alone, with threads that answer by rule. Real hosts are in host.test.ts.
 describe('the host server', () => {
@@ -82,6 +82,36 @@ describe('the host server', () => {
       () => 'cut',
     );
     expect([413, 'cut']).toContain(answer);
+  });
+
+  it('takes a print on its own route, under the same limits', async () => {
+    const client = createParseClient({ url });
+    const printed = client.print({
+      tenant: { organizationId: ORG_A, projectId: PROJECT_A },
+      path: 'docs/page.mdx',
+      root: parsed('a\n', 'md'),
+      policy: isolatedPolicy(),
+    });
+    await expect.poll(() => hold.length).toBe(1);
+    hold.shift()?.(refused('mdx.print_changed_meaning'));
+    await expect(printed).resolves.toEqual(refused('mdx.print_changed_meaning'));
+  });
+
+  it('refuses a print frame that is not one, and says nothing about it', async () => {
+    const response = await fetch(`${url}/print`, { method: 'POST', body: 'CANARY-PAGE-TEXT' });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('');
+    const frame = { ...page(), policy: { ...page().policy, components: [] } };
+    expect(
+      (await fetch(`${url}/print`, { method: 'POST', body: JSON.stringify(frame) })).status,
+    ).toBe(400);
+  });
+
+  it('has no print on a GET, and cuts a print body past its own cap', async () => {
+    expect((await fetch(`${url}/print`)).status).toBe(404);
+    const body = 'x'.repeat(maxBodyBytes(DEFAULT_LIMITS.maxBytes) + 1);
+    const small = await fetch(`${url}/print`, { method: 'POST', body });
+    expect(small.status).toBe(400);
   });
 
   it('answers a page, and turns busy refusals into a 429 a client can read', async () => {
