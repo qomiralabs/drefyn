@@ -158,7 +158,8 @@ export default defineConfig({
     },
     {
       name: 'auth',
-      testMatch: /(auth-(email|csrf|invite|cli-link|settings|oauth)|first-run)\.spec\.ts$/,
+      testMatch:
+        /(auth-(email|csrf|invite|cli-link|settings|oauth)|first-run|expiry-job)\.spec\.ts$/,
       // These count rows across the whole server, and read one inbox.
       workers: 1,
       use: { ...chromium, storageState: SIGNED_OUT, ...noLookups },

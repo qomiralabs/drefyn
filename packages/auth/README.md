@@ -671,8 +671,9 @@ const verifier = createApiKeyVerifier(process.env, { db, logger }); // API servi
   revoked. `matched` counts across pages after the filters; `total`, `live`, `creators`,
   `formerKeys` and `products` count before them. Never logged on success.
 - A revoked key's row goes 90 days after `revoked_at`, with its project rows, through
-  `AUTH_EXPIRY_RULES` in `@drefyn/db`. A key that expired but was never revoked stays listed
-  until someone revokes it.
+  `AUTH_EXPIRY_RULES` in `@drefyn/db`, on the schedule every dashboard server runs. A key that
+  expired but was never revoked stays listed until someone revokes it. A revoke can only set
+  `revoked_at` to the transaction's `now()`, so no value can bring a live key to the purge.
 - A key cannot outlive its creator: `created_by` clearing on a live key fails the
   `api_keys_ownerless_is_revoked` check, and `drefyn_app` cannot delete a key or change a revoked
   one.

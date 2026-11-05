@@ -30,6 +30,9 @@ import {
   SAM,
   stateFile,
   TESS,
+  VAULT_ID,
+  VAULT_KEY_INSIDE_LIMIT,
+  VAULT_KEY_PAST_LIMIT,
 } from './people.ts';
 import { refuseOutsideTests } from './seed-guard.ts';
 import { roleUrl, serverEnv, stackFile } from './stack-env.ts';
@@ -65,6 +68,13 @@ const people = PEOPLE.map(
 const membership = (organization: string, who: string, role: string) =>
   `(${quoted(organization)}, ${quoted(who)}, ${quoted(role)})`;
 
+// Keys with no creator are legal only once revoked, and both of these are. The job is put due
+// here, before any server starts, so the first run of the first server meets these rows.
+const vaultKey = (id: string, revoked: string) =>
+  `(${quoted(id)}, ${quoted(VAULT_ID)}, 'Old', decode(repeat('ab', 32), 'hex'), 'a1b2',
+    array['docs:read'], 'all', null, ${quoted(`seed-${id}`)}, decode(repeat('cd', 32), 'hex'),
+    now() - interval '200 days', now() - interval '${revoked}')`;
+
 const sql = `
 insert into app.users (id, email, email_normalized, display_name, email_verified_at)
 values ${people} on conflict do nothing;
@@ -87,6 +97,13 @@ values ${[
 ].join(', ')} on conflict do nothing;
 insert into app.projects (organization_id, product, slug, name)
 values (${quoted(KESTREL_ID)}, 'docs', 'handbook', 'Handbook') on conflict do nothing;
+insert into app.organizations (organization_id, name, plan_tier)
+values (${quoted(VAULT_ID)}, 'Vault', 'starter') on conflict do nothing;
+insert into app.api_keys (id, organization_id, name, secret_hash, display_suffix, scopes,
+  project_scope, created_by, idempotency_key, request_hash, created_at, revoked_at)
+values ${vaultKey(VAULT_KEY_PAST_LIMIT, '91 days')}, ${vaultKey(VAULT_KEY_INSIDE_LIMIT, '89 days')}
+on conflict do nothing;
+update app.scheduled_jobs set next_run_at = now(), last_run_at = null;
 `;
 
 check(

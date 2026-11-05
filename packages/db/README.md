@@ -48,8 +48,8 @@ without one of those.
   startup role check, and refuses any other role with `DB_ROLE_UNSAFE`.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
   known, with every setting empty. `drefyn_auth` holds grants on the identity tables and, for
-  the expiry cleanup, on `ctid`, `revoked_at` and delete of `api_keys`, past the 90 day limit
-  only. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+  the expiry cleanup, on `ctid`, `organization_id`, `revoked_at` and delete of `api_keys`, past
+  the 90 day limit only, and on `scheduled_jobs`. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
   `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
@@ -171,6 +171,19 @@ transact, onDeleted, logger })` runs them at most once a minute per process, nev
 once, reports every count, and never rejects: a failure logs `db_expiry_cleanup_failed` with
 the table names and the DbError code only. A later table registers its own rule beside these.
 
+`runExpiryJob(authDb, { batchSize })` makes one attempt at `AUTH_EXPIRY_RULES` on a clock. It
+takes the turn on the `auth_expiry` row of `scheduled_jobs` and deletes in the same
+transaction, with `for update skip locked`, so with any number of servers one does the work and
+the rest return `{ ran: false }` at once. A failed or killed run rolls back to still due, so no
+lease is left to wait out. A run is due an hour after the last one, or at once if a rule filled
+its batch. The result has counts by table and, for rules with `organizationColumn`, deletions
+by organization.
+
+`startExpirySchedule({ run, onRun })` calls it first within a minute of start, then about every
+15 minutes, about every minute during a backlog, and after a failure at jittered delays that
+double from 1 minute up to 15. `onRun` gets a `done` or `failed` entry; a failure carries the
+DbError code only. `stop()` cancels the wait. `apps/dashboard/server.ts` starts one per server.
+
 `drefyn_owner` matches no policy, so migrations cannot read or change tenant rows. Data
 changes run as jobs through `withTenant`, one transaction per tenant.
 
@@ -247,7 +260,8 @@ with `is_local` false) in any tracked file.
   `withApiKeyLimiter`, `toSafeInteger`, `newId`: see Tenant access. `AuthSchema`,
   `UserSchema` and `ApiKeyLimiterSchema` are the transaction types.
 - `reserveAuthRateWindows`, `reserveApiKeyFailureWindows`, `deleteExpired`,
-  `createExpiryCleanup`, `AUTH_EXPIRY_RULES`, `API_KEY_EXPIRY_RULES`: see Identity and limiter
+  `createExpiryCleanup`, `runExpiryJob`, `startExpirySchedule`, `AUTH_EXPIRY_RULES`,
+  `API_KEY_EXPIRY_RULES`: see Identity and limiter
   tables.
 - `DbError`, `DbErrorCode`.
 

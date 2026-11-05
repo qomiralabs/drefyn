@@ -318,6 +318,28 @@ app.example.com {
 }
 ```
 
+## Scheduled cleanup
+
+Every dashboard server deletes expired rows on its own timer: revoked API keys 90 days after
+the revoke, ended sign in limits, spent challenges and links, and stale devices. There is
+nothing to install and no cron entry to add. With several servers, one takes each turn through
+a row in `app.scheduled_jobs`, so they never repeat each other, and a server that dies mid run
+leaves the turn free for the next.
+
+It runs as `drefyn_auth` on one connection of its own, first within a minute of start and then
+hourly. A failed run is retried, from 1 minute apart up to 15, for as long as it keeps failing.
+
+Each run logs `dashboard.expiry_done` with a count per table, `dashboard.expiry_deleted` with
+the organization, table and count for tenant rows, and `dashboard.metric` with
+`metric: expiry_job_runs_total` and `outcome: done` or `failed`. A failure also logs
+`dashboard.expiry_failed` with its code. Alert on `outcome: failed`. To check the job by hand:
+
+```sql
+select name, last_run_at, next_run_at from app.scheduled_jobs;
+```
+
+With no dashboard server running, nothing is deleted until one starts.
+
 ## Mail for tests
 
 A test profile adds Mailpit (MIT), pinned by digest, for the auth flows and end to end tests.

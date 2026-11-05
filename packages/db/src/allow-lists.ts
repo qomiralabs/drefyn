@@ -101,6 +101,10 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
     name: 'app.known_devices',
     reason: 'browsers one person signed in from, keyed by user, never by tenant',
   },
+  {
+    name: 'app.scheduled_jobs',
+    reason: 'times of recurring jobs that span every organization; holds no tenant data',
+  },
 ];
 
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
@@ -157,6 +161,10 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
     reason:
       'the send limit checks a device before sign in; the cleanup deletes devices unseen for 400 days',
   },
+  {
+    name: 'app.scheduled_jobs',
+    reason: 'the expiry job takes its turn here, in the transaction it deletes in',
+  },
 ];
 
 const KEY_EXPIRY =
@@ -164,6 +172,12 @@ const KEY_EXPIRY =
 
 export const AUTH_TENANT_GRANTS: readonly ColumnGrantEntry[] = [
   { name: 'app.api_keys.ctid', grantee: 'drefyn_auth', privilege: 'SELECT', reason: KEY_EXPIRY },
+  {
+    name: 'app.api_keys.organization_id',
+    grantee: 'drefyn_auth',
+    privilege: 'SELECT',
+    reason: `${KEY_EXPIRY}; the job logs each purge under its organization`,
+  },
   {
     name: 'app.api_keys.revoked_at',
     grantee: 'drefyn_auth',
@@ -180,6 +194,7 @@ export const AUTH_ONLY_TABLES: readonly AllowEntry[] = [
   { name: 'app.oauth_states', reason: AUTH_ONLY },
   { name: 'app.cli_sign_in_links', reason: 'holds hashes of sign in links issued before sign in' },
   { name: 'app.auth_rate_limits', reason: AUTH_ONLY },
+  { name: 'app.scheduled_jobs', reason: 'only the expiry job, as the auth role, takes turns here' },
 ];
 
 const KEY_PAST_RETENTION = "(revoked_at < (now() - '90 days'::interval))";
@@ -263,6 +278,7 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     'operator links are written and redeemed before sign in; grants allow updating consumed_at only',
   ),
   authAccess('auth_rate_limits', 'limits are reserved before sign in'),
+  authAccess('scheduled_jobs', 'the expiry job takes its turn before it deletes'),
   selfAccess('known_devices'),
   {
     name: 'app.known_devices.auth_read',
@@ -366,9 +382,9 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     command: 'update',
     roles: ['drefyn_app'],
     using: '(revoked_at IS NULL)',
-    withCheck: 'true',
+    withCheck: '((revoked_at IS NULL) OR (revoked_at = now()))',
     reason:
-      'a revoked key is final: organization work cannot clear the revoke, move it or touch the row; the new row is unchecked so the revoke itself passes',
+      'a revoked key is final and its time is the database clock: organization work cannot clear the revoke, move it, touch the row or backdate it into the purge',
   },
   {
     name: 'app.invitations.invitation_insert_inviter',
@@ -509,7 +525,8 @@ export type AuthTableName =
   | 'oauth_states'
   | 'cli_sign_in_links'
   | 'auth_rate_limits'
-  | 'known_devices';
+  | 'known_devices'
+  | 'scheduled_jobs';
 // The organization tables a user context reads, through the person's own memberships.
 export type MemberTableName = 'memberships' | 'organizations' | 'organization_slugs';
 export type UserTableName =
