@@ -29,17 +29,10 @@ services:
     # from the first start even when init stops halfway. The image passes these arguments to
     # the temporary init server too.
     # Filter row lists need the covering key in memory, and checkpoints far enough apart that
-    # steady saves do not stall on full page writes.
-    command:
-      [
-        postgres,
-        -c,
-        hba_file=/etc/drefyn/pg_hba.conf,
-        -c,
-        shared_buffers=256MB,
-        -c,
-        max_wal_size=2GB,
-      ]
+    # steady saves do not stall on full page writes. One line, because the self host tests
+    # swap this line whole to change what the server loads.
+    # prettier-ignore
+    command: [postgres, -c, hba_file=/etc/drefyn/pg_hba.conf, -c, shared_buffers=256MB, -c, max_wal_size=2GB]
     # Passed as secrets so they show up as files in the container, not in docker inspect.
     # Compose copies these into the container before start, which is why the root
     # filesystem cannot be read only.
