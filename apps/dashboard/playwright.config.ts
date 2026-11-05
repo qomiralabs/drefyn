@@ -180,6 +180,9 @@ export default defineConfig({
       },
     },
     { name: 'bundle', testMatch: /bundle\.spec\.ts$/, use: { ...chromium } },
+    // One at a time, because each of these times or scores a page and a neighbour is noise.
+    { name: 'inp', workers: 1, testMatch: /\/inp\.spec\.ts$/, use: { ...chromium } },
+    { name: 'lighthouse', workers: 1, testMatch: /lighthouse\.spec\.ts$/, use: { ...chromium } },
     {
       name: 'visual',
       testMatch: /visual\.spec\.ts$/,
