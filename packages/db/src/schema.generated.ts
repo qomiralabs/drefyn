@@ -201,6 +201,13 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.scheduled_jobs
+export interface ScheduledJobsTable {
+  name: string;
+  next_run_at: Generated<Date>;
+  last_run_at: Date | null;
+}
+
 // app.sessions
 export interface SessionsTable {
   id: Generated<string>;
@@ -245,6 +252,7 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;
   users: UsersTable;
 }

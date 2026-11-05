@@ -5,6 +5,10 @@ export const ACME_ID = '01900000-0000-7000-8000-000000000a01';
 export const BETA_ID = '01900000-0000-7000-8000-000000000b01';
 // The settings spec changes people and keys here, so no other spec reads this organization.
 export const KESTREL_ID = '01900000-0000-7000-8000-000000000c01';
+// Nobody belongs here, so only the expiry job's spec ever reads these keys.
+export const VAULT_ID = '01900000-0000-7000-8000-000000000d01';
+export const VAULT_KEY_PAST_LIMIT = '01900000-0000-7000-8000-000000000d11';
+export const VAULT_KEY_INSIDE_LIMIT = '01900000-0000-7000-8000-000000000d12';
 
 export interface Person {
   readonly key: string;
