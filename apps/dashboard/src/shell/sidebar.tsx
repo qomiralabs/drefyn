@@ -7,7 +7,7 @@ import type { ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
-import { parseShellPath, shellHref } from './route.ts';
+import { parseShellPath, sectionHref, shellHref } from './route.ts';
 import { ICON_BY_NAME } from './section-icons.ts';
 import { ACCOUNT_SECTIONS, ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
 import { OrganizationMenu } from './top-bar.tsx';
@@ -25,8 +25,9 @@ const PRODUCT_ICON: Record<ProductId, ShellIcon> = {
 // Wherever settings are open, so a person never hunts for the other half of them.
 const SETTINGS_PATH = /^\/(?:account(?:\/|$)|settings-states\/|[^/]+\/settings(?:\/|$))/;
 
-// Labels leave the screen on the tablet rail but stay in the accessibility tree.
-const RAIL_HIDDEN = 'sm:max-md:sr-only';
+// Labels leave the screen on the rail but stay in the accessibility tree. Incident mode puts
+// wider screens on the rail too.
+const RAIL_HIDDEN = 'sm:max-md:sr-only incident:md:sr-only';
 
 // Below 40rem the sidebar is a drawer, out of the page until it opens.
 const PHONE = '(width < 40rem)';
@@ -104,6 +105,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           label: s.label,
           icon: s.icon,
         }));
+  const currentHref = here === null ? pathname : sectionHref(here);
   const productLabel = PRODUCTS.find((p) => p.id === product)?.label;
   const label = project?.name ?? data.organization.name;
   // A closed drawer is display none, which cannot take focus, so F6 passes it by.
@@ -119,7 +121,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   useEffect(() => {
     if (!drawerOpen) return;
     const others = document.querySelectorAll<HTMLElement>(
-      '[data-region="bar"], #main, [data-skip]',
+      '[data-region="bar"], [data-incident-line], #main, [data-skip]',
     );
     for (const el of others) el.inert = true;
     closeRef.current?.focus();
@@ -166,7 +168,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           {...landmark}
           className={[
             'flex-col gap-16 overflow-y-auto bg-ground px-8 py-12 outline-none focus-visible:focus-ring-inset',
-            'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav',
+            'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav incident:md:w-shell-nav-collapsed incident:md:px-4',
             drawerOpen
               ? 'max-sm:fixed max-sm:inset-y-0 max-sm:start-0 max-sm:z-overlay max-sm:flex max-sm:w-shell-drawer max-sm:border-e max-sm:border-rule-strong max-sm:bg-overlay max-sm:shadow-2'
               : 'hidden',
@@ -235,7 +237,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
             <ul className="flex flex-col gap-2">
               {items.map((item) => (
                 <li key={item.href}>
-                  <NavLink item={item} current={item.href === pathname} />
+                  <NavLink item={item} current={item.href === currentHref} />
                 </li>
               ))}
             </ul>

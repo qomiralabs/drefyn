@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { IncidentLine } from '../incident/line.tsx';
+import { IncidentProvider } from '../incident/provider.tsx';
 import type { ShellData } from '../shell/data.ts';
 import { ShellFrame } from '../shell/frame.tsx';
 import { ShellMain } from '../shell/main.tsx';
@@ -22,18 +24,21 @@ export function ShellChrome({
       orgName={data.organization.name}
       permissions={permissions}
     >
-      <a
-        href="#main"
-        data-skip=""
-        className="fixed start-8 top-8 z-toast -translate-y-64 rounded-sm border border-rule-strong bg-overlay px-12 py-8 text-ink focus-visible:translate-y-0 focus-visible:focus-ring"
-      >
-        Skip to content
-      </a>
-      <TopBar data={data} />
-      <div className="flex">
-        <Sidebar data={data} />
-        <ShellMain>{children}</ShellMain>
-      </div>
+      <IncidentProvider org={data.organization.slug} permissions={permissions}>
+        <a
+          href="#main"
+          data-skip=""
+          className="fixed start-8 top-8 z-toast -translate-y-64 rounded-sm border border-rule-strong bg-overlay px-12 py-8 text-ink focus-visible:translate-y-0 focus-visible:focus-ring"
+        >
+          Skip to content
+        </a>
+        <TopBar data={data} />
+        <IncidentLine />
+        <div className="flex">
+          <Sidebar data={data} />
+          <ShellMain>{children}</ShellMain>
+        </div>
+      </IncidentProvider>
     </ShellFrame>
   );
 }

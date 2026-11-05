@@ -1,12 +1,14 @@
 import { PRODUCTS, type ProductId } from './products.ts';
 
-// Where a shell URL points: /:org, /:org/:product, /:org/:product/:project and the
-// sections under a project.
+// Where a shell URL points: /:org, /:org/:product, /:org/:product/:project, the sections
+// under a project and the incidents under Status.
 export interface ShellLocation {
   readonly org: string;
   readonly product?: ProductId;
   readonly project?: string;
   readonly section?: string;
+  // One thing inside a section. Only incidents have their own URL so far.
+  readonly item?: string;
 }
 
 // Top level paths the app owns, so no organization can take them as its slug.
@@ -39,14 +41,17 @@ export function parseShellPath(pathname: string): ShellLocation | null {
   if (!pathname.startsWith('/')) return null;
   const trimmed = pathname.endsWith('/') ? pathname.slice(1, -1) : pathname.slice(1);
   const parts = trimmed.split('/');
-  if (parts.length > 4 || !parts.every(isSlug)) return null;
-  const [org, product, project, section] = parts as [string, ...(string | undefined)[]];
+  if (parts.length > 5 || !parts.every(isSlug)) return null;
+  const [org, product, project, section, item] = parts as [string, ...(string | undefined)[]];
   if (RESERVED_SLUGS.includes(org)) return null;
   if (product === undefined) return { org };
   if (!isProduct(product)) return null;
   if (project === undefined) return { org, product };
   if (section === undefined) return { org, product, project };
-  return { org, product, project, section };
+  if (item === undefined) return { org, product, project, section };
+  return product === 'status' && section === 'incidents'
+    ? { org, product, project, section, item }
+    : null;
 }
 
 // The inverse of parseShellPath. Segments stop at the first missing one.
@@ -56,10 +61,19 @@ export function shellHref(location: ShellLocation): string {
     parts.push(location.product);
     if (location.project !== undefined) {
       parts.push(location.project);
-      if (location.section !== undefined) parts.push(location.section);
+      if (location.section !== undefined) {
+        parts.push(location.section);
+        if (location.item !== undefined) parts.push(location.item);
+      }
     }
   }
   return `/${parts.join('/')}`;
+}
+
+// The section a location sits in, so an item page still marks its section in the sidebar.
+export function sectionHref(location: ShellLocation): string {
+  const href = shellHref(location);
+  return location.item === undefined ? href : href.slice(0, href.lastIndexOf('/'));
 }
 
 // Switching product keeps the organization and opens that product's home, which goes on to

@@ -68,6 +68,15 @@ export function places(org: string): readonly Command[] {
       permission: 'status.read',
     },
     {
+      id: 'start-incident',
+      icon: 'incident',
+      name: 'Start an incident',
+      kind: 'Status action',
+      keywords: ['outage', 'down'],
+      href: at('/status/acme-status/incidents/new'),
+      permission: 'status.read',
+    },
+    {
       id: 'plan',
       icon: 'card',
       name: 'Plan and usage',
