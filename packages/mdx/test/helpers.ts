@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { organizationId, projectId } from '@drefyn/tenancy';
 import { z } from 'zod';
-import { DEFAULT_LIMITS, parseForStore } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
+import type { ParsePoolConfig } from '../src/pool-config.ts';
 import type { Dialect, MdxIssue, MdxRoot, RenderPolicy } from '../src/index.ts';
 
 export const policy = (overrides: Partial<RenderPolicy> = {}): RenderPolicy => ({
@@ -83,3 +86,61 @@ export const VARIANTS: readonly (readonly [string, (text: string) => string])[] 
   ['no final newline', (text) => text.trimEnd()],
   ['trailing bytes', (text) => `${text}\n\n  \t\n`],
 ];
+
+export const ORG_A = organizationId('00000000-0000-4000-8000-00000000000a');
+export const ORG_B = organizationId('00000000-0000-4000-8000-00000000000b');
+export const PROJECT_A = projectId('00000000-0000-4000-8000-0000000000a1');
+export const PROJECT_B = projectId('00000000-0000-4000-8000-0000000000b1');
+
+export const orgAt = (index: number) =>
+  organizationId(`00000000-0000-4000-a000-${index.toString(16).padStart(12, '0')}`);
+
+// A project id per index, for tests that want many tenants.
+export const projectAt = (index: number) =>
+  projectId(`00000000-0000-4000-9000-${index.toString(16).padStart(12, '0')}`);
+
+export const isolatedPolicy = (components: readonly string[] = []) => ({
+  ...policy(),
+  components: new Set(components),
+});
+
+export const POOL_CONFIG: ParsePoolConfig = {
+  timeoutMs: 1_000,
+  maxMemoryMb: 256,
+  threads: 3,
+  maxQueued: 16,
+  orgThreads: 2,
+  projectThreads: 1,
+  maxQueuedPerOrg: 8,
+  maxQueuedPerProject: 4,
+  orgBudgetMs: 60_000,
+  projectBudgetMs: 60_000,
+  windowMs: 120_000,
+  killGraceMs: 2_000,
+};
+
+// The outer budget follows the window, so a test can shrink one without restating the other.
+export function poolConfig(overrides: Partial<ParsePoolConfig> = {}): ParsePoolConfig {
+  const merged = { ...POOL_CONFIG, ...overrides };
+  const spendable = merged.windowMs * merged.orgThreads - 1;
+  return { ...merged, orgBudgetMs: overrides.orgBudgetMs ?? Math.min(60_000, spendable) };
+}
+
+export interface LogEntry {
+  readonly level: 'info' | 'warn';
+  readonly event: string;
+  readonly fields: Readonly<Record<string, string | number | boolean>>;
+}
+
+export function recordingLogger() {
+  const entries: LogEntry[] = [];
+  return {
+    entries,
+    info(event: string, fields: LogEntry['fields']) {
+      entries.push({ level: 'info', event, fields });
+    },
+    warn(event: string, fields: LogEntry['fields']) {
+      entries.push({ level: 'warn', event, fields });
+    },
+  };
+}

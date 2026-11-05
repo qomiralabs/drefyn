@@ -1,7 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { parseForStore, serialize } from '../src/index.ts';
+import { serialize } from '../src/index.ts';
 import type { Dialect } from '../src/index.ts';
+import { parseForStore } from '../src/parse.ts';
 import { documentArbitrary, dialectArbitrary } from '../fuzz/documents.ts';
 import { policy } from './helpers.ts';
 

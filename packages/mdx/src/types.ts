@@ -49,7 +49,11 @@ export type MdxIssueCode =
   | 'mdx.frontmatter_invalid'
   | 'mdx.dialect_mismatch'
   | 'mdx.parse_timeout'
-  | 'mdx.out_of_memory';
+  | 'mdx.out_of_memory'
+  | 'mdx.queue_full'
+  | 'mdx.organization_limit'
+  | 'mdx.project_limit'
+  | 'mdx.parse_unavailable';
 
 // Codes and places only: an issue can reach a log, and customer text must not.
 export interface MdxIssue {

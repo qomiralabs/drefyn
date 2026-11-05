@@ -1,17 +1,16 @@
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { serialize } from '../src/index.ts';
 import type { Dialect, MdxIssueCode } from '../src/index.ts';
-import { parseIsolated } from '../src/isolated.ts';
-import { policy } from './helpers.ts';
+import { createParsePool } from '../src/pool.ts';
+import { isolatedPolicy, ORG_A, poolConfig, projectAt, recordingLogger } from './helpers.ts';
 
 const BYTES = 200_000;
-const LIMITS = { timeoutMs: 3_000, maxMemoryMb: 256 };
+const LIMITS = poolConfig({ timeoutMs: 3_000 });
 // The bound under test is the timeout. The grace covers a loaded runner starting and stopping
 // a thread, and is still far below the minutes these inputs take with no kill.
 const GRACE_MS = 15_000;
 const RUNS = 12;
-const isolatedPolicy = { ...policy(), components: new Set<string>() };
 
 const STOPPED: readonly MdxIssueCode[] = [
   'mdx.parse_failed',
@@ -34,6 +33,10 @@ const unit = fc.string({
 const page = fc.record({ start: unit, repeated: unit, gap: fc.constantFrom('', '\n\n', '\n') });
 
 describe('generated hostile pages', () => {
+  const pool = createParsePool(LIMITS, { logger: recordingLogger(), onStuck: () => undefined });
+  afterAll(() => pool.close());
+  let run = 0;
+
   it(
     'always settle within the timeout',
     async () => {
@@ -43,7 +46,13 @@ describe('generated hostile pages', () => {
           const body = `${repeated.repeat(Math.ceil(2_000 / repeated.length))}${gap}`;
           const source = start + body.repeat(Math.ceil(BYTES / body.length));
           const began = performance.now();
-          const result = await parseIsolated(source, dialect, isolatedPolicy, LIMITS);
+          const result = await pool.parse({
+            tenant: { organizationId: ORG_A, projectId: projectAt(run++) },
+            path: 'docs/generated.mdx',
+            source,
+            dialect,
+            policy: isolatedPolicy(),
+          });
           expect(performance.now() - began).toBeLessThan(LIMITS.timeoutMs + GRACE_MS);
           if (result.ok) expect(serialize(result.value.ast)).toBe(source);
           else expect(STOPPED).toContain(result.error[0]?.code);
