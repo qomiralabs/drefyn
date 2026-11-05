@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         project: [shell-firefox, auth-no-js]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       COMPOSE_PROJECT_NAME: drefyn-dash-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
       DREFYN_POSTGRES_PORT: '55432'
@@ -60,6 +60,7 @@ jobs:
         run: |
           docker compose --file deploy/compose.yaml exec -T -d postgres sh -c '
             cd /tmp && echo "insert into public.diag_fsync values (1);" > x.sql &&
+            (printf "begin;\nset local synchronous_commit = off;\ninsert into public.diag_fsync values (2);\ncommit;\n" > y.sql; nohup pgbench -U postgres -n -c 1 -R 20 -T 170 --file=y.sql -l --log-prefix=off drefyn > off.out 2>&1 &) ;
             pgbench -U postgres -n -c 1 -R 20 -T 170 --file=x.sql -l --log-prefix=lat drefyn > pgbench.out 2>&1'
       - name: playwright ${{ matrix.project }}
         env:
@@ -74,7 +75,7 @@ jobs:
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
             -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
-            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'if [ "$PROJECT" = shell-firefox ]; then node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure diag-sign-out; else node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure; fi'
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'if [ "$PROJECT" = shell-firefox ]; then node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure --repeat-each=25 sign-out; else node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure; fi'
       - name: Postgres log
         if: always()
         run: docker compose --file deploy/compose.yaml logs postgres | grep -vE '^postgres-1  \| *$' | tail -400
@@ -82,8 +83,8 @@ jobs:
         if: always()
         run: |
           docker compose --file deploy/compose.yaml exec -T postgres sh -c '
-            cat /tmp/pgbench.out | tail -8; cat /tmp/lat* | wc -l;
-            cat /tmp/lat* | sort -n -k3 | tail -12'
+            echo sync; cat /tmp/lat* | wc -l; cat /tmp/lat* | sort -n -k3 | tail -6;
+            echo async; cat /tmp/off* | wc -l; cat /tmp/off* | sort -n -k3 | tail -6'
       - name: upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
