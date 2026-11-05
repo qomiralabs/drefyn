@@ -44,7 +44,7 @@ describe('site logs', () => {
       () => renderStatusPage,
       pageInput(
         { route: `/${SECRET}` },
-        { pages: page(createElement('p', null, SECRET, incompressible(19_000))) },
+        { pages: page(createElement('p', null, SECRET, incompressible(21_000))) },
       ),
     ],
   ])('%s carries ids and never content', (event, pick, input) => {

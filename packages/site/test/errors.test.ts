@@ -70,7 +70,7 @@ describe('site.budget_exceeded', () => {
 
   it('warns between the target and the hard limit, and still renders', () => {
     const warn = vi.fn<SiteLogger['warn']>();
-    const result = renderStatusPage(pageInput({}, { pages: big(19_000) }), { log: { warn } });
+    const result = renderStatusPage(pageInput({}, { pages: big(21_000) }), { log: { warn } });
     if (!result.ok) throw new Error(result.error.code);
     expect(result.value.report.htmlGzipBytes).toBeGreaterThanOrEqual(14_000);
     expect(result.value.report.htmlGzipBytes).toBeLessThan(16_000);
@@ -140,7 +140,7 @@ describe('site.render_failed', () => {
   it.each([
     ['a forged tenant', pageInput({ tenant: { organizationId: 'x', projectId: 'y' } as never })],
     ['a bad locale', pageInput({ locale: '"><script>' })],
-    ['a zero version', pageInput({ policy: { version: -1, maxFirstResponseBytes: 14_000 } })],
+    ['a negative version', pageInput({ policy: { version: -1, maxFirstResponseBytes: 14_000 } })],
     [
       'a target past the hard limit',
       pageInput({ policy: { version: 1, maxFirstResponseBytes: 16_001 } }),
@@ -189,6 +189,7 @@ describe('site.render_failed', () => {
     ['an import', '@import "https://x.test/a.css";.page{color:red}'],
     ['an offsite image', '.page{background:url(https://x.test/a.png)}'],
     ['a protocol relative image', '.page{background:url("//x.test/a.png")}'],
+    ['an offsite image set', '.page{background:image-set("https://x.test/a.png" 1x)}'],
   ])('refuses CSS with %s', (_, css) => {
     expect(failed(renderDocsPage(pageInput({}, { css })))).toEqual({
       code: 'site.render_failed',

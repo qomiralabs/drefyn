@@ -35,7 +35,7 @@ describe('status fonts', () => {
       if (element === null) throw new Error(selector);
       expect(window.getComputedStyle(element).fontVariantNumeric).toBe('tabular-nums');
     }
-    window.happyDOM.abort();
+    void window.happyDOM.abort();
   });
 });
 

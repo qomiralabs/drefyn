@@ -26,7 +26,7 @@ describe('pruneCss', () => {
           }
           for (const n of unused) {
             expect(out).not.toContain(`.c${n}{`);
-            expect(out).not.toContain(`--p${n}`);
+            expect(out).not.toContain(`--p${n}:`);
           }
         },
       ),

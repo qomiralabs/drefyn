@@ -5,7 +5,7 @@ import { createElement } from 'react';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderDocsPage, renderStatusPage } from '../src/index.ts';
-import { article, pageInput } from './fixtures.ts';
+import { pageInput } from './fixtures.ts';
 
 const src = join(dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -94,7 +94,8 @@ describe('no clock and no random source', () => {
 
   it('survives a random source that changes on every call', () => {
     const first = renderDocsPage(pageInput());
-    vi.spyOn(Math, 'random').mockReturnValueOnce(0.999);
+    let next = 0;
+    vi.spyOn(Math, 'random').mockImplementation(() => (next += 0.001));
     expect(renderDocsPage(pageInput())).toEqual(first);
   });
 
@@ -114,6 +115,5 @@ describe('no clock and no random source', () => {
     expect(result.ok && result.value.html).toContain(
       '<main class="page"><p>Everything is running.</p></main>',
     );
-    expect(article).toBeDefined();
   });
 });
