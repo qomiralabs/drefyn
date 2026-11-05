@@ -20,6 +20,12 @@ const WIDE = { width: 1440, height: 900 };
 const NAV = 240;
 const RAIL = 48;
 
+// The chunk route fetches, and a fetch still going when the page closes fails the run after
+// every test has passed. Waiting, not ignoring, so a real error in a handler still counts.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' });
+});
+
 // Runs in the shell-chromium and reduced-motion projects, which differ only in this setting.
 test.describe('entering incident mode', () => {
   test.use({ viewport: WIDE });
