@@ -155,11 +155,16 @@ const needsBlankAfterText = ({ children = [] }: Prepared) =>
       children[index - 1]?.type === 'paragraph',
   );
 
-// A parser leaves a container's prefix on a line of only whitespace, so inside one such a line
-// in a code block grows on every pass.
+// Only a footnote leaves its indent on a line of nothing but whitespace, so such a line in a code
+// block grows on every pass. Lists, quotes and JSX strip theirs.
 function blankCode(child: Prepared): Prepared {
   if (child.type !== 'code') return child;
   return { ...child, value: (child.value as string).replace(/^[ \t]+$/gm, '') };
+}
+
+function settleChildren(type: string, children: Prepared[]): Prepared[] {
+  if (type === 'heading') return spaceBeforeHtml(children);
+  return type === 'footnoteDefinition' ? children.map(blankCode) : children;
 }
 
 // A private copy: values lose their CRLF, which the printer would otherwise double, and the
@@ -174,7 +179,7 @@ function prepare(node: Prepared, dialect: Dialect, tight: boolean): Prepared {
   if (node.attributes !== undefined) copy.attributes = node.attributes.map(foldAttribute);
   if (node.children !== undefined) {
     const children = node.children.map((child) => prepare(child, dialect, inTight));
-    copy.children = node.type === 'heading' ? spaceBeforeHtml(children) : children.map(blankCode);
+    copy.children = settleChildren(node.type, children);
   }
   if (node.type === 'mdxJsxFlowElement' && inTight) copy.data = { tight: true };
   if (node.type === 'listItem' && needsBlankAfterText(node)) copy.spread = true;

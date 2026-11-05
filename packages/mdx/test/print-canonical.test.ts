@@ -92,14 +92,17 @@ describe('the faults found in the stock printer', () => {
     expect(print(`${once}\n`, 'mdx')).toBe(once);
   });
 
-  it('does not grow a whitespace only code line inside a container', () => {
+  it('does not grow a whitespace only code line in a footnote', () => {
     const footnote = print('[^1]: a\n\n    ```\n      \n    ```\n');
     expect(footnote).toBe('[^1]: a\n\n    ```\n    ```');
-    expect(print('- ```\n  a\n     \n  b\n  ```\n')).toBe('- ```\n  a\n\n  b\n  ```');
   });
 
-  it('keeps a whitespace only code line at the top level', () => {
+  it('keeps a whitespace only code line everywhere else', () => {
     expect(print('```\n  \n```\n')).toBe('```\n  \n```');
+    const list = '- ```\n  a\n     \n  b\n  ```\n';
+    expect(print(list)).toBe(list.trimEnd());
+    const jsx = '<A>\n  ```\n  a\n    \n  b\n  ```\n</A>\n';
+    expect(print(jsx, 'mdx')).toBe(jsx.trimEnd());
   });
 
   it('settles an item with a thematic break after its text', () => {
