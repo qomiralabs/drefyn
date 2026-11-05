@@ -41,6 +41,8 @@ jobs:
             axe,
             reduced-motion,
             bundle,
+            inp,
+            lighthouse,
             auth,
             auth-no-js,
             auth-hop,
@@ -95,6 +97,15 @@ jobs:
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
             -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
             "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'node_modules/.bin/playwright test --project="${PROJECT%-[0-9]}" && node e2e/egress-check.ts'
+      # The numbers are the point of these two, so they stay on a green run as well.
+      - name: upload the scores
+        if: ${{ always() && (matrix.project == 'inp' || matrix.project == 'lighthouse') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dashboard-${{ matrix.project }}-scores
+          path: apps/dashboard/test-results/${{ matrix.project }}
+          if-no-files-found: error
+          retention-days: 14
       - name: Postgres log
         if: failure()
         run: docker compose -f deploy/compose.yaml logs postgres

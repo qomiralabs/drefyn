@@ -19,5 +19,10 @@ patchedDependencies:
 
 # Next lists sharp as an optional dependency for image optimisation. Its prebuilt libvips
 # binaries are LGPL, so it is never installed; the dashboard serves images unoptimized.
+#
+# Lighthouse imports @sentry/node only when error reporting is on, which it never is here.
+# Under it sits a Sentry CLI under FSL-1.1-Apache-2.0, a licence we do not take, so neither
+# is installed, and the audit run has nothing to phone home with.
 overrides:
   sharp: '-'
+  '@sentry/node': '-'

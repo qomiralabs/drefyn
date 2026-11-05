@@ -1,5 +1,5 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   Cell,
   CheckboxButton,
@@ -73,6 +73,7 @@ export interface TableProps<T extends { id: string }> {
 
 const ROW_HEIGHT = { compact: 'h-row-compact', comfortable: 'h-row-comfortable' } as const;
 const SKELETON_ROWS = 5;
+const NONE_DISABLED: Readonly<Record<string, string>> = {};
 
 // A hairline between rows. Hover takes the hover fill except on a selected row, which keeps
 // its wash and the accent bar on its leading edge; the ring sits inside the row's edge.
@@ -188,7 +189,7 @@ export function Table<T extends { id: string }>({
   selected,
   defaultSelected,
   onSelectionChange,
-  disabledRows = {},
+  disabledRows = NONE_DISABLED,
   onRowAction,
   density = 'compact',
   loading = false,
@@ -201,6 +202,101 @@ export function Table<T extends { id: string }>({
   const current = sort ?? ownSort;
   const chosen = selected ?? ownSelected;
   const failed = error !== undefined && error.trim() !== '';
+  const by = columns.find((c) => c.id === current?.column)?.sortValue;
+  const direction = current?.direction;
+  const shown = useMemo(
+    () => (direction === undefined || by === undefined ? rows : sortRows(rows, by, direction)),
+    [rows, by, direction],
+  );
+  const hasRowAction = onRowAction !== undefined;
+
+  // React Aria walks these elements to build its collection, and a new element walks it all
+  // again, every cell included. A row reads its selection from context, so holding the
+  // elements still is what keeps a press on one box from paying for the whole table.
+  const header = useMemo(
+    () => (
+      <TableHeader className="bg-raised">
+        {selectable ? (
+          <Column id="__select" className={`${HEAD} w-0`}>
+            <SelectionBox label="Select all" />
+          </Column>
+        ) : null}
+        {columns.map((column) => (
+          <Column
+            key={column.id}
+            id={column.id}
+            isRowHeader={column.rowHeader === true}
+            allowsSorting={column.sortValue !== undefined}
+            className={`${HEAD} ${column.numeric === true ? 'text-end' : ''} ${
+              column.sortValue === undefined ? '' : 'cursor-pointer data-hovered:text-ink'
+            }`}
+          >
+            {({ allowsSorting, sortDirection }) => (
+              <span
+                className={`inline-flex items-center gap-4 ${column.numeric === true ? 'flex-row-reverse' : ''}`}
+              >
+                {column.label}
+                {allowsSorting ? <SortMark direction={sortDirection} /> : null}
+              </span>
+            )}
+          </Column>
+        ))}
+      </TableHeader>
+    ),
+    [columns, selectable],
+  );
+  const body = useMemo(
+    () => (
+      <TableBody
+        {...(loading && shown.length === 0
+          ? {
+              renderEmptyState: () => <LoadingRows label={label} density={density} />,
+            }
+          : {})}
+      >
+        {shown.map((row) => {
+          const reason = disabledRows[row.id];
+          return (
+            <Row
+              key={row.id}
+              id={row.id}
+              className={`${ROW} ${ROW_HEIGHT[density]} ${
+                !hasRowAction || reason !== undefined ? '' : 'cursor-pointer'
+              }`}
+            >
+              {selectable ? (
+                // The selected row's accent bar sits on the leading edge of this cell.
+                <Cell
+                  className={`${CELL} w-0 border-s-indicator border-s-transparent in-data-selected:border-s-accent-ink`}
+                >
+                  <SelectionBox />
+                </Cell>
+              ) : null}
+              {columns.map((column) => (
+                <Cell
+                  key={column.id}
+                  className={`${CELL} ${column.numeric === true ? 'text-end tabular-nums' : ''}`}
+                >
+                  {column.rowHeader === true && reason !== undefined ? (
+                    <span className="flex flex-col py-4">
+                      <span>{column.cell(row)}</span>
+                      <span className="flex items-center gap-4 text-caption text-secondary">
+                        <IconLock />
+                        {reason}
+                      </span>
+                    </span>
+                  ) : (
+                    column.cell(row)
+                  )}
+                </Cell>
+              ))}
+            </Row>
+          );
+        })}
+      </TableBody>
+    ),
+    [columns, density, disabledRows, hasRowAction, label, loading, selectable, shown],
+  );
   const retry =
     onRetry === undefined ? null : (
       <Button variant="secondary" size="sm" onClick={onRetry}>
@@ -227,9 +323,6 @@ export function Table<T extends { id: string }>({
     );
   }
 
-  const by = columns.find((c) => c.id === current?.column)?.sortValue;
-  const shown =
-    current === undefined || by === undefined ? rows : sortRows(rows, by, current.direction);
   const selectableIds = shown.filter((r) => disabledRows[r.id] === undefined).map((r) => r.id);
   const descriptor: SortDescriptor | undefined =
     current === undefined ? undefined : { column: current.column, direction: current.direction };
@@ -282,80 +375,8 @@ export function Table<T extends { id: string }>({
               })}
           className="w-full border-collapse bg-ground outline-none"
         >
-          <TableHeader className="bg-raised">
-            {selectable ? (
-              <Column id="__select" className={`${HEAD} w-0`}>
-                <SelectionBox label="Select all" />
-              </Column>
-            ) : null}
-            {columns.map((column) => (
-              <Column
-                key={column.id}
-                id={column.id}
-                isRowHeader={column.rowHeader === true}
-                allowsSorting={column.sortValue !== undefined}
-                className={`${HEAD} ${column.numeric === true ? 'text-end' : ''} ${
-                  column.sortValue === undefined ? '' : 'cursor-pointer data-hovered:text-ink'
-                }`}
-              >
-                {({ allowsSorting, sortDirection }) => (
-                  <span
-                    className={`inline-flex items-center gap-4 ${column.numeric === true ? 'flex-row-reverse' : ''}`}
-                  >
-                    {column.label}
-                    {allowsSorting ? <SortMark direction={sortDirection} /> : null}
-                  </span>
-                )}
-              </Column>
-            ))}
-          </TableHeader>
-          <TableBody
-            {...(loading && shown.length === 0
-              ? {
-                  renderEmptyState: () => <LoadingRows label={label} density={density} />,
-                }
-              : {})}
-          >
-            {shown.map((row) => {
-              const reason = disabledRows[row.id];
-              return (
-                <Row
-                  key={row.id}
-                  id={row.id}
-                  className={`${ROW} ${ROW_HEIGHT[density]} ${
-                    onRowAction === undefined || reason !== undefined ? '' : 'cursor-pointer'
-                  }`}
-                >
-                  {selectable ? (
-                    // The selected row's accent bar sits on the leading edge of this cell.
-                    <Cell
-                      className={`${CELL} w-0 border-s-indicator border-s-transparent in-data-selected:border-s-accent-ink`}
-                    >
-                      <SelectionBox />
-                    </Cell>
-                  ) : null}
-                  {columns.map((column) => (
-                    <Cell
-                      key={column.id}
-                      className={`${CELL} ${column.numeric === true ? 'text-end tabular-nums' : ''}`}
-                    >
-                      {column.rowHeader === true && reason !== undefined ? (
-                        <span className="flex flex-col py-4">
-                          <span>{column.cell(row)}</span>
-                          <span className="flex items-center gap-4 text-caption text-secondary">
-                            <IconLock />
-                            {reason}
-                          </span>
-                        </span>
-                      ) : (
-                        column.cell(row)
-                      )}
-                    </Cell>
-                  ))}
-                </Row>
-              );
-            })}
-          </TableBody>
+          {header}
+          {body}
         </AriaTable>
       </div>
       {selectable ? (
