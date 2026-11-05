@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [shell-firefox, auth-no-js]
+        project: [shell-firefox]
         shard: [1, 2, 3, 4, 5, 6]
     env:
       COMPOSE_PROJECT_NAME: drefyn-dash-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -75,7 +75,7 @@ jobs:
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/apps/dashboard" \
             -v "$(dirname "$(dirname "$(command -v node)")"):/opt/node:ro" \
             -e HOME=/root -e CI -e PATH="/opt/node/bin:/usr/bin:/bin" -e PROJECT -e DREFYN_PLAYWRIGHT_IMAGE \
-            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'if [ "$PROJECT" = shell-firefox ]; then node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure --repeat-each=25 sign-out; else node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure; fi'
+            "$DREFYN_PLAYWRIGHT_IMAGE" sh -c 'if [ "$PROJECT" = shell-firefox ]; then node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure --repeat-each=200 sign-out -g "drops its own cookies"; else node_modules/.bin/playwright test --project="$PROJECT" --trace=retain-on-failure; fi'
       - name: Postgres log
         if: always()
         run: docker compose --file deploy/compose.yaml logs postgres | grep -vE '^postgres-1  \| *$' | tail -400
