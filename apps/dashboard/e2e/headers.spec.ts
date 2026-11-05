@@ -143,6 +143,7 @@ test('an inline script without the nonce does not run, one with it does', async 
     await route.fulfill({ response: res, body });
   });
   await page.goto('/acme');
+  await page.unrouteAll({ behavior: 'wait' });
   const ran = await page.evaluate(() => {
     const w = window as unknown as { __injected?: boolean; __trusted?: boolean };
     return { injected: w.__injected === true, trusted: w.__trusted === true };
