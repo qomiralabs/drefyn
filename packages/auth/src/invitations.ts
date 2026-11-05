@@ -26,10 +26,9 @@ import {
 } from './invitation-links.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import { UNNAMED_PERSON, checkedDisplayName, memberName, noticeEach } from './notices.ts';
-import type { OrganizationStore } from './organizations.ts';
+import { countUsed, type OrganizationStore } from './organizations.ts';
 import { ORG_ROLES, canAssign, permissionsFor, type OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
-import { countUsed } from './seat-count.ts';
 import {
   fail,
   idFields,
