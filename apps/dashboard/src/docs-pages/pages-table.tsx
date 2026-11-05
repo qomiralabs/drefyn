@@ -1,6 +1,14 @@
 'use client';
 import { Badge, Button, EmptyState, Skeleton, Table } from '@drefyn/ui/react';
-import { useId, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  startTransition,
+  useDeferredValue,
+  useId,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import type { DocsPage, Freshness } from '../fixtures/pages.ts';
 import { useOptimistic, type Tenant } from '../optimistic/use-optimistic.tsx';
 import { writePages } from '../server/pages-actions.ts';
@@ -88,10 +96,36 @@ export function PagesTable({
   const write = async (changes: readonly { id: string; archived: boolean }[]) =>
     pagesFrom(await writePages(org, { project, pages: changes }));
 
+  // The grid is the slowest thing on this page and its first render after a press took
+  // 300 ms on a CI runner. Rows follow the toast and the count in a render that can yield, so
+  // the press paints first and the row leaves a frame later.
+  const shown = useDeferredValue(rows);
+  const grid = useMemo(() => {
+    const held = new Set(selected);
+    const ids = shown.filter((page) => held.has(page.id)).map((page) => page.id);
+    return (
+      <Table
+        label="Pages"
+        columns={COLUMNS}
+        rows={shown}
+        selectable
+        selected={ids}
+        onSelectionChange={setSelected}
+        empty={
+          <EmptyState title="No pages to show" headingLevel={2}>
+            Archived pages are kept. Nothing was deleted.
+          </EmptyState>
+        }
+      />
+    );
+  }, [shown, selected]);
+
   const archive = () => {
     const name = chosen.length === 1 ? chosen[0]?.title : undefined;
     const ids = chosen.map((page) => page.id);
-    setSelected([]);
+    startTransition(() => {
+      setSelected([]);
+    });
     store.run({
       action: 'pages.archive',
       ids,
@@ -126,23 +160,7 @@ export function PagesTable({
           Archive
         </Button>
       </div>
-      {inBrowser ? (
-        <Table
-          label="Pages"
-          columns={COLUMNS}
-          rows={rows}
-          selectable
-          selected={chosen.map((page) => page.id)}
-          onSelectionChange={setSelected}
-          empty={
-            <EmptyState title="No pages to show" headingLevel={2}>
-              Archived pages are kept. Nothing was deleted.
-            </EmptyState>
-          }
-        />
-      ) : (
-        <RowsArriving rows={rows.length} />
-      )}
+      {inBrowser ? grid : <RowsArriving rows={rows.length} />}
     </div>
   );
 }

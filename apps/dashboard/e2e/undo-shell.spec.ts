@@ -39,7 +39,7 @@ test.describe('archive with undo', () => {
     await expect(row(page, 'Errors')).toHaveCount(0);
     await toastRegion(page).getByRole('button', { name: 'Undo' }).click();
     await expect(toastRegion(page).getByText('2 pages are back.')).toBeVisible();
-    expect(await titles(page)).toEqual(before);
+    await expect.poll(() => titles(page)).toEqual(before);
   });
 
   test('a refused change rolls back, keeps the choice and says so', async ({ page }) => {
@@ -51,7 +51,7 @@ test.describe('archive with undo', () => {
     const alert = toastRegion(page).getByRole('alert');
     await expect(alert).toContainText('Could not archive Refunds.');
     await expect(alert).toContainText('Nothing changed. Try again.');
-    expect(await titles(page)).toEqual(before);
+    await expect.poll(() => titles(page)).toEqual(before);
     await expect(row(page, 'Refunds').getByRole('checkbox')).toBeChecked();
     await expect(toastRegion(page).getByRole('button', { name: 'Undo' })).toHaveCount(0);
   });
