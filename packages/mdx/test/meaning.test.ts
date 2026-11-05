@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { meaningOf } from '../src/meaning.ts';
+import { rawOf } from '../src/index.ts';
+import { keptItsBytes, meaningOf } from '../src/meaning.ts';
 import type { MdxBlock } from '../src/index.ts';
 
 const of = (...nodes: readonly unknown[]) => meaningOf(nodes as readonly MdxBlock[]);
@@ -181,5 +182,104 @@ describe('what does', () => {
     const b = { type: 'code', value: 'b' };
     expect(of(a, b)).not.toBe(of(b, a));
     expect(of(a, a)).not.toBe(of(a));
+  });
+});
+
+describe('a block that claims its stored bytes', () => {
+  const words = (value: string) => paragraph({ type: 'text', value });
+  const stored = (node: unknown) =>
+    ({ ...(node as object), source: { rawOf: rawOf(node as MdxBlock) } }) as unknown as MdxBlock;
+  const kept = (block: unknown, again?: unknown) =>
+    keptItsBytes(
+      [block] as unknown as readonly MdxBlock[],
+      (again === undefined ? [] : [again]) as unknown as readonly MdxBlock[],
+    );
+  const reference = (type: string, fields: object) => paragraph({ type, ...fields });
+  const named = { children: [{ type: 'text', value: 'a' }] };
+
+  it('holds when it comes back as the same tree', () => {
+    expect(kept(stored(words('a')), words('a'))).toBe(true);
+  });
+
+  it('fails when it does not come back at all', () => {
+    expect(kept(stored(words('a')))).toBe(false);
+  });
+
+  it('fails on added words, with no reference to explain them', () => {
+    expect(kept(stored(words('a')), words('a and more'))).toBe(false);
+  });
+
+  it('does not ask this of a printed block', () => {
+    expect(kept(words('a'), words('b'))).toBe(true);
+    const moved = { ...words('a'), source: { rawOf: 'not this tree' } };
+    expect(kept(moved, words('b'))).toBe(true);
+  });
+
+  it.each(['linkReference', 'imageReference', 'footnoteReference'])(
+    'lets %s settle to the text that names it, either way',
+    (type) => {
+      const asReference = reference(type, named);
+      expect(kept(stored(asReference), words('[a]'))).toBe(true);
+      expect(kept(stored(words('[a]')), asReference)).toBe(true);
+    },
+  );
+
+  it('finds a reference among other children', () => {
+    const mixed = paragraph({ type: 'text', value: 'x ' }, { type: 'linkReference', ...named });
+    expect(kept(stored(mixed), words('x [a]'))).toBe(true);
+  });
+
+  it('still wants every word the tree held, in order and whole', () => {
+    expect(kept(stored(reference('linkReference', named)), words('b'))).toBe(false);
+    const two = paragraph({ type: 'text', value: 'ab' }, { type: 'linkReference', ...named });
+    expect(kept(stored(two), words('a b [a]'))).toBe(false);
+  });
+
+  it('reads alt text, and nothing that is not text', () => {
+    const image = reference('imageReference', { alt: 'a' });
+    expect(kept(stored(image), words('![a]'))).toBe(true);
+    expect(kept(stored(image), words('b'))).toBe(false);
+    const number = reference('linkReference', { value: 7, children: [] });
+    expect(kept(stored(number), words('nothing'))).toBe(true);
+  });
+
+  it('skips what an editor left empty when it pairs the blocks', () => {
+    expect(
+      keptItsBytes(
+        [paragraph(), stored(words('a'))] as readonly MdxBlock[],
+        [words('a')] as unknown as readonly MdxBlock[],
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('fields a tree can leave out', () => {
+  it('tells a value that is not text from one that is', () => {
+    expect(of({ type: 'html', value: 0 })).not.toBe(of({ type: 'html', value: null }));
+    expect(of({ type: 'code', value: 1 })).not.toBe(of({ type: 'code', value: 2 }));
+  });
+
+  it('gives a definition with no name no name, and folds only down', () => {
+    expect(of({ type: 'definition', identifier: 1, url: 'a' })).toBe(
+      of({ type: 'definition', url: 'a' }),
+    );
+    expect(of({ type: 'definition', identifier: 'ß', url: 'a' })).toBe(
+      of({ type: 'definition', identifier: 'ß', url: 'a' }),
+    );
+    expect(of({ type: 'definition', identifier: 'ß', url: 'a' })).not.toBe(
+      of({ type: 'definition', identifier: 'SS', url: 'a' }),
+    );
+  });
+
+  it('keeps alignment by column', () => {
+    expect(of({ type: 'table', align: ['left', null], children: [] })).not.toBe(
+      of({ type: 'table', align: [null, 'left'], children: [] }),
+    );
+    expect(of({ type: 'table', align: ['left', null, null], children: [] })).toBe(
+      of({ type: 'table', align: ['left'], children: [] }),
+    );
+    expect(of({ type: 'table', align: [null, null, 'left'], children: [] })).not.toBe(
+      of({ type: 'table', align: [null, 'left'], children: [] }),
+    );
   });
 });
