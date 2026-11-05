@@ -51,6 +51,19 @@ test('the command bar opens without travel under reduced motion', async ({ page 
   expect(moving).toBe(0);
 });
 
+test('a settings dialog opens without travel under reduced motion', async ({ page }) => {
+  await openShell(page, '/settings-states/keys/revoke');
+  await expect(page.getByRole('dialog', { name: 'Revoke ci-deploy?' })).toBeVisible();
+  const moving = await page.evaluate(
+    () =>
+      document.getAnimations().filter((a) => {
+        const effect = a.effect as KeyframeEffect | null;
+        return (effect?.getKeyframes() ?? []).some((k) => 'transform' in k || 'translate' in k);
+      }).length,
+  );
+  expect(moving).toBe(0);
+});
+
 test.describe('the signed out brand half', () => {
   test.use({ storageState: SIGNED_OUT, viewport: { width: 1280, height: 800 } });
 

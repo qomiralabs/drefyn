@@ -5,6 +5,7 @@ import {
   appOrigin,
   appUrl,
   originAllowed,
+  sameOriginNavigation,
   REQUEST_PATH_HEADER,
   requestPath,
 } from '../src/server/origin.ts';
@@ -96,6 +97,22 @@ describe('requestPath', () => {
 
   it('names the private header', () => {
     expect(REQUEST_PATH_HEADER).toBe('x-drefyn-request-path');
+  });
+});
+
+describe('sameOriginNavigation', () => {
+  const from = (init: Record<string, string>) => sameOriginNavigation(new Headers(init));
+
+  it('takes only a navigation that started on this origin', () => {
+    expect(from({ 'sec-fetch-site': 'same-origin' })).toBe(true);
+  });
+
+  it.each(['cross-site', 'same-site', 'none', '', 'Same-Origin'])('refuses %j', (site) => {
+    expect(from({ 'sec-fetch-site': site })).toBe(false);
+  });
+
+  it('refuses a request that does not say', () => {
+    expect(from({})).toBe(false);
   });
 });
 

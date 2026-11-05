@@ -87,6 +87,7 @@ describe('sidebar sections', () => {
       '',
       'settings/plan',
       'settings/members',
+      'settings/api-keys',
       'settings',
     ]);
   });

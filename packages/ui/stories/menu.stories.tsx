@@ -194,3 +194,24 @@ export const InARow: Story = {
     </WithOutput>
   ),
 };
+
+// A filter: the menu stays open while several are chosen, and each item says how many rows it
+// would keep. Sort is the single choice form, which closes on the first press.
+function RoleFilter() {
+  const [roles, setRoles] = useState<string[]>(['member']);
+  return (
+    <Menu trigger="Role" selectionMode="multiple" selected={roles} onSelectionChange={setRoles}>
+      <MenuItem id="owner" meta="1">
+        Owner
+      </MenuItem>
+      <MenuItem id="admin" meta="1">
+        Admin
+      </MenuItem>
+      <MenuItem id="member" meta="2">
+        Member
+      </MenuItem>
+    </Menu>
+  );
+}
+
+export const Filter: Story = { render: () => <RoleFilter /> };

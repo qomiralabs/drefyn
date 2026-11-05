@@ -1,7 +1,13 @@
 'use client';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { Button, Menu as AriaMenu, MenuTrigger, Popover } from 'react-aria-components';
+import {
+  Button,
+  Menu as AriaMenu,
+  MenuTrigger,
+  Popover,
+  type Selection,
+} from 'react-aria-components';
 import { buttonClasses, LABEL_CELL, type ButtonShape, type ButtonSize } from './button-classes.ts';
 import { Sheet, usePhone, useTriggerText } from './sheet.tsx';
 
@@ -20,6 +26,10 @@ export interface MenuProps {
   label?: string;
   onAction?: (id: string) => void;
   defaultOpen?: boolean;
+  // Items become checkboxes or radios: a filter or a sort, not a list of actions.
+  selectionMode?: 'single' | 'multiple';
+  selected?: readonly string[];
+  onSelectionChange?: (ids: string[]) => void;
   children: ReactNode;
 }
 
@@ -39,6 +49,9 @@ export function Menu({
   label,
   onAction,
   defaultOpen = false,
+  selectionMode,
+  selected = [],
+  onSelectionChange,
   children,
 }: MenuProps): ReactNode {
   const iconOnly = triggerLabel !== undefined;
@@ -89,6 +102,17 @@ export function Menu({
           : {
               onAction: (key) => {
                 onAction(String(key));
+              },
+            })}
+        {...(selectionMode === undefined
+          ? {}
+          : {
+              selectionMode,
+              selectedKeys: selected,
+              // Several filters are chosen in one visit, so that menu stays open.
+              shouldCloseOnSelect: selectionMode === 'single',
+              onSelectionChange: (keys: Selection) => {
+                onSelectionChange?.(keys === 'all' ? [] : [...keys].map(String));
               },
             })}
         className="flex flex-col outline-none"

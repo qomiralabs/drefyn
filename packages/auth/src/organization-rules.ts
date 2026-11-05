@@ -50,6 +50,7 @@ export const RESERVED_SLUGS: readonly string[] = Object.freeze([
   'root',
   'security',
   'settings',
+  'settings-states',
   'sign-in',
   'sign-out',
   'sign-up',

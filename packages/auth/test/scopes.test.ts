@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  API_KEY_SCOPES,
   MANAGEMENT_PERMISSIONS,
   PERMISSIONS,
   createScopeRegistry,
@@ -87,5 +88,18 @@ describe('createScopeRegistry', () => {
     }));
     expectAuthError(() => createScopeRegistry(many), 'AUTH_CONFIG_INVALID');
     expect(createScopeRegistry(many.slice(0, 64)).scopes).toHaveLength(64);
+  });
+});
+
+describe('the scopes the pages offer', () => {
+  it('all pass the registry rules', () => {
+    const registry = createScopeRegistry(
+      API_KEY_SCOPES.map(({ scope, permission }) => ({ scope, permission })),
+    );
+    expect(registry.scopes).toHaveLength(API_KEY_SCOPES.length);
+  });
+
+  it('say which product they belong to', () => {
+    for (const { scope, product } of API_KEY_SCOPES) expect(scope.split(':')[0]).toBe(product);
   });
 });

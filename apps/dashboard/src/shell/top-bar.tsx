@@ -56,11 +56,19 @@ export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
       <MenuItem id="members" onAction={go('/settings/members')}>
         Members
       </MenuItem>
+      <MenuItem id="api-keys" onAction={go('/settings/api-keys')}>
+        API keys
+      </MenuItem>
       <MenuItem id="settings" onAction={go('/settings')}>
         Organization settings
       </MenuItem>
       <MenuSeparator />
-      <MenuItem id="create" onAction={notYet('Creating an organization')}>
+      <MenuItem
+        id="create"
+        onAction={() => {
+          router.push('/organizations/new');
+        }}
+      >
         Create organization
       </MenuItem>
     </Menu>
@@ -68,6 +76,7 @@ export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
 }
 
 function AccountMenu({ data }: { data: ShellData }): ReactNode {
+  const router = useRouter();
   const [theme, setTheme] = useState<ThemeChoice>('system');
   const choose = (choice: ThemeChoice) => () => {
     applyTheme(choice);
@@ -106,7 +115,12 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
       <MenuItem id="shortcuts" shortcut="?" onAction={notYet('The shortcuts sheet')}>
         Keyboard shortcuts
       </MenuItem>
-      <MenuItem id="profile" onAction={notYet('Profile and security')}>
+      <MenuItem
+        id="profile"
+        onAction={() => {
+          router.push('/account');
+        }}
+      >
         Profile and security
       </MenuItem>
       <MenuSeparator />

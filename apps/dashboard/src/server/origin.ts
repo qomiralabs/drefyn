@@ -51,3 +51,9 @@ export function originAllowed(headers: Pick<Headers, 'get'>, origin: string): bo
   const site = headers.get('sec-fetch-site');
   return site === null || site === 'same-origin';
 }
+
+// For a GET that acts on a signed in person. Top level navigations carry a lax cookie and no
+// Origin, so only the browser's own word says where one started. A missing header is refused.
+export function sameOriginNavigation(headers: Pick<Headers, 'get'>): boolean {
+  return headers.get('sec-fetch-site') === 'same-origin';
+}

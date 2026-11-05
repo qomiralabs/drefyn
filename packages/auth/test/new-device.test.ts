@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
-  SESSIONS_PAGE_PLACEHOLDER_PATH,
+  SESSIONS_PAGE_PATH,
   createEmailSignIn,
   createPasswordSignIn,
   encodeSecret,
@@ -103,7 +103,7 @@ describe('newDeviceNotice', () => {
           method: 'password',
           device: 'Safari on iOS',
           at: SEEN_AT,
-          sessionsLink: new URL(SESSIONS_PAGE_PLACEHOLDER_PATH, config.appOrigin),
+          sessionsLink: new URL(SESSIONS_PAGE_PATH, config.appOrigin),
         },
       },
     ]);
