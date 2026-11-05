@@ -1,6 +1,11 @@
 import { TIERS, limitFor, type Tier } from '@drefyn/entitlements';
 import { describe, expect, it } from 'vitest';
-import { includedSentence, seatMeta, seatsSentence } from '../src/server/plan-words.ts';
+import {
+  includedSentence,
+  projectCountSentence,
+  seatMeta,
+  seatsSentence,
+} from '../src/server/plan-words.ts';
 
 describe('seat words', () => {
   it('counts against the plan where it has a limit', () => {
@@ -12,6 +17,15 @@ describe('seat words', () => {
     expect(seatsSentence({ used: 1, limit: 'unlimited' })).toBe('1 seat used.');
     expect(seatsSentence({ used: 7, limit: 'unlimited' })).toBe('7 seats used.');
     expect(seatMeta({ used: 7, limit: 'unlimited' })).toBe('7');
+  });
+});
+
+describe('project counts', () => {
+  it('names what each product holds', () => {
+    expect(projectCountSentence('docs', 0)).toBe('No Docs projects yet.');
+    expect(projectCountSentence('docs', 1)).toBe('1 Docs project.');
+    expect(projectCountSentence('status', 1)).toBe('1 status page.');
+    expect(projectCountSentence('status', 3)).toBe('3 status pages.');
   });
 });
 

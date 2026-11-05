@@ -14,7 +14,7 @@ import {
   useTheme,
 } from './fixtures.ts';
 import { expectBodyLeaksNothing, expectTitleLeaksNothing, UNKNOWN_ORG_PATHS } from './leaks.ts';
-import { LIV, NOOR, SAM, stateFile } from './people.ts';
+import { LIV, OMAR, SAM, stateFile } from './people.ts';
 import { test } from './test.ts';
 
 test.describe('flag on', () => {
@@ -488,16 +488,20 @@ test.describe('what a person reaches', () => {
     });
   });
 
+  // Beta is targeted off in the flag file, so Noor's side is proved in guard.spec.ts and the
+  // shell is proved here by an owner of an organization with the flag on.
   test.describe('a member of another organization', () => {
-    test.use({ storageState: stateFile(NOOR) });
+    test.use({ storageState: stateFile(OMAR) });
 
     test('sees nothing of acme', async ({ page, request }) => {
-      await openShell(page, '/beta');
-      await banner(page).getByRole('button', { name: /^Beta/ }).click();
+      await openShell(page, '/kestrel');
+      await banner(page)
+        .getByRole('button', { name: /^Kestrel/ })
+        .click();
       const menu = page.getByRole('menu', { name: 'Organization' });
+      await expect(menu.getByRole('menuitem', { name: /^Kestrel/ })).toContainText('Growth');
       await expect(menu.getByRole('menuitem', { name: /^Acme/ })).toHaveCount(0);
-      await expect(menu.getByRole('menuitem', { name: /^Beta/ })).toContainText('Starter');
-      const body = await (await request.get('/beta')).text();
+      const body = await (await request.get('/kestrel')).text();
       for (const word of ['Acme', 'Payments API docs', 'Maya Okafor']) {
         expect(body, word).not.toContain(word);
       }

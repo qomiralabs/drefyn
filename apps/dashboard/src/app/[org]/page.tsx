@@ -2,7 +2,7 @@ import { IconLock } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { guardOrganization } from '../../server/guard.ts';
-import { includedSentence, seatsSentence } from '../../server/plan-words.ts';
+import { includedSentence, projectCountSentence, seatsSentence } from '../../server/plan-words.ts';
 import { projectsInReach, reachesProduct } from '../../server/projects.ts';
 import { PLAN_LABELS, readShell } from '../../server/shell-data.ts';
 import { needsYouSentence } from '../../shell/needs-you.ts';
@@ -16,11 +16,6 @@ interface Params {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { view } = await guardOrganization((await params).org);
   return { title: `${view.organizationName} overview` };
-}
-
-function countSentence(label: string, count: number): string {
-  if (count === 0) return `No ${label} projects yet.`;
-  return `${String(count)} ${label} ${count === 1 ? 'project' : 'projects'}.`;
 }
 
 // The organization overview answers "does anything need me?" in one sentence, then one row
@@ -57,7 +52,7 @@ export default async function Overview({ params }: Params) {
               <p className="w-96 shrink-0 text-label text-secondary uppercase">{product.label}</p>
               <div className="flex min-w-0 flex-1 flex-col gap-4">
                 <p className="flex items-center gap-8 text-body-m text-ink">
-                  {countSentence(product.label, held(product.id).length)}
+                  {projectCountSentence(product.id, held(product.id).length)}
                   {held(product.id).some((p) => p.readOnly) ? (
                     <span role="img" aria-label="Read only" className="inline-flex text-secondary">
                       <IconLock />

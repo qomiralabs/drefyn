@@ -107,6 +107,8 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           label: s.label,
           icon: s.icon,
         }));
+  // Links carry the organization, and the state gallery's URL does not.
+  const currentHref = here === null ? pathname : shellHref({ ...here, org });
   const productLabel = PRODUCTS.find((p) => p.id === product)?.label;
   const label = project?.name ?? data.organization.name;
   // A closed drawer is display none, which cannot take focus, so F6 passes it by.
@@ -238,7 +240,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
             <ul className="flex flex-col gap-2">
               {items.map((item) => (
                 <li key={item.href}>
-                  <NavLink item={item} current={item.href === pathname} />
+                  <NavLink item={item} current={item.href === currentHref} />
                 </li>
               ))}
             </ul>

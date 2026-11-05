@@ -27,6 +27,12 @@ export const seatsPhrase = ({ used, limit }: SeatCount): string =>
     ? `${String(used)} ${used === 1 ? 'seat' : 'seats'}`
     : `${String(used)} of ${String(limit)} seats`;
 
+export function projectCountSentence(product: ProductId, count: number): string {
+  const [one, many] = PROJECT_WORDS[product];
+  if (count === 0) return `No ${many} yet.`;
+  return `${String(count)} ${count === 1 ? one : many}.`;
+}
+
 export function includedSentence(tier: Tier, product: ProductId): string {
   const plan = PLAN_LABELS[tier];
   const limit = limitFor(tier, PROJECT_LIMITS[product]);
