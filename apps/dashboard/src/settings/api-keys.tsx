@@ -9,6 +9,7 @@ import {
   dayWords,
   firstPage,
   keyFilterSearch,
+  keyRowTone,
   needsTypedName,
   plural,
   PRODUCT_LABELS,
@@ -437,10 +438,12 @@ export function KeysScreen({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id}>
+                <tr key={row.id} className={keyRowTone(row.state).row}>
                   <td>
                     <span className="flex flex-col">
-                      <span className="font-medium text-ink">{row.name}</span>
+                      <span className={`font-medium ${keyRowTone(row.state).name}`}>
+                        {row.name}
+                      </span>
                       <span className="font-mono text-caption text-secondary">
                         drf_ak_...{row.suffix}
                       </span>

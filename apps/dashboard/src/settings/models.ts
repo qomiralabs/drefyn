@@ -187,6 +187,17 @@ export function keyFilterSearch(filters: KeyFilters): string {
   return text === '' ? '' : `?${text}`;
 }
 
+// A revoked key stays listed, so it reads as over at a glance. Secondary rather than the
+// disabled ink, so its row is still read as easily as any other.
+export function keyRowTone(state: 'live' | 'expired' | 'revoked'): {
+  readonly row: string | undefined;
+  readonly name: string;
+} {
+  return state === 'revoked'
+    ? { row: 'bg-sunken text-secondary', name: 'text-secondary' }
+    : { row: undefined, name: 'text-ink' };
+}
+
 export const needsTypedName = (lastUsedAt: string | null, now: string): boolean =>
   lastUsedAt !== null && new Date(now).getTime() - new Date(lastUsedAt).getTime() <= WEEK_MS;
 

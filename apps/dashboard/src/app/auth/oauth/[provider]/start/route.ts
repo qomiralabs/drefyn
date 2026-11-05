@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
 import { currentSession, guardPublic } from '../../../../../server/guard.ts';
-import { appUrl, requestQuery } from '../../../../../server/origin.ts';
+import { appUrl, requestQuery, sameOriginNavigation } from '../../../../../server/origin.ts';
 
 interface Context {
   readonly params: Promise<{ readonly provider: string }>;
@@ -25,7 +25,11 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
     query.get('purpose') === 'link' || query.get('purpose') === 'step_up'
       ? (query.get('purpose') as 'link' | 'step_up')
       : 'sign_in';
-  // Linking and step up act for the person in this browser, never for an address in the URL.
+  // Both act for the person in this browser, whose lax cookie comes along on a link from any
+  // site. A provider can answer with no prompt, so a lure must not get to start them.
+  if (purpose !== 'sign_in' && !sameOriginNavigation(request.headers)) {
+    return NextResponse.redirect(appUrl('/account/sign-in?error=provider'), 303);
+  }
   const session = purpose === 'sign_in' ? null : await currentSession();
   if (purpose !== 'sign_in' && session === null) return NextResponse.redirect(failed, 303);
   const auth = await dashboardAuth();
