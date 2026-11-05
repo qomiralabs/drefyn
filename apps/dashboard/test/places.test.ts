@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commandFilter } from '../src/shell/commands.ts';
-import { places } from '../src/shell/places.ts';
+import { places, visiblePlaces } from '../src/shell/places.ts';
 
 const entries = places('acme');
 const filter = commandFilter(entries);
@@ -37,5 +37,20 @@ describe('command bar search', () => {
 
   it("keeps every place inside the organization or the person's own account", () => {
     for (const entry of entries) expect(entry.href).toMatch(/^\/(acme|account)(\/|$)/);
+  });
+});
+
+describe('Start an incident', () => {
+  it('is an action the bar finds, on the Status project that can have one', () => {
+    expect(found('outage')).toEqual(['Start an incident']);
+    expect(entries.find((e) => e.id === 'start-incident')?.href).toBe(
+      '/acme/status/acme-status/incidents/new',
+    );
+  });
+
+  it('is offered only to someone who can read Status', () => {
+    const ids = (held: string[]) => visiblePlaces('acme', held).map((e) => e.id);
+    expect(ids(['org.read'])).not.toContain('start-incident');
+    expect(ids(['status.read'])).toContain('start-incident');
   });
 });

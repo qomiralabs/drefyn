@@ -8,6 +8,7 @@ import {
   shellHref,
   type ShellLocation,
 } from '../src/index.ts';
+import { sectionHref } from '../src/shell/route.ts';
 import { SEEDS } from './seeds.ts';
 
 // fc.webPath() takes a few hundred ms to construct, more on a loaded CI runner. Built once here so
@@ -35,6 +36,16 @@ describe('parseShellPath', () => {
       '/acme/docs/payments-api/pages',
       { org: 'acme', product: 'docs', project: 'payments-api', section: 'pages' },
     ],
+    [
+      '/acme/status/acme-status/incidents/inc-1',
+      {
+        org: 'acme',
+        product: 'status',
+        project: 'acme-status',
+        section: 'incidents',
+        item: 'inc-1',
+      },
+    ],
   ])('reads %s', (path, location) => {
     expect(parseShellPath(path)).toEqual(location);
   });
@@ -50,6 +61,9 @@ describe('parseShellPath', () => {
     ['/acme/docs/x-', 'slug ends with a hyphen'],
     ['/acme//docs', 'empty segment'],
     ['/acme/docs/a/b/c', 'deeper than a section'],
+    ['/acme/status/a/pages/c', 'only incidents have items'],
+    ['/acme/docs/a/incidents/c', 'incidents belong to Status'],
+    ['/acme/status/a/incidents/b/c', 'deeper than an item'],
     ['/acme/docs/%2e%2e', 'encoded dot segment'],
     ['/acme/docs/..', 'dot segment'],
     ['/acme?x=1', 'query is not part of a pathname'],
@@ -83,6 +97,13 @@ describe('parseShellPath', () => {
       project: slug,
       section: slug,
     }),
+    fc.record({
+      org: slug,
+      product: fc.constant('status' as const),
+      project: slug,
+      section: fc.constant('incidents'),
+      item: slug,
+    }),
   );
 
   it.each(SEEDS)('round trips every valid location through its href (seed %i)', (seed) => {
@@ -102,6 +123,20 @@ describe('parseShellPath', () => {
       }),
       { seed, numRuns: 500 },
     );
+  });
+});
+
+describe('sectionHref', () => {
+  it('drops an item, so the sidebar can mark the section it sits under', () => {
+    const here: ShellLocation = {
+      org: 'acme',
+      product: 'status',
+      project: 'acme-status',
+      section: 'incidents',
+      item: 'inc-1',
+    };
+    expect(sectionHref(here)).toBe('/acme/status/acme-status/incidents');
+    expect(sectionHref({ org: 'acme', product: 'docs' })).toBe('/acme/docs');
   });
 });
 
