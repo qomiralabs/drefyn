@@ -112,6 +112,8 @@ export interface Sessions extends StepUps {
   // The guard's one call. Read only: a due touch is reported, never written here.
   resolveAccess(cookie: string | undefined, slug: string): Promise<AccessResult>;
   touchSession(ref: SessionRef): Promise<void>;
+  // Expires every cookie auth owns but the device one, which is what keeps this browser
+  // known after the person leaves.
   signOut(s: SessionInfo): Promise<readonly CookieSpec[]>;
   signOutEverywhere(s: SessionInfo): Promise<number>;
   // Ends every session of the user, this one included, and gives this browser a new row and
@@ -122,6 +124,8 @@ export interface Sessions extends StepUps {
     b: BrowserContext,
   ): Promise<Result<RotatedSession, AuthError>>;
   listSessions(s: SessionInfo): Promise<readonly SessionSummary[]>;
+  // Ends another session of the user. The current one is refused: only signOut clears its
+  // cookies, so this path would leave them in the browser.
   revokeSession(s: SessionInfo, id: SessionId): Promise<Result<void, AuthError>>;
 }
 
@@ -526,7 +530,8 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       } catch (error) {
         throw unavailable(error);
       }
-      return [clear(config.cookies.session)];
+      const owned: readonly string[] = Object.values(config.cookies);
+      return owned.filter((name) => name !== config.cookies.device).map((name) => clear(name));
     },
 
     async signOutEverywhere(s) {
@@ -669,6 +674,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
 
     async revokeSession(s, id) {
       if (asId('ses', id) === null) return fail(new AuthError('AUTH_NOT_FOUND'));
+      if (id === s.sessionId) return fail(new AuthError('AUTH_FORBIDDEN'));
       try {
         const rows = await store.user(s.userId, (tx) =>
           tx

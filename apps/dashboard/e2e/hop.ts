@@ -26,6 +26,9 @@ export async function behindHop(context: BrowserContext, client: string): Promis
         },
         maxRedirects: 0,
       });
+      // A fulfilled response skips what the browser does with this header, so the hop does
+      // it. Without this the lockout specs could not see a sign out wipe the device cookie.
+      if (response.headers()['clear-site-data'] !== undefined) await context.clearCookies();
       const moved = response.status() >= 300 && response.status() < 400;
       // Playwright routes no request a redirect makes, so the browser would look the host up.
       // A refresh is a fresh navigation, which comes back through here. Cookies stay on it.
