@@ -568,10 +568,10 @@ describe('public surface tokens', () => {
   it('sets status to the system stacks and names no web font', () => {
     const root = findRule(parseRules(status), ':root');
     expect(root.declarations.get('--dr-font-sans')).toBe(
-      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Roboto", "Helvetica Neue", "Arial", sans-serif',
     );
     expect(root.declarations.get('--dr-font-mono')).toBe(
-      'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      'ui-monospace, "SF Mono", "Menlo", "Consolas", monospace',
     );
     expect(status).not.toMatch(/@font-face|url\(|woff|Inter|JetBrains/);
   });

@@ -118,6 +118,7 @@ describe('package manifest', () => {
         'requiredPairs',
         'ruledOutPairs',
         'supplementaryMarks',
+        'surfaceTokensCss',
         'themeScript',
         'themeStorageKey',
         'tokens',
