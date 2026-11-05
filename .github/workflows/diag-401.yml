@@ -40,7 +40,7 @@ jobs:
             docker exec mailpit /mailpit readyz && break
             sleep 1
           done
-      - run: node scripts/diag-401/smtp-sampler.mjs 51025 300000
+      - run: python3 scripts/diag-401/smtp_sampler.py 51025 300
 
   # The real specs behind a resolver that loses queries, with reverse lookups on and off.
   forced:
@@ -76,7 +76,7 @@ jobs:
       - name: Start the lossy resolver and Mailpit
         run: |
           sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
-          nohup node scripts/diag-401/dns-drop.mjs 172.17.0.1 > "$RUNNER_TEMP/dns.log" 2>&1 &
+          nohup python3 scripts/diag-401/dns_drop.py 172.17.0.1 > "$RUNNER_TEMP/dns.log" 2>&1 &
           docker compose --file deploy/compose.yaml --file scripts/diag-401/dns.yaml --profile test up --detach --wait mailpit
       - run: pnpm --filter @drefyn/dashboard build
       - name: Seed people and sessions
