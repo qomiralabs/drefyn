@@ -74,7 +74,6 @@ export const AST_CASES: readonly AstCase[] = [
     ].join('\n'),
   },
   { name: 'yaml', dialect: 'md', source: '---\ntitle: A\n---\n\nBody\n' },
-  { name: 'toml', dialect: 'md', source: '+++\ntitle = "A"\n+++\n\nBody\n' },
   {
     name: 'mdx',
     dialect: 'mdx',

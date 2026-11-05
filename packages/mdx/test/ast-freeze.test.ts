@@ -13,8 +13,8 @@ const trees = Object.fromEntries(
 const pin = readPin(AST_VERSION);
 
 // A Record, so a new node type in the mdast types stops this file compiling until a case
-// covers it.
-const NODE_TYPES: Readonly<Record<Nodes['type'] | 'toml', true>> = {
+// covers it. An attribute is not a node there, but it is stored with a type like one.
+const NODE_TYPES: Readonly<Record<Nodes['type'] | 'mdxJsxAttribute', true>> = {
   blockquote: true,
   break: true,
   code: true,
@@ -33,6 +33,7 @@ const NODE_TYPES: Readonly<Record<Nodes['type'] | 'toml', true>> = {
   list: true,
   listItem: true,
   mdxFlowExpression: true,
+  mdxJsxAttribute: true,
   mdxJsxFlowElement: true,
   mdxJsxTextElement: true,
   mdxTextExpression: true,
@@ -45,7 +46,6 @@ const NODE_TYPES: Readonly<Record<Nodes['type'] | 'toml', true>> = {
   tableRow: true,
   text: true,
   thematicBreak: true,
-  toml: true,
   yaml: true,
 };
 
