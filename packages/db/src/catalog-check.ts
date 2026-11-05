@@ -41,7 +41,8 @@ export type CatalogRule =
   | 'auth_only'
   | 'public_policy'
   | 'restrictive_policy'
-  | 'actor_policy';
+  | 'actor_policy'
+  | 'tenant_statistics';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -1343,6 +1344,46 @@ async function foreignKeyProblems(
   return out;
 }
 
+// Project tables a composite foreign key points at, and whether each has ndistinct and
+// dependencies statistics on exactly the tenant columns.
+const TENANT_KEY_TARGETS = `
+select distinct rn.nspname || '.' || rc.relname as name,
+       exists (select from pg_statistic_ext s
+                where s.stxrelid = rc.oid and s.stxkind @> array['d', 'f']::"char"[]
+                  and (select array_agg(a.attname::text order by a.attname)
+                         from unnest(s.stxkeys) k
+                         join pg_attribute a on a.attrelid = s.stxrelid and a.attnum = k)
+                      = array['organization_id', 'project_id']) as covered
+  from pg_constraint con
+  join pg_class c on c.oid = con.conrelid
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_class rc on rc.oid = con.confrelid
+  join pg_namespace rn on rn.oid = rc.relnamespace
+ where con.contype = 'f' and n.nspname = 'app'
+   and exists (select from unnest(con.confkey) k
+                 join pg_attribute a on a.attrelid = con.confrelid and a.attnum = k
+                where a.attname = 'project_id')
+ order by 1`;
+
+// Without these the planner reads organization and project as independent, expects about one
+// row for a whole tenant, and a foreign key check can walk every row that tenant has. It only
+// shows on a large tenant, long after the migration, so it is caught here.
+async function statisticsProblems(client: pg.ClientBase): Promise<CatalogProblem[]> {
+  const out: CatalogProblem[] = [];
+  for (const row of await rows(client, TENANT_KEY_TARGETS)) {
+    if (flag(row, 'covered')) continue;
+    const table = text(row, 'name');
+    out.push(
+      problem(
+        'tenant_statistics',
+        table,
+        `${table} is a composite foreign key target with no ndistinct and dependencies statistics on organization_id, project_id`,
+      ),
+    );
+  }
+  return out;
+}
+
 export async function checkCatalog(
   client: pg.ClientBase,
   allow: AllowLists = ALLOW_LISTS,
@@ -1358,6 +1399,7 @@ export async function checkCatalog(
     problems.push(...(await grantProblems(client, allow)));
     problems.push(...(await appPrivilegeProblems(client, allow)));
     problems.push(...(await foreignKeyProblems(client, allow)));
+    problems.push(...(await statisticsProblems(client)));
     problems.push(...(await defaultPrivilegeProblems(client)));
     problems.push(...(await settingProblems(client)));
   } finally {

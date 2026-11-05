@@ -45,6 +45,7 @@ const SCALARS: Readonly<Record<string, string>> = {
   interval: 'string',
   // pgvector's text form, '[1,2,3]', until a parser is registered for it.
   vector: 'string',
+  halfvec: 'string',
   date: 'Date',
   timestamp: 'Date',
   timestamptz: 'Date',
