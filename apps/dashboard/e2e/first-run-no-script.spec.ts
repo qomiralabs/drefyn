@@ -28,11 +28,11 @@ test('Sign out works with scripts off', async ({ page }) => {
   await expect(page).toHaveURL(/\/welcome/);
   const answered = page.waitForResponse((response) => response.url().endsWith('/sign-out'));
   await page.getByRole('button', { name: 'Sign out' }).click();
-  expect(await (await answered).headerValue('clear-site-data')).toBe('"cookies"');
+  expect(await (await answered).headerValue('clear-site-data')).toBeNull();
   await expect(page).toHaveURL(/\/sign-in$/);
-  expect((await page.context().cookies()).map((cookie) => cookie.name)).not.toContain(
-    'drefyn_device',
-  );
+  const names = (await page.context().cookies()).map((cookie) => cookie.name);
+  expect(names).not.toContain('drefyn_session');
+  expect(names).toContain('drefyn_device');
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in/);
 });

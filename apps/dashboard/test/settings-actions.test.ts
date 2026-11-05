@@ -123,6 +123,12 @@ describe('mail and cookies', () => {
     auth.sessions.revokeSession.mockResolvedValue(no('AUTH_NOT_FOUND'));
     expect(await actions.signOutSession('ses')).toEqual(yes(undefined));
   });
+
+  it('does not read a refused current session as done', async () => {
+    auth.sessions.revokeSession.mockResolvedValue(no('AUTH_FORBIDDEN'));
+    const answer = await actions.signOutSession('ses');
+    expect(answer.ok).toBe(false);
+  });
 });
 
 describe('step up', () => {

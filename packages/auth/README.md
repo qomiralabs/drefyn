@@ -225,9 +225,11 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
 - `touchSession({ userId, sessionId, organizationId? })` runs after the response when
   `touchDue` is true. One guarded update, at most once an hour per session, never throws; a
   failure logs `auth.session_touch_failed` with public ids only.
-- `signOut`, `signOutEverywhere` (every row and every known device of the user, nothing
-  reissued), `listSessions`
-  (live rows, current marked, no hashes or IPs) and `revokeSession`.
+- `signOut` deletes the row and expires every cookie auth owns except the device cookie, so
+  the browser stays known to the address ceiling and the new device notice.
+  `signOutEverywhere` deletes every row and every known device of the user and reissues
+  nothing. `listSessions` returns live rows, current marked, no hashes or IPs. `revokeSession`
+  ends another session of the user and refuses the current one with `AUTH_FORBIDDEN`.
 - `signOutOtherSessions(session, browser)` is "Sign out everywhere else". In one transaction
   it deletes every row of the user, this one included, and gives this browser a new row and
   secret that keep the old `method`, `authenticated_at`, `user_agent` and `expires_at`. A copy

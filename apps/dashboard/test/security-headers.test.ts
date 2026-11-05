@@ -7,7 +7,6 @@ import {
   newNonce,
   securityHeaders,
   servedOverHttps,
-  withSignOutHeaders,
 } from '../src/server/security-headers.ts';
 
 const NONCE = 'AAECAwQFBgcICQoLDA0ODw==';
@@ -145,19 +144,6 @@ describe('servedOverHttps', () => {
         /DREFYN_APP_ORIGIN/,
       );
     }
-  });
-});
-
-describe('withSignOutHeaders', () => {
-  const signOut = (): Response =>
-    withSignOutHeaders(new Response(null, { status: 303, headers: { location: '/sign-in' } }));
-
-  it('tells the browser to drop every cookie for the origin and not to cache the answer', () => {
-    const response = signOut();
-    expect(response.status).toBe(303);
-    expect(response.headers.get('location')).toBe('/sign-in');
-    expect(response.headers.get('Clear-Site-Data')).toBe('"cookies"');
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 });
 
