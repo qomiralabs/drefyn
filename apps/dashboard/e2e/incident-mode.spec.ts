@@ -108,6 +108,22 @@ test.describe('entering incident mode', () => {
     await expect(page).toHaveURL(DOCS_PAGES);
   });
 
+  test('works from a page under another layout, and resolves back to it', async ({ page }) => {
+    await incidentOpen(page);
+    await openShell(page, '/account');
+    await line(page).getByRole('link', { name: 'Open incident' }).click();
+    await expect(heading(page)).toBeFocused();
+    await expect(said(page, 'assertive')).toHaveText(
+      'Incident mode. Payments API is failing in Europe.',
+    );
+    await main(page).getByRole('button', { name: 'Resolve incident' }).click();
+    await expect(page).toHaveURL('/account');
+    await expect(
+      notifications(page).getByText('Incident resolved at 14:51 UTC. Back to the calm view.'),
+    ).toBeVisible();
+    await expect(main(page).getByRole('heading', { level: 1 })).toBeFocused();
+  });
+
   test('does not take focus or announce when the page is simply opened', async ({ page }) => {
     await openCockpit(page);
     expect(await focused(page)).toBe('body');
@@ -186,9 +202,7 @@ test.describe('leaving incident mode', () => {
     ).toBeVisible();
     await expect(line(page)).toHaveCount(0);
     expect(await barWidth(page)).toBe(NAV);
-    await expect(main(page).getByRole('heading', { level: 1 })).toContainText(
-      'Everything is running.',
-    );
+    await expect(main(page).getByRole('heading', { level: 1 })).toContainText('No monitors yet.');
   });
 
   test('falls back to the page heading when that element is gone', async ({ page }) => {
@@ -199,9 +213,7 @@ test.describe('leaving incident mode', () => {
     await expect(heading(page)).toBeFocused();
     await main(page).getByRole('button', { name: 'Resolve incident' }).click();
     await expect(main(page).getByRole('heading', { level: 1 })).toBeFocused();
-    await expect(main(page).getByRole('heading', { level: 1 })).toContainText(
-      'Everything is running.',
-    );
+    await expect(main(page).getByRole('heading', { level: 1 })).toContainText('No monitors yet.');
   });
 
   test('the calm page settles in, and travels only with normal motion', async ({ page }) => {
@@ -256,9 +268,7 @@ test.describe('an incident that opens elsewhere', () => {
     await openShell(other, COCKPIT);
     await main(other).getByRole('button', { name: 'Resolve incident' }).click();
     await expect(page).toHaveURL(STATUS);
-    await expect(main(page).getByRole('heading', { level: 1 })).toContainText(
-      'Everything is running.',
-    );
+    await expect(main(page).getByRole('heading', { level: 1 })).toContainText('No monitors yet.');
     await other.close();
   });
 });

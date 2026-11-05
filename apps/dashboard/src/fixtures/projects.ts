@@ -1,6 +1,9 @@
-import type { AccessContext, Permission } from '@drefyn/auth';
+import type { AccessContext } from '@drefyn/auth';
+import { mayRead } from '../server/reach.ts';
 import type { ProductId } from '../shell/products.ts';
 import { PLACEHOLDER } from './placeholder.ts';
+
+export { mayRead };
 
 export type ProjectSlug = keyof typeof PLACEHOLDER.projects;
 
@@ -25,17 +28,6 @@ const shape = (
   answer: p.answer,
   readOnly: 'readOnly' in p,
 });
-
-const READ: Readonly<Record<ProductId, Permission>> = {
-  docs: 'docs.read',
-  studio: 'studio.read',
-  status: 'status.read',
-};
-
-// The command bar hides what a person may not open; this is what actually stops them.
-export function mayRead(access: AccessContext, product: ProductId): boolean {
-  return access.permissions.includes(READ[product]);
-}
 
 // The placeholder project at a product and slug, or undefined, which the route turns into a
 // 404. A project only exists under its own product, and only for someone who may read it.

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createFixtureFeed,
   FIXTURE_INCIDENT,
+  fixtureIncidentsOn,
   incidentRouteExists,
   START_ITEM,
   type FeedStorage,
@@ -102,6 +103,14 @@ describe('the fixture incident feed', () => {
     expect(feed.current()).toBe(FIXTURE_INCIDENT);
     feed.resolve();
     expect(feed.current()).toBeNull();
+  });
+});
+
+describe('the fixture switch', () => {
+  it('is on only where the test states are', () => {
+    expect(fixtureIncidentsOn({ DREFYN_DASHBOARD_STATES: 'on' })).toBe(true);
+    expect(fixtureIncidentsOn({})).toBe(false);
+    expect(fixtureIncidentsOn({ DREFYN_DASHBOARD_STATES: 'true' })).toBe(false);
   });
 });
 

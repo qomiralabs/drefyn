@@ -2,7 +2,8 @@ import type { AccessContext } from '@drefyn/auth';
 import { describe, expect, it } from 'vitest';
 import { PLACEHOLDER } from '../src/fixtures/placeholder.ts';
 import { findProject, mayRead, projectsOf } from '../src/fixtures/projects.ts';
-import { NEEDS_YOU, PLACEHOLDER_SHELL, needsYouSentence } from '../src/fixtures/shell.ts';
+import { NEEDS_YOU, PLACEHOLDER_SHELL } from '../src/fixtures/shell.ts';
+import { needsYouSentence } from '../src/shell/needs-you.ts';
 import { ORG_SECTIONS, SECTIONS, sectionOf } from '../src/shell/sections.ts';
 
 describe('what needs you', () => {
@@ -61,9 +62,10 @@ describe('placeholder projects', () => {
   });
 
   it('gives the shell every project by name and product', () => {
-    expect(PLACEHOLDER_SHELL.projects['acme-status']).toEqual({
+    expect(PLACEHOLDER_SHELL.projects['status/acme-status']).toEqual({
       name: 'Acme status',
       product: 'status',
+      state: { state: 'fresh', word: 'Running' },
     });
   });
 });

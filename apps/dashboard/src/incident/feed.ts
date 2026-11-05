@@ -1,6 +1,9 @@
+import type { Command } from '../shell/commands.ts';
+
 // The seam between the shell and whatever knows about incidents. Status has no API yet, so the
-// fixture feed below is the only source. A live feed implements IncidentFeed and nothing else
-// in the shell changes: the shell only reads current() and listens for changes.
+// fixture feed below is the only source, and it runs only where the test states are on: a real
+// organization never sees a made up outage. A live feed implements IncidentFeed and nothing
+// else in the shell changes: the shell only reads current() and listens for changes.
 export interface OpenIncident {
   readonly id: string;
   // The Status project it belongs to, as a slug in the URL.
@@ -24,6 +27,10 @@ export interface IncidentFeed {
 
 export const START_ITEM = 'new';
 
+// The same switch as the other test states.
+export const fixtureIncidentsOn = (env: Readonly<Record<string, string | undefined>>): boolean =>
+  env['DREFYN_DASHBOARD_STATES'] === 'on';
+
 export const FIXTURE_INCIDENT: OpenIncident = {
   id: 'inc-payments-europe',
   project: 'acme-status',
@@ -33,6 +40,18 @@ export const FIXTURE_INCIDENT: OpenIncident = {
   startedAt: '2026-10-27T14:02:00Z',
   resolvedAt: '2026-10-27T14:51:00Z',
 };
+
+// The way a person starts the fixture incident. A command, because that is one of the steps
+// that enters incident mode; the shell adds it only with the fixture.
+export const startIncidentCommand = (org: string): Command => ({
+  id: 'start-incident',
+  icon: 'incident',
+  name: 'Start an incident',
+  kind: 'Status action',
+  keywords: ['outage', 'down'],
+  href: `/${org}/status/${FIXTURE_INCIDENT.project}/incidents/${START_ITEM}`,
+  permission: 'status.read',
+});
 
 // A route can only exist for what the server knows, and the fixture is all it knows.
 export function incidentRouteExists(product: string, project: string, item: string): boolean {

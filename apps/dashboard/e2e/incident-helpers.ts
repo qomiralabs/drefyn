@@ -1,9 +1,10 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { commandBar, openShell } from './fixtures.ts';
+import { PAGES } from './undo-helpers.ts';
 
 export const STATUS = '/acme/status/acme-status';
 export const COCKPIT = `${STATUS}/incidents/inc-payments-europe`;
-export const DOCS_PAGES = '/acme/docs/payments-api/pages';
+export const DOCS_PAGES = PAGES;
 
 // Words only the cockpit chunk holds, so a script that has them is that chunk.
 export const COCKPIT_MARK = 'Update waiting for you';

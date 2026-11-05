@@ -21,11 +21,14 @@ export const RESERVED_SLUGS: readonly string[] = [
   'invite',
   'organizations',
   'settings-states',
+  'shell-states',
   'sign-in',
   'sign-out',
   'sign-up',
   'welcome',
 ];
+
+const STATE_GALLERY = 'shell-states';
 
 // Lower case letters, digits and inner hyphens, at most 63 characters: the DNS label rule,
 // so a slug can also name a subdomain later. Percent escapes and dot segments never match.
@@ -43,8 +46,9 @@ export function parseShellPath(pathname: string): ShellLocation | null {
   const parts = trimmed.split('/');
   if (parts.length > 5 || !parts.every(isSlug)) return null;
   const [org, product, project, section, item] = parts as [string, ...(string | undefined)[]];
-  if (RESERVED_SLUGS.includes(org)) return null;
-  if (product === undefined) return { org };
+  if (product === undefined) return RESERVED_SLUGS.includes(org) ? null : { org };
+  // The state gallery draws a project, so the sidebar reads its URL like one.
+  if (RESERVED_SLUGS.includes(org) && org !== STATE_GALLERY) return null;
   if (!isProduct(product)) return null;
   if (project === undefined) return { org, product };
   if (section === undefined) return { org, product, project };

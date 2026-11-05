@@ -13,13 +13,16 @@ import {
   ModalOverlay,
   SearchField,
 } from 'react-aria-components';
-import { commandFilter } from './commands.ts';
+import { commandFilter, type Command } from './commands.ts';
+import type { ShellData } from './data.ts';
 import { visiblePlaces } from './places.ts';
 import { ICON_BY_NAME } from './section-icons.ts';
 
 export interface CommandBarProps {
   org: string;
   orgName: string;
+  projects: ShellData['projects'];
+  actions: readonly Command[];
   permissions: readonly string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,13 +37,18 @@ const QUIET =
 export function CommandBar({
   org,
   orgName,
+  projects,
+  actions,
   permissions,
   open,
   onOpenChange,
 }: CommandBarProps): ReactNode {
   const router = useRouter();
   const [query, setQuery] = useState('');
-  const entries = useMemo(() => visiblePlaces(org, permissions), [org, permissions]);
+  const entries = useMemo(
+    () => visiblePlaces(org, permissions, projects, actions),
+    [org, permissions, projects, actions],
+  );
   const filter = useMemo(() => commandFilter(entries), [entries]);
   const close = () => {
     onOpenChange(false);

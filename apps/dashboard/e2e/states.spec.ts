@@ -46,8 +46,8 @@ test('error: says what still works, gives a reference and Try again, and the she
 });
 
 test('success: the project home shows its answer and the evidence under it', async ({ page }) => {
-  await openShell(page, ROUTES.project);
-  await expect(main(page).getByRole('heading', { level: 1 })).toHaveText(ANSWERS.project);
+  await openShell(page, ROUTES.success);
+  await expect(main(page).getByRole('heading', { level: 1 })).toHaveText(ANSWERS.success);
   await expect(main(page).locator('time').first()).toBeVisible();
   // Depth is a ranked list, never a card grid.
   await expect(main(page).getByRole('list').first()).toBeVisible();
@@ -70,7 +70,7 @@ test('the product home gives each project its own answer and says which is read 
   await openShell(page, '/acme/docs');
   const rows = main(page).getByRole('listitem');
   const row = (name: string) => rows.filter({ has: page.getByRole('link', { name }) });
-  await expect(row('Payments API docs')).toContainText('3 pages are out of date');
+  await expect(row('Payments API docs')).toContainText('No pages yet');
   await expect(row('New docs')).toContainText('No pages yet');
   const partner = row('Partner API docs');
   await expect(partner).toContainText('Read only. Nothing was deleted.');

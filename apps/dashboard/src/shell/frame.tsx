@@ -13,6 +13,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { CommandBarProps } from './command-bar.tsx';
+import type { Command } from './commands.ts';
+import type { ShellData } from './data.ts';
 import { isTyping, sequenceTarget } from './keys.ts';
 
 interface ShellState {
@@ -37,11 +39,15 @@ export function ShellFrame({
   org,
   orgName,
   permissions,
+  projects,
+  actions,
   children,
 }: {
   org: string;
   orgName: string;
   permissions: readonly string[];
+  projects: ShellData['projects'];
+  actions: readonly Command[];
   children: ReactNode;
 }): ReactNode {
   const router = useRouter();
@@ -133,6 +139,8 @@ export function ShellFrame({
           org={org}
           orgName={orgName}
           permissions={permissions}
+          projects={projects}
+          actions={actions}
           open={commandOpen}
           onOpenChange={setCommandOpen}
         />

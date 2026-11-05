@@ -14,7 +14,7 @@ test('the whole shift works from the keyboard', async ({ page, browserName }) =>
   await expect(line(page)).toHaveCount(0);
   await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toBeFocused();
   await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toContainText(
-    'Everything is running.',
+    'No monitors yet.',
   );
 });
 

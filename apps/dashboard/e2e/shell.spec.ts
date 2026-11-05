@@ -14,6 +14,7 @@ import {
   useTheme,
 } from './fixtures.ts';
 import { expectBodyLeaksNothing, expectTitleLeaksNothing, UNKNOWN_ORG_PATHS } from './leaks.ts';
+import { LIV, OMAR, SAM, stateFile } from './people.ts';
 import { test } from './test.ts';
 
 test.describe('flag on', () => {
@@ -161,7 +162,7 @@ test.describe('top bar', () => {
   for (const theme of THEMES) {
     test(`the inbox count is a plain number, never a state colour (${theme})`, async ({ page }) => {
       await useTheme(page, theme);
-      await openShell(page, ROUTES.overview);
+      await openShell(page, ROUTES.success);
       const inbox = banner(page).getByRole('button', { name: `Inbox, ${NEEDS_YOU} need you` });
       await expect(inbox).toBeVisible();
       const count = inbox.getByText(String(NEEDS_YOU), { exact: true });
@@ -209,6 +210,9 @@ test.describe('top bar', () => {
     await banner(page).getByRole('button', { name: /^Acme/ }).click();
     const menu = page.getByRole('menu', { name: 'Organization' });
     await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /^Acme/ })).toContainText(
+      'Starter, 4 of 5 seats',
+    );
     for (const item of [
       'Plan and usage',
       'Members',
@@ -261,26 +265,21 @@ test.describe('sidebar and URL', () => {
 });
 
 test.describe('answers', () => {
-  test('the inbox, the overview sentence and the Needs you list agree on what needs you', async ({
-    page,
-  }) => {
+  test('the inbox and the overview agree that nothing feeds them yet', async ({ page }) => {
     await openShell(page, ROUTES.overview);
-    const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
-    const heading = await main(page).getByRole('heading', { level: 1 }).textContent();
-    const said = /^(\w+) things? needs? you\./.exec(heading ?? '')?.[1] ?? '';
-    const inbox = await banner(page)
-      .getByRole('button', { name: /^Inbox, / })
-      .getAttribute('aria-label');
-    const counted = Number(/^Inbox, (\d+) need you$/.exec(inbox ?? '')?.[1]);
-    const listed = await main(page)
-      .getByRole('region', { name: 'Needs you' })
-      .getByRole('listitem')
-      .count();
-    expect({ said: words.indexOf(said), counted, listed }).toEqual({
-      said: NEEDS_YOU,
-      counted: NEEDS_YOU,
-      listed: NEEDS_YOU,
-    });
+    await expect(main(page).getByRole('heading', { level: 1 })).toContainText('Nothing needs you');
+    await expect(banner(page).getByRole('button', { name: /^Inbox/ })).toHaveAccessibleName(
+      'Inbox, nothing needs you',
+    );
+    await expect(main(page).getByRole('region', { name: 'Needs you' })).toHaveCount(0);
+  });
+
+  test('seats and plan come from the organization, not from page copy', async ({ page }) => {
+    await openShell(page, ROUTES.overview);
+    await expect(main(page)).toContainText('Acme is on Starter');
+    await expect(main(page)).toContainText('4 of 5 seats used.');
+    await expect(main(page)).toContainText('Starter includes 1 Docs project.');
+    await expect(main(page)).not.toContainText('$');
   });
 
   test('the overview heading is the answer sentence', async ({ page }) => {
@@ -289,8 +288,8 @@ test.describe('answers', () => {
   });
 
   test('the project home heading answers whether the site is fresh', async ({ page }) => {
-    await openShell(page, ROUTES.project);
-    await expect(main(page).getByRole('heading', { level: 1 })).toHaveText(ANSWERS.project);
+    await openShell(page, ROUTES.success);
+    await expect(main(page).getByRole('heading', { level: 1 })).toHaveText(ANSWERS.success);
   });
 
   test('the page title names the place', async ({ page }) => {
@@ -313,8 +312,8 @@ test.describe('JavaScript off', () => {
 });
 
 test.describe('command bar content', () => {
-  const open = async (page: Page) => {
-    await openShell(page, ROUTES.overview);
+  const open = async (page: Page, path: string = ROUTES.overview) => {
+    await openShell(page, path);
     await page.keyboard.press('ControlOrMeta+k');
     await expect(commandBar(page)).toBeVisible();
     return commandBar(page);
@@ -331,7 +330,7 @@ test.describe('command bar content', () => {
   });
 
   test('rows carry a kind icon, and objects their state word', async ({ page }) => {
-    const bar = await open(page);
+    const bar = await open(page, ROUTES.success);
     const options = bar.getByRole('option');
     for (const option of await options.all()) {
       // The kind icon leads the row, in a span that gives it the secondary ink.
@@ -448,4 +447,66 @@ test.describe('account initials', () => {
       });
     }
   }
+});
+
+test.describe('what a person reaches', () => {
+  const sidebarLinks = (page: Page) => page.getByRole('navigation', { name: 'Acme', exact: true });
+
+  test.describe('a member with no project', () => {
+    test.use({ storageState: stateFile(SAM) });
+
+    test('sees no project in the payload and no product link on the overview', async ({
+      page,
+      request,
+    }) => {
+      await openShell(page, ROUTES.overview);
+      await expect(main(page)).toContainText('You have no projects here yet.');
+      await expect(main(page).getByRole('link', { name: /^Open / })).toHaveCount(0);
+      const body = await (await request.get(ROUTES.overview)).text();
+      for (const name of ['Payments API docs', 'New docs', 'Partner API docs', 'Acme status']) {
+        expect(body, name).not.toContain(name);
+      }
+    });
+  });
+
+  test.describe('a member with one project role', () => {
+    test.use({ storageState: stateFile(LIV) });
+
+    test('sees that project and its product, and nothing else', async ({ page, request }) => {
+      await openShell(page, ROUTES.overview);
+      await expect(main(page).getByRole('link', { name: 'Open Docs' })).toHaveAttribute(
+        'href',
+        '/acme/docs',
+      );
+      await expect(main(page).getByRole('link', { name: 'Open Status' })).toHaveCount(0);
+      await expect(sidebarLinks(page)).toBeVisible();
+      const body = await (await request.get(ROUTES.overview)).text();
+      expect(body).toContain('New docs');
+      expect(body).not.toContain('Payments API docs');
+      expect((await request.get(ROUTES.empty)).status()).toBe(200);
+      expect((await request.get(ROUTES.project, { maxRedirects: 0 })).status()).toBe(404);
+    });
+  });
+
+  // Beta is targeted off in the flag file, so Noor's side is proved in guard.spec.ts and the
+  // shell is proved here by an owner of an organization with the flag on.
+  test.describe('a member of another organization', () => {
+    test.use({ storageState: stateFile(OMAR) });
+
+    test('sees nothing of acme', async ({ page, request }) => {
+      await openShell(page, '/kestrel');
+      await banner(page)
+        .getByRole('button', { name: /^Kestrel/ })
+        .click();
+      const menu = page.getByRole('menu', { name: 'Organization' });
+      await expect(menu.getByRole('menuitem', { name: /^Kestrel/ })).toContainText('Growth');
+      await expect(menu.getByRole('menuitem', { name: /^Acme/ })).toHaveCount(0);
+      const body = await (await request.get('/kestrel')).text();
+      for (const word of ['Acme', 'Payments API docs', 'Maya Okafor']) {
+        expect(body, word).not.toContain(word);
+      }
+      expect((await request.get(ROUTES.overview, { maxRedirects: 0 })).status()).toBe(404);
+      expect((await request.get(ROUTES.project, { maxRedirects: 0 })).status()).toBe(404);
+    });
+  });
 });

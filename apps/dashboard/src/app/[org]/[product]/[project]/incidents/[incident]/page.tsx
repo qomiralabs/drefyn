@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { incidentRouteExists } from '../../../../../../incident/feed.ts';
+import { fixtureIncidentsOn, incidentRouteExists } from '../../../../../../incident/feed.ts';
 import { IncidentRoute } from '../../../../../../incident/incident-route.tsx';
 import { guardOrganization } from '../../../../../../server/guard.ts';
 
@@ -13,6 +13,8 @@ export const metadata: Metadata = { title: 'Incident' };
 export default async function IncidentPage({ params }: Params) {
   const { org, product, project, incident } = await params;
   await guardOrganization(org);
-  if (!incidentRouteExists(product, project, incident)) notFound();
+  if (!fixtureIncidentsOn(process.env) || !incidentRouteExists(product, project, incident)) {
+    notFound();
+  }
   return <IncidentRoute item={incident} />;
 }

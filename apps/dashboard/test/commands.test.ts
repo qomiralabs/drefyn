@@ -10,6 +10,8 @@ import {
 } from '../src/shell/commands.ts';
 import { places, visiblePlaces } from '../src/shell/places.ts';
 
+const PROJECTS = { 'docs/handbook': { name: 'Handbook', product: 'docs' } } as const;
+
 const entry: Command = {
   id: 'docs',
   name: 'Docs',
@@ -65,15 +67,23 @@ describe('the command registry', () => {
   });
 
   it('keeps every place behind a permission that exists', () => {
-    for (const place of places('acme')) {
+    for (const place of places('acme', PROJECTS)) {
       expect((PERMISSIONS as readonly string[]).includes(place.permission), place.id).toBe(true);
     }
+  });
+
+  it('offers a project the server sent even with no product permission', () => {
+    const reachable = visiblePlaces('acme', permissionsFor('member', new Set()), PROJECTS);
+    expect(reachable.find((p) => p.name === 'Handbook')).toMatchObject({
+      href: '/acme/docs/handbook',
+      kind: 'Docs project',
+    });
   });
 
   it('shows a member fewer places than an admin, and an admin no fewer than an owner', () => {
     const reach = new Set<Product>(['docs', 'studio', 'status']);
     const visible = (permissions: readonly string[]) =>
-      visiblePlaces('acme', permissions).map((p) => p.id);
+      visiblePlaces('acme', permissions, {}).map((p) => p.id);
     const member = visible(permissionsFor('member', new Set()));
     const admin = visible(permissionsFor('admin', reach));
     expect(member).toEqual([
@@ -91,6 +101,6 @@ describe('the command registry', () => {
   });
 
   it('shows nothing with no permissions', () => {
-    expect(visiblePlaces('acme', [])).toEqual([]);
+    expect(visiblePlaces('acme', [], PROJECTS)).toEqual([]);
   });
 });

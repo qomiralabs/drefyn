@@ -54,6 +54,7 @@ const PUBLIC_PAGES: ReadonlySet<string> = new Set([
   'src/app/sign-in/reset/page.tsx',
   'src/app/sign-in/verify/page.tsx',
   'src/app/settings-states/[screen]/[state]/page.tsx',
+  'src/app/shell-states/[product]/[project]/[[...section]]/page.tsx',
   'src/app/sign-up/page.tsx',
 ]);
 // A person's own pages, which no organization in the URL can guard.

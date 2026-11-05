@@ -69,13 +69,9 @@ function browserStorage(): FeedStorage {
 const noFeed = () => () => undefined;
 const notRead = () => undefined;
 
-function restoreFocus(element: HTMLElement | null): void {
-  if (element?.isConnected === true) {
-    element.focus();
-    if (document.activeElement === element) return;
-  }
-  // A person who left by the link on the line is still on it, and that is a fine place to be.
-  if (document.activeElement !== document.body) return;
+const HEADING_SETTLES_MS = 2000;
+
+function focusHeading(): void {
   const heading = document.querySelector<HTMLElement>('#main h1');
   if (heading === null) {
     document.getElementById('main')?.focus();
@@ -85,6 +81,51 @@ function restoreFocus(element: HTMLElement | null): void {
   heading.focus();
 }
 
+function restoreFocus(element: HTMLElement | null): void {
+  if (element?.isConnected === true) {
+    element.focus();
+    if (document.activeElement === element) return;
+  }
+  // A person who left by the link on the line is still on it, and that is a fine place to be.
+  if (document.activeElement !== document.body) return;
+  focusHeading();
+  // A page that streams swaps its skeleton heading for the real one, and focus falls to the
+  // body with it. Following it for a moment is enough, and never takes focus from elsewhere.
+  const main = document.getElementById('main');
+  if (main === null) return;
+  const follow = new MutationObserver(() => {
+    if (document.activeElement === document.body) focusHeading();
+  });
+  follow.observe(main, { childList: true, subtree: true });
+  window.setTimeout(() => {
+    follow.disconnect();
+  }, HEADING_SETTLES_MS);
+}
+
+// What the shell last saw. The account pages and the gallery sit under their own layouts, so the provider
+// remounts on the way between them and an organization, and a shift must survive that. It
+// lives as long as the page does: a real load starts fresh and so takes no focus.
+const carried: {
+  org: string | null;
+  seen: Seen | null;
+  returnTo: string | null;
+  lastFocus: HTMLElement | null;
+  pendingRestore: boolean;
+} = { org: null, seen: null, returnTo: null, lastFocus: null, pendingRestore: false };
+
+function carriedFor(org: string): typeof carried {
+  if (carried.org !== org) {
+    Object.assign(carried, {
+      org,
+      seen: null,
+      returnTo: null,
+      lastFocus: null,
+      pendingRestore: false,
+    });
+  }
+  return carried;
+}
+
 // Owns the shell's incident state: reads the feed, turns its changes into focus moves and
 // announcements, and marks the shell so the sidebar can step back. One live region each for
 // polite and assertive stay mounted, because a screen reader only hears changes to a region
@@ -92,16 +133,21 @@ function restoreFocus(element: HTMLElement | null): void {
 export function IncidentProvider({
   org,
   permissions,
+  fixture,
   children,
 }: {
   org: string;
   permissions: readonly string[];
+  // Without it there is no feed yet, so nothing is ever read and the shell stays calm.
+  fixture: boolean;
   children: ReactNode;
 }): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
   const [feed] = useState<IncidentFeed | null>(() =>
-    typeof window === 'undefined' ? null : createFixtureFeed(org, browserStorage(), window),
+    typeof window === 'undefined' || !fixture
+      ? null
+      : createFixtureFeed(org, browserStorage(), window),
   );
   const read = useSyncExternalStore(
     feed === null ? noFeed : feed.subscribe,
@@ -114,13 +160,16 @@ export function IncidentProvider({
   const view = viewOf(pathname, incident ?? null);
 
   // Derived while rendering, so the cockpit's first render already knows how it arrived.
-  const [returnTo, setReturnTo] = useState<string | null>(null);
+  const [memory] = useState(() => carriedFor(org));
+  const [returnTo, setReturnTo] = useState(memory.returnTo);
   if (!isIncidentPath(pathname) && pathname !== returnTo) setReturnTo(pathname);
   const [shown, setShown] = useState<{ read: boolean; view: IncidentView }>({
     read: incident !== undefined,
     view,
   });
-  const [entering, setEntering] = useState(false);
+  const [entering, setEntering] = useState(
+    () => view === 'cockpit' && memory.seen !== null && memory.seen.view !== 'cockpit',
+  );
   const [returned, setReturned] = useState(false);
   if (!shown.read) {
     if (incident !== undefined) setShown({ read: true, view });
@@ -132,16 +181,12 @@ export function IncidentProvider({
 
   const [polite, setPolite] = useState({ text: '', turn: 0 });
   const [assertive, setAssertive] = useState({ text: '', turn: 0 });
-  const seen = useRef<Seen | null>(null);
   const insideNow = useRef(false);
-  const lastFocus = useRef<HTMLElement | null>(null);
   const headingEl = useRef<HTMLElement | null>(null);
   const pendingHeading = useRef<string | null>(null);
-  const pendingRestore = useRef(false);
-  const calmTo = useRef(returnTo);
 
   useEffect(() => {
-    calmTo.current = returnTo;
+    memory.returnTo = returnTo;
     insideNow.current = view === 'cockpit';
   });
 
@@ -168,19 +213,19 @@ export function IncidentProvider({
     const onFocus = (event: FocusEvent) => {
       const { target } = event;
       if (!(target instanceof HTMLElement) || insideNow.current) return;
-      if (target.closest('[role="dialog"]') === null) lastFocus.current = target;
+      if (target.closest('[role="dialog"]') === null) memory.lastFocus = target;
     };
     document.addEventListener('focusin', onFocus);
     return () => {
       document.removeEventListener('focusin', onFocus);
     };
-  }, []);
+  }, [memory]);
 
   useEffect(() => {
     if (incident === undefined) return;
     const now: Seen = { incident, view };
-    const before = seen.current;
-    seen.current = now;
+    const before = memory.seen;
+    memory.seen = now;
     if (before !== null) {
       for (const effect of shift(before, now)) {
         if (effect.kind === 'announce') {
@@ -191,22 +236,22 @@ export function IncidentProvider({
           toast({ title: effect.text });
         } else if (effect.kind === 'restore-focus') {
           pendingHeading.current = null;
-          pendingRestore.current = true;
+          memory.pendingRestore = true;
         } else if (before.incident !== null) {
-          router.replace(calmTo.current ?? projectHome(org, before.incident.project));
+          router.replace(memory.returnTo ?? projectHome(org, before.incident.project));
         }
       }
     }
     takeHeading();
     // Waits for the calm page: the cockpit's own URL is still showing after a resolve.
-    if (pendingRestore.current && !isIncidentPath(pathname)) {
-      pendingRestore.current = false;
-      const element = lastFocus.current;
+    if (memory.pendingRestore && !isIncidentPath(pathname)) {
+      memory.pendingRestore = false;
+      const element = memory.lastFocus;
       requestAnimationFrame(() => {
         restoreFocus(element);
       });
     }
-  }, [incident, view, pathname, org, router, takeHeading]);
+  }, [incident, view, pathname, org, router, takeHeading, memory]);
 
   const state = useMemo<IncidentState>(
     () => ({

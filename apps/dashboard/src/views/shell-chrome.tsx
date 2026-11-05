@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { fixtureIncidentsOn, startIncidentCommand } from '../incident/feed.ts';
 import { IncidentLine } from '../incident/line.tsx';
 import { IncidentProvider } from '../incident/provider.tsx';
 import type { ShellData } from '../shell/data.ts';
@@ -18,13 +19,17 @@ export function ShellChrome({
   permissions: readonly string[];
   children: ReactNode;
 }): ReactNode {
+  const org = data.organization.slug;
+  const fixture = fixtureIncidentsOn(process.env);
   return (
     <ShellFrame
-      org={data.organization.slug}
+      org={org}
       orgName={data.organization.name}
       permissions={permissions}
+      projects={data.projects}
+      actions={fixture ? [startIncidentCommand(org)] : []}
     >
-      <IncidentProvider org={data.organization.slug} permissions={permissions}>
+      <IncidentProvider org={org} permissions={permissions} fixture={fixture}>
         <a
           href="#main"
           data-skip=""

@@ -15,7 +15,7 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ShellData } from './data.ts';
+import { projectKey, type ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
 import { Inbox } from './inbox.tsx';
 import { PRODUCTS } from './products.ts';
@@ -63,6 +63,23 @@ export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
         Organization settings
       </MenuItem>
       <MenuSeparator />
+      {data.organizations.length === 0 ? null : (
+        <MenuSection title="Organizations">
+          {data.organizations.map((other) => (
+            <MenuItem
+              key={other.slug}
+              id={`organization-${other.slug}`}
+              meta={other.detail}
+              icon={other.slug === org ? <IconCheck /> : <span className="size-icon-sm" />}
+              onAction={() => {
+                router.push(`/${other.slug}`);
+              }}
+            >
+              {other.name}
+            </MenuItem>
+          ))}
+        </MenuSection>
+      )}
       <MenuItem
         id="create"
         onAction={() => {
@@ -174,7 +191,10 @@ export function TopBar({ data }: { data: ShellData }): ReactNode {
   const { drawerOpen, setDrawerOpen } = useShell();
   const here = parseShellPath(usePathname());
   const org = data.organization.slug;
-  const project = here?.project === undefined ? undefined : data.projects[here.project];
+  const project =
+    here?.product === undefined || here.project === undefined
+      ? undefined
+      : data.projects[projectKey(here.product, here.project)];
   const product = PRODUCTS.find((p) => p.id === here?.product);
   const where = project?.name ?? product?.label ?? data.organization.name;
   const ref = useRef<HTMLElement>(null);
