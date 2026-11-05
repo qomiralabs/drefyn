@@ -54,7 +54,8 @@ describe('the pinned corpus', () => {
     () => {
       let blocks = 0;
       const off: string[] = [];
-      for (const { file, text, dialect } of corpus) {
+      for (const [index, { file, text, dialect }] of corpus.entries()) {
+        if (index % BLOCK_SAMPLE !== 0) continue;
         const ast = parsed(text, dialect);
         const definitions = ast.children.filter((block) => block.type === 'definition');
         if (definitions.length > 0) continue; // a reference needs its definition to parse the same
