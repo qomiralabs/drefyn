@@ -68,7 +68,10 @@ export interface DashboardAuth {
     | 'startStepUpCode'
     | 'verifyStepUpCode'
   >;
-  readonly organizations: Pick<Organizations, 'listMyOrganizations' | 'createOrganization'>;
+  readonly organizations: Pick<
+    Organizations,
+    'listMyOrganizations' | 'listMyOrganizationSeats' | 'createOrganization'
+  >;
   readonly account: Pick<Account, 'readAccount' | 'setDisplayName'>;
   readonly emailSignIn: EmailSignIn;
   readonly emailChange: EmailChange;
@@ -228,6 +231,7 @@ async function compose(): Promise<DashboardAuth> {
     },
     organizations: {
       listMyOrganizations: (session) => organizations.listMyOrganizations(session),
+      listMyOrganizationSeats: (access) => organizations.listMyOrganizationSeats(access),
       createOrganization: (session, input) => organizations.createOrganization(session, input),
     },
     account: {

@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import { openShell } from './fixtures.ts';
 
-export const PAGES = '/acme/docs/payments-api/pages';
+export const PAGES = '/shell-states/docs/payments-api/pages';
 
 export const pagesTable = (page: Page): Locator => page.getByRole('grid', { name: 'Pages' });
 export const row = (page: Page, title: string): Locator =>

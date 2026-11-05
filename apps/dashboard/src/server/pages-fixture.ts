@@ -5,6 +5,10 @@ import { findProject } from '../fixtures/projects.ts';
 
 const MAX_PAGES = 50;
 
+// The same switch as the state gallery that draws these pages.
+export const pagesAreOpen = (env: Readonly<Record<string, string | undefined>>): boolean =>
+  env['DREFYN_DASHBOARD_STATES'] === 'on';
+
 const Update = z.strictObject({
   project: z.string().max(64),
   pages: z

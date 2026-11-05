@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { findProject } from '../../../../fixtures/projects.ts';
 import { guardOrganization } from '../../../../server/guard.ts';
+import { findProject } from '../../../../server/projects.ts';
 import { parseShellPath } from '../../../../shell/route.ts';
 
 // Checked here, above the loading boundary, so an unknown project is a real 404 status and
@@ -18,7 +18,7 @@ export default async function ProjectLayout({
   const location = parseShellPath(`/${org}/${product}/${project}`);
   if (
     location?.project === undefined ||
-    findProject(access, product, location.project) === undefined
+    (await findProject(access, product, location.project)) === undefined
   ) {
     notFound();
   }

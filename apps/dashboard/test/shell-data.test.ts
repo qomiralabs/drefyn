@@ -1,4 +1,4 @@
-import type { AccessContext, AccessView } from '@drefyn/auth';
+import type { AccessContext, AccessView, OrganizationSeats, ReachableProject } from '@drefyn/auth';
 import { TIERS } from '@drefyn/entitlements';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,19 +25,22 @@ const VIEW: AccessView = {
 };
 const ACCESS = { organizationId: 'org-beta', tier: 'growth' } as unknown as AccessContext;
 const BETA = {
+  role: 'owner',
+  readOnlySince: null,
   organizationId: 'org-beta',
   slug: 'beta',
   name: 'Beta Labs',
   tier: 'growth',
   seats: { used: 3, limit: 20 },
-};
+} as unknown as OrganizationSeats;
 const GAMMA = {
+  ...BETA,
   organizationId: 'org-gamma',
   slug: 'gamma',
   name: 'Gamma',
   tier: 'self_hosted',
   seats: { used: 9, limit: 'unlimited' },
-};
+} as OrganizationSeats;
 const COUNTLESS = { ...GAMMA, slug: 'delta', name: 'Delta', seats: null };
 const HANDBOOK = {
   projectId: 'p1',
@@ -45,7 +48,7 @@ const HANDBOOK = {
   name: 'Handbook',
   product: 'docs',
   readOnly: false,
-};
+} as unknown as ReachableProject;
 const NONE = { organizations: [], projects: [] };
 
 describe('shellDataFor', () => {
@@ -89,7 +92,7 @@ describe('shellDataFor', () => {
   });
 
   it('keeps projects with one slug in two products apart', () => {
-    const status = { ...HANDBOOK, projectId: 'p2', product: 'status', name: 'Handbook status' };
+    const status = { ...HANDBOOK, product: 'status', name: 'Handbook status' } as ReachableProject;
     const data = shellDataFor(
       { access: ACCESS, view: VIEW },
       { organizations: [], projects: [HANDBOOK, status] },

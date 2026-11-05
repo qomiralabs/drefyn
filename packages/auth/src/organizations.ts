@@ -10,7 +10,7 @@ import {
   type OrganizationSchema,
   type UserSchema,
 } from '@drefyn/db';
-import type { Tier } from '@drefyn/entitlements';
+import { limitFor, type LimitValue, type Tier } from '@drefyn/entitlements';
 import { idOf, type OrganizationId, type UserId } from '@drefyn/tenancy';
 import { sql, type Transaction } from 'kysely';
 import { grantAccess, storedRole, storedTier, type AccessContext } from './access.ts';
@@ -24,6 +24,7 @@ import {
 } from './organization-rules.ts';
 import type { OrgRole } from './permissions.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
+import { countUsed } from './seat-count.ts';
 import {
   fail,
   idFields,
@@ -45,6 +46,11 @@ export interface OrganizationSummary {
   readonly role: OrgRole;
   readonly tier: Tier;
   readonly readOnlySince: Date | null;
+}
+
+// What the organization menu shows. Seats are null past the counted few.
+export interface OrganizationSeats extends OrganizationSummary {
+  readonly seats: { readonly used: number; readonly limit: LimitValue } | null;
 }
 
 // The two transaction kinds organizations use. Tests hand in scripted ones.
@@ -93,7 +99,10 @@ export interface Organizations {
     s: SessionInfo,
     input: { readonly name: string },
   ): Promise<Result<CreatedOrganization, AuthError>>;
-  listMyOrganizations(s: SessionInfo): Promise<readonly OrganizationSummary[]>;
+  listMyOrganizations(s: Pick<SessionInfo, 'userId'>): Promise<readonly OrganizationSummary[]>;
+  // A user context cannot count another member, so each count takes its own organization
+  // transaction, and only for organizations the person's own list just proved.
+  listMyOrganizationSeats(a: AccessContext): Promise<readonly OrganizationSeats[]>;
   // For the operator command, which has a person but no session yet and is often run twice:
   // the organization this person already owns under this exact name, or a new one by the
   // same rules, limit and insert path as createOrganization.
@@ -110,6 +119,9 @@ const TAKEN = new SlugTaken('slug taken');
 // popular. Each retry rolls back first, so nothing is left to double up.
 const SLUG_TRIES = 5;
 const RETRY_WAIT_MS = 20;
+
+// Each count is a transaction on a page load, so the menu stops counting here.
+const SEAT_COUNTS_MAX = 25;
 
 function randomSlugSuffix(): string {
   return Array.from({ length: SLUG_SUFFIX_LENGTH }, () =>
@@ -268,6 +280,46 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
     }
   }
 
+  async function listMine(userId: UserId): Promise<readonly OrganizationSummary[]> {
+    const rows = await store.user(userId, (tx) =>
+      tx
+        .selectFrom('memberships as m')
+        .innerJoin('organizations as o', 'o.organization_id', 'm.organization_id')
+        .innerJoin('organization_slugs as sl', 'sl.organization_id', 'm.organization_id')
+        .select([
+          'o.organization_id',
+          'o.name',
+          'sl.slug',
+          'm.role',
+          'o.plan_tier',
+          'o.read_only_since',
+        ])
+        .where('m.user_id', '=', sql<string>`app.current_user_id()`)
+        .orderBy('o.name')
+        .orderBy('o.organization_id')
+        .execute(),
+    );
+    return Object.freeze(
+      rows.map((row) =>
+        Object.freeze({
+          organizationId: idOf('org', row.organization_id),
+          name: row.name,
+          slug: row.slug,
+          role: storedRole(row.role),
+          tier: storedTier(row.plan_tier),
+          readOnlySince: row.read_only_since,
+        }),
+      ),
+    );
+  }
+
+  async function seatsIn(organizationId: OrganizationId): Promise<OrganizationSeats['seats']> {
+    const { used, tier } = await store.organization(organizationId, (tx) =>
+      countUsed(tx, organizationId, null),
+    );
+    return Object.freeze({ used, limit: limitFor(storedTier(tier), 'org.seats') });
+  }
+
   return Object.freeze({
     async createOrganization(s, input) {
       const made = await insert(s.userId, input);
@@ -290,36 +342,21 @@ export function createOrganizations(config: AuthConfig, deps: OrganizationsDeps)
 
     async listMyOrganizations(s) {
       try {
-        const rows = await store.user(s.userId, (tx) =>
-          tx
-            .selectFrom('memberships as m')
-            .innerJoin('organizations as o', 'o.organization_id', 'm.organization_id')
-            .innerJoin('organization_slugs as sl', 'sl.organization_id', 'm.organization_id')
-            .select([
-              'o.organization_id',
-              'o.name',
-              'sl.slug',
-              'm.role',
-              'o.plan_tier',
-              'o.read_only_since',
-            ])
-            .where('m.user_id', '=', sql<string>`app.current_user_id()`)
-            .orderBy('o.name')
-            .orderBy('o.organization_id')
-            .execute(),
-        );
-        return Object.freeze(
-          rows.map((row) =>
-            Object.freeze({
-              organizationId: idOf('org', row.organization_id),
-              name: row.name,
-              slug: row.slug,
-              role: storedRole(row.role),
-              tier: storedTier(row.plan_tier),
-              readOnlySince: row.read_only_since,
-            }),
-          ),
-        );
+        return await listMine(s.userId);
+      } catch (error) {
+        throw unavailable(error);
+      }
+    },
+
+    async listMyOrganizationSeats(a) {
+      try {
+        const mine = await listMine(a.userId);
+        const counted: OrganizationSeats[] = [];
+        for (const [index, organization] of mine.entries()) {
+          const seats = index < SEAT_COUNTS_MAX ? await seatsIn(organization.organizationId) : null;
+          counted.push(Object.freeze({ ...organization, seats }));
+        }
+        return Object.freeze(counted);
       } catch (error) {
         throw unavailable(error);
       }

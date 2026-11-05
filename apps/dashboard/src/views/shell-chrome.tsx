@@ -21,6 +21,7 @@ export function ShellChrome({
       org={data.organization.slug}
       orgName={data.organization.name}
       permissions={permissions}
+      projects={data.projects}
     >
       <a
         href="#main"

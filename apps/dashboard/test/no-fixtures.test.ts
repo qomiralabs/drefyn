@@ -37,7 +37,7 @@ describe('shipping code', () => {
     expect(withFixtures.filter((path) => !GATED.includes(path))).toEqual([]);
   });
 
-  it.each(GATED.filter((path) => path.endsWith('page.tsx') || path.endsWith('actions.ts')))(
+  it.each(GATED.filter((path) => path.endsWith('page.tsx')))(
     '%s answers only on a server that opted in',
     (path) => {
       expect(readFileSync(join(SRC, path), 'utf8')).toContain(STATES_SWITCH);

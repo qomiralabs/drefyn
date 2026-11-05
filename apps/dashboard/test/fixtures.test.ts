@@ -65,6 +65,7 @@ describe('placeholder projects', () => {
     expect(PLACEHOLDER_SHELL.projects['status/acme-status']).toEqual({
       name: 'Acme status',
       product: 'status',
+      state: { state: 'fresh', word: 'Running' },
     });
   });
 });

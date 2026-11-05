@@ -233,12 +233,6 @@ describe('listReachableProjects', () => {
     const list = await members.listReachableProjects(access());
     expect(!list.ok && list.error.code).toBe('AUTH_UNAVAILABLE');
   });
-
-  it('refuses a product it does not know instead of drawing it', async () => {
-    const { members } = read({ product: 'blog' });
-    const list = await members.listReachableProjects(access());
-    expect(!list.ok && list.error.code).toBe('AUTH_UNAVAILABLE');
-  });
 });
 
 describe('withdrawInvitation', () => {

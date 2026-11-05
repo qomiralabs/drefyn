@@ -22,6 +22,7 @@ import {
   ADA,
   BETA_ID,
   KESTREL_ID,
+  LIV,
   MAYA,
   NOOR,
   OMAR,
@@ -80,13 +81,25 @@ values ${[
   membership(ACME_ID, MAYA.id, 'owner'),
   membership(ACME_ID, ADA.id, 'admin'),
   membership(ACME_ID, SAM.id, 'member'),
+  membership(ACME_ID, LIV.id, 'member'),
   membership(BETA_ID, NOOR.id, 'owner'),
   membership(KESTREL_ID, OMAR.id, 'owner'),
   membership(KESTREL_ID, TESS.id, 'admin'),
   membership(KESTREL_ID, RAFA.id, 'member'),
 ].join(', ')} on conflict do nothing;
-insert into app.projects (organization_id, product, slug, name)
-values (${quoted(KESTREL_ID)}, 'docs', 'handbook', 'Handbook') on conflict do nothing;
+insert into app.projects (organization_id, product, slug, name, read_only_since)
+values (${quoted(KESTREL_ID)}, 'docs', 'handbook', 'Handbook', null),
+  (${quoted(ACME_ID)}, 'docs', 'payments-api', 'Payments API docs', null),
+  (${quoted(ACME_ID)}, 'docs', 'new-docs', 'New docs', null),
+  (${quoted(ACME_ID)}, 'docs', 'partner-api', 'Partner API docs', now()),
+  (${quoted(ACME_ID)}, 'status', 'acme-status', 'Acme status', null)
+on conflict do nothing;
+insert into app.project_roles (organization_id, membership_id, target_project_id, role)
+select m.organization_id, m.id, p.id, 'viewer'
+  from app.memberships m
+  join app.projects p on p.organization_id = m.organization_id and p.slug = 'new-docs'
+ where m.user_id = ${quoted(LIV.id)}
+on conflict do nothing;
 `;
 
 check(

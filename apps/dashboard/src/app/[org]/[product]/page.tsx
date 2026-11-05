@@ -2,28 +2,31 @@ import type { AccessContext } from '@drefyn/auth';
 import { ButtonLink, IconLock } from '@drefyn/ui/react';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { mayRead, projectsOf } from '../../../fixtures/projects.ts';
 import { guardOrganization } from '../../../server/guard.ts';
-import { PLAN_LABELS } from '../../../server/shell-data.ts';
+import { includedSentence } from '../../../server/plan-words.ts';
+import { projectsInReach, reachesProduct } from '../../../server/projects.ts';
 import { PRODUCTS } from '../../../shell/products.ts';
 import { parseShellPath, shellHref } from '../../../shell/route.ts';
 import { Answer, Calm, Eyebrow, Head, Ranked } from '../../../views/calm.tsx';
+import { projectAnswer } from '../../../views/project-home.tsx';
 
 interface Params {
   params: Promise<{ org: string; product: string }>;
 }
 
-function productFrom(access: AccessContext, org: string, product: string) {
+async function productFrom(access: AccessContext, org: string, product: string) {
   const location = parseShellPath(`/${org}/${product}`);
   const found = PRODUCTS.find((p) => p.id === location?.product);
-  if (found === undefined || !mayRead(access, found.id)) notFound();
-  return found;
+  if (found === undefined) notFound();
+  const projects = await projectsInReach(access);
+  if (!reachesProduct(access, projects, found.id)) notFound();
+  return { product: found, projects: projects.filter((p) => p.product === found.id) };
 }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { org, product } = await params;
   const { access } = await guardOrganization(org);
-  return { title: productFrom(access, org, product).label };
+  return { title: (await productFrom(access, org, product)).product.label };
 }
 
 // A product home. With one project it goes straight there; with several it lists them;
@@ -31,8 +34,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function ProductHome({ params }: Params) {
   const { org, product: slug } = await params;
   const { access } = await guardOrganization(org);
-  const product = productFrom(access, org, slug);
-  const projects = projectsOf(access, product.id);
+  const { product, projects } = await productFrom(access, org, slug);
   const only = projects.length === 1 ? projects[0] : undefined;
   if (only !== undefined) redirect(shellHref({ org, product: product.id, project: only.slug }));
 
@@ -43,7 +45,7 @@ export default async function ProductHome({ params }: Params) {
           <Eyebrow>{product.label}</Eyebrow>
           <Answer
             claim={`No ${product.label} projects yet.`}
-            rest={`${PLAN_LABELS[access.tier]} includes one, so there is nothing to sign up for.`}
+            rest={includedSentence(access.tier, product.id)}
           />
         </Head>
         <div className="flex flex-wrap gap-8">
@@ -78,7 +80,7 @@ export default async function ProductHome({ params }: Params) {
           ),
           title: p.name,
           href: shellHref({ org, product: product.id, project: p.slug }),
-          detail: p.answer,
+          detail: projectAnswer(p.product, p.readOnly),
           when: null,
         }))}
       />
