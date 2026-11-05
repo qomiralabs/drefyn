@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { startIncidentCommand } from '../src/incident/feed.ts';
 import { places } from '../src/shell/places.ts';
 import type { Command } from '../src/shell/commands.ts';
 import { test } from './csp.ts';
@@ -12,7 +13,7 @@ const SEEDED = {
   'status/acme-status': { name: 'Acme status', product: 'status' },
 } as const;
 
-const REGISTRY = places('acme', SEEDED);
+const REGISTRY = [...places('acme', SEEDED), startIncidentCommand('acme')];
 
 // The one product with a single project goes straight to it.
 const LANDS_ON: Readonly<Record<string, string>> = { '/acme/status': '/acme/status/acme-status' };

@@ -1,6 +1,7 @@
 import { permissionsFor } from '@drefyn/auth/permissions';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { startIncidentCommand } from '../src/incident/feed.ts';
 import { commandFilter, type Command } from '../src/shell/commands.ts';
 import { places, visiblePlaces } from '../src/shell/places.ts';
 
@@ -32,10 +33,11 @@ const search = (entries: readonly Command[], query: string): readonly string[] =
 
 describe('every registry entry is reachable by search', () => {
   const owner = permissionsFor('owner', new Set(['docs', 'studio', 'status']));
-  const registry = visiblePlaces('acme', owner, PROJECTS);
+  const actions = [startIncidentCommand('acme')];
+  const registry = visiblePlaces('acme', owner, PROJECTS, actions);
 
   it('covers the whole registry, not a part of it', () => {
-    expect(registry).toEqual(places('acme', PROJECTS));
+    expect(registry).toEqual([...places('acme', PROJECTS), ...actions]);
     expect(registry.length).toBeGreaterThan(10);
   });
 
