@@ -131,6 +131,14 @@ variant passes, as does `motion-safe:` anywhere in the variant chain. State vari
 width (`@page:`). `supports-[...]:` is not checked. The guard step does not run this rule; it
 is a styling rule, not a boundary.
 
+### `drefyn/no-mdx-evaluate`
+
+Reports any load of `@mdx-js/mdx`, `@mdx-js/loader`, `@mdx-js/node-loader`, `@mdx-js/esbuild`
+or `@mdx-js/rollup`, or a path inside one. Every export of those packages compiles MDX to
+JavaScript or runs it, and customer MDX is never compiled or run; `@drefyn/mdx` parses it.
+Type only imports pass because they load nothing. A require made by `createRequire` is out
+of its reach. It runs in the root config and in the guard, like the other boundary rules.
+
 ### `drefyn/no-select-all`
 
 Refuses `selectAll()` and `returningAll()` on a table whose grants are per column, because the

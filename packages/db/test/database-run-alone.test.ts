@@ -107,6 +107,15 @@ describe.each(runners)('a statement run alone on the %s pool', (_label, kind, ru
     expect(client?.released).toBeUndefined();
   });
 
+  // The row lock lasts until the commit returns, so a slow disk would queue every caller on
+  // that key behind one flush, and each of them has a timeout of about a second.
+  it('commits without waiting for the disk, for this transaction only', async () => {
+    const { db, clients } = scripted(kind, () => fiveResults([]));
+    await run(db, 'select 1', 1000);
+    const parts = clients[0]?.sent[0]?.split(';\n');
+    expect(parts?.[2]).toContain("set_config('synchronous_commit', 'off', true)");
+  });
+
   it('uses the pool statement timeout when none is given', async () => {
     const { db, clients } = scripted(kind, () => fiveResults([]));
     await run(db, 'select 1');
