@@ -34,15 +34,56 @@ interface IncidentState {
   readonly resolve: () => void;
 }
 
-const IncidentContext = createContext<IncidentState | null>(null);
+// Holds nothing the feed decides. The first read follows hydration, and a context change that
+// reaches a Suspense boundary still streaming makes React drop the server's markup and render
+// the page again in the browser. So each reader subscribes for itself.
+interface IncidentShared {
+  readonly org: string;
+  readonly feed: IncidentFeed | null;
+  readonly mayRead: boolean;
+  readonly entering: boolean;
+  readonly returnTo: string | null;
+  readonly heading: (element: HTMLElement | null) => void;
+  readonly start: () => void;
+  readonly resolve: () => void;
+}
 
-export function useIncident(): IncidentState {
-  const state = useContext(IncidentContext);
-  if (state === null) throw new Error('useIncident needs the incident provider.');
-  return state;
+const IncidentContext = createContext<IncidentShared | null>(null);
+
+const noFeed = () => () => undefined;
+const notRead = () => undefined;
+
+function useRead(feed: IncidentFeed | null, mayRead: boolean): OpenIncident | null | undefined {
+  const read = useSyncExternalStore(
+    feed === null ? noFeed : feed.subscribe,
+    feed === null ? notRead : feed.current,
+    notRead,
+  );
+  // The incident line names a Status component, so it stays with people who can read Status.
+  return read === undefined ? undefined : mayRead ? read : null;
 }
 
 const projectHome = (org: string, project: string) => `/${org}/status/${project}`;
+
+export function useIncident(): IncidentState {
+  const shared = useContext(IncidentContext);
+  if (shared === null) throw new Error('useIncident needs the incident provider.');
+  const { org, feed, mayRead, entering, returnTo, heading, start, resolve } = shared;
+  const pathname = usePathname();
+  const incident = useRead(feed, mayRead);
+  return {
+    incident,
+    view: viewOf(pathname, incident ?? null),
+    entering,
+    calmHref:
+      returnTo ?? (incident == null ? `/${org}/status` : projectHome(org, incident.project)),
+    cockpitHref:
+      incident == null ? null : `${projectHome(org, incident.project)}/incidents/${incident.id}`,
+    heading,
+    start,
+    resolve,
+  };
+}
 
 const inMemory = (): FeedStorage => {
   const values = new Map<string, string>();
@@ -65,9 +106,6 @@ function browserStorage(): FeedStorage {
     return inMemory();
   }
 }
-
-const noFeed = () => () => undefined;
-const notRead = () => undefined;
 
 const HEADING_SETTLES_MS = 5000;
 
@@ -151,14 +189,8 @@ export function IncidentProvider({
       ? null
       : createFixtureFeed(org, browserStorage(), window),
   );
-  const read = useSyncExternalStore(
-    feed === null ? noFeed : feed.subscribe,
-    feed === null ? notRead : feed.current,
-    notRead,
-  );
-  // The incident line names a Status component, so it stays with people who can read Status.
   const mayRead = permissions.includes('status.read');
-  const incident = read === undefined ? undefined : mayRead ? read : null;
+  const incident = useRead(feed, mayRead);
   const view = viewOf(pathname, incident ?? null);
 
   // Derived while rendering, so the cockpit's first render already knows how it arrived.
@@ -255,15 +287,13 @@ export function IncidentProvider({
     }
   }, [incident, view, pathname, org, router, takeHeading, memory]);
 
-  const state = useMemo<IncidentState>(
+  const shared = useMemo<IncidentShared>(
     () => ({
-      incident,
-      view,
+      org,
+      feed,
+      mayRead,
       entering,
-      calmHref:
-        returnTo ?? (incident == null ? `/${org}/status` : projectHome(org, incident.project)),
-      cockpitHref:
-        incident == null ? null : `${projectHome(org, incident.project)}/incidents/${incident.id}`,
+      returnTo,
       heading,
       start: () => {
         feed?.start();
@@ -272,11 +302,11 @@ export function IncidentProvider({
         feed?.resolve();
       },
     }),
-    [incident, view, entering, returnTo, org, heading, feed],
+    [org, feed, mayRead, entering, returnTo, heading],
   );
 
   return (
-    <IncidentContext value={state}>
+    <IncidentContext value={shared}>
       {/* The shell's mode, so plain CSS can step the sidebar back without any script in it. */}
       <div
         className="contents"
