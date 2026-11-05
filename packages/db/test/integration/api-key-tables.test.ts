@@ -324,7 +324,6 @@ describeWithStack('API key tables', () => {
 
   it.each([
     'id',
-    'organization_id',
     'name',
     'secret_hash',
     'display_suffix',
@@ -386,6 +385,18 @@ describeWithStack('API key tables', () => {
         await auth.query('rollback');
       }
     };
+
+    it('show drefyn_auth the organization of a row past the limit and of no other', async () => {
+      const seen = await asAuth(
+        async (auth) =>
+          (
+            await auth.query<{ organization_id: string }>(
+              'select organization_id from app.api_keys',
+            )
+          ).rows,
+      );
+      expect(seen).toEqual([{ organization_id: ORG_A }]);
+    });
 
     it('show drefyn_auth only the rows past the limit', async () => {
       const count = await asAuth(
@@ -511,6 +522,41 @@ describeWithStack('API key tables', () => {
       (p) => p.name === 'app.api_keys.api_key_insert_creator',
     );
     expect(text.trim()).toBe(entry?.withCheck);
+  });
+
+  it('let a revoke set the transaction time', async () => {
+    const app = await as('app');
+    const count = await within(app, ORG_A, async () => {
+      const done = await app.query(
+        `update app.api_keys set revoked_at = now() where id = '${KEY_A}' returning 1`,
+      );
+      return done.rowCount;
+    });
+    expect(count).toBe(1);
+  });
+
+  it.each([
+    ['backdate', "'2000-01-01'"],
+    ['backdate by a second', "now() - interval '1 second'"],
+    ['forward date', "now() + interval '1 day'"],
+  ])('refuse a live key a revoke that tries to %s', async (_name, value) => {
+    const app = await as('app');
+    expect(
+      await within(app, ORG_A, () =>
+        sqlState(app.query(`update app.api_keys set revoked_at = ${value} where id = '${KEY_A}'`)),
+      ),
+    ).toBe('42501');
+  });
+
+  it('still let the verifier stamp last_used_at on a live key', async () => {
+    const app = await as('app');
+    const count = await within(app, ORG_A, async () => {
+      const done = await app.query(
+        `update app.api_keys set last_used_at = now() where id = '${KEY_A}' returning 1`,
+      );
+      return done.rowCount;
+    });
+    expect(count).toBe(1);
   });
 
   it('carry the revoke guard with the exact text the allow list reviews', async () => {
