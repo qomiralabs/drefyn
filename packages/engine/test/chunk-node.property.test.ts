@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { chunkNode } from '../src/index.ts';
-import { sourceOf, treeOf, type BlockSpec } from './support/tree.ts';
+import { chunksBySection, sectionOf, sourceOf, treeOf, type BlockSpec } from './support/tree.ts';
 
 // Long lines are one short text repeated: drawing thousands of random characters per line costs
 // seconds a run, and the cap and the pair check only care about length and where a pair falls.
@@ -91,6 +91,62 @@ describe('chunkNode', () => {
             if (wellFormedBefore) expect(chunk.body.isWellFormed()).toBe(true);
           });
         }),
+        RUNS,
+      );
+    },
+    TIMEOUT_MS,
+  );
+});
+
+describe('an edit', () => {
+  const body = fc.array(raw, { minLength: 1, maxLength: 5 });
+  const section = fc.record({ title: fc.string({ maxLength: 30 }), bodies: body });
+  const edit = fc.oneof(
+    fc.constant((text: string) => text.replace(/\w+/, 'zebra')),
+    fc.constant((text: string) => text.replace(/\w+/, 'z'.repeat(24))),
+    fc.constant((text: string) => `${text} One more plain sentence ends this block.`),
+    fc.string({ maxLength: 900 }).map((text) => () => text),
+  );
+
+  const specsOf = (
+    sections: readonly { readonly title: string; readonly bodies: readonly string[] }[],
+  ): BlockSpec[] =>
+    sections.flatMap(({ title, bodies }, at) => [
+      // Section 0 has no heading half the time, as a page's opening text does not.
+      ...(at === 0 && title.length % 2 === 0
+        ? []
+        : [{ raw: `# ${title}`, heading: { depth: 1, text: title } } as const]),
+      ...bodies.map((text) => ({ raw: text })),
+    ]);
+
+  it(
+    'never changes a chunk outside its heading section',
+    () => {
+      fc.assert(
+        fc.property(
+          fc.array(section, { minLength: 2, maxLength: 8 }),
+          fc.nat(),
+          edit,
+          sizes,
+          fc.constantFrom('', '\n', 'trailing words\n'),
+          (sections, pick, change, options, tail) => {
+            const specs = specsOf(sections);
+            const editable = specs.flatMap(({ heading }, at) =>
+              heading === undefined ? [at] : [],
+            );
+            const target = editable[pick % editable.length] ?? 0;
+            const changed = specs.map((spec, at) =>
+              at === target ? { ...spec, raw: change(spec.raw) } : spec,
+            );
+            const before = treeOf(specs, tail);
+            const after = treeOf(changed, tail);
+            const home = sectionOf(before, target);
+            const was = chunksBySection(before, chunkNode(before, options));
+            const now = chunksBySection(after, chunkNode(after, options));
+            const others = (found: typeof was) => [...found].filter(([key]) => key !== home);
+            expect(others(now)).toEqual(others(was));
+          },
+        ),
         RUNS,
       );
     },

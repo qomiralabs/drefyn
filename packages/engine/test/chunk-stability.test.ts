@@ -1,19 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { DEFAULT_LIMITS, type Dialect, type MdxIssueCode, type MdxRoot } from '@drefyn/mdx';
 import { createParseClient, type ParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { chunkNode } from '../src/index.ts';
+import { chunkNode, type Chunk } from '../src/index.ts';
 import { startHost, type RunningHost } from './support/parse-host.ts';
+import { chunksBySection, sectionOf } from './support/tree.ts';
 
-const REPLACEMENT = 'zebra';
 const WORD = /\b[A-Za-z]{4,}\b/;
 const POSITIONS = [0, 0.5, 1];
 const options = { targetChars: 800, maxChars: 2000 };
 const HOST_START_MS = 60_000;
 const CORPUS_MS = 180_000;
+// Two word edits turn a page into one the parser refuses. A sentence does not.
+const EDITS_ON_THE_FIXTURE = { short: 466, long: 466, sentence: 468 };
+const LONG_PAGE_CHUNKS = 20;
+const MIN_LONG_PAGE_EDITS = 50;
 
 const corpus = join(import.meta.dirname, '..', '..', 'mdx', 'test', 'fixtures', 'corpus');
 
@@ -48,53 +53,112 @@ async function parsed(client: ParseClient, source: string, dialect: Dialect) {
   return null;
 }
 
-// One word of the block at this share of the page's paragraphs, in place in the file.
-function edited(text: string, root: MdxRoot, position: number): string | null {
-  const paragraphs = root.children.filter(
-    ({ type, source }) => type === 'paragraph' && WORD.test(source?.raw ?? ''),
+type Change = (raw: string) => string;
+
+const CHANGES = {
+  short: (raw) => raw.replace(WORD, 'zebra'),
+  // Greedy fill can push a block on to the next chunk, which a short word rarely shows.
+  long: (raw) => raw.replace(WORD, 'zebrazebrazebrazebrazebr'),
+  sentence: (raw) => `${raw} One more plain sentence ends this paragraph here.`,
+} as const satisfies Readonly<Record<string, Change>>;
+
+type ChangeName = keyof typeof CHANGES;
+
+interface Target {
+  readonly index: number;
+  readonly from: number;
+  readonly raw: string;
+}
+
+// The paragraph at this share of the page, found by adding up the source before it: searching
+// for its text can land on an earlier copy, in another section.
+function targetIn(root: MdxRoot, position: number): Target | null {
+  const paragraphs = root.children.flatMap(({ type, source }, index) =>
+    type === 'paragraph' && WORD.test(source?.raw ?? '') ? [index] : [],
   );
-  const target = paragraphs[Math.round((paragraphs.length - 1) * position)];
-  if (target?.source === undefined) return null;
-  const { raw } = target.source;
-  const at = text.indexOf(raw);
-  if (at < 0) return null;
-  return text.slice(0, at) + raw.replace(WORD, REPLACEMENT) + text.slice(at + raw.length);
+  const index = paragraphs[Math.round((paragraphs.length - 1) * position)];
+  const source = index === undefined ? undefined : root.children[index]?.source;
+  if (index === undefined || source === undefined) return null;
+  const before = root.children.slice(0, index).reduce((sum, block) => {
+    const { gapBefore = '', raw = '' } = block.source ?? {};
+    return sum + gapBefore.length + raw.length;
+  }, 0);
+  return { index, from: before + source.gapBefore.length, raw: source.raw };
 }
 
 interface Edit {
   readonly chunks: number;
   readonly changed: number;
+  readonly outside: number;
 }
 
-async function editsOnCorpus(client: ParseClient): Promise<readonly Edit[]> {
-  const edits: Edit[] = [];
+// Counted as a multiset, so a body that repeats on the page cannot hide a new copy of itself.
+function newBodies(before: readonly string[], after: readonly string[]): number {
+  const left = new Map<string, number>();
+  for (const body of before) left.set(body, (left.get(body) ?? 0) + 1);
+  let found = 0;
+  for (const body of after) {
+    const count = left.get(body) ?? 0;
+    if (count === 0) found += 1;
+    else left.set(body, count - 1);
+  }
+  return found;
+}
+
+const bodiesOf = (chunks: readonly Chunk[]) => chunks.map(({ body }) => body);
+
+function outsideSection(before: MdxRoot, after: MdxRoot, home: number): number {
+  const was = chunksBySection(before, chunkNode(before, options));
+  const now = chunksBySection(after, chunkNode(after, options));
+  const keys = new Set([...was.keys(), ...now.keys()]);
+  keys.delete(home);
+  return [...keys].filter((key) => !isDeepStrictEqual(was.get(key) ?? [], now.get(key) ?? []))
+    .length;
+}
+
+async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, readonly Edit[]>> {
+  const edits: Record<ChangeName, Edit[]> = { short: [], long: [], sentence: [] };
   for (const file of readdirSync(corpus).sort()) {
     const dialect: Dialect = file.endsWith('.mdx.txt') ? 'mdx' : 'md';
     const text = readFileSync(join(corpus, file), 'utf8');
     const root = await parsed(client, text, dialect);
     if (root === null) continue;
-    const before = new Set(chunkNode(root, options).map(({ body }) => body));
+    const before = bodiesOf(chunkNode(root, options));
     for (const position of POSITIONS) {
-      const next = edited(text, root, position);
-      const after = next === null ? null : await parsed(client, next, dialect);
-      if (after === null) continue;
-      const bodies = chunkNode(after, options).map(({ body }) => body);
-      edits.push({
-        chunks: bodies.length,
-        changed: bodies.filter((body) => !before.has(body)).length,
-      });
+      const target = targetIn(root, position);
+      if (target === null) continue;
+      const { index, from, raw } = target;
+      if (!text.startsWith(raw, from))
+        throw new Error(`${file}: the block is not where it adds up`);
+      for (const name of Object.keys(CHANGES) as ChangeName[]) {
+        const next = text.slice(0, from) + CHANGES[name](raw) + text.slice(from + raw.length);
+        const after = await parsed(client, next, dialect);
+        if (after === null) continue;
+        const bodies = bodiesOf(chunkNode(after, options));
+        edits[name].push({
+          chunks: bodies.length,
+          changed: newBodies(before, bodies),
+          outside: outsideSection(root, after, sectionOf(root, index)),
+        });
+      }
     }
   }
   return edits;
 }
 
-const share = (edits: readonly Edit[]) =>
+const changedCounts = (edits: readonly Edit[]) => edits.map(({ changed }) => changed);
+const mean = (values: readonly number[]) =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
+const p99 = (values: readonly number[]) =>
+  [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.99) - 1] ?? Infinity;
+const unchanged = (edits: readonly Edit[]) =>
+  1 -
   edits.reduce((sum, { changed }) => sum + changed, 0) /
-  edits.reduce((sum, { chunks }) => sum + chunks, 0);
+    edits.reduce((sum, { chunks }) => sum + chunks, 0);
 
-describe('a one word edit on the corpus', () => {
+describe('an edit on the corpus', () => {
   let running: RunningHost;
-  let edits: readonly Edit[];
+  let edits: Record<ChangeName, readonly Edit[]>;
 
   beforeAll(async () => {
     running = await startHost();
@@ -105,23 +169,35 @@ describe('a one word edit on the corpus', () => {
     running.host.kill('SIGKILL');
   });
 
-  it('reaches every page position', () => {
-    expect(edits.length).toBe(466);
+  it.each(['short', 'long', 'sentence'] as const)('reaches every position: %s', (name) => {
+    expect(edits[name]).toHaveLength(EDITS_ON_THE_FIXTURE[name]);
   });
 
-  // Any edit changes at least the chunk holding the word, so a page under 20 chunks cannot reach
-  // 95 percent whatever the chunker does. The median page here is 2 KB and about 3 chunks.
-  it('leaves at least 95 percent of chunks unchanged on pages of 20 chunks or more', () => {
-    const long = edits.filter(({ chunks }) => chunks >= 20);
-    expect(long.length).toBeGreaterThan(50);
-    expect(share(long)).toBeLessThanOrEqual(0.05);
+  it.each(['short', 'long', 'sentence'] as const)(
+    'changes nothing outside its heading section: %s',
+    (name) => {
+      expect(edits[name].filter(({ outside }) => outside > 0)).toEqual([]);
+    },
+  );
+
+  it.each(['short', 'long'] as const)('re-embeds about one chunk per one word edit: %s', (name) => {
+    const counts = changedCounts(edits[name]);
+    expect(mean(counts)).toBeLessThan(1.1);
+    expect(p99(counts)).toBeLessThanOrEqual(2);
+    expect(Math.max(...counts)).toBeLessThanOrEqual(3);
   });
 
-  it('touches no more than two chunks on any page', () => {
-    expect(Math.max(...edits.map(({ changed }) => changed))).toBeLessThanOrEqual(2);
+  it('re-embeds under 1.3 chunks when a sentence is added', () => {
+    expect(mean(changedCounts(edits.sentence))).toBeLessThan(1.3);
   });
 
-  it('holds the whole corpus at one chunk per edit, which is about 90 percent unchanged', () => {
-    expect(share(edits)).toBeLessThanOrEqual(0.1);
-  });
+  // Fails rather than skips when the fixture stops holding enough long pages.
+  it.each(['short', 'long'] as const)(
+    'leaves at least 95 percent unchanged on pages of 20 chunks or more: %s',
+    (name) => {
+      const long = edits[name].filter(({ chunks }) => chunks >= LONG_PAGE_CHUNKS);
+      expect(long.length).toBeGreaterThan(MIN_LONG_PAGE_EDITS);
+      expect(unchanged(long)).toBeGreaterThanOrEqual(0.95);
+    },
+  );
 });

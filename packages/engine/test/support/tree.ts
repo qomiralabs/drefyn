@@ -1,4 +1,5 @@
 import type { MdxBlock, MdxRoot } from '@drefyn/mdx';
+import type { Chunk } from '../../src/index.ts';
 
 export interface BlockSpec {
   readonly raw: string;
@@ -28,3 +29,22 @@ export const sourceOf = (root: MdxRoot): string =>
     (text, { source }) => text + (source?.gapBefore ?? '') + (source?.raw ?? ''),
     '',
   ) + root.tail;
+
+// A section runs from one heading to the next, and whatever comes before the first is section 0.
+export function sectionOf(root: MdxRoot, blockIndex: number): number {
+  const upTo = root.children.slice(0, blockIndex + 1);
+  return upTo.filter(({ type }) => type === 'heading').length;
+}
+
+// Chunks by the section they start in, without ord, which moves whenever an earlier one splits.
+export function chunksBySection(
+  root: MdxRoot,
+  chunks: readonly Chunk[],
+): ReadonlyMap<number, readonly Omit<Chunk, 'ord'>[]> {
+  const sections = new Map<number, Omit<Chunk, 'ord'>[]>();
+  for (const { blockPath, headingPath, body } of chunks) {
+    const section = sectionOf(root, Number.parseInt(blockPath, 10));
+    sections.set(section, [...(sections.get(section) ?? []), { blockPath, headingPath, body }]);
+  }
+  return sections;
+}
