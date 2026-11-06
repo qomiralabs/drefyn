@@ -394,9 +394,10 @@ describe('queryNodes without a server', () => {
         })
         .map(encoded),
     );
+    // One engine for every run: building one per run is what cost the time here, not the cursors.
+    const { engine } = deps(answering({ anchor: null }));
     await fc.assert(
       fc.asyncProperty(shapes, async (cursor) => {
-        const { engine } = deps(answering({ anchor: null }));
         const page = await engine.queryNodes(tenant, {
           typeId: TYPE,
           sort: { field: WHEN },
