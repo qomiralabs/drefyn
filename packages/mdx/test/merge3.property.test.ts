@@ -398,4 +398,41 @@ describe('merge3 over generated edits', () => {
     },
     TIMEOUT_MS,
   );
+
+  // No slot rule sees this one: the item leaves a list one side deleted it from and lands in a new
+  // block, so only the count stands between it and a clean merge.
+  it(
+    'never lets a delete pass an item the other side pulled out',
+    () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 2_000_000_000 }),
+          fc.nat(3),
+          fc.boolean(),
+          (seed, at, edited) => {
+            const items = ['first', 'second', 'third', 'fourth'].map((word) => `${word}${seed}`);
+            const list = (kept: readonly string[]) => kept.map((item) => `- ${item}`).join('\n');
+            const without = items.filter((_, index) => index !== at);
+            const lead = generatedPage(seed).trimEnd();
+            const page = (block: string, last = '') =>
+              `${lead}\n\nStay.\n\n${block}${last}\n\nEnd.\n`;
+            const pulled = `${items[at] ?? ''}${edited ? ' changed' : ''}`;
+            const base = parsed(page(list(items)), 'md');
+            const deleted = parsed(page(list(without)), 'md');
+            const moved = parsed(page(list(without), `\n\n> ${pulled}`), 'md');
+            for (const [ours, theirs] of [
+              [deleted, moved],
+              [moved, deleted],
+            ] as const) {
+              const result = merge3(base, ours, theirs);
+              if (!result.ok) throw new Error('refused an honest page');
+              expect(result.value.kind).toBe('conflict');
+            }
+          },
+        ),
+        { numRuns: Math.min(RUNS, 3_000), ...(SEED === undefined ? {} : { seed: Number(SEED) }) },
+      );
+    },
+    TIMEOUT_MS,
+  );
 });
