@@ -29,7 +29,12 @@ export interface SupervisorConfig {
 export function parseSupervisorConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): SupervisorConfig {
-  const parsed = z.object(envShape).parse(env);
+  const parsed = z
+    .object(envShape)
+    .refine((all) => all.DREFYN_PARSE_RESTART_BACKOFF_MS <= all.DREFYN_PARSE_RESTART_MAX_MS, {
+      message: 'a restart backoff cannot start above its ceiling',
+    })
+    .parse(env);
   return {
     backoffMs: parsed.DREFYN_PARSE_RESTART_BACKOFF_MS,
     maxBackoffMs: parsed.DREFYN_PARSE_RESTART_MAX_MS,
