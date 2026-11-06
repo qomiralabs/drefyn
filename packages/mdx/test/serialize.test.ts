@@ -289,9 +289,9 @@ describe('a gap with no blank line', () => {
   it('does not take one CRLF for a blank line', () => {
     const table = '| a |\r\n| - |\r\n';
     const tight = parsed(`# Title\r\n${table}`, 'md');
-    const changed = withChild(tight, 0, () => ({
+    const changed = withChild(tight, 0, (block) => ({
       ...newBlock('Plain words\n'),
-      source: tight.children[0]?.source as BlockSource,
+      ...(block.source && { source: block.source }),
     }));
     expect(serialize(changed)).toBe(`Plain words\r\n\r\n${table}`);
   });
