@@ -91,7 +91,8 @@ function place(
   return { block, text: printWith(block, dialect, override), verbatim: false };
 }
 
-const BLANK_LINE = /(?:\r\n?|\n)[ \t]*(?:\r\n?|\n)/;
+// \r(?!\n) keeps one CRLF from reading as two endings when the match backs up.
+export const BLANK_LINE = /(?:\r\n|\r(?!\n)|\n)[ \t]*(?:\r\n|\r|\n)/;
 const ATX_OR_FENCE = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|[`~])/;
 // Only these lists can interrupt a paragraph: an empty item or a later number cannot.
 const INTERRUPTING_LIST = /^ {0,3}(?:[-+*]|1[.)])[ \t]+\S/;

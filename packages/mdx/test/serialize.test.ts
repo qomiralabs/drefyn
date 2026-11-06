@@ -285,6 +285,16 @@ describe('a gap with no blank line', () => {
     expect(edit('a\n  \n\n\nb\n', 1, 'c')).toBe('a\n  \n\n\nc\n');
     expect(edit('a\r\n\r\nb\r\n', 1, 'c')).toBe('a\r\n\r\nc\r\n');
   });
+
+  it('does not take one CRLF for a blank line', () => {
+    const table = '| a |\r\n| - |\r\n';
+    const tight = parsed(`# Title\r\n${table}`, 'md');
+    const changed = withChild(tight, 0, () => ({
+      ...newBlock('Plain words\n'),
+      source: tight.children[0]?.source as BlockSource,
+    }));
+    expect(serialize(changed)).toBe(`Plain words\r\n\r\n${table}`);
+  });
 });
 
 describe('which single line gaps are safe', () => {

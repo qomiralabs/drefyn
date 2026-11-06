@@ -993,6 +993,14 @@ describe('merge3 gaps and tails', () => {
     expect(printed(result.value.merged)).toBe(`One.${gap}Three.\n`);
   });
 
+  it('opens a tight gap in a CRLF file, where one ending is not a blank line', () => {
+    const base = 'Quote words.\r\n\r\n# Title\r\nTight words here.\r\n';
+    const root = parsed(base, 'md');
+    const result = merge3(root, withoutMiddle(root), root);
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe('Quote words.\r\n\r\nTight words here.\r\n');
+  });
+
   it('opens a tight gap when the block above it goes', () => {
     const base = 'One.\n\n# Two\nThree.\n';
     const root = parsed(base, 'md');

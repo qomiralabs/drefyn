@@ -8,6 +8,7 @@ import { parseForStore } from './parse.ts';
 import { DEFAULT_LIMITS, DEFAULT_MERGE_MAX_BLOCKS } from './policy.ts';
 import { refused } from './result.ts';
 import { rootSchema } from './root-schema.ts';
+import { BLANK_LINE } from './serialize.ts';
 import { checkTree } from './tree-limits.ts';
 import type {
   BlockConflict,
@@ -129,7 +130,6 @@ function once<T>(compute: () => T): () => T {
   };
 }
 
-const BLANK_LINE = /(?:\r\n?|\n)[ \t]*(?:\r\n?|\n)/;
 const LEADING_BOMS = /^\uFEFF*/;
 
 const INDENTED = /^[ \t]/;
