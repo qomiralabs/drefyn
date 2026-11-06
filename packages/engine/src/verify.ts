@@ -3,13 +3,12 @@ import {
   DEFAULT_LIMITS,
   rawOf,
   validateTree,
-  type MdxBlock,
   type MdxIssue,
   type MdxLimits,
   type MdxRoot,
   type TreeProblem,
 } from '@drefyn/mdx';
-import type { ParseClient, ParseClientRequest } from '@drefyn/mdx/client';
+import type { ParseClient, PrintClientRequest } from '@drefyn/mdx/client';
 import type { TenantRef } from '@drefyn/tenancy';
 import type { EngineConfig } from './config.ts';
 import { astVersionOf } from './content.ts';
@@ -17,12 +16,12 @@ import { refuse, type EngineIssue, type EngineResult } from './errors.ts';
 import type { EngineLogger } from './ports.ts';
 import type { NodeId } from './types.ts';
 
-export type ParsePolicy = Omit<ParseClientRequest['policy'], 'limits' | 'components'> & {
+export type ParsePolicy = Omit<PrintClientRequest['policy'], 'limits' | 'components'> & {
   readonly components: Iterable<string>;
 };
 
 export interface VerifyDeps {
-  readonly parse: Pick<ParseClient, 'parse'>;
+  readonly parse: Pick<ParseClient, 'print'>;
   readonly parsePolicy: ParsePolicy;
   readonly config: EngineConfig;
   readonly logger: EngineLogger;
@@ -78,53 +77,23 @@ function pageRefusal<T>(found: readonly MdxIssue[]): EngineResult<T> {
   return refuse('engine.validation_failed', issues);
 }
 
-// The bytes a tree claims to be. The parser wrote gap, raw and tail so that they join back into
-// the page, which is what makes parsing them again a fair test of the tree.
-function sourceText(root: MdxRoot): EngineResult<string> {
-  let text = '';
-  for (const [index, block] of root.children.entries()) {
-    const { source } = block;
-    // TODO(#279): print a new or edited block in the host instead of refusing it.
-    if (source === undefined) {
-      return refuse('engine.validation_failed', [
-        { path: `content.children.${index}.source`, code: 'engine.block_not_printed' },
-      ]);
-    }
-    text += source.gapBefore + source.raw;
-  }
-  return { ok: true, value: text + root.tail };
-}
+const joinedSource = (root: MdxRoot) =>
+  root.children.reduce(
+    (text, { source }) => text + (source?.gapBefore ?? '') + (source?.raw ?? ''),
+    '',
+  ) + root.tail;
 
-function sameBlock(sent: MdxBlock, parsed: MdxBlock): boolean {
-  return (
-    sent.source?.raw === parsed.source?.raw &&
-    sent.source?.gapBefore === parsed.source?.gapBefore &&
-    rawOf(sent) === rawOf(parsed)
-  );
-}
+// The answer has to hold together on its own: every hash fresh, and the blocks joining back
+// into the bytes it says it printed.
+const answerHolds = (root: MdxRoot, text: string) =>
+  root.children.every((block) => block.source?.rawOf === rawOf(block)) &&
+  joinedSource(root) === text;
 
-// Compares trees and recomputes hashes, as a hash in a submitted tree proves nothing: it has no
-// key, so whoever forged the raw text can compute a matching one.
-function firstDifference(sent: MdxRoot, parsed: MdxRoot): string | null {
-  if (sent.eol !== parsed.eol) return 'content.eol';
-  if (sent.tail !== parsed.tail) return 'content.tail';
-  const count = Math.max(sent.children.length, parsed.children.length);
-  for (let index = 0; index < count; index += 1) {
-    const left = sent.children[index];
-    const right = parsed.children[index];
-    if (left === undefined || right === undefined || !sameBlock(left, right)) {
-      return `content.children.${index}`;
-    }
-  }
-  return null;
-}
-
-const hashesHold = (root: MdxRoot) =>
-  root.children.every((block) => block.source?.rawOf === rawOf(block));
-
-// Everything a tree has to pass before it may be stored. It holds no lock: the parse is a
-// network call and can take seconds. What gets stored is the tree the host parsed from the
-// bytes, never the one sent, so a forged tree that slips a check still cannot reach the column.
+// Everything a tree has to pass before it may be stored. It holds no lock, as printing is a
+// network call and can take seconds. The host prints the tree and parses what it printed, and
+// refuses when the bytes do not mean what the nodes say, which is what catches a forged raw:
+// hashes in a submitted tree prove nothing, since they have no key. What gets stored is the tree
+// that parse gave, never the one sent.
 export async function verifyContent(
   content: unknown,
   tenant: TenantRef,
@@ -136,17 +105,10 @@ export async function verifyContent(
   const sent = validateTree(content, treeLimits);
   if (!sent.ok) return treeRefusal(sent.error);
 
-  const text = sourceText(sent.value);
-  if (!text.ok) return text;
-  if (Buffer.byteLength(text.value, 'utf8') > maxNodeBytes) {
-    return refuse('engine.too_large', [{ path: 'content', code: 'engine.source_too_large' }]);
-  }
-
-  const answer = await deps.parse.parse({
+  const answer = await deps.parse.print({
     tenant,
     path: `nodes/${nodeId}`,
-    source: text.value,
-    dialect: sent.value.dialect,
+    root: sent.value,
     policy: {
       ...deps.parsePolicy,
       components: new Set(deps.parsePolicy.components),
@@ -155,24 +117,19 @@ export async function verifyContent(
   });
   if (!answer.ok) return pageRefusal(answer.error);
 
-  // Hostile pages run on that host, so its answer gets no more trust than a client's. A page can
-  // parse into far more than the tree sent for it, which is the page's fault and not the host's.
+  // Hostile pages run on that host, so its answer gets no more trust than a client's. A tree can
+  // print and parse into far more than was sent, which is the page's fault and not the host's.
   const parsed = validateTree(answer.value.ast, treeLimits);
   if (!parsed.ok && parsed.error.some(({ code }) => OVERSIZED_TREE.has(code))) {
     return treeRefusal(parsed.error);
   }
-  if (!parsed.ok || !hashesHold(parsed.value)) {
+  if (!parsed.ok || !answerHolds(parsed.value, answer.value.text)) {
     deps.logger.warn('engine.parse_answer_refused', {
       organization_id: tenant.organizationId,
       project_id: tenant.projectId,
       node_id: nodeId,
     });
     return refuse('engine.unavailable', [{ path: 'content', code: 'engine.parse_answer_invalid' }]);
-  }
-
-  const path = firstDifference(sent.value, parsed.value);
-  if (path !== null) {
-    return refuse('engine.validation_failed', [{ path, code: 'engine.tree_mismatch' }]);
   }
 
   const json = JSON.stringify(parsed.value);

@@ -1,6 +1,6 @@
 import { DbError } from '@drefyn/db';
 import { createTestFlagClient } from '@drefyn/flags/testing';
-import type { MdxIssueCode, MdxRoot, ParseResult } from '@drefyn/mdx';
+import type { MdxIssueCode, MdxRoot, PrintResult } from '@drefyn/mdx';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,8 +41,18 @@ const save = (over: Partial<SaveDraftInput> = {}): SaveDraftInput => ({
   ...over,
 });
 
-const parseOk = { parse: (): Promise<ParseResult> => Promise.resolve(parsedPage()) };
-const parsedPage = (): ParseResult => ({ ok: true, value: { ast: page, issues: [] } });
+const joined = (root: MdxRoot) =>
+  root.children.reduce(
+    (text, { source }) => text + (source?.gapBefore ?? '') + (source?.raw ?? ''),
+    '',
+  ) + root.tail;
+
+const printed = (ast: MdxRoot): PrintResult => ({
+  ok: true,
+  value: { ast, text: joined(ast), issues: [] },
+});
+
+const parseOk = { print: () => Promise.resolve(printed(page)) };
 
 const has = (statement: Statement, text: string) => statement.sql.includes(text);
 
@@ -150,23 +160,19 @@ describe('content', () => {
     expect(insert?.parameters).toContain(JSON.stringify(page));
   });
 
-  it('refuses a block with no source until the printer exists', async () => {
+  it('sends a new block with no source for the host to print', async () => {
     const bare = { ...page.children[0] };
     Reflect.deleteProperty(bare, 'source');
-    const { engine } = build(happy);
+    const print = vi.fn(parseOk.print);
+    const { engine } = build(happy, { parse: { print } });
     const done = await engine.saveDraft(save({ content: { ...page, children: [bare as never] } }));
-    expect(done).toMatchObject({
-      ok: false,
-      error: {
-        code: 'engine.validation_failed',
-        issues: [{ path: 'content.children.0.source', code: 'engine.block_not_printed' }],
-      },
-    });
+    expect(done).toMatchObject({ ok: true });
+    expect(print).toHaveBeenCalledOnce();
   });
 
   const refusedBy = (code: MdxIssueCode) => ({
-    parse: () =>
-      Promise.resolve<ParseResult>({
+    print: () =>
+      Promise.resolve<PrintResult>({
         ok: false,
         error: [{ code, severity: 'error', line: 2, column: 3 }],
       }),
@@ -174,6 +180,8 @@ describe('content', () => {
 
   it.each<[MdxIssueCode, string]>([
     ['mdx.parse_failed', 'engine.validation_failed'],
+    ['mdx.block_not_printable', 'engine.validation_failed'],
+    ['mdx.print_changed_meaning', 'engine.validation_failed'],
     ['mdx.prop_not_literal', 'engine.validation_failed'],
     ['mdx.too_large', 'engine.too_large'],
     ['mdx.too_deep', 'engine.too_large'],
@@ -200,11 +208,7 @@ describe('content', () => {
     const { engine } = build(happy, {
       config: { maxNodeBytes: 1_048_576, maxTreeBytes: bytes + 8 },
       parse: {
-        parse: () =>
-          Promise.resolve({
-            ok: true,
-            value: { ast: { ...page, tail: 'x'.repeat(bytes) }, issues: [] },
-          }),
+        print: () => Promise.resolve(printed({ ...page, tail: 'x'.repeat(bytes) })),
       },
     });
     expect(await engine.saveDraft(save())).toMatchObject({
@@ -226,31 +230,21 @@ describe('content', () => {
       ],
     };
     const { engine } = build(happy, {
-      parse: { parse: () => Promise.resolve({ ok: true, value: { ast: lying, issues: [] } }) },
+      parse: { print: () => Promise.resolve(printed(lying)) },
     });
     const done = await engine.saveDraft(save());
     expect(done).toMatchObject({ ok: false, error: { code: 'engine.unavailable' } });
   });
 
-  it.each([
-    ['a tail', (root: MdxRoot) => ({ ...root, tail: `${root.tail}\n` }), 'content.tail'],
-    [
-      'a line ending',
-      (root: MdxRoot) => ({ ...root, eol: root.eol === 'lf' ? 'crlf' : 'lf' }),
-      'content.eol',
-    ],
-    ['a block', (root: MdxRoot) => ({ ...root, children: [] }), 'content.children.0'],
-  ])('refuses a parse that differs in %s', async (_name, change, path) => {
+  it('refuses an answer whose blocks do not join into its text', async () => {
     const { engine } = build(happy, {
       parse: {
-        parse: () =>
-          Promise.resolve({ ok: true, value: { ast: change(page) as MdxRoot, issues: [] } }),
+        print: () => Promise.resolve({ ok: true, value: { ast: page, text: 'other', issues: [] } }),
       },
     });
-    const done = await engine.saveDraft(save());
-    expect(done).toMatchObject({
+    expect(await engine.saveDraft(save())).toMatchObject({
       ok: false,
-      error: { code: 'engine.validation_failed', issues: [{ path }] },
+      error: { code: 'engine.unavailable', retryable: true },
     });
   });
 });

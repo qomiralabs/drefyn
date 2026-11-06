@@ -46,9 +46,9 @@ A save re-reads its input before it trusts it:
 1. `validateTree` from `@drefyn/mdx` applies closed key sets per node type, a known `astVersion`,
    and depth, node and byte limits, with its own stack. NUL and lone surrogates are refused, since
    jsonb holds neither and encoding them would break byte fidelity.
-2. The block source is joined back into the page and parsed in the host.
-3. The answer gets the same check, then has to equal the tree that was sent, compared on freshly
-   computed hashes. A hash in a submitted tree proves nothing, as it has no key.
+2. The parse host prints the tree and parses what it printed, and refuses when those bytes do not
+   mean what the nodes say. A hash in a submitted tree proves nothing, as it has no key.
+3. The host's tree gets the same check as a client's.
 4. The stored tree is the host's, capped by size, never the one sent.
 
 Each tree check runs before anything recursive. The transaction runs last and holds the node's
@@ -60,9 +60,6 @@ organization went read only. The same key with anything else is `engine.idempote
 come from `@drefyn/entitlements` and count per organization in `organization_node_counts`, updated
 in the transaction that creates the node. A read only organization or project, or one over its
 limit after a downgrade, gets `engine.read_only` on writes, and reads go on working.
-
-A block with no `source` is refused for now, as nothing prints a new block until the canonical
-printer lands.
 
 ## Configuration
 

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { closeDatabase, type Database } from '@drefyn/db';
 import type { ParseClient } from '@drefyn/mdx/client';
 import { idOf } from '@drefyn/tenancy';
@@ -240,7 +240,49 @@ describeWithStack('saveDraft against Postgres', () => {
     expect(await versionCount(node)).toBe(0);
   });
 
-  it('stores the tree the server parsed, not the one it was sent', async () => {
+  it('refuses the same forgery with its hashes recomputed', async () => {
+    const node = await newNode(engine, home);
+    const honest = await tree(parse, home, 'harmless\n');
+    const [block] = honest.children;
+    const raw = '<script>alert(1)</script>\n';
+    const gapBefore = block?.source?.gapBefore ?? '';
+    const treeHash = block?.source?.rawOf ?? '';
+    const sourceOf = createHash('sha256')
+      .update(`${treeHash}:${String(gapBefore.length)}:${gapBefore}${raw}`)
+      .digest('hex');
+    const forged = {
+      ...honest,
+      children: [{ ...block, source: { ...block?.source, raw, sourceOf } }],
+    };
+    const done = await engine.saveDraft({
+      ...(await input(node, null, 'x\n')),
+      content: forged as never,
+    });
+    expect(done).toMatchObject({
+      ok: false,
+      error: { code: 'engine.validation_failed' },
+    });
+    expect(await versionCount(node)).toBe(0);
+  });
+
+  it('prints a new block with no source and stores what came back', async () => {
+    const node = await newNode(engine, home);
+    const content = await tree(parse, home, 'First\n');
+    const added = {
+      ...content,
+      children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Written here' }] }],
+    };
+    const done = await engine.saveDraft({
+      ...(await input(node, null, 'x\n')),
+      content: added as never,
+    });
+    expect(codeOf(done)).toBe('ok');
+    const head = await engine.getHead(home.tenant, node);
+    const [stored] = head.ok ? (head.value.content?.children ?? []) : [];
+    expect(stored?.source?.raw).toBe('Written here');
+  });
+
+  it('refuses a block whose stored hash went stale', async () => {
     const node = await newNode(engine, home);
     const honest = await tree(parse, home, 'a\n');
     const [block] = honest.children;
@@ -252,9 +294,8 @@ describeWithStack('saveDraft against Postgres', () => {
       ...(await input(node, null, 'x\n')),
       content: stale as never,
     });
-    expect(codeOf(done)).toBe('ok');
-    const head = await engine.getHead(home.tenant, node);
-    expect(head.ok && head.value.content).toEqual(honest);
+    expect(codeOf(done)).toBe('engine.validation_failed');
+    expect(await versionCount(node)).toBe(0);
   });
 
   it.each([
@@ -354,7 +395,7 @@ describeWithStack('saveDraft against Postgres', () => {
   it('stays out of the way when the parse host is down: retryable, nothing stored', async () => {
     const down = buildEngine(db, {
       parse: {
-        parse: () =>
+        print: () =>
           Promise.resolve({
             ok: false,
             error: [{ code: 'mdx.parse_unavailable', severity: 'error', line: 1, column: 1 }],
@@ -376,10 +417,10 @@ describeWithStack('saveDraft against Postgres', () => {
     const lying = buildEngine(db, {
       logger: { info: () => undefined, warn },
       parse: {
-        parse: () =>
+        print: () =>
           Promise.resolve({
             ok: true,
-            value: { ast: { ...honest, astVersion: 999 } as never, issues: [] },
+            value: { ast: { ...honest, astVersion: 999 } as never, text: 'a\n', issues: [] },
           }),
       },
     }).engine;
