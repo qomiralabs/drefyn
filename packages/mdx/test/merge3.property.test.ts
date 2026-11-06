@@ -12,7 +12,8 @@ import type { MergeCase, Side, Tree } from './merge3-generators.ts';
 // `pnpm --filter @drefyn/mdx test:merge` runs the whole of it.
 const RUNS = Number(process.env['MERGE_PROPERTY_RUNS'] ?? 2_000);
 const SEED = process.env['MERGE_PROPERTY_SEED'];
-const TIMEOUT_MS = Math.max(120_000, RUNS * 30);
+// 2,000 runs took 170 s under coverage on a CI runner, and about 8 ms a run without it.
+const TIMEOUT_MS = Math.max(400_000, RUNS * 30);
 
 const TOKEN = /\b(?:u\d+|[OT]\d+)\b/g;
 const LEAF = new Set(['paragraph', 'heading', 'tableCell', 'code']);

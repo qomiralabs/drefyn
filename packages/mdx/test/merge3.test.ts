@@ -1070,6 +1070,9 @@ describe('merge3 gaps and tails', () => {
 });
 
 describe('merge3 limits', () => {
+  // Pages this large took 6 s and 32 s under coverage on a CI runner, most of it parsing the fixture.
+  const LARGE_PAGE_TIMEOUT_MS = 90_000;
+
   const pageOf = (blocks: number) =>
     Array.from({ length: blocks }, (_, index) => `Block ${index}.`).join('\n\n');
   const refusal = { code: 'mdx.merge_limit', severity: 'error', line: 1, column: 1 };
@@ -1084,19 +1087,23 @@ describe('merge3 limits', () => {
     expect(merge3(at, at, past, limit)).toEqual({ ok: false, error: [refusal] });
   });
 
-  it('defaults to 20000 blocks', () => {
-    expect(DEFAULT_MERGE_MAX_BLOCKS).toBe(20_000);
-    const block = { type: 'thematicBreak' as const };
-    const root = (blocks: number): MdxRoot => ({
-      ...parsed('', 'md'),
-      children: Array.from({ length: blocks }, () => block),
-    });
-    expect(merge3(root(20_000), root(20_000), root(20_000)).ok).toBe(true);
-    expect(merge3(root(20_001), root(20_000), root(20_000))).toEqual({
-      ok: false,
-      error: [refusal],
-    });
-  });
+  it(
+    'defaults to 20000 blocks',
+    () => {
+      expect(DEFAULT_MERGE_MAX_BLOCKS).toBe(20_000);
+      const block = { type: 'thematicBreak' as const };
+      const root = (blocks: number): MdxRoot => ({
+        ...parsed('', 'md'),
+        children: Array.from({ length: blocks }, () => block),
+      });
+      expect(merge3(root(20_000), root(20_000), root(20_000)).ok).toBe(true);
+      expect(merge3(root(20_001), root(20_000), root(20_000))).toEqual({
+        ok: false,
+        error: [refusal],
+      });
+    },
+    LARGE_PAGE_TIMEOUT_MS,
+  );
 
   it('refuses a tree past the node limit in its policy', () => {
     const at = parsed(`${pageOf(4)}\n`, 'md');
@@ -1104,11 +1111,17 @@ describe('merge3 limits', () => {
     expect(merge3(at, at, at, { policy })).toEqual({ ok: false, error: [refusal] });
   });
 
-  it('merges a page rewritten end to end on both sides without a quadratic table', () => {
-    const blocks = 3_000;
-    const side = (word: string) =>
-      Array.from({ length: blocks }, (_, index) => `${word} ${index} q${index * 7}.`).join('\n\n');
-    const outcome = outcomeOf(`${pageOf(blocks)}\n`, `${side('ours')}\n`, `${side('theirs')}\n`);
-    expect(outcome.kind).toBe('conflict');
-  });
+  it(
+    'merges a page rewritten end to end on both sides without a quadratic table',
+    () => {
+      const blocks = 3_000;
+      const side = (word: string) =>
+        Array.from({ length: blocks }, (_, index) => `${word} ${index} q${index * 7}.`).join(
+          '\n\n',
+        );
+      const outcome = outcomeOf(`${pageOf(blocks)}\n`, `${side('ours')}\n`, `${side('theirs')}\n`);
+      expect(outcome.kind).toBe('conflict');
+    },
+    LARGE_PAGE_TIMEOUT_MS,
+  );
 });
