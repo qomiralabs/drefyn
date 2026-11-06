@@ -27,7 +27,9 @@ line ending.
 
 ## Changed blocks
 
-`client.print({ tenant, path, root, policy })` gives back the bytes of a tree. A block prints its
+`client.print({ tenant, path, root, policy })` gives back the bytes of a tree, the tree they parse
+to, and `timing`: milliseconds for each step in the thread, plus the pool's wait and thread time. The
+same numbers are on the host's `mdx.parse_finished` line. A block prints its
 stored bytes only while its tree still hashes to `rawOf`. A block with no source, or one that
 moved on, goes through the one canonical printer, whose options are fixed in code. Changing them
 is an `astVersion` bump, and stored blocks are never reprinted because of it.
