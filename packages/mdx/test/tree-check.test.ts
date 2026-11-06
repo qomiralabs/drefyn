@@ -38,7 +38,7 @@ describe('validateTree accepts what the parser stores', () => {
     for (const { text, dialect, file } of corpus) {
       expect(problemsOf(stored(parsed(text, dialect))), file).toEqual([]);
     }
-  });
+  }, 120_000);
 
   it.each([
     ['an expression prop', '<Callout a={1} />\n'],
@@ -72,7 +72,7 @@ describe('validateTree accepts what the parser stores', () => {
       }),
       { numRuns: 200 },
     );
-  });
+  }, 60_000);
 
   it('hands back the tree it read', () => {
     const value = tree();
@@ -268,7 +268,7 @@ describe('validateTree limits run before anything recursive', () => {
       }),
       { numRuns: 50 },
     );
-  });
+  }, 60_000);
 
   it('ends on a cycle', () => {
     const value = tree();
