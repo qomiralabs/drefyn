@@ -9,7 +9,6 @@ import { createEngine, DEFAULT_ENGINE_CONFIG, type NodeId } from '../src/index.t
 import {
   admin,
   ACTOR,
-  buildEngine,
   key,
   openDatabase,
   parseClient,
@@ -25,6 +24,7 @@ import {
   dateField,
   declare,
   fieldId,
+  itemEngine,
   listField,
   newItem,
   numberField,
@@ -70,9 +70,12 @@ const refusal = async (seeded: Seeded, query: Record<string, unknown>) => {
   return page.error;
 };
 
-// Bulk rows, written past the engine, for sizes that would take minutes one save at a time.
+// Bulk rows, written past the engine, for sizes that would take minutes one save at a time. The
+// rows are valid as written, and foreign key checks on a table with no statistics take seconds,
+// which holds up every test file that needs a lock on these shared tables.
 const bulkItems = (seeded: Seeded, count: number) =>
   admin(`
+set session_replication_role = replica;
 insert into app.nodes (organization_id, project_id, family, type_id, order_key, lifecycle)
   select '${seeded.organization}', '${seeded.project}', 'studio_item', '${seeded.typeId}', 'a', 'draft'
   from generate_series(1, ${String(count)});
@@ -83,7 +86,7 @@ insert into app.node_filter_rows (organization_id, project_id, type_id, node_id)
 
 beforeAll(async () => {
   db = await openDatabase();
-  built = buildEngine(db);
+  built = itemEngine(db);
 });
 
 afterAll(async () => {
@@ -417,7 +420,7 @@ describeWithStack('queryNodes', () => {
       const seeded = await stocked();
       await addItem(built, seeded, { [NOTE]: 'a' });
       await addItem(built, seeded, { [NOTE]: 'b' });
-      const tight = buildEngine(db, {
+      const tight = itemEngine(db, {
         config: { ...DEFAULT_ENGINE_CONFIG, undeclaredScanMaxItems: 1 },
       });
       const page = await tight.engine.queryNodes(seeded.tenant, {
@@ -499,21 +502,14 @@ describeWithStack('queryNodes', () => {
 
   it('a timed out query is a stable error with no partial page', async () => {
     const seeded = await stocked();
-    await addItem(built, seeded, { [NAME]: 'a' });
-    const quick = buildEngine(db, { config: { ...DEFAULT_ENGINE_CONFIG, queryTimeoutMs: 100 } });
-    const held = admin(`
-begin;
-lock table app.node_filter_rows in access exclusive mode;
-select pg_sleep(1);
-commit;`);
-    await vi.waitFor(async () => {
-      const waiting = await admin(
-        `select count(*) from pg_locks where relation = 'app.node_filter_rows'::regclass and mode = 'AccessExclusiveLock' and granted;`,
-      );
-      expect(waiting).toBe('1');
+    // Scanning this many rows takes several ms, so 1 ms always runs out, and no lock on a table
+    // every test file shares has to hold the query up.
+    await bulkItems(seeded, 20_000);
+    const quick = itemEngine(db, { config: { ...DEFAULT_ENGINE_CONFIG, queryTimeoutMs: 1 } });
+    const page = await quick.engine.queryNodes(seeded.tenant, {
+      typeId: seeded.typeId,
+      filter: { field: NOTE, op: 'contains', value: 'needle' },
     });
-    const page = await quick.engine.queryNodes(seeded.tenant, { typeId: seeded.typeId });
-    await held;
     expect(page).toEqual({
       ok: false,
       error: { code: 'engine.unavailable', retryable: true, issues: [] },
@@ -553,7 +549,7 @@ commit;`);
       info: (event: string, fields: object) => lines.push(event + JSON.stringify(fields)),
       warn: (event: string, fields: object) => lines.push(event + JSON.stringify(fields)),
     };
-    const logged = buildEngine(db, { logger });
+    const logged = itemEngine(db, { logger });
     const value = 'private-words';
     await logged.engine.queryNodes(seeded.tenant, {
       typeId: seeded.typeId,
@@ -567,7 +563,7 @@ commit;`);
   it('opens the engine.query span', async () => {
     const seeded = await stocked();
     const spans: string[] = [];
-    const traced = buildEngine(db, {
+    const traced = itemEngine(db, {
       tracer: {
         span: (name, _fields, work) => {
           spans.push(name);
@@ -660,24 +656,14 @@ describeWithStack('filter rows in a save', () => {
     await declare(built, seeded, FIELDS);
     const node = await newItem(built, seeded);
     const first = await saveItem(built, seeded, node, null, { [NAME]: 'kept' });
-    const trigger = `crash_${randomUUID().replaceAll('-', '')}`;
-    await admin(`
-create function app.${trigger}() returns trigger language plpgsql as $$
-begin
-  if new.node_id = '${node}' then raise exception 'injected crash'; end if;
-  return new;
-end $$;
-create trigger ${trigger} before update on app.node_filter_rows
-  for each row execute function app.${trigger}();`);
-    try {
-      await expect(
-        saveItem(built, seeded, node, first.versionId, { [NAME]: 'lost' }),
-      ).rejects.toThrow();
-    } finally {
-      await admin(
-        `drop trigger ${trigger} on app.node_filter_rows; drop function app.${trigger}();`,
-      );
-    }
+    // The value cannot cast to this column, so the slot write fails after the version insert
+    // and the head update have both run.
+    await admin(`update app.content_types
+      set filter_slots = jsonb_set(filter_slots, '{${NAME},column}', '"d2"')
+      where id = '${seeded.typeId}';`);
+    await expect(
+      saveItem(built, seeded, node, first.versionId, { [NAME]: 'lost' }),
+    ).rejects.toThrow();
     const head = await built.engine.getHead(seeded.tenant, node);
     expect(head.ok && head.value.versionId).toBe(first.versionId);
     expect(head.ok && head.value.fields).toEqual({ [NAME]: 'kept' });
@@ -690,7 +676,7 @@ create trigger ${trigger} before update on app.node_filter_rows
     const node = await newItem(built, seeded);
     const parse = parseClient();
     const content = await tree(parse, seeded, 'Body.');
-    const real = buildEngine(db).engine;
+    const real = itemEngine(db).engine;
     const crashing = createEngine({
       store: {
         tenant: (tenant, work) =>
@@ -803,7 +789,7 @@ create trigger ${trigger} before update on app.node_filter_rows
 
   it('a save is refused past writes off, and declare too', async () => {
     const seeded = await seedItems();
-    const off = buildEngine(db, {
+    const off = itemEngine(db, {
       flags: { evaluate: () => Promise.resolve({ value: false }) },
     });
     const done = await off.engine.declareSchema({

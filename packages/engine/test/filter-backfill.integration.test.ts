@@ -8,12 +8,13 @@ import {
   runFilterBackfill,
   type NodeId,
 } from '../src/index.ts';
-import { admin, buildEngine, openDatabase, type Built, type Seeded } from './support/fixture.ts';
+import { admin, openDatabase, type Built, type Seeded } from './support/fixture.ts';
 import { describeWithStack } from './support/presence.ts';
 import {
   addItem,
   declare,
   fieldId,
+  itemEngine,
   listField,
   newItem,
   numberField,
@@ -27,7 +28,7 @@ let built: Built;
 
 beforeAll(async () => {
   db = await openDatabase();
-  built = buildEngine(db);
+  built = itemEngine(db);
 });
 
 afterAll(async () => {
@@ -102,7 +103,7 @@ describeWithStack('filter backfill', () => {
     await addItem(built, seeded, { [NOTE]: 'a' });
     await addItem(built, seeded, { [NOTE]: 'b' });
     await declare(built, seeded, [BASE[0] as never, NEW], 2);
-    const tight = buildEngine(db, {
+    const tight = itemEngine(db, {
       config: { ...DEFAULT_ENGINE_CONFIG, undeclaredScanMaxItems: 1 },
     });
     const page = await tight.engine.queryNodes(seeded.tenant, {
@@ -148,6 +149,7 @@ describeWithStack('filter backfill', () => {
     await declare(built, seeded, PLAIN);
     const count = BACKFILL_BATCH + 10;
     await admin(`
+set session_replication_role = replica;
 insert into app.nodes (organization_id, project_id, family, type_id, order_key, lifecycle, head_fields)
   select '${seeded.organization}', '${seeded.project}', 'studio_item', '${seeded.typeId}', 'a', 'draft',
          jsonb_build_object('${NOTE}', 'v' || g)
@@ -163,7 +165,7 @@ insert into app.node_filter_rows (organization_id, project_id, type_id, node_id)
     expect(await stateOf(seeded, NOTE)).toBe('backfilling');
 
     // A new engine is a restarted job: only the table remembers.
-    const restarted = buildEngine(db);
+    const restarted = itemEngine(db);
     await runFilterBackfill(restarted.engine, seeded.tenant, noWait);
     expect(await filled()).toBe(String(count));
     expect(await stateOf(seeded, NOTE)).toBe('ready');
@@ -176,6 +178,7 @@ insert into app.node_filter_rows (organization_id, project_id, type_id, node_id)
     for (const seeded of [one, two, third]) {
       await declare(built, seeded, PLAIN);
       await admin(`
+set session_replication_role = replica;
 insert into app.nodes (organization_id, project_id, family, type_id, order_key, lifecycle)
   select '${seeded.organization}', '${seeded.project}', 'studio_item', '${seeded.typeId}', 'a', 'draft'
   from generate_series(1, ${String(BACKFILL_BATCH + 1)});
@@ -254,7 +257,7 @@ insert into app.node_filter_rows (organization_id, project_id, type_id, node_id)
 
   it('does not run with writes off', async () => {
     const seeded = await seedItems();
-    const off = buildEngine(db, { flags: { evaluate: () => Promise.resolve({ value: false }) } });
+    const off = itemEngine(db, { flags: { evaluate: () => Promise.resolve({ value: false }) } });
     const done = await off.engine.backfillFilters(seeded.tenant);
     expect(done).toMatchObject({ ok: false, error: { code: 'engine.forbidden' } });
   });

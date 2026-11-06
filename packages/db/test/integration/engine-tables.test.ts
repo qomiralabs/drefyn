@@ -993,7 +993,7 @@ describeWithStack('the engine tables', () => {
       );
       expect(await definition('node_filter_rows_pkey')).toContain(
         'btree (organization_id, project_id, type_id, node_id) ' +
-          'INCLUDE (t1, t2, t3, t4, t5, i1, i2, i3, i4, i5, d1, d2)',
+          'INCLUDE (t1, t2, t3, t4, t5, l1, l2, l3, l4, l5, i1, i2, i3, i4, i5, d1, d2)',
       );
     });
 
