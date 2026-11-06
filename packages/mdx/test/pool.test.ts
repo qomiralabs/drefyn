@@ -570,6 +570,25 @@ describe('input', () => {
 });
 
 describe('printing in the pool', () => {
+  it('adds its own wait and thread time to the steps, and logs them all', async () => {
+    const { pool, logger, finish } = harness();
+    const printed = pool.print(printing());
+    await flush();
+    const timing = { decodeMs: 1, printMs: 2, reparseMs: 3, compareMs: 4 };
+    await finish({
+      result: { ok: true, value: { text: '', ast: {} as never, issues: [], timing } },
+      end: 'reusable',
+      workMs: 12,
+    });
+    const answer = await printed;
+    if (!answer.ok) throw new Error('refused');
+    expect(answer.value.timing).toEqual({ ...timing, waitedMs: 0, threadMs: 12 });
+    expect(logger.entries.at(-1)).toMatchObject({
+      event: 'mdx.parse_finished',
+      fields: { decodeMs: 1, printMs: 2, reparseMs: 3, compareMs: 4, tookMs: 12 },
+    });
+  });
+
   it('hands the tree to a thread and the answer back', async () => {
     const { pool, threads } = harness();
     const printed = pool.print(printing('{"tree":1}'));

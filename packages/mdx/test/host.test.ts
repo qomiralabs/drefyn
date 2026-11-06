@@ -99,6 +99,9 @@ describe('the parse host', () => {
       expect(result).toMatchObject({ ok: true, value: { text: 'new\n' } });
       if (!result.ok) throw new Error('refused');
       expect(result.value.ast.children[0]?.source?.raw).toBe('new');
+      expect(result.value.timing?.printMs).toBeGreaterThanOrEqual(0);
+      expect(result.value.timing?.reparseMs).toBeGreaterThan(0);
+      expect(result.value.timing?.threadMs).toBeGreaterThan(0);
     },
     TIMEOUT_MS,
   );
@@ -305,6 +308,23 @@ describe('the client', () => {
     const client = createParseClient({
       url: 'http://parse.internal',
       fetch: answering(200, '{"ok":true,"value":{"issues":[]}}'),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('refuses an answer with a timing that is not a time', async () => {
+    const root = printRequest().root;
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(
+        200,
+        JSON.stringify({
+          ok: true,
+          value: { text: '', ast: root, issues: [], timing: { printMs: 'page text' } },
+        }),
+      ),
     });
     await expect(client.print(printRequest())).resolves.toMatchObject({
       error: [{ code: 'mdx.parse_failed' }],

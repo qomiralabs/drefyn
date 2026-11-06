@@ -600,6 +600,56 @@ describe('observability', () => {
   });
 });
 
+describe('host spans', () => {
+  const timing = {
+    decodeMs: 1,
+    printMs: 2,
+    reparseMs: 3,
+    compareMs: 4,
+    waitedMs: 5,
+    threadMs: 6,
+  };
+  const timed = {
+    print: () => {
+      const answer = printed(page);
+      if (!answer.ok) throw new Error('refused');
+      return Promise.resolve({ ...answer, value: { ...answer.value, timing } });
+    },
+  };
+
+  it('records each host step under the save, with the tenant and the node', async () => {
+    const seen: [string, number, LogFields][] = [];
+    const tracer: EngineTracer = {
+      ...noopTracer,
+      record: (name, fields, ms) => seen.push([name, ms, fields]),
+    };
+    const { engine } = build(happy, { parse: timed, tracer });
+    await engine.saveDraft(save());
+    expect(seen.map(([name, ms]) => [name, ms])).toEqual([
+      ['engine.save.host.queue', 5],
+      ['engine.save.host.thread', 6],
+      ['engine.save.host.decode', 1],
+      ['engine.save.host.print', 2],
+      ['engine.save.host.reparse', 3],
+      ['engine.save.host.compare', 4],
+    ]);
+    for (const [, , fields] of seen) {
+      expect(fields).toEqual({
+        organization_id: tenant.organizationId,
+        project_id: tenant.projectId,
+        node_id: NODE,
+      });
+    }
+  });
+
+  it('records nothing for an answer with no timing', async () => {
+    const record = vi.fn();
+    const { engine } = build(happy, { tracer: { ...noopTracer, record } });
+    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    expect(record).not.toHaveBeenCalled();
+  });
+});
+
 describe('chunks at write', () => {
   const chunkWrites = (statements: readonly Statement[]) =>
     statements.filter((statement) => has(statement, 'insert into "chunks"'));
