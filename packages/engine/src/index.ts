@@ -1,40 +1,37 @@
-// Each list is frozen and each union comes from its list, so the database check, the runtime
-// value and the type cannot name different sets.
-
 export { astVersionOf, type NodeContent } from './content.ts';
-
-export const NODE_FAMILIES = Object.freeze([
-  'docs_page',
-  'studio_item',
-  'status_component',
-  'status_incident',
-  'status_incident_update',
-  'status_maintenance',
-  'status_postmortem',
-] as const);
-export type NodeFamily = (typeof NODE_FAMILIES)[number];
-
-// Soft deletion is deleted_at, not a state: a node of any state can be restored as it was.
-export const NODE_LIFECYCLES = Object.freeze(['draft', 'published', 'archived'] as const);
-export type NodeLifecycle = (typeof NODE_LIFECYCLES)[number];
-
-export const ORIGINS = Object.freeze(['human', 'ai', 'git', 'import'] as const);
-export type Origin = (typeof ORIGINS)[number];
-
-export const ENGINE_ERROR_CODES = Object.freeze([
-  // Also for another tenant's ids, so a caller cannot tell which it was.
-  'engine.not_found',
-  'engine.forbidden',
-  'engine.version_conflict',
-  'engine.validation_failed',
-  // The same key with different input.
-  'engine.idempotency_conflict',
-  // Entitlements refused; content stays readable.
-  'engine.limit_reached',
-  'engine.filter_not_declared',
-  'engine.filter_backfilling',
-  // Over limit after a downgrade.
-  'engine.read_only',
-  'engine.too_large',
-] as const);
-export type EngineErrorCode = (typeof ENGINE_ERROR_CODES)[number];
+export { DEFAULT_ENGINE_CONFIG, parseEngineConfig, type EngineConfig } from './config.ts';
+export { createEngine, type Engine, type EngineDeps } from './engine.ts';
+export type { EngineError, EngineIssue, EngineResult } from './errors.ts';
+export {
+  noopTracer,
+  type EngineFlags,
+  type EngineLogger,
+  type EngineTracer,
+  type LogFields,
+} from './ports.ts';
+export { databaseStore, type EngineStore } from './store.ts';
+export type {
+  Actor,
+  CreateNodeInput,
+  IdempotencyKey,
+  NodeHead,
+  NodeId,
+  NodeRef,
+  Page,
+  PageArgs,
+  RollbackInput,
+  SaveDraftInput,
+  VersionId,
+  VersionRef,
+  VersionSummary,
+} from './types.ts';
+export {
+  ENGINE_ERROR_CODES,
+  NODE_FAMILIES,
+  NODE_LIFECYCLES,
+  ORIGINS,
+  type EngineErrorCode,
+  type NodeFamily,
+  type NodeLifecycle,
+  type Origin,
+} from './vocabulary.ts';
