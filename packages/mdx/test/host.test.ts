@@ -1,16 +1,30 @@
 import type { MdxRoot } from '../src/index.ts';
+import { createHash } from 'node:crypto';
+import fc from 'fast-check';
 import { honestPage } from './honest-page.ts';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { bytesOfTree } from '../src/answer.ts';
 import { createParseClient } from '../src/client.ts';
 import type { ParseClientRequest } from '../src/client.ts';
-import { assertHostEnv, parseHostConfig } from '../src/host-config.ts';
+import { assertHostEnv, assertHostFlags, parseHostConfig } from '../src/host-config.ts';
 import { DEFAULT_LIMITS } from '../src/index.ts';
 import { serialize } from '../src/serialize.ts';
-import { isolatedPolicy, ORG_A, PROJECT_A } from './helpers.ts';
+import {
+  CLIENT,
+  HOST_TOKEN,
+  HOST_TOKEN_SHA256,
+  isolatedPolicy,
+  loadCorpus,
+  ORG_A,
+  parsed,
+  PROJECT_A,
+  recordingLogger,
+  VARIANTS,
+} from './helpers.ts';
 
 const TIMEOUT_MS = 60_000;
 // A parse and a print of the largest page, each several seconds on a busy CI runner.
@@ -37,9 +51,9 @@ const ended = (host: ChildProcess) =>
   });
 
 // The host prints one line with its port, so a test never guesses at one.
-function start(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  const host = spawn(process.execPath, [...PERMISSION, ...args], {
-    env,
+function start(args: readonly string[], env: NodeJS.ProcessEnv = {}, flags = PERMISSION) {
+  const host = spawn(process.execPath, [...flags, ...args], {
+    env: { DREFYN_PARSE_TOKEN_SHA256: HOST_TOKEN_SHA256, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   hosts.push(host);
@@ -70,7 +84,7 @@ describe('the parse host', () => {
     'parses for a client across the wire, under --permission',
     async () => {
       const { url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
-      const client = createParseClient({ url: await url });
+      const client = createParseClient({ ...CLIENT, url: await url });
       const source = '# One\n\nA page.\n';
       const result = await client.parse(page(source));
       if (!result.ok) throw new Error('refused');
@@ -83,7 +97,7 @@ describe('the parse host', () => {
     'prints for a client across the wire, and hands back the parser tree',
     async () => {
       const { url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
-      const client = createParseClient({ url: await url });
+      const client = createParseClient({ ...CLIENT, url: await url });
       const parsed = await client.parse(page('old\n'));
       if (!parsed.ok) throw new Error('refused');
       const { ast } = parsed.value;
@@ -112,7 +126,7 @@ describe('the parse host', () => {
         DREFYN_PARSE_TIMEOUT_MS: '20000',
         DREFYN_PARSE_PRINT_TIMEOUT_MS: '20000',
       });
-      const client = createParseClient({ url: await url });
+      const client = createParseClient({ ...CLIENT, url: await url });
       const source = honestPage('md');
       const first = await client.parse(page(source));
       if (!first.ok) throw new Error('refused');
@@ -132,7 +146,7 @@ describe('the parse host', () => {
         DREFYN_PARSE_PORT: '0',
         DREFYN_PARSE_TIMEOUT_MS: '500',
       });
-      const client = createParseClient({ url: await url });
+      const client = createParseClient({ ...CLIENT, url: await url });
       const bomb = `> a\n${'b\n'.repeat(30_000)}`;
       await expect(client.parse(page(bomb))).resolves.toMatchObject({
         error: [{ code: 'mdx.parse_timeout' }],
@@ -146,11 +160,10 @@ describe('the parse host', () => {
     'keeps files, children and addons from a thread, where the seal is only a seatbelt',
     async () => {
       const { url } = start([fixtureHost, 'host-probe']);
-      const client = createParseClient({ url: await url });
+      const client = createParseClient({ ...CLIENT, url: await url });
       const result = await client.parse(page('x'));
-      expect(result).toEqual({
-        ok: true,
-        value: { issues: [], ast: { file: 'ERR_ACCESS_DENIED', env: [] } },
+      expect(result).toMatchObject({
+        error: [{ code: 'mdx.probe:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:0' }],
       });
     },
     TIMEOUT_MS,
@@ -161,7 +174,7 @@ describe('the parse host', () => {
     async () => {
       // Not under --permission: the stand in for a native stall has to be able to block.
       const host = spawn(process.execPath, [fixtureHost, 'native-stall'], {
-        env: {},
+        env: { DREFYN_PARSE_TOKEN_SHA256: HOST_TOKEN_SHA256 },
         stdio: ['ignore', 'pipe', 'ignore'],
       });
       hosts.push(host);
@@ -170,7 +183,7 @@ describe('the parse host', () => {
           resolve(`http://127.0.0.1:${/"port":(\d+)/.exec(chunk.toString())?.[1] ?? ''}`);
         });
       });
-      const client = createParseClient({ url });
+      const client = createParseClient({ ...CLIENT, url });
       await expect(client.parse(page('a'))).resolves.toMatchObject({
         error: [{ code: 'mdx.parse_unavailable' }],
       });
@@ -195,6 +208,46 @@ describe('the parse host', () => {
     TIMEOUT_MS,
   );
 
+  it.each([
+    ['every file', ['--permission', '--allow-fs-read=*', '--allow-worker']],
+    ['the whole disk', ['--permission', '--allow-fs-read=/', '--allow-worker']],
+    ['writes', [...PERMISSION, `--allow-fs-write=${workspace}`]],
+    ['child processes', [...PERMISSION, '--allow-child-process']],
+    ['addons', [...PERMISSION, '--allow-addons']],
+  ])(
+    'refuses to start when --permission also allows %s',
+    async (_name, flags) => {
+      const { host, url } = start([hostMain], { DREFYN_PARSE_PORT: '0' }, flags);
+      await expect(url).rejects.toThrow();
+      expect(await ended(host)).not.toBe(0);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'refuses to start without the hash of its token',
+    async () => {
+      const host = spawn(process.execPath, [...PERMISSION, hostMain], {
+        env: { DREFYN_PARSE_PORT: '0' },
+        stdio: 'ignore',
+      });
+      hosts.push(host);
+      expect(await ended(host)).not.toBe(0);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'stops cleanly on SIGTERM',
+    async () => {
+      const { host, url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
+      await url;
+      host.kill('SIGTERM');
+      await expect(ended(host)).resolves.toBe(0);
+    },
+    TIMEOUT_MS,
+  );
+
   it(
     'refuses to start without --permission',
     async () => {
@@ -206,14 +259,67 @@ describe('the parse host', () => {
   );
 });
 
+const HOST_ENV = { DREFYN_PARSE_TOKEN_SHA256: HOST_TOKEN_SHA256 };
+
+describe('the host flags', () => {
+  const closed = () => false;
+
+  it('takes the flags it needs', () => {
+    expect(() => {
+      assertHostFlags(['--permission', '--allow-fs-read=/app', '--allow-worker'], closed);
+    }).not.toThrow();
+  });
+
+  it.each([
+    ['no flags', []],
+    ['a wildcard read', ['--permission', '--allow-fs-read=*']],
+    ['a path with a wildcard', ['--permission', '--allow-fs-read=/app/*']],
+    ['a split flag', ['--permission', '--allow-fs-read', '/app']],
+    ['anything else', ['--permission', '--inspect']],
+  ])('refuses %s', (_name, flags) => {
+    expect(() => {
+      assertHostFlags(flags, closed);
+    }).toThrow();
+  });
+
+  it('asks the runtime too, since a flag can name a parent of everything', () => {
+    expect(() => {
+      assertHostFlags(['--permission', '--allow-fs-read=/'], () => true);
+    }).toThrow('reach outside');
+  });
+});
+
+describe('the address a host binds', () => {
+  it('is loopback unless the deployment says otherwise', () => {
+    expect(parseHostConfig(HOST_ENV).bind).toBe('127.0.0.1');
+    expect(parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_BIND: '0.0.0.0' }).bind).toBe('0.0.0.0');
+    expect(parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_BIND: '::1' }).bind).toBe('::1');
+  });
+
+  it('is an address and nothing else', () => {
+    expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_BIND: 'anywhere' })).toThrow();
+  });
+});
+
+describe('the token hash', () => {
+  it('is required', () => {
+    expect(() => parseHostConfig({})).toThrow();
+  });
+
+  it.each(['', 'short', 'x'.repeat(64), HOST_TOKEN])('refuses %j', (value) => {
+    expect(() => parseHostConfig({ DREFYN_PARSE_TOKEN_SHA256: value })).toThrow();
+  });
+});
+
 describe('the bytes a host may hold', () => {
   const env = (held: string, memory = '1536') => ({
+    ...HOST_ENV,
     DREFYN_PARSE_MAX_HELD_BYTES: held,
     DREFYN_PARSE_HOST_MEMORY_MB: memory,
   });
 
   it('defaults to 256 MiB, which the default memory limit has room for', () => {
-    expect(parseHostConfig({}).maxHeldBytes).toBe(268_435_456);
+    expect(parseHostConfig(HOST_ENV).maxHeldBytes).toBe(268_435_456);
   });
 
   it('counts them in the memory check at start', () => {
@@ -228,6 +334,15 @@ describe('the bytes a host may hold', () => {
 });
 
 describe('the host environment', () => {
+  it.each(['DREFYN_PARSE_HOST_TOKEN', 'DREFYN_PARSE_SOMETHING_NEW'])(
+    'refuses %s, though it has our prefix: a list of names fails closed',
+    (key) => {
+      expect(() => {
+        assertHostEnv({ [key]: 'x' });
+      }).toThrow(key);
+    },
+  );
+
   it('allows the keys a container brings and our own', () => {
     expect(() => {
       assertHostEnv({ PATH: '/bin', HOME: '/', NODE_VERSION: '24', DREFYN_PARSE_THREADS: '2' });
@@ -247,9 +362,9 @@ describe('the host environment', () => {
   );
 
   it('checks the memory floor at start', () => {
-    expect(parseHostConfig({}).hostMemoryMb).toBe(1_536);
-    expect(() => parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1535' })).toThrow();
-    expect(() => parseHostConfig({ DREFYN_PARSE_PORT: '70000' })).toThrow();
+    expect(parseHostConfig(HOST_ENV).hostMemoryMb).toBe(1_536);
+    expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_HOST_MEMORY_MB: '1535' })).toThrow();
+    expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_PORT: '70000' })).toThrow();
   });
 });
 
@@ -259,6 +374,7 @@ describe('the client', () => {
 
   it('refuses an oversized page without a call', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: () => Promise.reject(new Error('must not be called')),
     });
@@ -280,6 +396,7 @@ describe('the client', () => {
 
   it('refuses an oversized tree without a call', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: () => Promise.reject(new Error('must not be called')),
     });
@@ -291,6 +408,7 @@ describe('the client', () => {
 
   it('refuses a tree too deep to send, without a call', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: () => Promise.reject(new Error('must not be called')),
     });
@@ -303,6 +421,7 @@ describe('the client', () => {
 
   it('refuses an answer to a print that holds no bytes', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: answering(200, '{"ok":true,"value":{"issues":[]}}'),
     });
@@ -315,6 +434,7 @@ describe('the client', () => {
     const answer =
       '{"ok":false,"error":[{"code":"mdx.print_changed_meaning","severity":"error","line":1,"column":1}]}';
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: answering(200, answer),
     });
@@ -328,7 +448,7 @@ describe('the client', () => {
     astVersion: 1,
     dialect: 'md',
     eol: 'lf',
-    children: [{ type: 'paragraph' }],
+    children: [{ type: 'paragraph', source: { raw: 'a', gapBefore: '' } }],
     tail: '',
     tailOf: 'x',
   };
@@ -340,9 +460,12 @@ describe('the client', () => {
     ['the wrong version', { text: 'a', ast: { ...GOOD_ROOT, astVersion: 2 }, issues: [] }],
     ['a child with no kind', { text: 'a', ast: { ...GOOD_ROOT, children: [{}] }, issues: [] }],
     ['text that is not text', { text: 1, ast: GOOD_ROOT, issues: [] }],
+    ['a tree that disagrees with the text', { text: 'b', ast: GOOD_ROOT, issues: [] }],
+    ['a block with no bytes', { text: 'a', ast: { ...GOOD_ROOT, children: [{ type: 'p' }] } }],
   ])('refuses an answer with %s, which a caller would store', async (_name, value) => {
     const answer = JSON.stringify({ ok: true, value });
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: answering(200, answer),
     });
@@ -354,6 +477,7 @@ describe('the client', () => {
   it('names the organization in a header on both routes, so the host can refuse early', async () => {
     const seen: (string | null)[] = [];
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: (_url, init) => {
         seen.push(new Headers(init?.headers).get('x-drefyn-organization'));
@@ -369,6 +493,7 @@ describe('the client', () => {
   it('reads a print answer with bytes in it', async () => {
     const answer = JSON.stringify({ ok: true, value: { text: 'a', ast: GOOD_ROOT, issues: [] } });
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       fetch: answering(200, answer),
     });
@@ -386,12 +511,13 @@ describe('the client', () => {
       'mdx.parse_failed',
     ],
   ])('turns %s into a refusal', async (_name, fetch, code) => {
-    const client = createParseClient({ url: 'http://parse.internal', fetch });
+    const client = createParseClient({ ...CLIENT, url: 'http://parse.internal', fetch });
     await expect(client.parse(page('a'))).resolves.toMatchObject({ error: [{ code }] });
   });
 
   it('refuses an answer past its size cap', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       maxAnswerBytes: 8,
       fetch: answering(200, '{"ok":false,"error":[]}'),
@@ -406,14 +532,194 @@ describe('the client', () => {
       ok: false,
       error: [{ code: 'mdx.queue_full', severity: 'error', line: 1, column: 1 }],
     });
-    const client = createParseClient({ url: 'http://parse.internal', fetch: answering(429, body) });
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: answering(429, body),
+    });
     await expect(client.parse(page('a'))).resolves.toMatchObject({
       error: [{ code: 'mdx.queue_full' }],
     });
   });
 
+  it('sends its token on both routes', async () => {
+    const seen: (string | null)[] = [];
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: (_url, init) => {
+        seen.push(new Headers(init?.headers).get('authorization'));
+        return Promise.resolve(new Response('{"ok":false,"error":[]}'));
+      },
+    });
+    await client.parse(page('a'));
+    await client.print(printRequest());
+    expect(seen).toEqual([`Bearer ${HOST_TOKEN}`, `Bearer ${HOST_TOKEN}`]);
+  });
+
+  it('will not start with a token anyone could guess', () => {
+    expect(() =>
+      createParseClient({ ...CLIENT, url: 'http://parse.internal', token: 'short' }),
+    ).toThrow();
+  });
+
+  it('treats a refused token as the host being unavailable, and says so', async () => {
+    const logger = recordingLogger();
+    const client = createParseClient({
+      ...CLIENT,
+      logger,
+      url: 'http://parse.internal',
+      fetch: answering(401, ''),
+    });
+    await expect(client.parse(page('a'))).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_unavailable' }],
+    });
+    expect(logger.entries.map(({ event }) => event)).toEqual(['mdx.parse_host_unauthorized']);
+    expect(logger.entries[0]?.fields).toMatchObject({
+      organizationId: ORG_A,
+      projectId: PROJECT_A,
+    });
+    expect(JSON.stringify(logger.entries)).not.toContain(HOST_TOKEN);
+  });
+
+  it('checks a parse answer as closely as a print answer', async () => {
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: answering(200, JSON.stringify({ ok: true, value: { ast: GOOD_ROOT, issues: [] } })),
+    });
+    await expect(client.parse(page('a'))).resolves.toMatchObject({ ok: true });
+    await expect(client.parse(page('something else'))).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it.each([
+    ['no tree', { ok: true, value: { issues: [] } }],
+    ['a tree that is not one', { ok: true, value: { ast: { type: 'root' }, issues: [] } }],
+  ])('refuses a parse answer with %s', async (_name, answer) => {
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: answering(200, JSON.stringify(answer)),
+    });
+    await expect(client.parse(page('a'))).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  describe('a bad answer', () => {
+    const CANARY = 'CANARY-PAGE-TEXT';
+    const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+
+    it('is logged by hash, with both ids and no bytes of it', async () => {
+      const logger = recordingLogger();
+      const body = JSON.stringify({ ok: true, value: { issues: [], leaked: CANARY } });
+      const client = createParseClient({
+        ...CLIENT,
+        logger,
+        url: 'http://parse.internal',
+        fetch: answering(200, body),
+      });
+      await client.parse(page(CANARY));
+      expect(logger.entries).toEqual([
+        {
+          level: 'warn',
+          event: 'mdx.parse_bad_answer',
+          fields: {
+            organizationId: ORG_A,
+            projectId: PROJECT_A,
+            path: 'docs/page.md',
+            bytes: Buffer.byteLength(body),
+            sha256: hash(body),
+          },
+        },
+      ]);
+      expect(JSON.stringify(logger.entries)).not.toContain(CANARY);
+    });
+
+    it('past the size cap is logged too, by what was read', async () => {
+      const logger = recordingLogger();
+      const client = createParseClient({
+        ...CLIENT,
+        logger,
+        url: 'http://parse.internal',
+        maxAnswerBytes: 8,
+        fetch: answering(200, CANARY.repeat(4)),
+      });
+      await expect(client.parse(page('a'))).resolves.toMatchObject({
+        error: [{ code: 'mdx.parse_failed' }],
+      });
+      expect(logger.entries.map(({ event }) => event)).toEqual(['mdx.parse_bad_answer']);
+      expect(JSON.stringify(logger.entries)).not.toContain(CANARY);
+    });
+
+    it('never costs the caller a failed log line', async () => {
+      const client = createParseClient({
+        ...CLIENT,
+        logger: {
+          warn: () => {
+            throw new Error('no sink');
+          },
+        },
+        url: 'http://parse.internal',
+        fetch: answering(200, 'nonsense'),
+      });
+      await expect(client.parse(page('a'))).resolves.toMatchObject({
+        error: [{ code: 'mdx.parse_failed' }],
+      });
+    });
+  });
+
+  const answers = fc.oneof(
+    fc.string(),
+    fc.json(),
+    fc.jsonValue().map((value) => JSON.stringify({ ok: true, value })),
+    fc.jsonValue().map((value) => JSON.stringify({ ok: true, value: { issues: [], ast: value } })),
+    fc.jsonValue().map((value) => JSON.stringify({ ok: false, error: value })),
+    fc
+      .record({ text: fc.jsonValue(), ast: fc.jsonValue(), issues: fc.jsonValue() })
+      .map((value) => JSON.stringify({ ok: true, value })),
+  );
+
+  it('answers anything a hostile host sends with a refusal, and never throws', async () => {
+    await fc.assert(
+      fc.asyncProperty(answers, fc.constantFrom(200, 429), async (body, status) => {
+        const client = createParseClient({
+          ...CLIENT,
+          url: 'http://parse.internal',
+          fetch: answering(status, body),
+        });
+        const results = [await client.parse(page('a')), await client.print(printRequest())];
+        for (const result of results) {
+          if (result.ok) throw new Error(`took a bad answer: ${body}`);
+        }
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  describe('the bytes of a tree', () => {
+    it.each(['# a\n\nb\n', '', '\n\n', 'a\r\n\r\nb\r\n', '﻿a\n', 'a\n\n\n\nb'])(
+      'add up to the page for %j',
+      (source) => {
+        expect(bytesOfTree(parsed(source, 'md'))).toBe(source);
+      },
+    );
+
+    it('add up to every page in the corpus and its line ending variants', () => {
+      for (const { text, dialect } of loadCorpus()) {
+        for (const [, variant] of VARIANTS) {
+          const source = variant(text);
+          expect(bytesOfTree(parsed(source, dialect))).toBe(source);
+        }
+      }
+    });
+  });
+
   it('has a timeout on every call', async () => {
     const client = createParseClient({
+      ...CLIENT,
       url: 'http://parse.internal',
       timeoutMs: 20,
       fetch: (_url, init) =>

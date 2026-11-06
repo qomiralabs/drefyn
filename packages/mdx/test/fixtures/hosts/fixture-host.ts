@@ -11,6 +11,8 @@ const config = parsePoolConfig({
 await startParseHost({
   config,
   port: 0,
+  bind: '127.0.0.1',
+  tokenSha256: process.env['DREFYN_PARSE_TOKEN_SHA256'] ?? '',
   logger: { warn: () => undefined },
   startThread: () => startParseThread(script, config),
 });

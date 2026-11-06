@@ -70,37 +70,39 @@ const number = (fallback: number) =>
 
 // Sized on the kill: a hostile page costs a full timeout, so an organization gets about fifteen
 // of those a minute and a project ten, far more parse time than any real save takes.
-export const envSchema = z
-  .object({
-    DREFYN_PARSE_TIMEOUT_MS: number(2_000),
-    DREFYN_PARSE_PRINT_TIMEOUT_MS: number(DEFAULT_PRINT_TIMEOUT_MS),
-    DREFYN_PARSE_WORKER_MEMORY_MB: number(512),
-    DREFYN_PARSE_THREADS: number(2),
-    DREFYN_PARSE_QUEUE_MAX: number(64),
-    DREFYN_PARSE_ORG_THREADS: number(1),
-    DREFYN_PARSE_PROJECT_THREADS: number(1),
-    DREFYN_PARSE_ORG_QUEUE_MAX: number(8),
-    DREFYN_PARSE_PROJECT_QUEUE_MAX: number(4),
-    DREFYN_PARSE_ORG_BUDGET_MS: number(30_000),
-    DREFYN_PARSE_PROJECT_BUDGET_MS: number(20_000),
-    DREFYN_PARSE_WINDOW_MS: number(60_000),
-    DREFYN_PARSE_KILL_GRACE_MS: number(2_000),
-  })
-  .transform((env) => ({
-    timeoutMs: env.DREFYN_PARSE_TIMEOUT_MS,
-    printTimeoutMs: env.DREFYN_PARSE_PRINT_TIMEOUT_MS,
-    maxMemoryMb: env.DREFYN_PARSE_WORKER_MEMORY_MB,
-    threads: env.DREFYN_PARSE_THREADS,
-    maxQueued: env.DREFYN_PARSE_QUEUE_MAX,
-    orgThreads: env.DREFYN_PARSE_ORG_THREADS,
-    projectThreads: env.DREFYN_PARSE_PROJECT_THREADS,
-    maxQueuedPerOrg: env.DREFYN_PARSE_ORG_QUEUE_MAX,
-    maxQueuedPerProject: env.DREFYN_PARSE_PROJECT_QUEUE_MAX,
-    orgBudgetMs: env.DREFYN_PARSE_ORG_BUDGET_MS,
-    projectBudgetMs: env.DREFYN_PARSE_PROJECT_BUDGET_MS,
-    windowMs: env.DREFYN_PARSE_WINDOW_MS,
-    killGraceMs: env.DREFYN_PARSE_KILL_GRACE_MS,
-  }));
+const envShape = {
+  DREFYN_PARSE_TIMEOUT_MS: number(2_000),
+  DREFYN_PARSE_PRINT_TIMEOUT_MS: number(DEFAULT_PRINT_TIMEOUT_MS),
+  DREFYN_PARSE_WORKER_MEMORY_MB: number(512),
+  DREFYN_PARSE_THREADS: number(2),
+  DREFYN_PARSE_QUEUE_MAX: number(64),
+  DREFYN_PARSE_ORG_THREADS: number(1),
+  DREFYN_PARSE_PROJECT_THREADS: number(1),
+  DREFYN_PARSE_ORG_QUEUE_MAX: number(8),
+  DREFYN_PARSE_PROJECT_QUEUE_MAX: number(4),
+  DREFYN_PARSE_ORG_BUDGET_MS: number(30_000),
+  DREFYN_PARSE_PROJECT_BUDGET_MS: number(20_000),
+  DREFYN_PARSE_WINDOW_MS: number(60_000),
+  DREFYN_PARSE_KILL_GRACE_MS: number(2_000),
+};
+
+export const POOL_ENV_KEYS = Object.keys(envShape);
+
+export const envSchema = z.object(envShape).transform((env) => ({
+  timeoutMs: env.DREFYN_PARSE_TIMEOUT_MS,
+  printTimeoutMs: env.DREFYN_PARSE_PRINT_TIMEOUT_MS,
+  maxMemoryMb: env.DREFYN_PARSE_WORKER_MEMORY_MB,
+  threads: env.DREFYN_PARSE_THREADS,
+  maxQueued: env.DREFYN_PARSE_QUEUE_MAX,
+  orgThreads: env.DREFYN_PARSE_ORG_THREADS,
+  projectThreads: env.DREFYN_PARSE_PROJECT_THREADS,
+  maxQueuedPerOrg: env.DREFYN_PARSE_ORG_QUEUE_MAX,
+  maxQueuedPerProject: env.DREFYN_PARSE_PROJECT_QUEUE_MAX,
+  orgBudgetMs: env.DREFYN_PARSE_ORG_BUDGET_MS,
+  projectBudgetMs: env.DREFYN_PARSE_PROJECT_BUDGET_MS,
+  windowMs: env.DREFYN_PARSE_WINDOW_MS,
+  killGraceMs: env.DREFYN_PARSE_KILL_GRACE_MS,
+}));
 
 export function parsePoolConfig(
   env: Readonly<Record<string, string | undefined>>,
