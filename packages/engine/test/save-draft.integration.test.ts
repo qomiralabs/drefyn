@@ -132,9 +132,10 @@ describeWithStack('saveDraft against Postgres', () => {
   it('lets one of twenty racing saves through, with no gap', async () => {
     const node = await newNode(engine, home);
     const first = await save(built, home, node, null, 'base\n');
-    const drafts = await Promise.all(
-      Array.from({ length: 20 }, (_, index) => input(node, first.versionId, `draft ${index}\n`)),
-    );
+    const drafts = [];
+    for (let index = 0; index < 20; index += 1) {
+      drafts.push(await input(node, first.versionId, `draft ${String(index)}\n`));
+    }
     // The host's project queue is smaller than this, so some wait is refused before the race.
     const results = await Promise.all(drafts.map((draft) => engine.saveDraft(draft)));
     expect(results.filter((result) => result.ok)).toHaveLength(1);
