@@ -7,19 +7,25 @@ import { join } from 'node:path';
 import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  chunkNode,
   createEngine,
+  DEFAULT_ENGINE_CONFIG,
   noopTracer,
   type EngineDeps,
   type EngineLogger,
   type EngineTracer,
+  type LogFields,
   type SaveDraftInput,
 } from '../src/index.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
+import { treeOf } from './support/tree.ts';
 
 const pinFile = join(import.meta.dirname, '..', '..', 'mdx', 'test', 'fixtures', 'ast', 'v1.json');
 const pins = JSON.parse(readFileSync(pinFile, 'utf8')) as Readonly<Record<string, MdxRoot>>;
 const page = Object.values(pins).find((root) => root.children.length > 1);
 if (page === undefined) throw new Error('no pinned trees');
+
+const DEFAULT_CHUNKS = { targetChars: 800, maxChars: 2000 };
 
 const tenant: TenantRef = {
   organizationId: organizationId('01890a5d-ac96-774b-bcce-b302099a8001'),
@@ -206,7 +212,7 @@ describe('content', () => {
   it('blames the page when it parses into more than the cap', async () => {
     const bytes = Buffer.byteLength(JSON.stringify(page));
     const { engine } = build(happy, {
-      config: { maxNodeBytes: 1_048_576, maxTreeBytes: bytes + 8 },
+      config: { ...DEFAULT_ENGINE_CONFIG, maxNodeBytes: 1_048_576, maxTreeBytes: bytes + 8 },
       parse: {
         print: () => Promise.resolve(printed({ ...page, tail: 'x'.repeat(bytes) })),
       },
@@ -383,8 +389,9 @@ describe('failure', () => {
 
 describe('history', () => {
   const ACTOR = { kind: 'system', job: 'test' } as const;
+  const STORED = JSON.stringify(treeOf([]));
   const target = {
-    json: '{}',
+    json: STORED,
     content_sha256: SHA,
     ast_version: 1,
     schema_version: 3,
@@ -412,7 +419,7 @@ describe('history', () => {
     const { engine, statements } = build(withHead);
     expect(await engine.rollback(ask)).toMatchObject({ ok: true, value: { seq: 5 } });
     const insert = statements.find((s) => has(s, 'insert into "node_versions"'));
-    expect(insert?.parameters).toEqual(expect.arrayContaining([5, 3, 'ai', '{}']));
+    expect(insert?.parameters).toEqual(expect.arrayContaining([5, 3, 'ai', STORED]));
   });
 
   it('refuses a target this node does not have', async () => {
@@ -584,6 +591,189 @@ describe('observability', () => {
     };
     const { engine } = build(happy, { tracer });
     await engine.saveDraft(save());
-    expect(spans).toEqual([`engine.save ${NODE}`]);
+    expect(spans).toEqual([
+      `engine.save ${NODE}`,
+      `engine.save.verify ${NODE}`,
+      `engine.save.chunk ${NODE}`,
+      `engine.save.write ${NODE}`,
+    ]);
+  });
+});
+
+describe('chunks at write', () => {
+  const chunkWrites = (statements: readonly Statement[]) =>
+    statements.filter((statement) => has(statement, 'insert into "chunks"'));
+  const outboxWrites = (statements: readonly Statement[]) =>
+    statements.filter((statement) => has(statement, 'insert into "engine_outbox"'));
+  const onlyWrites = {
+    isOn: (name: string) => Promise.resolve(name === 'engine.writes'),
+  };
+
+  it('writes chunks and one outbox row in the save transaction, after the version', async () => {
+    const { engine, statements, ends } = build(happy);
+    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    const version = statements.findIndex((s) => has(s, 'insert into "node_versions"'));
+    const chunks = statements.findIndex((s) => has(s, 'insert into "chunks"'));
+    expect(chunks).toBeGreaterThan(version);
+    expect(outboxWrites(statements)).toHaveLength(1);
+    expect(ends).toEqual(['commit']);
+  });
+
+  it('carries the tenant and the new version on every chunk and outbox row', async () => {
+    const { engine, statements } = build(happy);
+    await engine.saveDraft(save());
+    for (const statement of [...chunkWrites(statements), ...outboxWrites(statements)]) {
+      expect(statement.sql).toContain('"organization_id", "project_id"');
+      expect(statement.parameters).toContain(tenant.organizationId);
+      expect(statement.parameters).toContain(tenant.projectId);
+      expect(statement.parameters).toContain(VERSION);
+      expect(statement.parameters).toContain(NODE);
+    }
+  });
+
+  it('stores the sha256 of each body beside it', async () => {
+    const { engine, statements } = build(happy);
+    await engine.saveDraft(save());
+    const parameters = chunkWrites(statements).flatMap((statement) => [...statement.parameters]);
+    const hashes = parameters.filter((value): value is Buffer => Buffer.isBuffer(value));
+    const bodies = chunkNode(page, DEFAULT_CHUNKS).map(({ body }) => body);
+    expect(hashes.map((hash) => hash.toString('hex'))).toEqual(
+      bodies.map((body) => createHash('sha256').update(body).digest('hex')),
+    );
+  });
+
+  it('writes neither with the flag off', async () => {
+    const { engine, statements } = build(happy, { flags: onlyWrites });
+    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    expect(chunkWrites(statements)).toEqual([]);
+    expect(outboxWrites(statements)).toEqual([]);
+  });
+
+  it('asks for the flag with the tenant', async () => {
+    const isOn = vi.fn(() => Promise.resolve(true));
+    const { engine } = build(happy, { flags: { isOn } });
+    await engine.saveDraft(save());
+    expect(isOn).toHaveBeenCalledWith('engine.chunk_at_write', tenant);
+  });
+
+  it('writes nothing more for a replay', async () => {
+    const replayed: Responder = (statement) =>
+      has(statement, '"idempotency_key" = ')
+        ? [
+            {
+              id: VERSION,
+              seq: 1,
+              node_id: NODE,
+              parent_version_id: null,
+              origin: 'human',
+              actor: { kind: 'system', job: 'test' },
+              content_sha256: createHash('sha256').update(JSON.stringify(page)).digest(),
+            },
+          ]
+        : happy(statement);
+    const { engine, statements } = build(replayed);
+    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    expect(chunkWrites(statements)).toEqual([]);
+    expect(outboxWrites(statements)).toEqual([]);
+  });
+
+  it('writes nothing for a conflict', async () => {
+    const conflict: Responder = (statement) =>
+      has(statement, 'for update') ? [{ ...NODE_ROW, head_version_id: VERSION }] : happy(statement);
+    const { engine, statements } = build(conflict);
+    await engine.saveDraft(save());
+    expect(chunkWrites(statements)).toEqual([]);
+  });
+
+  it('stores no version when a chunk write fails', async () => {
+    const failing: Responder = (statement) => {
+      if (has(statement, 'insert into "chunks"')) throw new DbError('DB_TIMEOUT', 'x');
+      return happy(statement);
+    };
+    const { engine, ends } = build(failing);
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: false,
+      error: { code: 'engine.unavailable' },
+    });
+    expect(ends).toEqual(['rollback']);
+  });
+
+  it('stores no version when the outbox write fails', async () => {
+    const failing: Responder = (statement) => {
+      if (has(statement, 'insert into "engine_outbox"')) throw new DbError('DB_TIMEOUT', 'x');
+      return happy(statement);
+    };
+    const { engine, ends } = build(failing);
+    await engine.saveDraft(save());
+    expect(ends).toEqual(['rollback']);
+  });
+
+  describe('on a rollback', () => {
+    const TARGET = '01890a5d-ac96-774b-bcce-b302099a8006';
+    const HEAD = '01890a5d-ac96-774b-bcce-b302099a8007';
+    const ask = {
+      tenant,
+      nodeId: NODE,
+      toVersionId: idOf('ver', TARGET),
+      expectedHeadVersionId: idOf('ver', HEAD),
+      actor: { kind: 'system', job: 'test' },
+      idempotencyKey: 'back-1',
+    } as const;
+    const stored: Responder = (statement) => {
+      if (has(statement, 'for update')) return [{ ...NODE_ROW, head_version_id: HEAD }];
+      if (has(statement, 'content::text')) {
+        return [
+          {
+            json: JSON.stringify(page),
+            content_sha256: SHA,
+            ast_version: 1,
+            schema_version: 1,
+            origin: 'ai',
+          },
+        ];
+      }
+      if (has(statement, 'select "seq"')) return [{ seq: 4 }];
+      if (has(statement, 'insert into "node_versions"')) {
+        return [{ id: VERSION, seq: 5, content_sha256: SHA }];
+      }
+      return happy(statement);
+    };
+
+    it('chunks the content it brings back, for the new version', async () => {
+      const { engine, statements } = build(stored);
+      expect(await engine.rollback(ask)).toMatchObject({ ok: true });
+      const writes = chunkWrites(statements);
+      expect(writes.length).toBeGreaterThan(0);
+      for (const { parameters } of writes) expect(parameters).toContain(VERSION);
+      expect(outboxWrites(statements)).toHaveLength(1);
+    });
+
+    it('writes neither with the flag off', async () => {
+      const { engine, statements } = build(stored, { flags: onlyWrites });
+      expect(await engine.rollback(ask)).toMatchObject({ ok: true });
+      expect(chunkWrites(statements)).toEqual([]);
+      expect(outboxWrites(statements)).toEqual([]);
+    });
+  });
+
+  it('logs a count and never a body', async () => {
+    const lines: { event: string; fields: LogFields }[] = [];
+    const logger: EngineLogger = {
+      info: (event, fields) => lines.push({ event, fields }),
+      warn: (event, fields) => lines.push({ event, fields }),
+    };
+    const { engine } = build(happy, { logger });
+    await engine.saveDraft(save());
+    const line = lines.find(({ event }) => event === 'engine.save');
+    expect(line?.fields).toMatchObject({
+      organization_id: tenant.organizationId,
+      project_id: tenant.projectId,
+      node_id: NODE,
+      chunks: chunkNode(page, DEFAULT_CHUNKS).length,
+    });
+    const logged = JSON.stringify(lines);
+    for (const { body } of chunkNode(page, DEFAULT_CHUNKS)) {
+      expect(logged).not.toContain(JSON.stringify(body).slice(1, -1));
+    }
   });
 });

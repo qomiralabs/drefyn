@@ -2,6 +2,7 @@ import { DbError } from '@drefyn/db';
 import { idOf, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import type { z } from 'zod';
+import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
 import type { NodeContent } from './content.ts';
 import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
@@ -125,12 +126,15 @@ export function createEngine(deps: EngineDeps): Engine {
   const logger = deps.logger ?? noopLogger;
   const tracer = deps.tracer ?? noopTracer;
   const verifyDeps: VerifyDeps = { ...deps, config, logger };
+  const chunkOptions: ChunkOptions = {
+    targetChars: config.chunkTargetChars,
+    maxChars: config.chunkMaxChars,
+  };
 
-  const writesOn = (tenant: TenantRef) =>
-    flags.isOn('engine.writes', {
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
-    });
+  const isOn = (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) =>
+    flags.isOn(name, { organizationId: tenant.organizationId, projectId: tenant.projectId });
+  const writesOn = (tenant: TenantRef) => isOn('engine.writes', tenant);
+  const chunkingOn = (tenant: TenantRef) => isOn('engine.chunk_at_write', tenant);
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
   const logged = async <T>(
@@ -193,26 +197,44 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return input;
       const { tenant, nodeId, content, origin, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      const chunking = await chunkingOn(tenant);
+      const fields = { ...tenantFields(tenant), node_id: nodeId };
+      // Counted when written, so a replay does not report rows it never made.
+      let written = 0;
       return logged(
         'engine.save',
-        { ...tenantFields(tenant), node_id: nodeId, origin, actor_kind: actor.kind },
+        { ...fields, origin, actor_kind: actor.kind },
         async () => {
-          const verified = await verifyContent(content, tenant, nodeId, verifyDeps);
+          const verified = await tracer.span('engine.save.verify', fields, () =>
+            verifyContent(content, tenant, nodeId, verifyDeps),
+          );
           if (!verified.ok) return verified;
-          return settled(() =>
-            store.tenant(tenant, async (tx) => {
-              const node = await lockNode(tx, tenant, nodeId);
-              return appendVersion(tx, tenant, node, {
-                ...verified.value,
-                origin,
-                actor,
-                idempotencyKey: input.value.idempotencyKey,
-                expectedHeadVersionId: input.value.expectedHeadVersionId,
-              });
-            }),
+          // Before the transaction, which should hold its connection for writes alone.
+          const chunks: readonly Chunk[] = chunking
+            ? await tracer.span('engine.save.chunk', fields, () =>
+                Promise.resolve(chunkNode(verified.value.tree, chunkOptions)),
+              )
+            : [];
+          return tracer.span('engine.save.write', fields, () =>
+            settled(() =>
+              store.tenant(tenant, async (tx) => {
+                const node = await lockNode(tx, tenant, nodeId);
+                return appendVersion(tx, tenant, node, {
+                  ...verified.value,
+                  origin,
+                  actor,
+                  idempotencyKey: input.value.idempotencyKey,
+                  expectedHeadVersionId: input.value.expectedHeadVersionId,
+                  chunksOf: () => {
+                    written = chunks.length;
+                    return chunks;
+                  },
+                });
+              }),
+            ),
           );
         },
-        versionFields,
+        (value) => ({ ...versionFields(value), chunks: written }),
       );
     },
 
@@ -221,6 +243,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return input;
       const { tenant, nodeId, toVersionId, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      const chunking = await chunkingOn(tenant);
+      let written = 0;
       return logged(
         'engine.rollback',
         { ...tenantFields(tenant), node_id: nodeId, to_version_id: toVersionId },
@@ -254,10 +278,18 @@ export function createEngine(deps: EngineDeps): Engine {
                 actor,
                 idempotencyKey: input.value.idempotencyKey,
                 expectedHeadVersionId: input.value.expectedHeadVersionId,
+                // Chunked again and not copied: the target may predate chunking, and its rows
+                // belong to its own version.
+                chunksOf: () => {
+                  if (!chunking) return [];
+                  const chunks = chunkNode(JSON.parse(target.json) as NodeContent, chunkOptions);
+                  written = chunks.length;
+                  return chunks;
+                },
               });
             }),
           ),
-        versionFields,
+        (value) => ({ ...versionFields(value), chunks: written }),
       );
     },
 

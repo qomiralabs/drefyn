@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { TenantRef } from '@drefyn/tenancy';
 import { idOf } from '@drefyn/tenancy';
+import type { Chunk } from './chunk.ts';
 import { Refusal } from './errors.ts';
 import type { NodeFamily, Origin } from './vocabulary.ts';
 import { assertWritable } from './limits.ts';
@@ -25,7 +27,16 @@ export interface NewVersion {
   readonly actor: Actor;
   readonly idempotencyKey: string;
   readonly expectedHeadVersionId: VersionId | null;
+  // Only called once the version is certain to be written, so a replay or a conflict costs no
+  // chunking. Empty when chunks are off.
+  readonly chunksOf: () => readonly Chunk[];
 }
+
+const OUTBOX_EMBED_CHUNKS = 'embed_chunks';
+
+// A page of bare headings gives a row per heading, up to about 25,000, and one statement can
+// bind 65,535 values. Batches keep that page legal and leave a normal page one statement.
+const CHUNK_ROWS_PER_INSERT = 500;
 
 const tenantOf = (tenant: TenantRef) =>
   ({ organization_id: tenant.organizationId, project_id: tenant.projectId }) as const;
@@ -114,6 +125,44 @@ async function schemaVersionOf(tx: EngineTx, tenant: TenantRef, typeId: string):
   return row.current_schema_version;
 }
 
+// In the version's transaction, so no version commits without its chunks. Embeddings stay out:
+// the row left here is all a later job needs, and a provider is never called under a lock.
+async function writeChunks(
+  tx: EngineTx,
+  tenant: TenantRef,
+  nodeId: NodeId,
+  versionId: string,
+  chunks: readonly Chunk[],
+): Promise<void> {
+  if (chunks.length === 0) return;
+  for (let from = 0; from < chunks.length; from += CHUNK_ROWS_PER_INSERT) {
+    await tx
+      .insertInto('chunks')
+      .values(
+        chunks.slice(from, from + CHUNK_ROWS_PER_INSERT).map((chunk) => ({
+          ...tenantOf(tenant),
+          node_id: nodeId,
+          version_id: versionId,
+          ord: chunk.ord,
+          block_path: chunk.blockPath,
+          heading_path: [...chunk.headingPath],
+          body: chunk.body,
+          body_sha256: createHash('sha256').update(chunk.body).digest(),
+        })),
+      )
+      .execute();
+  }
+  await tx
+    .insertInto('engine_outbox')
+    .values({
+      ...tenantOf(tenant),
+      node_id: nodeId,
+      version_id: versionId,
+      kind: OUTBOX_EMBED_CHUNKS,
+    })
+    .execute();
+}
+
 // One way into history, for saves and rollbacks alike. The caller holds the node's lock. The
 // key is read before the head is compared, or a retry of a save that landed would conflict with
 // itself. Only a request that will write is held to the plan.
@@ -167,5 +216,6 @@ export async function appendVersion(
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', node.id)
     .executeTakeFirstOrThrow();
+  await writeChunks(tx, tenant, node.id, inserted.id, draft.chunksOf());
   return refOf(node.id, inserted);
 }
