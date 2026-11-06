@@ -381,6 +381,18 @@ describe('queryNodes without a server', () => {
     expect(pageSql(statements)).toBeUndefined();
   });
 
+  it('has room for the longest cursor it can issue, and refuses far past that unread', async () => {
+    const longest = encoded({ s: NAME, d: 'desc', n: NODE });
+    const { engine, statements } = deps(answering({ anchor: null }));
+    const query = { typeId: TYPE, sort: { field: NAME, direction: 'desc' } } as const;
+    const known = await engine.queryNodes(tenant, { ...query, cursor: longest });
+    expect(known).toMatchObject({ error: { issues: [{ code: 'engine.cursor_invalid' }] } });
+    statements.length = 0;
+    const long = await engine.queryNodes(tenant, { ...query, cursor: longest.repeat(3) });
+    expect(long).toMatchObject({ ok: false, error: { code: 'engine.validation_failed' } });
+    expect(statements).toEqual([]);
+  });
+
   it('never throws on whatever comes back as a cursor', async () => {
     const shapes = fc.oneof(
       fc.string({ unit: 'binary', minLength: 1, maxLength: 64 }),

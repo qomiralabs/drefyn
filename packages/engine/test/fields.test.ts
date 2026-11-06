@@ -1,6 +1,6 @@
 import type { ContentSchema, FieldDef, FieldId, TypeId } from '@drefyn/schema';
 import { describe, expect, it } from 'vitest';
-import { canonicalFields, canonicalValue } from '../src/fields.ts';
+import { canonicalFields, canonicalValue, filterValue } from '../src/fields.ts';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}` as FieldId;
 const base = (n: number) => ({ id: id(n), apiName: `f${String(n)}`, label: 'F', required: false });
@@ -111,6 +111,23 @@ describe('canonicalFields', () => {
     const result = canonicalFields(schema, { [id(9)]: 'aaaaaaaaaaaaaaaa' }, 10);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('engine.too_large');
+  });
+});
+
+describe('filterValue', () => {
+  const field = (n: number) => FIELDS.find(({ id: fieldId }) => fieldId === id(n)) as FieldDef;
+
+  it('takes text past what the field may store, which only matches nothing', () => {
+    expect(filterValue(field(1), 'longer than eight')).toBe('longer than eight');
+  });
+
+  it.each([
+    ['a lone surrogate in text', 1, '\ud800'],
+    ['a lone surrogate in markdown', 9, 'a\udc00b'],
+    ['a lone surrogate in a list of text', 8, '\ud800'],
+    ['a NUL in text', 1, 'a\u0000'],
+  ])('holds back %s, which Postgres would refuse', (_name, n, value) => {
+    expect(filterValue(field(n), value)).toBeNull();
   });
 });
 

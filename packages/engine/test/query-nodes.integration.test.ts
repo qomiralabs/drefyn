@@ -460,6 +460,25 @@ describeWithStack('queryNodes', () => {
     });
   });
 
+  // A lone surrogate survives the driver as text, but JSON keeps it escaped and jsonb refuses that.
+  it.each([
+    ['a declared field', 'declared'],
+    ['an undeclared list, which goes through jsonb', 'undeclared'],
+  ])('refuses a lone surrogate on %s, with no server error', async (_name, route) => {
+    const seeded = await stocked();
+    const other = fieldId();
+    await declare(built, seeded, [...FIELDS, listField(other, 'labels')], 2);
+    const field = route === 'declared' ? NAME : other;
+    for (const filter of [
+      { field, op: 'eq', value: '\ud800' },
+      { field, op: 'in', value: ['fine', '\udc00'] },
+    ]) {
+      const error = await refusal(seeded, { filter });
+      expect(error.code).toBe('engine.validation_failed');
+      expect(error.issues[0]?.code).toBe('filter.value_invalid');
+    }
+  });
+
   it('reads a year 0000 value stored before it was refused as missing', async () => {
     const seeded = await stocked();
     const other = fieldId();
