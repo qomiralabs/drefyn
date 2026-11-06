@@ -11,7 +11,7 @@ const write = (level: string) => (event: string, fields: LogFields) => {
   process.stdout.write(`${JSON.stringify({ level, event, ...fields })}\n`);
 };
 
-const host = await startParseHost({
+const host = startParseHost({
   config,
   port,
   bind,
@@ -20,8 +20,11 @@ const host = await startParseHost({
   logger: { info: write('info'), warn: write('warn') },
 });
 
+// Before anything listens: a stop that lands just after the host says so must still be clean.
 process.once('SIGTERM', () => {
-  void host.close().then(() => {
-    process.exit(0);
-  });
+  void host
+    .then((running) => running.close())
+    .then(() => {
+      process.exit(0);
+    });
 });
