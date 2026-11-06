@@ -112,6 +112,8 @@ describe('custom CSS', () => {
     ['open brackets', `a{b:${'c('.repeat(60_000)}}`],
     ['open comments', '/*'.repeat(60_000)],
     ['quotes', `a{b:${'"'.repeat(130_000)}}`],
+    ['escaped quotes ending in a backslash', `"${'\\"'.repeat(60_000)}\\`],
+    ['escaped single quotes ending in a backslash', `'${"\\'".repeat(60_000)}\\`],
   ])('reads %s in linear time', { timeout: 2 * LINEAR_MS }, (_name, css) => {
     const started = performance.now();
     checkCustomCss(css);

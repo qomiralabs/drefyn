@@ -61,9 +61,10 @@ const TOKEN =
   /"(?:[^"\\]|\\[^])*"?|'(?:[^'\\]|\\[^])*'?|((?:[-\w]|[^\0-\x7f]|\\[0-9a-f]{1,6}[ \t\n\r\f]?|\\[^])+)(\(\s*(?:"((?:[^"\\]|\\[^])*)"?|'((?:[^'\\]|\\[^])*)'?|((?:[^)\\]|\\[^])*))?)?/gi;
 
 // A browser ends a string at a bare line break and keeps reading rules. postcss reads on to the
-// closing quote, so what looks like one string here can hold a live rule there.
+// closing quote, so what looks like one string here can hold a live rule there. Each string
+// ends in a match of some kind, so a failed one never restarts from the next quote.
 const STRING_OR_COMMENT =
-  /\/\*[^]*?(?:\*\/|$)|"(?:[^"\\\n\r\f]|\\[^])*(["\n\r\f]|$)|'(?:[^'\\\n\r\f]|\\[^])*(['\n\r\f]|$)/g;
+  /\/\*[^]*?(?:\*\/|$)|"(?:[^"\\\n\r\f]|\\[^])*(["\n\r\f]|\\?$)|'(?:[^'\\\n\r\f]|\\[^])*(['\n\r\f]|\\?$)/g;
 
 // http, so a URL that takes its scheme from here cannot pass as https.
 const SITE_BASE = 'http://page.invalid/';

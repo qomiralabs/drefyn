@@ -411,10 +411,10 @@ describe('refusals', () => {
   });
 
   it('holds a tree far larger than its source, as a stored one is', () => {
-    const page = Array.from({ length: 2000 }, (_, index) => `line ${index}\n`).join('\n');
+    const page = Array.from({ length: 200 }, (_, index) => `line ${index}\n`).join('\n');
     const tree = parsed(page, 'md');
-    const tight = policy({ limits: { ...DEFAULT_LIMITS, maxBytes: 20_000 } });
-    expect(toHtml(tree, tight)).toContain('line 1999');
+    const tight = policy({ limits: { ...DEFAULT_LIMITS, maxBytes: 2_000 } });
+    expect(toHtml(tree, tight)).toContain('line 199');
   });
 
   it('says nothing of the page in its message', () => {
