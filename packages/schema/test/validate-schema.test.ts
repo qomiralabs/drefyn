@@ -268,7 +268,11 @@ describe('declared filter fields', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.issues).toEqual([
-      { path: expect.stringMatching(/^fields\.\d+$/), code: 'schema.limit_reached', reason },
+      {
+        path: expect.stringMatching(/^fields\.\d+$/) as string,
+        code: 'schema.limit_reached',
+        reason,
+      },
     ]);
   });
 

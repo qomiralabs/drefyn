@@ -28,7 +28,7 @@ const MEDIA_TYPE = /^[a-z]+\/(?:\*|[a-z0-9][a-z0-9.+-]*)$/;
 const fieldId = z.custom<FieldId>(isUuid);
 const typeId = z.custom<TypeId>(isUuid);
 const positive = z.number().int().min(1);
-const noRepeats = <T>(items: readonly T[]): boolean => new Set(items).size === items.length;
+const noRepeats = (items: readonly unknown[]): boolean => new Set(items).size === items.length;
 
 const common = {
   id: fieldId,

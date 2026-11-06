@@ -183,9 +183,8 @@ export function diffSchemas(
     else if (own(was.field) !== own(now.field)) changed.add(id);
   }
 
-  const added = sorted([...after.keys()].filter((id) => !before.has(id)));
-  for (const id of added) {
-    const { field, parent, path } = after.get(id) as Placed;
+  const fresh = [...after].filter(([id]) => !before.has(id));
+  for (const [id, { field, parent, path }] of fresh) {
     // Children of a new parent are new with it, so no writer has been sending them.
     if (field.required && (parent === null || before.has(parent))) {
       breaking(path, id, 'required_added');
@@ -197,7 +196,7 @@ export function diffSchemas(
     fromVersion: prior.version,
     toVersion: next.version,
     additive: deprecated.length === 0 && removed.size === 0,
-    added,
+    added: sorted(fresh.map(([id]) => id)),
     changed: sorted(changed),
     deprecated,
     restored: sorted(prior.deprecated.filter((id) => after.has(id) && !nowDeprecated.has(id))),

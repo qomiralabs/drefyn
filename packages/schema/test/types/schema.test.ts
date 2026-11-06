@@ -5,8 +5,9 @@ import type { ContentSchema, FieldDef, FieldId, FilterNode, TypeId } from '../..
 
 declare const field: FieldId;
 declare const type: TypeId;
+declare const stored: ContentSchema;
 
-function compileOnly(): void {
+function compileOnly(): unknown[] {
   // @ts-expect-error a plain string is not a field id
   const id: FieldId = 'title';
 
@@ -30,10 +31,10 @@ function compileOnly(): void {
   // @ts-expect-error a filter names a field id, not a customer string
   const name: FilterNode = { field: 'title', op: 'exists' };
 
-  // @ts-expect-error nothing can be pushed onto a stored schema
-  const mutate = (s: ContentSchema) => s.deprecated.push(field);
+  // @ts-expect-error a stored schema is read only
+  const writable: FieldId[] = stored.deprecated;
 
-  void [id, crossed, scale, bound, value, op, name, mutate];
+  return [id, crossed, scale, bound, value, op, name, writable];
 }
 
 describe('schema types', () => {
