@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
@@ -65,6 +66,19 @@ describe('no-tier-literals', () => {
     ]) {
       expect(await lint(code), code).toHaveLength(1);
     }
+  });
+
+  it('counts tier keys past a spread, which has no key of its own', async () => {
+    const code = 'const rest = {};\nexport const a = { ...rest, free: 1, growth: 2 };';
+    expect(await lint(code)).toHaveLength(1);
+  });
+
+  it('reports a file outside every workspace, which no package can own', async () => {
+    const outside = makeEslint(tmpdir(), { [RULE]: 'error' });
+    const results = await outside.lintText("export const a = (t: string) => t === 'free';", {
+      filePath: join(tmpdir(), 'check.ts'),
+    });
+    expect(reports(results).map((report) => report.ruleId)).toEqual([RULE]);
   });
 
   it('reports each form on its own, so a file of them shows them all', async () => {
