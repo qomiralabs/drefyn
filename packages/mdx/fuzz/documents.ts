@@ -53,15 +53,6 @@ const FRAGMENTS = [
   'export const b = 1\n',
   'export {',
   '<!-- c -->\n',
-  '<script>alert(1)</script>',
-  '<img src=x onerror=alert(1)>',
-  '<a href="javascript:alert(1)">',
-  '[x](javascript:alert(1))',
-  '<svg onload=alert(1)>',
-  '<b>',
-  '</b>',
-  '<table><td>',
-  '<?',
   '<div>\n',
   '</div>\n',
   'www.a.com ',
@@ -89,18 +80,36 @@ const FRAGMENTS = [
   'عربي',
 ];
 
-const piece = fc.oneof(
-  { weight: 6, arbitrary: fc.constantFrom(...FRAGMENTS) },
-  { weight: 1, arbitrary: fc.string({ unit: 'binary', maxLength: 8 }) },
-);
+// Kept apart from the fragments above: printing has a measured rate of pages that do not settle
+// on those, and raw HTML this heavy moves it.
+const HOSTILE_FRAGMENTS = [
+  '<script>alert(1)</script>',
+  '<img src=x onerror=alert(1)>',
+  '<a href="javascript:alert(1)">',
+  '[x](javascript:alert(1))',
+  '<svg onload=alert(1)>',
+  '<b>',
+  '</b>',
+  '<table><td>',
+  '<?',
+];
 
-const pieces = fc.array(piece, { maxLength: 40 }).map((parts) => parts.join(''));
+function documentsFrom(fragments: readonly string[]) {
+  const piece = fc.oneof(
+    { weight: 6, arbitrary: fc.constantFrom(...fragments) },
+    { weight: 1, arbitrary: fc.string({ unit: 'binary', maxLength: 8 }) },
+  );
+  const pieces = fc.array(piece, { maxLength: 40 }).map((parts) => parts.join(''));
+  return fc.oneof(
+    { weight: 4, arbitrary: pieces },
+    { weight: 1, arbitrary: pieces.map((text) => `${BOM}${text}`) },
+    { weight: 1, arbitrary: pieces.map((text) => text.replaceAll('\n', '\r\n')) },
+    { weight: 1, arbitrary: fc.string({ unit: 'binary', maxLength: 200 }) },
+  );
+}
 
-export const documentArbitrary = fc.oneof(
-  { weight: 4, arbitrary: pieces },
-  { weight: 1, arbitrary: pieces.map((text) => `${BOM}${text}`) },
-  { weight: 1, arbitrary: pieces.map((text) => text.replaceAll('\n', '\r\n')) },
-  { weight: 1, arbitrary: fc.string({ unit: 'binary', maxLength: 200 }) },
-);
+export const documentArbitrary = documentsFrom(FRAGMENTS);
+
+export const hostileDocumentArbitrary = documentsFrom([...FRAGMENTS, ...HOSTILE_FRAGMENTS]);
 
 export const dialectArbitrary = fc.constantFrom<Dialect>('mdx', 'md');

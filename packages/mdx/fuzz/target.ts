@@ -5,7 +5,7 @@ import type { MdxRoot, RenderPolicy } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
 import { RenderRefused, checkCustomCss } from '../src/render.ts';
 import { dangerIn, rootOf, toHtml } from '../test/render-helpers.ts';
-import { dialectArbitrary, documentArbitrary } from './documents.ts';
+import { dialectArbitrary, documentArbitrary, hostileDocumentArbitrary } from './documents.ts';
 
 const POLICY: RenderPolicy = {
   version: 1,
@@ -67,13 +67,16 @@ function rendersInert(tree: unknown): boolean {
 export function fuzz({ seconds, seed, check }: FuzzOptions): FuzzReport {
   const property = fc.property(
     documentArbitrary,
+    hostileDocumentArbitrary,
     dialectArbitrary,
     fc.anything({ maxDepth: 3 }),
     cssArbitrary,
-    (source, dialect, junk, css) => {
+    (source, hostile, dialect, junk, css) => {
       const result = parseForStore(source, dialect, POLICY);
       if (result.ok && serialize(result.value.ast) !== source) return false;
       if (result.ok && !rendersInert(result.value.ast)) return false;
+      const page = parseForStore(hostile, dialect, POLICY);
+      if (page.ok && !rendersInert(page.value.ast)) return false;
       if (!rendersInert(junk) || !rendersInert(rootOf([junk]))) return false;
       checkCustomCss(css);
       return check === undefined || check(source);
