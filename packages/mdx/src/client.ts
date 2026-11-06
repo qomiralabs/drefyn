@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { TenantRef } from '@drefyn/tenancy';
 import { z } from 'zod';
-import { checkParsed, checkPrinted } from './answer.ts';
+import { checkMerged, checkParsed, checkPrinted } from './answer.ts';
 import { DEFAULT_LIMITS } from './policy.ts';
 import { refused, wireResultSchema } from './result.ts';
 import type { JobResult } from './result.ts';
 import type { IsolatedPolicy } from './thread.ts';
-import type { Dialect, MdxRoot, ParseResult, PrintResult } from './types.ts';
-import { maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
-import type { WirePrint, WireRequest } from './wire.ts';
+import type { Dialect, MdxRoot, MergeAnswer, ParseResult, PrintResult } from './types.ts';
+import { maxMergeTreesBytes, maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
+import type { WireMerge, WirePrint, WireRequest } from './wire.ts';
 
 export type ParsePriority = 'interactive' | 'bulk';
 
@@ -32,6 +32,17 @@ export interface PrintClientRequest {
   readonly priority?: ParsePriority;
 }
 
+export interface MergeClientRequest {
+  readonly tenant: TenantRef;
+  // Logged by the host, so it never holds page text.
+  readonly path: string;
+  readonly base: MdxRoot;
+  readonly ours: MdxRoot;
+  readonly theirs: MdxRoot;
+  readonly policy: IsolatedPolicy;
+  readonly priority?: ParsePriority;
+}
+
 export interface ParseClient {
   // Never parses here, and has no fallback that does. Resolves with a refusal for anything
   // about the page, the load or the host, so a save keeps its last good version.
@@ -39,6 +50,9 @@ export interface ParseClient {
   // Prints in the host and reparses what it printed, so nothing reaches git that means
   // something other than the tree. Store the tree this hands back, not the one sent.
   print(request: PrintClientRequest): Promise<PrintResult>;
+  // Merges in the host. A clean outcome is not yet a version: print it and store what that hands
+  // back. A conflict stops the write until a person decides.
+  merge(request: MergeClientRequest): Promise<MergeAnswer>;
 }
 
 export interface ParseClientLogger {
@@ -188,7 +202,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       };
       const body = JSON.stringify(frame);
       const check = (answer: JobResult) => checkParsed(answer, source);
-      return await post({ route: '/parse', body, tenant, path, check });
+      return (await post({ route: '/parse', body, tenant, path, check })) as ParseResult;
     },
     async print(request) {
       const { tenant, path, root, policy, priority = 'bulk' } = request;
@@ -206,6 +220,23 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       const body = JSON.stringify(frame);
       const answer = await post({ route: '/print', body, tenant, path, check: checkPrinted });
       return answer as PrintResult;
+    },
+    async merge(request) {
+      const { tenant, path, base, ours, theirs, policy, priority = 'bulk' } = request;
+      let trees: string;
+      try {
+        trees = JSON.stringify({ base, ours, theirs });
+      } catch {
+        // Only a tree far past any depth limit can overflow this.
+        return refused('mdx.too_deep');
+      }
+      if (Buffer.byteLength(trees, 'utf8') > maxMergeTreesBytes(policy.limits.maxBytes)) {
+        return refused('mdx.too_large');
+      }
+      const frame: WireMerge = { tenant, path, trees, policy: wireOf(policy), priority };
+      const body = JSON.stringify(frame);
+      const check = (answer: JobResult) => checkMerged(answer, { base, ours, theirs });
+      return (await post({ route: '/merge', body, tenant, path, check })) as MergeAnswer;
     },
   };
 }

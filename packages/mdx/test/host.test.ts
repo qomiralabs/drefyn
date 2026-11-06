@@ -121,6 +121,90 @@ describe('the parse host', () => {
   );
 
   it(
+    'merges for a client across the wire, then prints what it merged',
+    async () => {
+      const { url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
+      const client = createParseClient({ ...CLIENT, url: await url });
+      const parseOf = async (source: string) => {
+        const answer = await client.parse(page(source));
+        if (!answer.ok) throw new Error('refused');
+        return answer.value.ast;
+      };
+      const [base, ours, theirs] = await Promise.all([
+        parseOf('One line here.\n\nTwo lines here.\n'),
+        parseOf('One OURS here.\n\nTwo lines here.\n'),
+        parseOf('One line here.\n\nTwo THEIRS here.\n'),
+      ]);
+      const { tenant, path, policy } = page('');
+      const merged = await client.merge({ tenant, path, policy, base, ours, theirs });
+      if (!merged.ok) throw new Error('refused');
+      const { outcome } = merged.value;
+      if (outcome.kind !== 'clean') throw new Error('conflict');
+      const printed = await client.print({ tenant, path, policy, root: outcome.merged });
+      expect(printed).toMatchObject({
+        ok: true,
+        value: { text: 'One OURS here.\n\nTwo THEIRS here.\n' },
+      });
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'records a conflict across the wire, and applies the configured block limit',
+    async () => {
+      const { url } = start([hostMain], {
+        DREFYN_PARSE_PORT: '0',
+        DREFYN_MDX_MERGE_MAX_BLOCKS: '2',
+      });
+      const client = createParseClient({ ...CLIENT, url: await url });
+      const parseOf = async (source: string) => {
+        const answer = await client.parse(page(source));
+        if (!answer.ok) throw new Error('refused');
+        return answer.value.ast;
+      };
+      const base = await parseOf('One line here.\n');
+      const ours = await parseOf('One OURS here.\n');
+      const theirs = await parseOf('One THEIRS here.\n');
+      const { tenant, path, policy } = page('');
+      const merged = await client.merge({ tenant, path, policy, base, ours, theirs });
+      expect(merged).toMatchObject({
+        ok: true,
+        value: { outcome: { kind: 'conflict', conflicts: [{ reason: 'both_changed' }] } },
+      });
+      const long = await parseOf('A.\n\nB.\n\nC.\n');
+      const over = await client.merge({ tenant, path, policy, base: long, ours, theirs });
+      expect(over).toMatchObject({ error: [{ code: 'mdx.merge_limit' }] });
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'carries three honest trees at the size limit across the wire',
+    async () => {
+      const { url } = start([hostMain], {
+        DREFYN_PARSE_PORT: '0',
+        DREFYN_PARSE_TIMEOUT_MS: '20000',
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: '20000',
+      });
+      const client = createParseClient({ ...CLIENT, url: await url });
+      const first = await client.parse(page(honestPage('md')));
+      if (!first.ok) throw new Error('refused');
+      const { ast } = first.value;
+      const { tenant, path, policy } = page('');
+      const merged = await client.merge({
+        tenant,
+        path,
+        policy,
+        base: ast,
+        ours: ast,
+        theirs: ast,
+      });
+      expect(merged).toMatchObject({ ok: true, value: { outcome: { kind: 'clean' } } });
+    },
+    FULL_PAGE_TIMEOUT_MS,
+  );
+
+  it(
     'carries an honest page at the size limit across the wire',
     async () => {
       // A long kill: this is about the caps and held bytes. Time is proved on the thread.
@@ -422,7 +506,13 @@ describe('the host environment', () => {
 
   it('allows the keys a container brings and our own', () => {
     expect(() => {
-      assertHostEnv({ PATH: '/bin', HOME: '/', NODE_VERSION: '24', DREFYN_PARSE_THREADS: '2' });
+      assertHostEnv({
+        PATH: '/bin',
+        HOME: '/',
+        NODE_VERSION: '24',
+        DREFYN_PARSE_THREADS: '2',
+        DREFYN_MDX_MERGE_MAX_BLOCKS: '100',
+      });
     }).not.toThrow();
   });
 
@@ -591,6 +681,146 @@ describe('the client', () => {
     await client.print(printRequest());
     const { organizationId } = page('').tenant;
     expect(seen).toEqual([organizationId, organizationId]);
+  });
+
+  const mergeRequest = (overrides = {}) => ({
+    tenant: page('').tenant,
+    path: 'docs/page.mdx',
+    base: root,
+    ours: root,
+    theirs: root,
+    policy: isolatedPolicy(),
+    ...overrides,
+  });
+
+  it('refuses trees too big to send, without a call', async () => {
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    const policy = { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 1 } };
+    await expect(client.merge(mergeRequest({ policy }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_large' }],
+    });
+  });
+
+  it('refuses trees too deep to send, without a call', async () => {
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    let deep: unknown = {};
+    for (let depth = 0; depth < 200_000; depth += 1) deep = { deep };
+    await expect(client.merge(mergeRequest({ ours: deep }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_deep' }],
+    });
+  });
+
+  it.each([
+    ['no outcome', '{"ok":true,"value":{"issues":[]}}'],
+    ['an unknown kind', '{"ok":true,"value":{"issues":[],"outcome":{"kind":"maybe"}}}'],
+    ['a clean merge with no tree', '{"ok":true,"value":{"issues":[],"outcome":{"kind":"clean"}}}'],
+    [
+      'a conflict with no record',
+      JSON.stringify({
+        ok: true,
+        value: { issues: [], outcome: { kind: 'conflict', partial: GOOD_ROOT } },
+      }),
+    ],
+    [
+      'a conflict with an empty record',
+      JSON.stringify({
+        ok: true,
+        value: { issues: [], outcome: { kind: 'conflict', partial: GOOD_ROOT, conflicts: [] } },
+      }),
+    ],
+    [
+      'a conflict with an unknown reason',
+      JSON.stringify({
+        ok: true,
+        value: {
+          issues: [],
+          outcome: {
+            kind: 'conflict',
+            partial: GOOD_ROOT,
+            conflicts: [{ baseIndex: 0, ours: null, theirs: null, reason: 'whatever' }],
+          },
+        },
+      }),
+    ],
+  ])('never reads an answer with %s as a merge', async (_name, answer) => {
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.merge(mergeRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('reads a clean merge and a recorded conflict', async () => {
+    const answer = (outcome: unknown) =>
+      JSON.stringify({ ok: true, value: { issues: [], outcome } });
+    const conflict = {
+      baseIndex: null,
+      ours: { type: 'html' },
+      theirs: null,
+      reason: 'both_inserted',
+    };
+    for (const outcome of [
+      { kind: 'clean', merged: GOOD_ROOT },
+      { kind: 'conflict', partial: GOOD_ROOT, conflicts: [conflict] },
+    ]) {
+      const client = createParseClient({
+        ...CLIENT,
+        url: 'http://parse.internal',
+        fetch: answering(200, answer(outcome)),
+      });
+      const request = mergeRequest({ base: GOOD_ROOT, ours: GOOD_ROOT, theirs: GOOD_ROOT });
+      await expect(client.merge(request)).resolves.toMatchObject({ ok: true });
+    }
+  });
+
+  it('runs the count on what it sent, so a taken host cannot report clean over a drop', async () => {
+    const base = parsed('One line here.\n\nTwo lines here.\n', 'md');
+    const ours = parsed('One OURS here.\n\nTwo lines here.\n', 'md');
+    const dropped = parsed('Two lines here.\n', 'md');
+    const warnings: string[] = [];
+    const answer = (merged: MdxRoot) =>
+      JSON.stringify({ ok: true, value: { issues: [], outcome: { kind: 'clean', merged } } });
+    const clientFor = (merged: MdxRoot) =>
+      createParseClient({
+        ...CLIENT,
+        logger: {
+          warn: (event) => {
+            warnings.push(event);
+          },
+        },
+        url: 'http://parse.internal',
+        fetch: answering(200, answer(merged)),
+      });
+    const request = mergeRequest({ base, ours, theirs: base });
+    await expect(clientFor(dropped).merge(request)).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+    expect(warnings).toEqual(['mdx.parse_bad_answer']);
+    await expect(clientFor(ours).merge(request)).resolves.toMatchObject({ ok: true });
+  });
+
+  it('passes a refusal through', async () => {
+    const answer =
+      '{"ok":false,"error":[{"code":"mdx.merge_limit","severity":"error","line":1,"column":1}]}';
+    const client = createParseClient({
+      ...CLIENT,
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.merge(mergeRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.merge_limit' }],
+    });
   });
 
   it('reads a print answer with bytes in it', async () => {

@@ -30,6 +30,7 @@ describe('parsePoolConfig', () => {
         DREFYN_PARSE_PROJECT_BUDGET_MS: '1000',
         DREFYN_PARSE_WINDOW_MS: '2000',
         DREFYN_PARSE_KILL_GRACE_MS: '300',
+        DREFYN_MDX_MERGE_MAX_BLOCKS: '500',
       }),
     ).toEqual({
       timeoutMs: 750,
@@ -45,11 +46,18 @@ describe('parsePoolConfig', () => {
       projectBudgetMs: 1_000,
       windowMs: 2_000,
       killGraceMs: 300,
+      maxMergeBlocks: 500,
     });
+  });
+
+  it('allows 20000 blocks in a merge unless told otherwise', () => {
+    expect(parsePoolConfig({}).maxMergeBlocks).toBe(20_000);
   });
 
   it.each([
     ['a zero timeout', { DREFYN_PARSE_TIMEOUT_MS: '0' }],
+    ['no blocks in a merge', { DREFYN_MDX_MERGE_MAX_BLOCKS: '0' }],
+    ['a merge past any page', { DREFYN_MDX_MERGE_MAX_BLOCKS: '1000001' }],
     ['a print limit under the parse limit', { DREFYN_PARSE_PRINT_TIMEOUT_MS: '1999' }],
     ['a print limit past the project budget', { DREFYN_PARSE_PRINT_TIMEOUT_MS: '20001' }],
     ['an endless timeout', { DREFYN_PARSE_TIMEOUT_MS: '600001' }],

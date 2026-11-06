@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import type { MdxIssue, MdxIssueCode, ParseResult, PrintResult } from './types.ts';
+import type { MdxIssue, MdxIssueCode, MergeAnswer, ParseResult, PrintResult } from './types.ts';
 
-export type JobResult = ParseResult | PrintResult;
+export type JobResult = ParseResult | PrintResult | MergeAnswer;
 
 export interface Refused {
   readonly ok: false;

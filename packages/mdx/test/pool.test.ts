@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
 import { createParsePool } from '../src/pool.ts';
-import type { ParseRequest, PrintRequest } from '../src/pool.ts';
+import type { MergeRequest, ParseRequest, PrintRequest } from '../src/pool.ts';
 import type { ParsePoolConfig } from '../src/pool-config.ts';
+import type { JobResult } from '../src/result.ts';
 import { RECYCLE_AFTER_JOBS } from '../src/thread.ts';
 import type { ParseThread, ThreadAnswer, ThreadJob } from '../src/thread.ts';
 import {
@@ -43,7 +44,7 @@ class FakeThread implements ParseThread {
   stopped = 0;
 
   run(job: ThreadJob) {
-    this.sources.push('source' in job ? job.source : job.tree);
+    this.sources.push('source' in job ? job.source : 'tree' in job ? job.tree : job.trees);
     return new Promise<ThreadAnswer>((resolve) => {
       this.jobs.push(resolve);
     });
@@ -90,6 +91,13 @@ const printing = (tree = '{}', projectId = PROJECT_A): PrintRequest => ({
   policy: isolatedPolicy(),
 });
 
+const merging = (trees = '{}', projectId = PROJECT_A): MergeRequest => ({
+  tenant: { organizationId: ORG_A, projectId },
+  path: 'docs/page.mdx',
+  trees,
+  policy: isolatedPolicy(),
+});
+
 const request = (projectId = PROJECT_A, source = 'page', organizationId = ORG_A): ParseRequest => ({
   tenant: { organizationId, projectId },
   path: 'docs/page.md',
@@ -103,7 +111,7 @@ const limitsPolicy = () => ({
   limits: { ...DEFAULT_LIMITS, maxBytes: 3 },
 });
 
-const codeOf = async (result: Promise<ParseResult>) => {
+const codeOf = async (result: Promise<JobResult>) => {
   const settled = await result;
   return settled.ok ? 'ok' : settled.error[0]?.code;
 };
@@ -682,6 +690,116 @@ describe('printing in the pool', () => {
     await flush();
     threads[0]?.jobs[0]?.(done);
     await printed;
+    expect(JSON.stringify(logger)).not.toContain('CANARY');
+  });
+});
+
+describe('merging in the pool', () => {
+  it('hands the trees and the block limit to a thread and the answer back', async () => {
+    const { pool, threads } = harness({ maxMergeBlocks: 7 });
+    const seen: ThreadJob[] = [];
+    const thread = {
+      alive: () => true,
+      stop: () => Promise.resolve(),
+      run: (job: ThreadJob) => {
+        seen.push(job);
+        return Promise.resolve({ result: done.result, end: 'reusable' as const, workMs: 1 });
+      },
+    };
+    const direct = createParsePool(poolConfig({ maxMergeBlocks: 7 }), {
+      logger: recordingLogger(),
+      onStuck: vi.fn(),
+      startThread: () => thread,
+    });
+    await direct.merge(merging('{"trees":1}'));
+    expect(seen[0]).toMatchObject({ trees: '{"trees":1}', maxBlocks: 7 });
+    const merged = pool.merge(merging('{"trees":2}'));
+    await flush();
+    expect(threads[0]?.sources).toEqual(['{"trees":2}']);
+    threads[0]?.jobs[0]?.(done);
+    await expect(merged).resolves.toEqual(OK);
+  });
+
+  it('takes turns on the same queue and limit as a parse', async () => {
+    const { pool, threads } = harness({ maxQueuedPerProject: 1, projectThreads: 1 });
+    const first = pool.parse(request());
+    const second = pool.merge(merging());
+    await flush();
+    expect(await codeOf(pool.merge(merging()))).toBe('mdx.project_limit');
+    threads[0]?.jobs[0]?.(done);
+    await first;
+    await flush();
+    threads[0]?.jobs[1]?.(done);
+    await second;
+  });
+
+  it('allows three trees, and refuses more before the queue', async () => {
+    const { pool, threads } = harness();
+    const limits = { ...DEFAULT_LIMITS, maxBytes: 4 };
+    const over = { ...merging('x'.repeat(97)), policy: { ...isolatedPolicy(), limits } };
+    expect(await codeOf(pool.merge(over))).toBe('mdx.too_large');
+    expect(threads).toEqual([]);
+    const fits = { ...merging('x'.repeat(96)), policy: { ...isolatedPolicy(), limits } };
+    const merged = pool.merge(fits);
+    await flush();
+    threads[0]?.jobs[0]?.(done);
+    await expect(merged).resolves.toEqual(OK);
+  });
+
+  it('rejects a bad policy or a forged tenant, which is our bug', async () => {
+    const { pool } = harness();
+    const bad = { ...merging(), policy: { ...isolatedPolicy(), version: -1 } };
+    await expect(pool.merge(bad)).rejects.toThrow();
+    const forged = { ...merging(), tenant: { organizationId: 'x', projectId: 'y' } };
+    await expect(pool.merge(forged as MergeRequest)).rejects.toThrow();
+  });
+
+  it('logs a count breach as a number, with no word from the page', async () => {
+    const { pool, threads, logger } = harness();
+    const merged = pool.merge(merging('{}'));
+    await flush();
+    const outcome = {
+      kind: 'conflict',
+      partial: {},
+      conflicts: [],
+      unexplained: 2,
+      note: 'CANARY',
+    };
+    const result = {
+      ok: true,
+      value: { outcome, issues: [] },
+    } as unknown as ThreadAnswer['result'];
+    threads[0]?.jobs[0]?.({ result, end: 'reusable', workMs: 0 });
+    await merged;
+    expect(logger.entries).toContainEqual(
+      expect.objectContaining({
+        event: 'mdx.merge_unexplained',
+        fields: expect.objectContaining({ tokens: 2 }) as unknown,
+      }),
+    );
+    expect(JSON.stringify(logger.entries)).not.toContain('CANARY');
+  });
+
+  it('logs nothing of the kind for a merge the count explains', async () => {
+    const { pool, threads, logger } = harness();
+    const merged = pool.merge(merging('{}'));
+    await flush();
+    const outcome = { kind: 'clean', merged: {} };
+    const result = {
+      ok: true,
+      value: { outcome, issues: [] },
+    } as unknown as ThreadAnswer['result'];
+    threads[0]?.jobs[0]?.({ result, end: 'reusable', workMs: 0 });
+    await merged;
+    expect(logger.entries.map(({ event }) => event)).not.toContain('mdx.merge_unexplained');
+  });
+
+  it('logs the size and hash of the trees, and never the trees', async () => {
+    const { pool, threads, logger } = harness();
+    const merged = pool.merge(merging('{"CANARY":1}'));
+    await flush();
+    threads[0]?.jobs[0]?.(done);
+    await merged;
     expect(JSON.stringify(logger)).not.toContain('CANARY');
   });
 });
