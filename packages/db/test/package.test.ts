@@ -27,14 +27,20 @@ describe('package shape', () => {
   });
 
   // @drefyn/cli owns the drefyn binary; db hands it the migrate command as a function.
-  it('declares no binary and exports exactly the migrate command', async () => {
+  it('declares no binary and exports exactly the migrate and maintain commands', async () => {
     expect(manifest.bin).toBeUndefined();
     expect(existsSync(join(root, 'src', 'cli.ts'))).toBe(false);
     const command = await import('../src/command.ts');
-    expect(Object.keys(command).sort()).toEqual(['MIGRATE_USAGE', 'runMigrate']);
+    expect(Object.keys(command).sort()).toEqual([
+      'MAINTAIN_USAGE',
+      'MIGRATE_USAGE',
+      'runMaintain',
+      'runMigrate',
+    ]);
     expect(command.MIGRATE_USAGE).toBe(
       'usage: drefyn migrate up | down [n] | status [--migrations-dir <dir>]',
     );
+    expect(command.MAINTAIN_USAGE).toBe('usage: drefyn maintain filter-rows [--after-import]');
   });
 
   it('has the integration and type drift tasks', () => {
