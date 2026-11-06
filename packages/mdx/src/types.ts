@@ -87,6 +87,18 @@ export interface RenderPolicy {
   readonly limits: MdxLimits;
 }
 
+// Milliseconds a print spent in each step, read off the thread. Beside the tree and never in it,
+// so a stored version stays the same bytes however long it took.
+export interface PrintTiming {
+  readonly decodeMs: number;
+  readonly printMs: number;
+  readonly reparseMs: number;
+  readonly compareMs: number;
+  // Added by the pool, which sees what the thread cannot.
+  readonly waitedMs?: number;
+  readonly threadMs?: number;
+}
+
 // The bytes, and the tree they parse to. Store that tree and not the one sent: only this one is
 // known to agree with what git will hold.
 export type PrintResult = Result<
@@ -94,6 +106,7 @@ export type PrintResult = Result<
     readonly text: string;
     readonly ast: MdxRoot;
     readonly issues: readonly MdxIssue[];
+    readonly timing?: PrintTiming;
   },
   readonly MdxIssue[]
 >;

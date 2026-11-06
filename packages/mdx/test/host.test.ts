@@ -113,6 +113,9 @@ describe('the parse host', () => {
       expect(result).toMatchObject({ ok: true, value: { text: 'new\n' } });
       if (!result.ok) throw new Error('refused');
       expect(result.value.ast.children[0]?.source?.raw).toBe('new');
+      expect(result.value.timing?.printMs).toBeGreaterThanOrEqual(0);
+      expect(result.value.timing?.reparseMs).toBeGreaterThan(0);
+      expect(result.value.timing?.threadMs).toBeGreaterThan(0);
     },
     TIMEOUT_MS,
   );
@@ -590,6 +593,32 @@ describe('the client', () => {
       fetch: answering(200, '{"ok":true,"value":{"issues":[]}}'),
     });
     await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('takes a timing of numbers and refuses any other', async () => {
+    const ast = {
+      type: 'root',
+      astVersion: 1,
+      dialect: 'md',
+      eol: 'lf',
+      children: [],
+      tail: '',
+      tailOf: '',
+    };
+    const answerWith = (timing: unknown) =>
+      createParseClient({
+        ...CLIENT,
+        url: 'http://parse.internal',
+        fetch: answering(
+          200,
+          JSON.stringify({ ok: true, value: { text: '', ast, issues: [], timing } }),
+        ),
+      }).print(printRequest());
+    const times = { decodeMs: 1, printMs: 1, reparseMs: 1, compareMs: 1 };
+    await expect(answerWith(times)).resolves.toMatchObject({ ok: true });
+    await expect(answerWith({ ...times, printMs: 'page text' })).resolves.toMatchObject({
       error: [{ code: 'mdx.parse_failed' }],
     });
   });

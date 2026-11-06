@@ -12,7 +12,7 @@ const treesSchema = z.object({ base: z.unknown(), ours: z.unknown(), theirs: z.u
 // to mean storable, or a sync would stop on a refusal nobody can resolve. Blocks say nothing
 // here, as the fault is between them, so the record names the whole page.
 function provenClean(outcome: MergeOutcome, policy: MergeJob['policy']): MergeOutcome {
-  if (outcome.kind !== 'clean' || printAndReparse(outcome.merged, policy).ok) return outcome;
+  if (outcome.kind !== 'clean' || printAndReparse(outcome.merged, policy, 0).ok) return outcome;
   const conflict = { baseIndex: null, ours: null, theirs: null, reason: 'both_changed' } as const;
   return { kind: 'conflict', partial: outcome.merged, conflicts: [conflict] };
 }

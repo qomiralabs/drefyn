@@ -12,11 +12,14 @@ import { chunksBySection, sectionOf } from './support/tree.ts';
 
 const WORD = /\b[A-Za-z]{4,}\b/;
 const POSITIONS = [0, 0.5, 1];
+// Chunks hold reader text, so fewer pages reach 20 of them. More edits on those pages keep the
+// sample over its floor without lowering the floor or the share.
+const LONG_PAGE_POSITIONS = [0, 0.25, 0.5, 0.75, 1];
 const options = { targetChars: 800, maxChars: 2000 };
 const HOST_START_MS = 60_000;
 const CORPUS_MS = 180_000;
 // Two word edits turn a page into one the parser refuses. A sentence does not.
-const EDITS_ON_THE_FIXTURE = { short: 466, long: 466, sentence: 468 };
+const EDITS_ON_THE_FIXTURE = { short: 498, long: 498, sentence: 500 };
 const LONG_PAGE_CHUNKS = 20;
 const MIN_LONG_PAGE_EDITS = 50;
 
@@ -124,7 +127,8 @@ async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, re
     const root = await parsed(client, text, dialect);
     if (root === null) continue;
     const before = bodiesOf(chunkNode(root, options));
-    for (const position of POSITIONS) {
+    const positions = before.length >= LONG_PAGE_CHUNKS ? LONG_PAGE_POSITIONS : POSITIONS;
+    for (const position of positions) {
       const target = targetIn(root, position);
       if (target === null) continue;
       const { index, from, raw } = target;

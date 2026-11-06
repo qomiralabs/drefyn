@@ -20,6 +20,7 @@ export type {
   MergeResult,
   ParseResult,
   PrintResult,
+  PrintTiming,
   RenderPolicy,
   Result,
 } from './types.ts';

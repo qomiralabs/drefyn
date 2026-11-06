@@ -578,6 +578,60 @@ describe('input', () => {
 });
 
 describe('printing in the pool', () => {
+  it('trusts no timing from a thread, as a hostile page runs there', async () => {
+    const { pool, logger, finish } = harness();
+    const printed = pool.print(printing());
+    await flush();
+    const timing = { decodeMs: 1, printMs: 2, reparseMs: 3, compareMs: 4 };
+    const forged = { ...timing, organizationId: 'someone-else', pageText: 'quoted' };
+    await finish({
+      result: { ok: true, value: { text: '', ast: {} as never, issues: [], timing: forged } },
+      end: 'reusable',
+      workMs: 1,
+    });
+    await printed;
+    const fields = logger.entries.at(-1)?.fields;
+    expect(fields).toMatchObject({ organizationId: printing().tenant.organizationId });
+    expect(fields).not.toHaveProperty('pageText');
+  });
+
+  it('drops a timing that is not numbers', async () => {
+    const { pool, logger, finish } = harness();
+    const printed = pool.print(printing());
+    await flush();
+    const timing = { decodeMs: 'page text', printMs: 2, reparseMs: 3, compareMs: 4 };
+    await finish({
+      result: {
+        ok: true,
+        value: { text: '', ast: {} as never, issues: [], timing: timing as never },
+      },
+      end: 'reusable',
+      workMs: 1,
+    });
+    const answer = await printed;
+    expect(answer.ok && answer.value.timing).toBeUndefined();
+    expect(logger.entries.at(-1)?.fields).not.toHaveProperty('decodeMs');
+  });
+
+  it('adds its own wait and thread time to the steps, and logs them all', async () => {
+    const { pool, logger, finish } = harness();
+    const printed = pool.print(printing());
+    await flush();
+    const timing = { decodeMs: 1, printMs: 2, reparseMs: 3, compareMs: 4 };
+    await finish({
+      result: { ok: true, value: { text: '', ast: {} as never, issues: [], timing } },
+      end: 'reusable',
+      workMs: 12,
+    });
+    const answer = await printed;
+    if (!answer.ok) throw new Error('refused');
+    expect(answer.value.timing).toEqual({ ...timing, waitedMs: 0, threadMs: 12 });
+    expect(logger.entries.at(-1)).toMatchObject({
+      event: 'mdx.parse_finished',
+      fields: { decodeMs: 1, printMs: 2, reparseMs: 3, compareMs: 4, tookMs: 12 },
+    });
+  });
+
   it('hands the tree to a thread and the answer back', async () => {
     const { pool, threads } = harness();
     const printed = pool.print(printing('{"tree":1}'));

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { TenantRef } from '@drefyn/tenancy';
 import { organizationId as toOrganizationId, projectId as toProjectId } from '@drefyn/tenancy';
 import { z } from 'zod';
+import { timingSchema } from './answer.ts';
 import { parseInputSchema } from './policy.ts';
 import { poolConfigSchema } from './pool-config.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
@@ -135,6 +136,17 @@ interface Slot {
   jobs: number;
 }
 
+// Only a print has steps to report, and only the pool knows the wait ahead of them. A timing that
+// fails its schema goes, and unknown keys with it, so a thread cannot write a tenant field or page
+// text into a log line.
+function withHostTimes(result: JobResult, waitedMs: number, threadMs: number): JobResult {
+  if (!result.ok || !('timing' in result.value)) return result;
+  const { timing, ...value } = result.value;
+  const checked = timingSchema.safeParse(timing);
+  if (!checked.success) return { ...result, value };
+  return { ...result, value: { ...value, timing: { ...checked.data, waitedMs, threadMs } } };
+}
+
 export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): ParsePool {
   const settings = poolConfigSchema.parse(config);
   const now = deps.now ?? (() => performance.now());
@@ -261,8 +273,10 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
       if (item.interactive) budget.interactiveMs += outcome.workMs;
     }
     if (slot !== undefined) release(slot, outcome.end, item.fields);
-    report({ ...item.fields, waitedMs, tookMs: outcome.workMs }, outcome.result);
-    item.resolve(outcome.result);
+    const result = withHostTimes(outcome.result, waitedMs, outcome.workMs);
+    const timing = result.ok && 'timing' in result.value ? result.value.timing : undefined;
+    report({ ...timing, ...item.fields, waitedMs, tookMs: outcome.workMs }, result);
+    item.resolve(result);
     pump();
   };
 

@@ -13,7 +13,7 @@ import type { TenantRef } from '@drefyn/tenancy';
 import type { EngineConfig } from './config.ts';
 import { astVersionOf } from './content.ts';
 import { refuse, type EngineIssue, type EngineResult } from './errors.ts';
-import type { EngineLogger } from './ports.ts';
+import type { EngineLogger, EngineTracer } from './ports.ts';
 import type { NodeId } from './types.ts';
 
 export type ParsePolicy = Omit<PrintClientRequest['policy'], 'limits' | 'components'> & {
@@ -25,6 +25,7 @@ export interface VerifyDeps {
   readonly parsePolicy: ParsePolicy;
   readonly config: EngineConfig;
   readonly logger: EngineLogger;
+  readonly tracer: EngineTracer;
 }
 
 export interface VerifiedContent {
@@ -122,6 +123,21 @@ export async function verifyContent(
 
   // Hostile pages run on that host, so its answer gets no more trust than a client's. A tree can
   // print and parse into far more than was sent, which is the page's fault and not the host's.
+  const { timing } = answer.value;
+  if (timing !== undefined) {
+    const fields = {
+      organization_id: tenant.organizationId,
+      project_id: tenant.projectId,
+      node_id: nodeId,
+    };
+    deps.tracer.record('engine.save.host.queue', fields, timing.waitedMs ?? 0);
+    deps.tracer.record('engine.save.host.thread', fields, timing.threadMs ?? 0);
+    deps.tracer.record('engine.save.host.decode', fields, timing.decodeMs);
+    deps.tracer.record('engine.save.host.print', fields, timing.printMs);
+    deps.tracer.record('engine.save.host.reparse', fields, timing.reparseMs);
+    deps.tracer.record('engine.save.host.compare', fields, timing.compareMs);
+  }
+
   const parsed = validateTree(answer.value.ast, treeLimits);
   if (!parsed.ok && parsed.error.some(({ code }) => OVERSIZED_TREE.has(code))) {
     return treeRefusal(parsed.error);

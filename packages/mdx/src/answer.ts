@@ -22,7 +22,21 @@ export function bytesOfTree(root: MdxRoot): string | undefined {
 }
 
 const parsedSchema = z.looseObject({ ast: rootSchema });
-const printedSchema = z.looseObject({ text: z.string(), ast: rootSchema });
+const time = z.number().min(0);
+// The pool checks this too, ahead of a log line, as the thread that sends it runs hostile pages.
+export const timingSchema = z.object({
+  decodeMs: time,
+  printMs: time,
+  reparseMs: time,
+  compareMs: time,
+  waitedMs: time.optional(),
+  threadMs: time.optional(),
+});
+const printedSchema = z.looseObject({
+  text: z.string(),
+  ast: rootSchema,
+  timing: timingSchema.optional(),
+});
 
 // A caller stores what these hand back, so a malformed answer must not look like a success.
 export function checkParsed(answer: JobResult, source: string): ParseResult {

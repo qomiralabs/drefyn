@@ -287,6 +287,33 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
     );
   });
 
+  // Only shows with coverage on, which is how the gate runs: without it the JIT makes a scan of
+  // every item for every item look linear, until a cold process or a slow runner meets it.
+  it(
+    'searches a list once, not once for each item',
+    () => {
+      const page = (total: number) =>
+        rootOf([
+          {
+            type: 'list',
+            spread: false,
+            children: Array.from({ length: total }, () => ({
+              type: 'listItem',
+              spread: false,
+              children: [],
+            })),
+          },
+        ]);
+      expect(
+        growthOf(
+          () => renderSafe(page(MAX_LIST_ITEMS / SIZE_RATIO), policy()),
+          () => renderSafe(page(MAX_LIST_ITEMS), policy()),
+        ),
+      ).toBeLessThan(MAX_GROWTH);
+    },
+    GROWTH_TIMEOUT_MS,
+  );
+
   it('counts blocks outside the HTML against reopened formatting', () => {
     const paragraphs = Array.from({ length: 1_500 }, () => text('x'));
     const opening = numbered(1_500, (i) => `<b a=${i}>`);
