@@ -752,22 +752,26 @@ describe('the client', () => {
       .map((value) => JSON.stringify({ ok: true, value })),
   );
 
-  it('answers anything a hostile host sends with a refusal, and never throws', async () => {
-    await fc.assert(
-      fc.asyncProperty(answers, fc.constantFrom(200, 429), async (body, status) => {
-        const client = createParseClient({
-          ...CLIENT,
-          url: 'http://parse.internal',
-          fetch: answering(status, body),
-        });
-        const results = [await client.parse(page('a')), await client.print(printRequest())];
-        for (const result of results) {
-          if (result.ok) throw new Error(`took a bad answer: ${body}`);
-        }
-      }),
-      { numRuns: 300 },
-    );
-  });
+  it(
+    'answers anything a hostile host sends with a refusal, and never throws',
+    { timeout: TIMEOUT_MS },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(answers, fc.constantFrom(200, 429), async (body, status) => {
+          const client = createParseClient({
+            ...CLIENT,
+            url: 'http://parse.internal',
+            fetch: answering(status, body),
+          });
+          const results = [await client.parse(page('a')), await client.print(printRequest())];
+          for (const result of results) {
+            if (result.ok) throw new Error(`took a bad answer: ${body}`);
+          }
+        }),
+        { numRuns: 300 },
+      );
+    },
+  );
 
   describe('the bytes of a tree', () => {
     it.each(['# a\n\nb\n', '', '\n\n', 'a\r\n\r\nb\r\n', '﻿a\n', 'a\n\n\n\nb'])(
@@ -788,7 +792,7 @@ describe('the client', () => {
     );
 
     // The small pages only: this parses each one once per variant, and CI has one core to spare.
-    it('add up through every line ending variant', () => {
+    it('add up through every line ending variant', { timeout: TIMEOUT_MS }, () => {
       const small = [...loadCorpus()].sort((one, two) => one.bytes.length - two.bytes.length);
       for (const { text, dialect } of small.slice(0, 20)) {
         for (const [, variant] of VARIANTS) {

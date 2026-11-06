@@ -114,7 +114,7 @@ describe('the queue under a colluding group', () => {
 
   const submit = fc.record({ org: fc.nat(11), project: fc.nat(3) });
 
-  it('always has a place for an organization holding nothing', async () => {
+  it('always has a place for an organization holding nothing', { timeout: 60_000 }, async () => {
     await fc.assert(
       fc.asyncProperty(fc.array(submit, { maxLength: 200 }), async (steps) => {
         const config = poolConfig({

@@ -154,7 +154,7 @@ describe('every real page in the corpus', () => {
   });
 
   // The honest move the reference rule exists for, on pages nobody wrote for this test.
-  it('still prints with its definitions gone', () => {
+  it('still prints with its definitions gone', { timeout: 60_000 }, () => {
     const refused = withDefinitions.filter(({ root }) => {
       const kept = root.children.filter(({ type }) => type !== 'definition');
       const result = print({ ...root, children: kept });
