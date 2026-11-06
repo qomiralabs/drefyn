@@ -93,6 +93,17 @@ describe('a block printing its stored bytes', () => {
     expect(code(print(forged(raw, DEFINED)))).toBe(CHANGED);
   });
 
+  // A link can pass as settled text only if GFM could have made it from those words.
+  it.each([
+    ['a script link', 'javascript:alert(1)'],
+    ['a data link', 'data:text/html,x'],
+    ['a relative link', 'evil.test'],
+    ['a vbscript link', 'vbscript:x'],
+  ])('refuses %s forged over words beside a reference', (_name, words) => {
+    const source = `go ${words} [t][a]\n\n[a]: https://example.com\n`;
+    expect(code(print(forged(`go [${words}](${words}) [t][a]`, source)))).toBe(CHANGED);
+  });
+
   it.each([
     ['Safe [text][a]\n\n[a]: https://evil.test\n', 'Safe text EVIL'],
     ['Safe[^1]\n\n[^1]: note\n', 'Safe Evil[^1]'],

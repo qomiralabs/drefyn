@@ -16,6 +16,9 @@ export interface ParseHostConfig {
 // Room for the runtime and native memory on top of every thread at its cap.
 const HOST_OVERHEAD_MB = 256;
 const BYTES_PER_MB = 1_048_576;
+// A held byte is in the body, the string, the parsed frame and a copy on its thread, not all at
+// once. A mixed flood reached 1,985 MB when this was counted once against a 1,536 MB floor.
+const HELD_COPIES = 3;
 // An organization gets a quarter, and that has to hold the largest body that can be honest.
 const MIN_HELD_BYTES = 64 * BYTES_PER_MB;
 
@@ -34,7 +37,7 @@ const hostSchema = z.object({
   DREFYN_PARSE_HOST_MEMORY_MB: z
     .string()
     .regex(/^[0-9]{1,6}$/)
-    .default('1536')
+    .default('2048')
     .transform(Number),
   DREFYN_PARSE_MAX_HELD_BYTES: z
     .string()
@@ -50,7 +53,7 @@ export function parseHostConfig(
   const host = hostSchema.parse(env);
   const pool = poolConfigSchema.parse(envSchema.parse(env));
   const heldMb = Math.ceil(host.DREFYN_PARSE_MAX_HELD_BYTES / BYTES_PER_MB);
-  const floor = pool.threads * pool.maxMemoryMb + HOST_OVERHEAD_MB + heldMb;
+  const floor = pool.threads * pool.maxMemoryMb + HOST_OVERHEAD_MB + heldMb * HELD_COPIES;
   if (host.DREFYN_PARSE_HOST_MEMORY_MB < floor) {
     throw new Error(`DREFYN_PARSE_HOST_MEMORY_MB must be at least ${floor}`);
   }

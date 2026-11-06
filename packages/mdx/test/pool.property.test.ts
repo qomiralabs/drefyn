@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { ParseResult } from '../src/index.ts';
 import { createParsePool } from '../src/pool.ts';
+import { parsePoolConfig } from '../src/pool-config.ts';
 import type { ParseThread, ThreadAnswer } from '../src/thread.ts';
 import { isolatedPolicy, orgAt, poolConfig, projectAt, recordingLogger } from './helpers.ts';
 
@@ -154,4 +155,66 @@ describe('the queue under a colluding group', () => {
       { numRuns: 100 },
     );
   });
+});
+
+describe('thread time under a colluding group', () => {
+  const KILL_MS = 6_000;
+  const answer = (workMs: number): ThreadAnswer => ({ result: ANSWER, end: 'killed', workMs });
+
+  // Any number of organizations, in any order, each having spent at least one kill.
+  const flood = fc.record({
+    orgs: fc.integer({ min: 2, max: 128 }),
+    kills: fc.array(fc.nat(127), { minLength: 1, maxLength: 200 }),
+    finishFirst: fc.nat(1),
+  });
+
+  it('never makes an organization that has spent nothing wait past the jobs running', async () => {
+    await fc.assert(
+      fc.asyncProperty(flood, async ({ orgs, kills, finishFirst }) => {
+        const running: { source: string; resolve: (answer: ThreadAnswer) => void }[] = [];
+        const clock = { now: 0 };
+        const pool = createParsePool(parsePoolConfig({}), {
+          logger: recordingLogger(),
+          onStuck: () => undefined,
+          now: () => clock.now,
+          startThread: () => ({
+            alive: () => true,
+            stop: () => Promise.resolve(),
+            run: (job) =>
+              new Promise((resolve) => {
+                running.push({ source: 'source' in job ? job.source : job.tree, resolve });
+              }),
+          }),
+        });
+        const parse = (org: number, source: string) =>
+          pool.parse({
+            tenant: { organizationId: orgAt(org), projectId: projectAt(org) },
+            path: 'a.md',
+            source,
+            dialect: 'md',
+            policy: isolatedPolicy(),
+          });
+
+        // Everyone spends a kill, so nothing here is fresh by the time the honest page comes.
+        for (let org = 0; org < orgs; org += 1) {
+          void parse(org, 'spend');
+          await flush();
+          running.shift()?.resolve(answer(KILL_MS));
+          await flush();
+        }
+        for (const kill of kills) void parse(kill % orgs, 'bomb');
+        await flush();
+        void parse(999, 'honest');
+        await flush();
+        const place = running.findIndex(({ source }) => source === 'honest');
+        if (place === -1) {
+          const first = running.splice(finishFirst % running.length, 1)[0];
+          first?.resolve(answer(KILL_MS));
+          await flush();
+          expect(running.map(({ source }) => source)).toContain('honest');
+        }
+      }),
+      { numRuns: 60 },
+    );
+  }, 120_000);
 });

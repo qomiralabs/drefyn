@@ -284,6 +284,42 @@ describe('a block that claims its stored bytes', () => {
     expect(kept(stored(asReference), elsewhere)).toBe(false);
   });
 
+  it.each([
+    ['a script scheme', 'javascript:x', 'javascript:x'],
+    ['a data scheme', 'data:text/html,x', 'data:text/html,x'],
+    ['bare words', 'evil.test', 'evil.test'],
+    ['http on bare words', 'evil.test', 'http://evil.test'],
+    ['mail on words with no address', 'evil', 'mailto:evil'],
+    ['mail with a scheme in it', 'a:b@c.d', 'mailto:a:b@c.d'],
+  ])('does not take a link with %s for a settled URL', (_name, words, url) => {
+    const asReference = paragraph(
+      { type: 'text', value: `${words} ` },
+      { type: 'linkReference', referenceType: 'shortcut', label: 'a', ...named },
+    );
+    const again = paragraph(
+      { type: 'link', url, children: [{ type: 'text', value: words }] },
+      { type: 'text', value: ' [a]' },
+    );
+    expect(kept(stored(asReference), again)).toBe(false);
+  });
+
+  it.each([
+    ['an https URL', 'https://a.test/b', 'https://a.test/b'],
+    ['an http URL', 'http://a.test', 'http://a.test'],
+    ['a www address', 'www.a.test', 'http://www.a.test'],
+    ['a mail address', 'a@b.test', 'mailto:a@b.test'],
+  ])('takes %s for a settled URL', (_name, words, url) => {
+    const asReference = paragraph(
+      { type: 'text', value: `${words} ` },
+      { type: 'linkReference', referenceType: 'shortcut', label: 'a', ...named },
+    );
+    const again = paragraph(
+      { type: 'link', url, children: [{ type: 'text', value: words }] },
+      { type: 'text', value: ' [a]' },
+    );
+    expect(kept(stored(asReference), again)).toBe(true);
+  });
+
   it('wants what the tree said and nothing more', () => {
     expect(kept(stored(link), words('b'))).toBe(false);
     const two = paragraph({ type: 'text', value: 'ab' }, { type: 'linkReference', ...named });

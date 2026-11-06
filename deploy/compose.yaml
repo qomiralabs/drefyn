@@ -117,12 +117,12 @@ services:
     pids_limit: 128
     # Native memory passes the heap cap, so only the OS bounds this. The host checks the same
     # number at start. No swap, or a flood would slow everyone down before it was stopped.
-    mem_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-1536}m
-    memswap_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-1536}m
+    mem_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}m
+    memswap_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}m
     environment:
       DREFYN_PARSE_BIND: 0.0.0.0
       DREFYN_PARSE_PORT: '8787'
-      DREFYN_PARSE_HOST_MEMORY_MB: ${DREFYN_PARSE_HOST_MEMORY_MB:-1536}
+      DREFYN_PARSE_HOST_MEMORY_MB: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}
       # The hash of the token the app tier sends. Empty stops the host: there is no default.
       DREFYN_PARSE_TOKEN_SHA256: ${DREFYN_PARSE_TOKEN_SHA256:-}
     networks: [parse]

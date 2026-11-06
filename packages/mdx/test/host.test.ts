@@ -382,7 +382,7 @@ describe('the token hash', () => {
 });
 
 describe('the bytes a host may hold', () => {
-  const env = (held: string, memory = '1536') => ({
+  const env = (held: string, memory = '2048') => ({
     ...HOST_ENV,
     DREFYN_PARSE_MAX_HELD_BYTES: held,
     DREFYN_PARSE_HOST_MEMORY_MB: memory,
@@ -392,9 +392,13 @@ describe('the bytes a host may hold', () => {
     expect(parseHostConfig(HOST_ENV).maxHeldBytes).toBe(268_435_456);
   });
 
-  it('counts them in the memory check at start', () => {
-    expect(() => parseHostConfig(env('536870912'))).toThrow('DREFYN_PARSE_HOST_MEMORY_MB');
-    expect(parseHostConfig(env('536870912', '1792')).maxHeldBytes).toBe(536_870_912);
+  // Security measured 1,985 MB on a 1,536 MB floor. A held byte is a buffer, a string, a parsed
+  // frame and a copy on its thread, so one count of them understates what the host needs.
+  it('counts them three times in the memory check at start', () => {
+    expect(() => parseHostConfig(env('268435456', '2047'))).toThrow('at least 2048');
+    expect(parseHostConfig(env('268435456', '2048')).hostMemoryMb).toBe(2_048);
+    expect(() => parseHostConfig(env('536870912', '2815'))).toThrow('DREFYN_PARSE_HOST_MEMORY_MB');
+    expect(parseHostConfig(env('536870912', '2816')).maxHeldBytes).toBe(536_870_912);
   });
 
   it('refuses a cap too small to hold one page', () => {
@@ -432,8 +436,8 @@ describe('the host environment', () => {
   );
 
   it('checks the memory floor at start', () => {
-    expect(parseHostConfig(HOST_ENV).hostMemoryMb).toBe(1_536);
-    expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_HOST_MEMORY_MB: '1535' })).toThrow();
+    expect(parseHostConfig(HOST_ENV).hostMemoryMb).toBe(2_048);
+    expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_HOST_MEMORY_MB: '2047' })).toThrow();
     expect(() => parseHostConfig({ ...HOST_ENV, DREFYN_PARSE_PORT: '70000' })).toThrow();
   });
 });

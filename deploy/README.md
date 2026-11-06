@@ -493,7 +493,7 @@ bash scripts/selfhost-parse-test.sh             # proves the boundary from real 
 ```
 
 The host keeps only the hash, and it will not start without one. `DREFYN_PARSE_HOST_MEMORY_MB`,
-default 1536, sets both the check the host makes at start and the container's memory limit. The
-supervisor inside the container restarts a host that dies. A crash loop stops it for five minutes
+default 2048, sets both the check the host makes at start and the container's memory limit. The
+supervisor inside the container restarts a host that dies. A crash loop stops it for a minute
 and logs `mdx.parse_host_crash_loop` at error level, and the container reads unhealthy until it
 is back.

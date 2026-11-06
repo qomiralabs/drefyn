@@ -191,7 +191,7 @@ code that is determined to get out, and proves nothing about the network.
 | `DREFYN_PARSE_WINDOW_MS`          | 60000     | Length of the budget window                               |
 | `DREFYN_PARSE_MAX_HELD_BYTES`     | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
 | `DREFYN_PARSE_KILL_GRACE_MS`      | 2000      | Wait after `terminate` before SIGKILL                     |
-| `DREFYN_PARSE_HOST_MEMORY_MB`     | 1536      | At least threads times the cap, held bytes, plus 256      |
+| `DREFYN_PARSE_HOST_MEMORY_MB`     | 2048      | At least threads times the cap, held bytes x 3, plus 256  |
 | `DREFYN_PARSE_PORT`               | 8787      | Port the host listens on                                  |
 | `DREFYN_PARSE_BIND`               | 127.0.0.1 | Address the host listens on                               |
 | `DREFYN_PARSE_TOKEN_SHA256`       | none      | SHA-256 of the app tier's token, required                 |
@@ -199,21 +199,24 @@ code that is determined to get out, and proves nothing about the network.
 | `DREFYN_PARSE_RESTART_MAX_MS`     | 30000     | Longest wait between restarts                             |
 | `DREFYN_PARSE_CRASH_LIMIT`        | 5         | Crashes in the window that make a crash loop              |
 | `DREFYN_PARSE_CRASH_WINDOW_MS`    | 60000     | How long a crash counts                                   |
-| `DREFYN_PARSE_COOL_OFF_MS`        | 300000    | How long a crash loop stays down                          |
+| `DREFYN_PARSE_COOL_OFF_MS`        | 60000     | How long a crash loop stays down                          |
 
 ### What the limits hold against
 
-Organizations take turns for a free thread, and projects take turns inside one, so a tenant
-gets the same share however many projects it makes. One organization can never hold every
-thread or fill the queue, so one bad tenant leaves a thread and queue places free.
+The next free thread goes to the organization that has spent the fewest whole kills in the
+window, and projects take turns inside one, so a tenant gets the same share however many projects
+it makes. One organization can never hold every thread or fill the queue. Someone who has spent
+nothing waits for one running job, however many others are spending, and colluders only compete
+with each other. Among equals, an organization arriving from nothing goes first, then turns.
 
-Several organizations acting together cannot keep a neighbour out. A full queue takes a page from
-whoever holds most for whoever holds less, so a newcomer finds a place unless every place is held
-by a different organization, which takes 64 of them at these defaults. The page given up gets
+Pass `priority: 'interactive'` for a save a person is waiting on. It goes ahead of that
+organization's own sync and is ranked on interactive time alone, so a sync never pushes a save
+back. Each bomb marked interactive is charged to the next, so marking them earns nothing.
+
+A full queue takes a page from whoever holds most for whoever holds less, and when holdings are
+level from whoever has spent most for whoever has spent less. The page given up gets
 `mdx.queue_full` and spends no budget. Held bytes work the same way: nobody holds more than stays
-free beside them, so the room left halves with each newcomer instead of running out. What
-colluders do keep is their turns: threads go to organizations in turn, so with `n` of them
-hostile a neighbour's page can wait about `n / threads` kills.
+free beside them, so the room left halves with each newcomer instead of running out.
 
 Limits are per host. With several hosts every budget is per replica, so a cluster wide bound needs
 a shared counter.

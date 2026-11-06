@@ -74,16 +74,16 @@ describe('the parse host service', () => {
   });
 
   it('has an OS memory limit that follows the setting the host checks at start', () => {
-    const setting = '${DREFYN_PARSE_HOST_MEMORY_MB:-1536}';
+    const setting = '${DREFYN_PARSE_HOST_MEMORY_MB:-2048}';
     expect(service['mem_limit']).toBe(`${setting}m`);
     expect(service['memswap_limit']).toBe(`${setting}m`);
     expect(service.environment?.['DREFYN_PARSE_HOST_MEMORY_MB']).toBe(setting);
     expect(
       parseHostConfig({
         DREFYN_PARSE_TOKEN_SHA256: 'a'.repeat(64),
-        DREFYN_PARSE_HOST_MEMORY_MB: '1536',
+        DREFYN_PARSE_HOST_MEMORY_MB: '2048',
       }).hostMemoryMb,
-    ).toBe(1_536);
+    ).toBe(2_048);
   });
 
   it('drops what a parser never needs', () => {

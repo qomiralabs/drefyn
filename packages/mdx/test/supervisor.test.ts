@@ -242,7 +242,9 @@ describe('the supervisor config', () => {
       spent += Math.min(maxBackoffMs, backoffMs * 2 ** (crash - 1));
     }
     expect(spent).toBeLessThan(crashWindowMs);
-    expect(coolOffMs).toBeGreaterThan(crashWindowMs);
+    // Everyone on the host waits this long, so it is the shortest that still stops a tight loop.
+    expect(coolOffMs).toBe(60_000);
+    expect(crashWindowMs).toBe(60_000);
   });
 
   it('reads the environment', () => {

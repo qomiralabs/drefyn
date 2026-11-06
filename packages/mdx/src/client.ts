@@ -10,6 +10,8 @@ import type { Dialect, MdxRoot, ParseResult, PrintResult } from './types.ts';
 import { maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
 import type { WirePrint, WireRequest } from './wire.ts';
 
+export type ParsePriority = 'interactive' | 'bulk';
+
 export interface ParseClientRequest {
   readonly tenant: TenantRef;
   // Logged by the host, so it never holds page text.
@@ -17,6 +19,8 @@ export interface ParseClientRequest {
   readonly source: string;
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
+  // Interactive for a save a person is waiting on. Everything else is bulk.
+  readonly priority?: ParsePriority;
 }
 
 export interface PrintClientRequest {
@@ -25,6 +29,7 @@ export interface PrintClientRequest {
   readonly path: string;
   readonly root: MdxRoot;
   readonly policy: IsolatedPolicy;
+  readonly priority?: ParsePriority;
 }
 
 export interface ParseClient {
@@ -169,17 +174,24 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
 
   return {
     async parse(request) {
-      const { tenant, path, source, dialect, policy } = request;
+      const { tenant, path, source, dialect, policy, priority = 'bulk' } = request;
       if (Buffer.byteLength(source, 'utf8') > policy.limits.maxBytes) {
         return refused('mdx.too_large');
       }
-      const frame: WireRequest = { tenant, path, source, dialect, policy: wireOf(policy) };
+      const frame: WireRequest = {
+        tenant,
+        path,
+        source,
+        dialect,
+        policy: wireOf(policy),
+        priority,
+      };
       const body = JSON.stringify(frame);
       const check = (answer: JobResult) => checkParsed(answer, source);
       return await post({ route: '/parse', body, tenant, path, check });
     },
     async print(request) {
-      const { tenant, path, root, policy } = request;
+      const { tenant, path, root, policy, priority = 'bulk' } = request;
       let tree: string;
       try {
         tree = JSON.stringify(root);
@@ -190,7 +202,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       if (Buffer.byteLength(tree, 'utf8') > maxTreeBytes(policy.limits.maxBytes)) {
         return refused('mdx.too_large');
       }
-      const frame: WirePrint = { tenant, path, tree, policy: wireOf(policy) };
+      const frame: WirePrint = { tenant, path, tree, policy: wireOf(policy), priority };
       const body = JSON.stringify(frame);
       const answer = await post({ route: '/print', body, tenant, path, check: checkPrinted });
       return answer as PrintResult;

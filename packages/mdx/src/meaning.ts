@@ -109,14 +109,19 @@ const asWritten = (node: Shaped) => {
   return node.referenceType === 'collapsed' ? '[]' : '';
 };
 
+// What GFM makes of bare words, and nothing else: a scheme it never links must not pass as text.
+const isAutolink = (words: string, url: string) =>
+  (url === words && /^https?:\/\/\S+$/i.test(words)) ||
+  (url === `http://${words}` && /^www\.\S+$/i.test(words)) ||
+  (url === `mailto:${words}` && /^[^\s:@]+@[^\s:@]+$/.test(words));
+
 // GFM links a bare URL only in text, so one inside a reference settles into a link once the
 // definition goes. Its target is its own words, so nothing new is said.
 function settledUrl({ type, url, children }: Shaped): string | undefined {
   const [only] = children ?? [];
   if (type !== 'link' || children?.length !== 1 || only?.type !== 'text') return undefined;
   if (typeof only.value !== 'string' || typeof url !== 'string') return undefined;
-  const words = only.value;
-  return [words, `http://${words}`, `mailto:${words}`].includes(url) ? words : undefined;
+  return isAutolink(only.value, url) ? only.value : undefined;
 }
 
 const fieldsOf = (node: Shaped) =>
@@ -142,7 +147,7 @@ function spelled(node: Shaped): string {
       return `[^${labelOf(node)}]`;
     default:
       // Private use, so page text cannot spell its way into this seam.
-      return settledUrl(node) ?? `${fieldsOf(node)}${inner}`;
+      return settledUrl(node) ?? `\uE000${fieldsOf(node)}\uE001${inner}\uE002`;
   }
 }
 

@@ -13,7 +13,8 @@ const envShape = {
   DREFYN_PARSE_RESTART_MAX_MS: number(30_000),
   DREFYN_PARSE_CRASH_LIMIT: number(5),
   DREFYN_PARSE_CRASH_WINDOW_MS: number(60_000),
-  DREFYN_PARSE_COOL_OFF_MS: number(300_000),
+  // Every tenant on the host waits this long, so it only has to outlast a tight loop.
+  DREFYN_PARSE_COOL_OFF_MS: number(60_000),
 };
 
 export const SUPERVISOR_ENV_KEYS = Object.keys(envShape);

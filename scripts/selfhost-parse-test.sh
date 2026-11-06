@@ -65,7 +65,7 @@ else
   fail "the parse host publishes no port" "$(docker port "$id")"
 fi
 limit="$(docker inspect --format '{{.HostConfig.Memory}}' "$id")"
-if [ "$limit" = "$((1536 * 1024 * 1024))" ]; then
+if [ "$limit" = "$((2048 * 1024 * 1024))" ]; then
   pass "the parse host has its memory limit"
 else
   fail "the parse host has its memory limit" "limit is $limit"
