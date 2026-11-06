@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { formatUnits, parseUnits, type Scale } from '../src/index.ts';
+import './support.ts';
 
 const INT8_MAX = 9_223_372_036_854_775_807n;
 const INT8_MIN = -9_223_372_036_854_775_808n;

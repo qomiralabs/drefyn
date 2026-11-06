@@ -8,6 +8,19 @@ import {
   type TypeId,
 } from '../src/index.ts';
 
+// FC_SEED replays every property under another seed without editing a file. Unset, every
+// machine runs the same seed, so a failure reproduces anywhere.
+function seedFrom(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const seed = Number(raw);
+  if (!/^-?[0-9]+$/.test(raw) || seed !== (seed | 0)) {
+    throw new Error('FC_SEED must be a 32 bit integer');
+  }
+  return seed;
+}
+
+fc.configureGlobal({ seed: seedFrom(process.env['FC_SEED'], 284) });
+
 const uuid = (kind: string, n: number): string =>
   `00000000-0000-7000-${kind}-${n.toString(16).padStart(12, '0')}`;
 
