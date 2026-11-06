@@ -120,6 +120,12 @@ const insertNode = (
   ],
 });
 
+// A version only ever belongs to a node that already exists, so these are updates.
+const pointNode = (column: string, version: string, node: string): Insert => ({
+  text: `update app.nodes set ${column} = $1 where id = $2`,
+  values: [version, node],
+});
+
 const insertVersion = (
   org: string,
   project: string,
@@ -257,6 +263,9 @@ const TABLES: readonly EngineTable[] = [
 
 const TABLE_NAMES = TABLES.map((t) => t.table);
 
+// History is append only, so drefyn_app holds no update or delete on it.
+const REWRITABLE = TABLES.filter((t) => t.table !== 'node_versions');
+
 // Each child, the foreign key that guards it, and a write that names a parent. `of` is the
 // tenant the parent ids come from; the row itself always belongs to A.
 interface ForeignKey {
@@ -275,11 +284,11 @@ const FOREIGN_KEYS: readonly ForeignKey[] = [
   },
   {
     constraint: 'nodes_head_version_fkey',
-    write: (of, missing) => insertNode(A.org, A.project, { head: missing ?? of.version }),
+    write: (of, missing) => pointNode('head_version_id', missing ?? of.version, A.node),
   },
   {
     constraint: 'nodes_published_version_fkey',
-    write: (of, missing) => insertNode(A.org, A.project, { published: missing ?? of.version }),
+    write: (of, missing) => pointNode('published_version_id', missing ?? of.version, A.node),
   },
   {
     constraint: 'node_versions_node_fkey',
@@ -294,20 +303,8 @@ const FOREIGN_KEYS: readonly ForeignKey[] = [
     write: (of, missing) => insertFilterRow(A.org, A.project, { node: missing ?? of.spareNode }),
   },
   {
-    constraint: 'node_filter_rows_type_fkey',
-    write: (of, missing) => insertFilterRow(A.org, A.project, { type: missing ?? of.type }),
-  },
-  {
-    constraint: 'chunks_node_fkey',
-    write: (of, missing) => insertChunk(A.org, A.project, { node: missing ?? of.node }),
-  },
-  {
     constraint: 'chunks_version_fkey',
     write: (of, missing) => insertChunk(A.org, A.project, { version: missing ?? of.version }),
-  },
-  {
-    constraint: 'engine_outbox_node_fkey',
-    write: (of, missing) => insertOutbox(A.org, A.project, { node: missing ?? of.node }),
   },
   {
     constraint: 'engine_outbox_version_fkey',
@@ -373,6 +370,12 @@ async function refusal(work: Promise<unknown>): Promise<Refusal> {
   }
   throw new Error('the database accepted the write');
 }
+
+const firstId = (result: pg.QueryResult<{ id: string }>) => {
+  const row = result.rows[0];
+  if (row === undefined) throw new Error('the insert returned no row');
+  return row.id;
+};
 
 const keys = async (client: pg.Client, spec: EngineTable): Promise<readonly string[]> => {
   const result = await client.query<{ key: string }>(
@@ -479,7 +482,7 @@ describeWithStack('the engine tables', () => {
       expect(refused.code).toBe('42501');
     });
 
-    it.each(TABLES)('$table updates no other tenant row', async (spec) => {
+    it.each(REWRITABLE)('$table updates no other tenant row', async (spec) => {
       const done = await as(B, (client) =>
         client.query(`update app.${spec.table} set ${spec.touch} where ${spec.key} = $1`, [
           spec.keyOf(A),
@@ -488,7 +491,7 @@ describeWithStack('the engine tables', () => {
       expect(done.rowCount).toBe(0);
     });
 
-    it.each(TABLES)('$table updates a row of its own', async (spec) => {
+    it.each(REWRITABLE)('$table updates a row of its own', async (spec) => {
       const done = await as(A, (client) =>
         client.query(`update app.${spec.table} set ${spec.touch} where ${spec.key} = $1`, [
           spec.keyOf(A),
@@ -497,7 +500,7 @@ describeWithStack('the engine tables', () => {
       expect(done.rowCount).toBe(1);
     });
 
-    it.each(TABLES)('$table deletes no other tenant row', async (spec) => {
+    it.each(REWRITABLE)('$table deletes no other tenant row', async (spec) => {
       const done = await as(B, (client) =>
         client.query(`delete from app.${spec.table} where ${spec.key} = $1`, [spec.keyOf(A)]),
       );
@@ -601,6 +604,147 @@ describeWithStack('the engine tables', () => {
     });
   });
 
+  describe('parent pairs inside one project', () => {
+    const insertOtherVersion = (client: pg.Client) =>
+      client.query<{ id: string }>(
+        `insert into app.node_versions (organization_id, project_id, node_id, seq, schema_version,
+           ast_version, origin, actor, content, content_sha256)
+         values ($1, $2, $3, 1, 1, 1, 'human', '{}', '{}', $4) returning id`,
+        [A.org, A.project, A.spareNode, hash('ee')],
+      );
+
+    it.each(['head_version_id', 'published_version_id'])(
+      '%s refuses a version of another node',
+      async (column) => {
+        const refused = await as(A, (client) =>
+          refusal(run(client, pointNode(column, A.version, A.spareNode))),
+        );
+        expect(refused).toMatchObject({
+          code: '23503',
+          constraint: `nodes_${column.replace('_id', '')}_fkey`,
+        });
+      },
+    );
+
+    it('a version refuses a parent version of another node', async () => {
+      const refused = await as(A, async (client) => {
+        const other = await insertOtherVersion(client);
+        return refusal(run(client, insertVersion(A.org, A.project, { parent: firstId(other) })));
+      });
+      expect(refused).toMatchObject({
+        code: '23503',
+        constraint: 'node_versions_parent_version_fkey',
+      });
+    });
+
+    it('a chunk refuses a version of another node', async () => {
+      const refused = await as(A, (client) =>
+        refusal(run(client, insertChunk(A.org, A.project, { node: A.spareNode }))),
+      );
+      expect(refused).toMatchObject({ code: '23503', constraint: 'chunks_version_fkey' });
+    });
+
+    it('an outbox row refuses a version of another node', async () => {
+      const refused = await as(A, (client) =>
+        refusal(run(client, insertOutbox(A.org, A.project, { node: A.spareNode }))),
+      );
+      expect(refused).toMatchObject({ code: '23503', constraint: 'engine_outbox_version_fkey' });
+    });
+
+    it('a filter row refuses a type its node does not have', async () => {
+      const refused = await as(A, async (client) => {
+        const other = await client.query<{ id: string }>(
+          `insert into app.content_types (organization_id, project_id, family, key)
+           values ($1, $2, 'studio_item', 'other') returning id`,
+          [A.org, A.project],
+        );
+        return refusal(run(client, insertFilterRow(A.org, A.project, { type: firstId(other) })));
+      });
+      expect(refused).toMatchObject({ code: '23503', constraint: 'node_filter_rows_node_fkey' });
+    });
+
+    it('a node refuses a family its type does not have', async () => {
+      const refused = await as(A, (client) =>
+        refusal(run(client, insertNode(A.org, A.project, { family: 'docs_page' }))),
+      );
+      expect(refused).toMatchObject({ code: '23503', constraint: 'nodes_type_fkey' });
+    });
+  });
+
+  describe('history', () => {
+    it.each([
+      ['update', `update app.node_versions set ast_version = 2 where id = $1`],
+      ['delete', `delete from app.node_versions where id = $1`],
+    ])('%s of a stored version is refused for the app role', async (_name, statement) => {
+      const refused = await as(A, (client) => refusal(client.query(statement, [A.version])));
+      expect(refused.code).toBe('42501');
+    });
+
+    it('still takes a new version', async () => {
+      const done = await as(A, (client) => run(client, insertVersion(A.org, A.project)));
+      expect(done.rowCount).toBe(1);
+    });
+
+    it('holds only select and insert for the app role', async () => {
+      const privileges = await superuser(
+        `select string_agg(privilege_type, ',' order by privilege_type)
+           from information_schema.role_table_grants
+          where grantee = 'drefyn_app' and table_schema = 'app' and table_name = 'node_versions';`,
+        db.name,
+      );
+      expect(privileges.trim()).toBe('INSERT,SELECT');
+    });
+  });
+
+  describe('organization node counts', () => {
+    const add = (client: pg.Client, org: string, family: string) =>
+      client.query(
+        `insert into app.organization_node_counts (organization_id, family, nodes)
+         values ($1, $2, 1)`,
+        [org, family],
+      );
+
+    it('is one row an organization reaches from each of its projects', async () => {
+      const seen = await as(A, async (client) => {
+        await add(client, A.org, 'docs_page');
+        const read = await client.query<{ nodes: string }>(
+          `select nodes from app.organization_node_counts`,
+        );
+        return read.rows;
+      });
+      expect(seen).toEqual([{ nodes: '1' }]);
+    });
+
+    it('is out of reach for another organization', async () => {
+      const refused = await as(B, (client) => refusal(add(client, A.org, 'docs_page')));
+      expect(refused.code).toBe('42501');
+    });
+
+    it('reads as empty for another organization', async () => {
+      const rows = await within(B.org, B.project, (client) =>
+        client.query(`select 1 from app.organization_node_counts where organization_id = $1`, [
+          A.org,
+        ]),
+      );
+      expect(rows.rowCount).toBe(0);
+    });
+
+    it('refuses a family outside the set and a count below zero', async () => {
+      const family = await as(A, (client) => refusal(add(client, A.org, 'blog_post')));
+      expect(family.code).toBe('23514');
+      const negative = await as(A, (client) =>
+        refusal(
+          client.query(
+            `insert into app.organization_node_counts (organization_id, family, nodes)
+             values ($1, 'docs_page', -1)`,
+            [A.org],
+          ),
+        ),
+      );
+      expect(negative.code).toBe('23514');
+    });
+  });
+
   describe('closed sets and unique keys', () => {
     it.each([
       ['nodes_family_check', () => insertNode(A.org, A.project, { family: 'blog_post' })],
@@ -641,7 +785,14 @@ describeWithStack('the engine tables', () => {
       'status_maintenance',
       'status_postmortem',
     ])('nodes take the family %s', async (family) => {
-      const done = await as(A, (client) => run(client, insertNode(A.org, A.project, { family })));
+      const done = await as(A, async (client) => {
+        const type = await client.query<{ id: string }>(
+          `insert into app.content_types (organization_id, project_id, family, key)
+           values ($1, $2, $3, 'of-family') returning id`,
+          [A.org, A.project, family],
+        );
+        return run(client, insertNode(A.org, A.project, { family, type: firstId(type) }));
+      });
       expect(done.rowCount).toBe(1);
     });
 
@@ -975,6 +1126,50 @@ describeWithStack('the engine tables', () => {
       const up = await migrate(['migrate', 'up'], { url: fresh.owner });
       expect(up.code, describeFailure(up)).toBe(0);
       expect(await tablesPresent(fresh.name)).toBe('7');
+      expect(await catalogProblems(fresh.owner, ALLOW_LISTS)).toEqual([]);
+    });
+
+    it('takes the write path rules off and puts them back over stored rows', async () => {
+      const fresh = await dbs.fresh('migrated');
+      await superuser(seedSql, fresh.name);
+      const privileges = async () =>
+        (
+          await superuser(
+            `select count(*) from information_schema.role_table_grants
+              where grantee = 'drefyn_app' and table_schema = 'app'
+                and table_name = 'node_versions'
+                and privilege_type in ('UPDATE', 'DELETE');`,
+            fresh.name,
+          )
+        ).trim();
+      const keyColumns = async (name: string) =>
+        (
+          await superuser(
+            `select array_length(conkey, 1) from pg_constraint where conname = '${name}';`,
+            fresh.name,
+          )
+        ).trim();
+      expect(await privileges()).toBe('0');
+      expect(await keyColumns('nodes_head_version_fkey')).toBe('4');
+
+      const down = await migrate(['migrate', 'down', '1'], { url: fresh.owner });
+      expect(down.code, describeFailure(down)).toBe(0);
+      expect(await privileges()).toBe('2');
+      expect(await keyColumns('nodes_head_version_fkey')).toBe('3');
+      expect(await keyColumns('chunks_node_fkey')).toBe('3');
+      const counts = await superuser(
+        `select to_regclass('app.organization_node_counts');`,
+        fresh.name,
+      );
+      expect(counts.trim()).toBe('');
+      const versions = await superuser(`select count(*) from app.node_versions;`, fresh.name);
+      expect(versions.trim()).toBe('3');
+      expect(await catalogProblems(fresh.owner, ALLOW_LISTS)).toEqual([]);
+
+      const up = await migrate(['migrate', 'up'], { url: fresh.owner });
+      expect(up.code, describeFailure(up)).toBe(0);
+      expect(await privileges()).toBe('0');
+      expect(await keyColumns('nodes_head_version_fkey')).toBe('4');
       expect(await catalogProblems(fresh.owner, ALLOW_LISTS)).toEqual([]);
     });
   });

@@ -34,6 +34,7 @@ describe('the closed sets', () => {
       'engine.filter_backfilling',
       'engine.read_only',
       'engine.too_large',
+      'engine.unavailable',
     ]);
   });
 

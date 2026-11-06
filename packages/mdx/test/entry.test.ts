@@ -42,7 +42,12 @@ function sources(dir: string): string[] {
 
 describe('the way into the parser', () => {
   it('is not exported to any caller', () => {
-    expect(Object.keys(main).sort()).toEqual(['AST_VERSION', 'DEFAULT_LIMITS', 'rawOf']);
+    expect(Object.keys(main).sort()).toEqual([
+      'AST_VERSION',
+      'DEFAULT_LIMITS',
+      'rawOf',
+      'validateTree',
+    ]);
     expect(Object.keys(client)).toEqual(['createParseClient']);
   });
 
