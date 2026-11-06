@@ -12,6 +12,8 @@ interface Shaped {
   readonly alt?: unknown;
   readonly url?: unknown;
   readonly identifier?: unknown;
+  readonly label?: unknown;
+  readonly referenceType?: unknown;
   readonly ordered?: unknown;
   readonly start?: unknown;
   readonly align?: readonly unknown[] | null;
@@ -97,17 +99,61 @@ const REFERENCES = new Set(['footnoteReference', 'imageReference', 'linkReferenc
 const hasReference = (node: Shaped): boolean =>
   REFERENCES.has(node.type) || (node.children ?? []).some(hasReference);
 
-// What a reader sees, without what a reference is written in.
-function visibleText(node: Shaped): string {
-  const own = [node.value, node.alt].filter((text) => typeof text === 'string').join('');
-  const inner = (node.children ?? []).map(visibleText).join('');
-  return `${own}${inner}`.replace(/[![\]\\]/g, '');
+const labelOf = ({ label, identifier }: Shaped) => {
+  if (typeof label === 'string') return label;
+  return typeof identifier === 'string' ? identifier : '';
+};
+
+const asWritten = (node: Shaped) => {
+  if (node.referenceType === 'full') return `[${labelOf(node)}]`;
+  return node.referenceType === 'collapsed' ? '[]' : '';
+};
+
+// What GFM makes of bare words, and nothing else: a scheme it never links must not pass as text.
+const isAutolink = (words: string, url: string) =>
+  (url === words && /^https?:\/\/\S+$/i.test(words)) ||
+  (url === `http://${words}` && /^www\.\S+$/i.test(words)) ||
+  (url === `mailto:${words}` && /^[^\s:@]+@[^\s:@]+$/.test(words));
+
+// GFM links a bare URL only in text, so one inside a reference settles into a link once the
+// definition goes. Its target is its own words, so nothing new is said.
+function settledUrl({ type, url, children }: Shaped): string | undefined {
+  const [only] = children ?? [];
+  if (type !== 'link' || children?.length !== 1 || only?.type !== 'text') return undefined;
+  if (typeof only.value !== 'string' || typeof url !== 'string') return undefined;
+  return isAutolink(only.value, url) ? only.value : undefined;
+}
+
+const fieldsOf = (node: Shaped) =>
+  JSON.stringify(
+    Object.entries(node)
+      .filter(([key]) => !['children', 'data', 'position', 'source'].includes(key))
+      .sort(([one], [two]) => one.localeCompare(two)),
+  );
+
+// The block as its author wrote it, with every reference spelled out and everything else exact.
+// Definitions are the only thing that can move a block between the two trees, so the bytes that
+// made both spell the same here, and any other difference was forged.
+function spelled(node: Shaped): string {
+  const inner = (node.children ?? []).map(spelled).join('');
+  switch (node.type) {
+    case 'text':
+      return typeof node.value === 'string' ? foldLineEndings(node.value) : '';
+    case 'linkReference':
+      return `[${inner}]${asWritten(node)}`;
+    case 'imageReference':
+      return `![${typeof node.alt === 'string' ? node.alt : ''}]${asWritten(node)}`;
+    case 'footnoteReference':
+      return `[^${labelOf(node)}]`;
+    default:
+      // Private use, so page text cannot spell its way into this seam.
+      return settledUrl(node) ?? `\uE000${fieldsOf(node)}\uE001${inner}\uE002`;
+  }
 }
 
 // A definition elsewhere on the page decides whether [a] is a reference or text, so an edit
-// beside a block can change its tree and nothing else. Nothing the tree said may be lost.
-const saysTheSame = (block: Shaped, again: Shaped) =>
-  visibleText(again).includes(visibleText(block));
+// beside a block can change its tree and nothing else. That is the only change allowed here.
+const saysTheSame = (block: Shaped, again: Shaped) => spelled(again) === spelled(block);
 
 function holds(block: Shaped, again: Shaped | undefined): boolean {
   if (again === undefined) return false;

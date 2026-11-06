@@ -110,6 +110,8 @@ export async function verifyContent(
     tenant,
     path: `nodes/${nodeId}`,
     root: sent.value,
+    // Someone is waiting on a save, so it goes ahead of this organization's own sync.
+    priority: 'interactive',
     policy: {
       ...deps.parsePolicy,
       components: new Set(deps.parsePolicy.components),

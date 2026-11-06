@@ -19,6 +19,7 @@
     "test:mutation": "stryker run",
     "bench": "node bench/roundtrip.ts",
     "bench:render": "node bench/render.ts",
+    "bench:host": "node bench/host.ts",
     "pin:ast": "node test/pin-ast.ts"
   },
   "dependencies": {
