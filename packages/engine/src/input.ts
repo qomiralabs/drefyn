@@ -94,8 +94,9 @@ export const rollbackSchema = z.strictObject({
 export const readSchema = z.strictObject({ tenant, nodeId });
 
 const MAX_PAGE = 100;
-// 256 bytes of control characters grow six times in JSON and a third again in base64.
-const MAX_CURSOR_CHARS = 4096;
+// The longest real cursor is 131 characters: two ids and a direction. Anything well past that
+// is not one of ours, and should not cost a read to find out.
+const MAX_CURSOR_CHARS = 256;
 
 export const pageSchema = z.strictObject({
   limit: z.int().min(1).max(MAX_PAGE).default(50),

@@ -28,6 +28,8 @@ const NOTE = id(4);
 const NODE = id(5);
 const UNSLOTTED_WHEN = id(7);
 
+const MAX_CURSOR = 256;
+
 const FIELDS: readonly FieldDef[] = [
   {
     id: NAME,
@@ -388,7 +390,7 @@ describe('queryNodes without a server', () => {
     const known = await engine.queryNodes(tenant, { ...query, cursor: longest });
     expect(known).toMatchObject({ error: { issues: [{ code: 'engine.cursor_invalid' }] } });
     statements.length = 0;
-    const long = await engine.queryNodes(tenant, { ...query, cursor: longest.repeat(3) });
+    const long = await engine.queryNodes(tenant, { ...query, cursor: 'x'.repeat(MAX_CURSOR + 1) });
     expect(long).toMatchObject({ ok: false, error: { code: 'engine.validation_failed' } });
     expect(statements).toEqual([]);
   });
@@ -415,9 +417,10 @@ describe('queryNodes without a server', () => {
           sort: { field: WHEN },
           cursor,
         });
+        const code = cursor.length > MAX_CURSOR ? 'too_big' : 'engine.cursor_invalid';
         expect(page).toMatchObject({
           ok: false,
-          error: { issues: [{ code: 'engine.cursor_invalid' }] },
+          error: { code: 'engine.validation_failed', issues: [{ code }] },
         });
       }),
     );
@@ -708,10 +711,12 @@ describe('queryNodes under load', () => {
     const inner = scriptedStore(answering({}));
     const waiting: (() => void)[] = [];
     const entered: string[] = [];
+    const watchers = new Map<number, () => void>();
     const store: EngineDeps['store'] = {
       tenant: (ref, work) =>
         inner.store.tenant(ref, async (tx) => {
           entered.push(ref.organizationId);
+          watchers.get(entered.length)?.();
           await new Promise<void>((open) => waiting.push(open));
           return work(tx);
         }),
@@ -719,7 +724,11 @@ describe('queryNodes under load', () => {
     const release = () => {
       for (const open of waiting.splice(0)) open();
     };
-    return { store, entered, release };
+    const arrived = (count: number) =>
+      entered.length >= count
+        ? Promise.resolve()
+        : new Promise<void>((open) => watchers.set(count, open));
+    return { store, entered, release, arrived };
   };
 
   const crowd = (engine: ReturnType<typeof deps>['engine'], size: number) =>
@@ -736,11 +745,9 @@ describe('queryNodes under load', () => {
   };
 
   it('admits the cap out of a crowd and refuses the rest, retryable', async () => {
-    const { engine, entered, release } = held();
+    const { engine, entered, release, arrived } = held();
     const running = crowd(engine, 500);
-    await vi.waitFor(() => {
-      expect(entered).toHaveLength(CAP);
-    });
+    await arrived(CAP);
     release();
     const results = await Promise.all(running);
     expect(entered).toHaveLength(CAP);
@@ -758,11 +765,9 @@ describe('queryNodes under load', () => {
   });
 
   it('leaves another organization its own places', async () => {
-    const { engine, entered, release } = held();
+    const { engine, entered, release, arrived } = held();
     const running = [...crowd(engine, 50), engine.queryNodes(other, { typeId: TYPE })];
-    await vi.waitFor(() => {
-      expect(entered).toHaveLength(CAP + 1);
-    });
+    await arrived(CAP + 1);
     expect(entered.filter((org) => org === other.organizationId)).toHaveLength(1);
     release();
     const results = await Promise.all(running);
@@ -770,17 +775,13 @@ describe('queryNodes under load', () => {
   });
 
   it('takes queries again once the crowd has gone', async () => {
-    const { engine, entered, release } = held();
+    const { engine, entered, release, arrived } = held();
     const running = crowd(engine, 20);
-    await vi.waitFor(() => {
-      expect(entered).toHaveLength(CAP);
-    });
+    await arrived(CAP);
     release();
     await Promise.all(running);
     const next = engine.queryNodes(tenant, { typeId: TYPE });
-    await vi.waitFor(() => {
-      expect(entered).toHaveLength(CAP + 1);
-    });
+    await arrived(CAP + 1);
     release();
     expect((await next).ok).toBe(true);
   });
@@ -824,11 +825,9 @@ describe('queryNodes under load', () => {
   it('logs a busy refusal with ids and the cap, and no query text', async () => {
     const warn = vi.fn<EngineLogger['warn']>();
     const logger: EngineLogger = { info: vi.fn(), warn };
-    const { engine, entered, release } = held({ logger });
+    const { engine, release, arrived } = held({ logger });
     const running = crowd(engine, CAP + 1);
-    await vi.waitFor(() => {
-      expect(entered).toHaveLength(CAP);
-    });
+    await arrived(CAP);
     release();
     await Promise.all(running);
     expect(warn).toHaveBeenCalledExactlyOnceWith('engine.query_busy', {

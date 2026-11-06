@@ -59,7 +59,7 @@ export function filterValue(field: FieldDef, value: unknown): StoredScalar | nul
       return filterValue(field.of, value);
     case 'text':
     case 'markdown':
-      return typeof value === 'string' ? value : null;
+      return typeof value === 'string' && storable(value) ? value : null;
     case 'number':
       return unitsOf(field, value);
     default:
