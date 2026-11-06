@@ -18,6 +18,7 @@ test.describe.configure({ mode: 'serial' });
 const KEYS = '/kestrel/settings/api-keys';
 const MEMBERS = '/kestrel/settings/members';
 const PASSWORD = 'a harbour lantern at the end of the pier';
+const KEYS_NOTICE = 'Only owners and admins can create or revoke keys.';
 
 async function openAs(browser: Browser, person: Person, path: string): Promise<Page> {
   await makeFresh(person.id);
@@ -26,6 +27,29 @@ async function openAs(browser: Browser, person: Person, path: string): Promise<P
   await page.goto(path);
   await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
   return page;
+}
+
+// React queues a streamed boundary, then swaps it in on the next frame or timer. Until then
+// its markup waits in a hidden div outside main. Holding the swap makes that moment last.
+function holdStreamedReveal(): void {
+  const held: FrameRequestCallback[] = [];
+  const frame = window.requestAnimationFrame.bind(window);
+  const timer = window.setTimeout.bind(window) as (callback: unknown, ...rest: unknown[]) => number;
+  const heldBack = (callback: unknown): boolean => {
+    if (typeof callback !== 'function' || callback.name !== 'bound $RV') return false;
+    held.push(callback as FrameRequestCallback);
+    return true;
+  };
+  window.requestAnimationFrame = (callback) => (heldBack(callback) ? 0 : frame(callback));
+  Object.assign(window, {
+    setTimeout: (callback: unknown, ...rest: unknown[]) =>
+      heldBack(callback) ? 0 : timer(callback, ...rest),
+    revealStreamed: () => {
+      const count = held.length;
+      for (const reveal of held.splice(0)) reveal(0);
+      return count;
+    },
+  });
 }
 
 async function createKey(page: Page, name: string, scope: string): Promise<string> {
@@ -159,10 +183,48 @@ test('a member sees no controls for people or keys', async ({ browser }) => {
   await expect(page.getByRole('button', { name: /^Remove/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Role for/ })).toHaveCount(0);
   await page.goto(KEYS);
-  await expect(page.getByText('Only owners and admins can create or revoke keys.')).toBeVisible();
+  await expect(page.getByText(KEYS_NOTICE)).toBeVisible();
+  await expect(page.getByText(KEYS_NOTICE)).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Create key' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Revoke/ })).toHaveCount(0);
   await page.context().close();
+});
+
+test('the page hydrates what the server streamed, so its notice never exists twice', async ({
+  browser,
+}) => {
+  await makeFresh(RAFA.id);
+  const context = await browser.newContext({ storageState: stateFile(RAFA) });
+  await context.addInitScript(holdStreamedReveal);
+  const scripts = Promise.withResolvers<undefined>();
+  // No script runs until the whole response is in, so hydration always meets a queued boundary.
+  await context.route('**/_next/static/**/*.js', async (route) => {
+    await scripts.promise;
+    await route.continue();
+  });
+  const page = await context.newPage();
+  const response = await page.goto(KEYS, { waitUntil: 'commit' });
+  await response?.finished();
+
+  const notice = page.getByText(KEYS_NOTICE);
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toBeHidden();
+  await notice.evaluate((element) => {
+    element.setAttribute('data-streamed', '');
+  });
+
+  scripts.resolve(undefined);
+  await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+  await expect(notice).toHaveCount(1);
+
+  const reveals = await page.evaluate(() =>
+    (window as unknown as { revealStreamed: () => number }).revealStreamed(),
+  );
+  expect(reveals).toBeGreaterThan(0);
+  // The same element: a client render would have made a new one and left the streamed behind.
+  await expect(page.locator('#main').locator('[data-streamed]')).toBeVisible();
+  await expect(notice).toHaveCount(1);
+  await context.close();
 });
 
 test('an invitation can be sent and withdrawn, and Undo sends it again', async ({ browser }) => {
