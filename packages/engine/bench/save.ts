@@ -12,6 +12,7 @@ import { createParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { createEngine, databaseStore, type NodeId, type VersionId } from '../src/index.ts';
 import setup from '../test/support/global-setup.ts';
+import { parseClientConfig } from '../test/support/parse-host.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
 
 const SAVE_BUDGET_MS = 150;
@@ -77,7 +78,7 @@ const tenant: TenantRef = {
 const db = await createDatabase(
   parseDatabaseConfig({ DREFYN_DATABASE_URL: urlFor('app', name), DREFYN_DATABASE_SSL: 'disable' }),
 );
-const parse = createParseClient({ url: parseUrl });
+const parse = createParseClient(parseClientConfig(parseUrl));
 const parsePolicy = {
   version: 1,
   components: [] as string[],
