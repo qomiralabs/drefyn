@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { checkCustomCss } from '../src/render.ts';
 import type { CssProblemCode } from '../src/render.ts';
 
+const LINEAR_MS = 1_000;
+
 const codes = (css: string): readonly CssProblemCode[] => {
   const result = checkCustomCss(css);
   return result.ok ? [] : result.error.map((problem) => problem.code);
@@ -32,12 +34,13 @@ describe('custom CSS', () => {
     ['@import "a.css";', 'css.import'],
     ['@import url(https://a.example/b.css);', 'css.import'],
     ['@IMPORT "a.css";', 'css.import'],
-    ['@\\69mport "a.css";', 'css.import'],
-    ['@\\000069 mport "a.css";', 'css.import'],
-    ['@im\\port "a.css";', 'css.import'],
+    // postcss cannot read an escape in a rule name, which refuses it all the same.
+    ['@\\69mport "a.css";', 'css.parse_failed'],
+    ['@\\000069 mport "a.css";', 'css.parse_failed'],
+    ['@im\\port "a.css";', 'css.forbidden_at_rule'],
     ['a { b: url(http://a.example/c); }', 'css.foreign_url'],
     ['a { b: url(//a.example/c); }', 'css.foreign_url'],
-    ['a { b: url(/\\a.example/c); }', 'css.foreign_url'],
+    ['a { b: url("/\\\\a.example/c"); }', 'css.foreign_url'],
     ['a { b: url(data:image/svg+xml,a); }', 'css.foreign_url'],
     ['a { b: url(javascript:alert(1)); }', 'css.foreign_url'],
     ['a { b: URL("javascript:alert(1)"); }', 'css.foreign_url'],
@@ -46,6 +49,12 @@ describe('custom CSS', () => {
     ['a { b: url(  "\\6a avascript:alert(1)"  ); }', 'css.foreign_url'],
     ['a { b: url("java\\\nscript:alert(1)"); }', 'css.foreign_url'],
     ['a { b: url(', 'css.parse_failed'],
+    ['a { b: url("http://["); }', 'css.foreign_url'],
+    ['a { \\110000 b: url(http://a.example); }', 'css.foreign_url'],
+    ['a { b: \\110000(c); }', 'css.forbidden_function'],
+    ['a { b: "c\n} d { background: url(http://a.example/e); } f { g: "; }', 'css.parse_failed'],
+    ["a { b: 'c\n} d { background: url(http://a.example/e); } f { g: '; }", 'css.parse_failed'],
+    ['a { b: "c', 'css.parse_failed'],
     ['@font-face { src: url(ftp://a.example/b); }', 'css.foreign_url'],
     ['@media url(http://a.example) { a { b: c; } }', 'css.foreign_url'],
     ['a { width: expression(alert(1)); }', 'css.expression'],
@@ -90,6 +99,22 @@ describe('custom CSS', () => {
 
   it('refuses a sheet past the size limit before parsing it', () => {
     expect(codes(`a{b:c}`.repeat(50_000))).toEqual(['css.too_large']);
+  });
+
+  it('keeps a string split with a backslash', () => {
+    expect(codes('a { content: "b\\\nc"; }')).toEqual([]);
+  });
+
+  it.each([
+    ['one long word', `a{b:${'c'.repeat(130_000)}}`],
+    ['one long escape run', `a{b:${'\\c'.repeat(60_000)}}`],
+    ['open brackets', `a{b:${'c('.repeat(60_000)}}`],
+    ['open comments', '/*'.repeat(60_000)],
+    ['quotes', `a{b:${'"'.repeat(130_000)}}`],
+  ])('reads %s in linear time', (_name, css) => {
+    const started = performance.now();
+    checkCustomCss(css);
+    expect(performance.now() - started).toBeLessThan(LINEAR_MS);
   });
 
   it('survives deep nesting', () => {

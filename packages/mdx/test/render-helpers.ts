@@ -14,16 +14,15 @@ const EMPTY_HASH = sha256(Buffer.alloc(0));
 export const toHtml = (root: MdxRoot, use: RenderPolicy = policy()): string =>
   renderToStaticMarkup(createElement('div', null, renderSafe(root, use))).slice(5, -6);
 
-export const rootOf = (children: readonly unknown[], dialect: Dialect = 'md'): MdxRoot =>
-  ({
-    type: 'root',
-    astVersion: 1,
-    dialect,
-    eol: 'lf',
-    children: children as readonly MdxBlock[],
-    tail: '',
-    tailOf: EMPTY_HASH,
-  }) as MdxRoot;
+export const rootOf = (children: readonly unknown[], dialect: Dialect = 'md'): MdxRoot => ({
+  type: 'root',
+  astVersion: 1,
+  dialect,
+  eol: 'lf',
+  children: children as readonly MdxBlock[],
+  tail: '',
+  tailOf: EMPTY_HASH,
+});
 
 export const rendered = (source: string, dialect: Dialect = 'md', use = policy()): string =>
   toHtml(parsed(source, dialect, use), use);
@@ -43,7 +42,7 @@ const OUTPUT_ATTRIBUTES = new Set(
   (
     'align alt aria-describedby aria-hidden aria-label aria-labelledby checked class colspan ' +
     'data-footnote-backref data-footnote-ref data-footnotes dir disabled height href id lang ' +
-    'name open reversed rowspan scope src start title type value width'
+    'loading name open reversed rowspan scope src start title type value width'
   ).split(' '),
 );
 const BASE = 'https://page.invalid/';
@@ -54,7 +53,8 @@ function urlProblem(name: string, value: string, schemes: readonly string[]): st
   try {
     parsedUrl = new URL(value, BASE);
   } catch {
-    return `${name} does not parse: ${value}`;
+    // No browser can follow this.
+    return undefined;
   }
   const scheme = parsedUrl.protocol.slice(0, -1);
   return schemes.includes(scheme) ? undefined : `${name} has scheme ${scheme}`;

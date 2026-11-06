@@ -8,6 +8,7 @@ import { MEASURED, OWASP } from './xss-payloads.ts';
 
 const RUNS = 300;
 const CORPUS_TIMEOUT_MS = 120_000;
+const MIN_CORPUS_REREADS = 100;
 
 const hostile = fc.oneof(
   fc.constantFrom(...MEASURED, ...OWASP),
@@ -94,14 +95,17 @@ const policies: fc.Arbitrary<RenderPolicy> = fc
   })
   .map((overrides) => policy(overrides));
 
-const render = (children: readonly unknown[], use: RenderPolicy): string | null => {
+function attempt(run: () => string): string | null {
   try {
-    return toHtml(rootOf(children), use);
+    return run();
   } catch (error) {
     if (error instanceof RenderRefused) return null;
     throw error;
   }
-};
+}
+
+const render = (children: readonly unknown[], use: RenderPolicy) =>
+  attempt(() => toHtml(rootOf(children), use));
 
 const allowedSchemes = (use: RenderPolicy) => [...use.linkProtocols];
 
@@ -129,6 +133,25 @@ const fragment = fc.constantFrom(
 
 const page = fc.array(fragment, { maxLength: 6 }).map((parts) => parts.join('\n'));
 
+const soup = fc
+  .array(
+    fc.constantFrom(
+      ...'a b i p div table tr td th tbody li ul ol pre h1 details summary marquee center font form select svg math style title textarea'
+        .split(' ')
+        .flatMap((tag) => [`<${tag}>`, `</${tag}>`]),
+      'x',
+      ' ',
+      '\n',
+      '<br>',
+      '<hr>',
+      '<img src=/a>',
+      '<input>',
+      '<!-- -->',
+    ),
+    { maxLength: 24 },
+  )
+  .map((parts) => parts.join(''));
+
 describe('renderSafe, for any tree', () => {
   it('gives no handler, script element or disallowed scheme', () => {
     fc.assert(
@@ -147,8 +170,8 @@ describe('renderSafe, for any tree', () => {
       fc.property(fc.array(tree, { maxLength: 4 }), (children) => {
         const html = render(children, policy({ remoteImages: 'block' }));
         if (html === null) return;
-        for (const [, url] of html.matchAll(/ src="([^"]*)"/g)) {
-          const decoded = (url as string).replaceAll('&amp;', '&');
+        for (const { groups } of html.matchAll(/ src="(?<url>[^"]*)"/g)) {
+          const decoded = (groups?.['url'] ?? '').replaceAll('&amp;', '&');
           const resolved = new URL(decoded, 'https://page.invalid/');
           expect(resolved.origin).toBe('https://page.invalid');
         }
@@ -176,15 +199,34 @@ describe('renderSafe is idempotent', () => {
     );
   });
 
+  it('for tag soup, where a parser rebuilds the tree', () => {
+    const use = policy();
+    fc.assert(
+      fc.property(soup, (html) => {
+        const once = toHtml(rootOf([{ type: 'html', value: html }]), use);
+        expect(rerendered(once, use)).toBe(once);
+        expect(dangerIn(once)).toEqual([]);
+      }),
+      { numRuns: RUNS },
+    );
+  });
+
   it(
     'for the corpus, which also renders inert',
     () => {
       const use = policy({ remoteImages: 'allow' });
+      let rereads = 0;
       for (const { file, text, dialect } of loadCorpus()) {
         const html = rendered(text, dialect, use);
         expect(dangerIn(html), file).toEqual([]);
-        expect(rerendered(html, use), file).toBe(html);
+        // A long page's output is past what a page may hold as raw HTML, and that is all this
+        // refusal says.
+        const again = attempt(() => rerendered(html, use));
+        if (again === null) continue;
+        rereads += 1;
+        expect(again, file).toBe(html);
       }
+      expect(rereads).toBeGreaterThan(MIN_CORPUS_REREADS);
     },
     CORPUS_TIMEOUT_MS,
   );

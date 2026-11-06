@@ -47,18 +47,18 @@ describe.each([
     const goldens = payloads.map((payload) => [payload, rendered(`${payload}\n`, 'md', allowAll)]);
     const name = payloads === MEASURED ? 'measured' : 'owasp';
     await expect(`${JSON.stringify(goldens, null, 1)}\n`).toMatchFileSnapshot(
-      `fixtures/render/${name}.json`,
+      `fixtures/render/${name}.txt`,
     );
   });
 });
 
 describe('the measured payloads, one by one', () => {
   it('stores as an inline element in MDX and renders as nothing', () => {
-    expect(rendered('<script>alert(1)</script>\n', 'mdx')).toBe('');
+    expect(rendered('<script>alert(1)</script>\n', 'mdx')).toBe('<p></p>');
   });
 
   it('keeps the image and loses the handler', () => {
-    expect(rendered('<img src=x onerror=alert(1)>\n')).toBe('<p><img src="x"/></p>');
+    expect(rendered('<img src=x onerror=alert(1)>\n')).toBe('<img src="x" loading="lazy"/>');
   });
 
   it('keeps the link text and loses the target', () => {
@@ -124,6 +124,24 @@ describe('work a page can force', () => {
     expect(timed(`${'<div>'.repeat(300)}${'</div>'.repeat(300)}`)).toBe('render.too_deep');
   });
 
+  it('turns a stack overflow in a library into a refusal', () => {
+    // Too deep is the same answer from a process with a bigger stack.
+    expect(timed('<div>'.repeat(4_900))).toMatch(/^render\.(?:failed|too_deep)$/);
+  });
+
+  it('turns a crash in a library into a refusal', () => {
+    const tree = rootOf([
+      {
+        type: 'emphasis',
+        children: [
+          { type: 'emphasis', children: [{ type: 'html', value: '<?' }] },
+          { type: 'html', value: ' ' },
+        ],
+      },
+    ]);
+    expect(() => renderSafe(tree, policy())).toThrow(new RenderRefused('render.failed'));
+  });
+
   it('renders nesting inside the limit all the way through', () => {
     const page = `${'<div>'.repeat(60)}x${'</div>'.repeat(60)}`;
     expect(dangerIn(toHtml(rootOf([{ type: 'html', value: page }])))).toEqual([]);
@@ -134,6 +152,25 @@ describe('work a page can force', () => {
     for (let level = 0; level < 505; level += 1) node = { type: 'emphasis', children: [node] };
     const use = policy({ limits: { maxBytes: 1_048_576, maxDepth: 512, maxNodes: 50_000 } });
     expect(toHtml(rootOf([{ type: 'paragraph', children: [node] }]), use)).toContain('x');
+  });
+
+  it('holds on footnotes, which the Markdown conversion searches in a list', () => {
+    const total = 24_000;
+    const paragraph = {
+      type: 'paragraph',
+      children: Array.from({ length: total }, (_, i) => ({
+        type: 'footnoteReference',
+        identifier: `n${i}`,
+      })),
+    };
+    const notes = Array.from({ length: total }, (_, i) => ({
+      type: 'footnoteDefinition',
+      identifier: `n${i}`,
+      children: [],
+    }));
+    const started = performance.now();
+    toHtml(rootOf([paragraph, ...notes]));
+    expect(performance.now() - started).toBeLessThan(BUDGET_MS);
   });
 
   it('passes a large honest page of HTML', () => {
