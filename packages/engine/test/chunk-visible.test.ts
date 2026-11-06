@@ -4,7 +4,7 @@ import { createParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chunkNode } from '../src/index.ts';
-import { startHost, type RunningHost } from './support/parse-host.ts';
+import { parseClientConfig, startHost, type RunningHost } from './support/parse-host.ts';
 
 const options = { targetChars: 800, maxChars: 2000 };
 const HOST_START_MS = 60_000;
@@ -102,7 +102,7 @@ describe('a parsed page', () => {
   });
 
   const chunksOf = async (source: string, dialect: Dialect) => {
-    const client = createParseClient({ url: running.url });
+    const client = createParseClient(parseClientConfig(running.url));
     const tenant = {
       organizationId: organizationId(randomUUID()),
       projectId: projectId(randomUUID()),

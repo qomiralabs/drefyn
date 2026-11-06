@@ -21,6 +21,7 @@ import {
 } from '../src/index.ts';
 import { chunkForeignKeyCost } from '../test/support/foreign-keys.ts';
 import setup from '../test/support/global-setup.ts';
+import { parseClientConfig } from '../test/support/parse-host.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
 import { pageOf, percentile, rounded } from './support.ts';
 
@@ -131,7 +132,7 @@ vacuum analyze app.chunks;`,
 const db = await createDatabase(
   parseDatabaseConfig({ DREFYN_DATABASE_URL: urlFor('app', name), DREFYN_DATABASE_SSL: 'disable' }),
 );
-const parse = createParseClient({ url: parseUrl });
+const parse = createParseClient(parseClientConfig(parseUrl));
 const parsePolicy = {
   version: 1,
   components: [] as string[],

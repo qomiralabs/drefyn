@@ -4,7 +4,7 @@ import { DEFAULT_LIMITS } from '@drefyn/mdx';
 import { createParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { chunkNode, DEFAULT_ENGINE_CONFIG } from '../src/index.ts';
-import { startHost } from '../test/support/parse-host.ts';
+import { parseClientConfig, startHost } from '../test/support/parse-host.ts';
 import { pageOf, percentile, rounded } from './support.ts';
 
 const BUDGET_MS = 30;
@@ -14,7 +14,7 @@ const SAMPLES = 1000;
 
 const source = pageOf(PAGE_BYTES);
 const running = await startHost();
-const parsed = await createParseClient({ url: running.url }).parse({
+const parsed = await createParseClient(parseClientConfig(running.url)).parse({
   tenant: {
     organizationId: organizationId('01890a5d-ac96-774b-bcce-b302099a8201'),
     projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8202'),

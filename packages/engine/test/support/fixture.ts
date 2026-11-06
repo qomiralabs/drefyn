@@ -13,6 +13,7 @@ import {
   type NodeId,
   type VersionId,
 } from '../../src/index.ts';
+import { parseClientConfig } from './parse-host.ts';
 import { superuser, urlFor } from './stack.ts';
 
 export const database = () => inject('engineDatabase');
@@ -34,7 +35,8 @@ export const PARSE_POLICY = {
   linkProtocols: ['https', 'http', 'mailto'],
 } as const;
 
-export const parseClient = (): ParseClient => createParseClient({ url: inject('engineParseUrl') });
+export const parseClient = (): ParseClient =>
+  createParseClient(parseClientConfig(inject('engineParseUrl')));
 
 export const ACTOR: Actor = {
   kind: 'user',
