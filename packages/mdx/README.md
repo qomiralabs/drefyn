@@ -71,6 +71,86 @@ them, and opens up otherwise. Two neighbouring lists with one marker are one lis
 the second takes another marker, even if it was untouched. A file cannot open with a printed `---`,
 which would start frontmatter, so that rule prints as `***`.
 
+## Rendering
+
+`@drefyn/mdx/render` is the only way customer content becomes output, on published pages and in
+the dashboard alike. It is a separate entry so that code which only checks trees loads neither
+React nor an HTML parser.
+
+```ts
+import { renderSafe } from '@drefyn/mdx/render';
+const element = renderSafe(ast, policy);
+```
+
+`renderSafe` takes a stored tree and returns a React element. It takes nothing on trust: the tree
+goes through `validateTree` again, since hostile pages run on the host that made it, and the
+sanitizer is the last transform, so a fix to it reaches old content with a re-render. Everything
+is an allow list, in `src/sanitize-schema.ts`.
+
+- Elements and attributes outside the lists go. `script`, `style`, `svg`, `math`, `iframe` and a
+  few more go with their content; other tags are unwrapped. `style` and every `on*` attribute go
+  everywhere.
+- `href` takes the schemes in `linkProtocols` and relative URLs. `src` takes http, https and
+  relative URLs. An empty `linkProtocols` allows relative URLs and nothing else.
+- `id` and `name` get a `user-content-` prefix once, however many renders they go through. `name`
+  survives only on `a`.
+- `remoteImages: 'allow'` keeps remote images. `block` keeps only URLs that stay on the page's
+  origin under both http and https. `proxy` has no signer yet, so it does what `block` does.
+- `rawHtml: 'drop'` removes raw HTML. `sanitize` parses it as a browser would, so it cannot say
+  one thing to the sanitizer and another to a reader.
+- ESM and expressions render as nothing, and are never parsed or run. A JSX element outside
+  `policy.components` renders as nothing, children included. One inside it renders its children
+  and no props, until the component registry gives it something to render.
+- Every image is `loading="lazy"`. React's server render otherwise adds a preload `link` outside
+  the sanitized tree.
+
+The same page gives the same bytes, and output read back as raw HTML renders to itself. A stored
+tree is many times its source, so the policy's depth and node limits apply here and its byte
+limit does not.
+
+It runs in the caller's process with no thread to kill, and the HTML parser is quadratic in open
+elements, in formatting elements and in the attributes of one tag, so those are counted before it
+starts. These are far above any real page: the corpus peaks at 34 tags and 192 attribute
+positions, against limits of 5,000 and 10,000. The Markdown conversion searches a list per
+footnote and per list item, so a page may hold 2,000 footnote references and 5,000 items in one
+list. Call `renderSafe` from a job, not a request path: a page at a budget costs up to a few
+hundred milliseconds of the thread it runs on.
+
+`renderSafe` throws `RenderRefused` and never renders in part. Keep the last good page and log the
+code by ID. The message is the code, with no customer text.
+
+| Code                    | Meaning                                                    |
+| ----------------------- | ---------------------------------------------------------- |
+| `render.invalid_policy` | The policy fails its schema                                |
+| `render.invalid_tree`   | The tree fails `validateTree`, or passes the policy limits |
+| `render.too_deep`       | Raw HTML nests past the depth limit                        |
+| `render.too_complex`    | Past a budget above                                        |
+| `render.failed`         | A library threw, a stack overflow included                 |
+
+### Custom CSS
+
+`checkCustomCss(css)` gives back the sheet or refuses it with codes, lines and columns, and never
+rewrites it. Names and values are decoded one at a time, as a browser would read `ur\6c(`. At
+rules and functions are allow lists, so a new browser function that loads a URL fails until
+someone looks at it. `url()` takes https and paths on the site. It also refuses `</` and `<!`,
+which would end a `style` element whatever CSS makes of them. Where a browser and postcss split a sheet
+differently it refuses with `css.parse_failed`, on postcss's own tokens: a string with a bare
+line break, a comment inside brackets or right after a backslash, and `url(` followed by anything
+postcss does not treat as one URL or a string. Otherwise a rule could hide from every check here
+and be live in the browser.
+
+| Code                     | Meaning                                   |
+| ------------------------ | ----------------------------------------- |
+| `css.too_large`          | Over 128 KiB                              |
+| `css.parse_failed`       | postcss cannot read it                    |
+| `css.markup`             | Holds `</` or `<!`                        |
+| `css.import`             | `@import`                                 |
+| `css.foreign_url`        | `url()` with anything but https or a path |
+| `css.expression`         | `expression(`                             |
+| `css.forbidden_at_rule`  | An at rule outside the list               |
+| `css.forbidden_function` | A function outside the list               |
+| `css.forbidden_property` | `behavior` or `-moz-binding`              |
+
 ## Issue codes
 
 | Code                        | Severity | Meaning                                                |
@@ -257,9 +337,12 @@ If it fails and the change is meant:
 ## Commands
 
 - `pnpm --filter @drefyn/mdx test`
-- `pnpm --filter @drefyn/mdx test:fuzz` runs 60 s; `-- --seconds 5 --seed 1` narrows it.
+- `pnpm --filter @drefyn/mdx test:fuzz` runs 60 s, over the parser, `renderSafe` on parsed pages
+  and on junk trees, and `checkCustomCss`; `-- --seconds 5 --seed 1` narrows it.
 - `pnpm --filter @drefyn/mdx test:mutation` runs Stryker over the printer, `serialize`, the print
   job, its checks and the hashes, and fails at 10 percent of mutants surviving. It uses the exact byte tests only, as
   the corpus and generated suites take minutes a mutant.
 - `pnpm --filter @drefyn/mdx bench` measures parse plus print against the budgets. Run it on
   an idle machine; it prints the load and exits 1 over budget.
+- `pnpm --filter @drefyn/mdx bench:render` measures `renderSafe` on 100 KiB pages, with parse
+  beside it. It reports the budget and does not fail on it, as parse alone is over.
