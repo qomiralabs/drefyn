@@ -16,7 +16,8 @@ export interface Edit {
     | 'deleteItem'
     | 'addRow'
     | 'deleteRow'
-    | 'reformat';
+    | 'reformat'
+    | 'retype';
   readonly at: number;
   readonly choice: number;
 }
@@ -185,6 +186,19 @@ const listsIn = (node: Tree): readonly Tree[] => [
 
 const tokensOf = (node: Tree) => JSON.stringify(node).match(TOKEN) ?? [];
 
+// With a space each side, so it is never part of a URL, where one word prints twice.
+const PLAIN_WORD = /(?<= )(?!u\d)[a-z]{3,}(?= )/;
+
+// Changes what a block is and one of its words together, which reads as a delete and an insert.
+// Its unique tokens stay, so a test can see whether a delete of it was honoured.
+export function retyped(raw: string, word: string, choice: number): string {
+  const changed = PLAIN_WORD.test(raw) ? raw.replace(PLAIN_WORD, word) : `${raw} ${word}`;
+  const lines = changed.split('\n');
+  const quoted = lines.map((line) => `> ${line}`).join('\n');
+  if (lines.length > 1 || choice % 3 === 0) return quoted;
+  return choice % 3 === 1 ? `## ${changed}` : `- ${changed}`;
+}
+
 const SIDE_BLOCKS = (word: string) => [
   `para ${word}`,
   `## heading ${word}`,
@@ -272,6 +286,11 @@ export function applyEdits(
         rows.splice(1 + (choice % (rows.length - 1)), 1);
       }
       reprint(block);
+    } else if (kind === 'retype') {
+      if (block.node.type === 'yaml') continue;
+      block.raw = retyped(block.raw, token(), choice);
+      const [node] = parsed(`${block.raw}\n`, dialect).children as unknown as readonly Tree[];
+      if (node !== undefined) block.node = withoutSource(node);
     } else if (block.node.type === 'heading' && /^#+ /.test(block.raw) && !/ #+$/.test(block.raw)) {
       block.raw += ' #';
     } else if (block.node.type === 'list') {
@@ -298,6 +317,7 @@ const editArbitrary: fc.Arbitrary<Edit> = fc.record({
     'addRow',
     'deleteRow',
     'reformat',
+    'retype',
   ),
   at: fc.nat(1_000_000),
   choice: fc.nat(1_000_000),

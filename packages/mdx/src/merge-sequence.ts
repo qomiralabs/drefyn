@@ -1,5 +1,5 @@
 import { rawOf } from './canonical.ts';
-import { align, holdsWords, SIMILARITY_BUDGET, similarity, wordsOf } from './merge-align.ts';
+import { align, SAME_BLOCK, shareHeld, SIMILARITY_BUDGET } from './merge-align.ts';
 import type { Alignment, Budget, Entry, Inserted, MergeNode, Slot } from './merge-align.ts';
 import { at } from './merge-diff.ts';
 import {
@@ -27,6 +27,11 @@ export interface MergedSequence {
 }
 
 type Moved = Extract<Slot, { state: 'moved' }>;
+
+// No answer, as opposed to no rewrite: the budget ran out before the search could finish.
+const UNKNOWN = Symbol('unknown');
+
+const knownOf = (found: Entry | null | typeof UNKNOWN) => (found === UNKNOWN ? null : found);
 
 const hashOf = (node: MergeNode) => rawOf(node as unknown as MdxBlock);
 
@@ -80,6 +85,19 @@ const rewritesOf = ({ slots, after }: Alignment): readonly (readonly [Entry, num
   ];
 };
 
+interface Search {
+  readonly side: Alignment;
+  readonly rewrites: readonly Entry[];
+  readonly hashes: ReadonlySet<string>;
+  readonly budget: Budget;
+}
+
+function searchOf(side: Alignment): Search {
+  const rewrites = rewritesOf(side).map(([entry]) => entry);
+  const hashes = new Set(rewrites.map(({ hash }) => hash));
+  return { side, rewrites, hashes, budget: { left: SIMILARITY_BUDGET } };
+}
+
 // Slots a side's content came from, when it now sits under a different block: items that moved
 // between lists, and whole blocks a list took in when the one between them went.
 function crossings(
@@ -108,11 +126,12 @@ function crossings(
   const budget = { left: SIMILARITY_BUDGET };
   slots.forEach((slot, index) => {
     if (slot.state !== 'deleted' || budget.left < 0) return;
-    const words = wordsOf(at(base, index));
-    if (words.size === 0) return;
     for (const [entry, here] of rewrites) {
-      if (holdsWords(entry, words, budget))
+      // A rewrite where the block stood has not crossed anything.
+      if ('spot' in entry && (entry.spot === index || entry.spot === index + 1)) continue;
+      if (shareHeld(at(base, index), entry, budget) >= SAME_BLOCK) {
         spans.push([Math.min(index, here), Math.max(index, here)]);
+      }
     }
   });
   return spans;
@@ -275,34 +294,28 @@ export function mergeSequence(
     items.push(...live(a), ...live(c));
   };
 
-  // A rewrite too different to pair still answers a delete: same kind, same place, a word shared.
-  const rewriteNear = (index: number, side: Alignment, other: Alignment): Entry | null => {
-    const beside = [...at(side.after, index), ...at(side.after, index + 1)];
-    const theirsToo = new Set(
-      [...at(other.after, index), ...at(other.after, index + 1)].map(({ hash }) => hash),
-    );
-    const budget = { left: Infinity };
-    const found = beside.find(
+  // A slot both sides deleted may not be: a block that changed kind never pairs, so it reads as a
+  // delete and an insert. A rewrite still answers the other side's delete, so look by words, across
+  // kinds: any word beside the slot, or half of them anywhere. A false conflict costs a person a
+  // look, and a false clean costs the delete. With no budget left to look, a person decides.
+  const oursSearch = searchOf(ours);
+  const theirsSearch = searchOf(theirs);
+
+  const rewriteOf = (index: number, slot: Entry, mine: Search, other: Search) => {
+    const fresh = ({ hash }: Entry) => !other.hashes.has(hash);
+    const near = [...at(mine.side.after, index), ...at(mine.side.after, index + 1)].find(
       (entry) =>
         entry.movedFrom === undefined &&
-        similarity(at(base, index), entry, budget) > 0 &&
-        !theirsToo.has(entry.hash),
+        fresh(entry) &&
+        shareHeld(slot, entry, { left: Infinity }) > 0,
     );
-    return found ?? null;
-  };
-
-  // Blocks can fuse: an indented block moved beside another becomes one code block. Then the
-  // slot reads as deleted on that side while its words live on inside a block it rewrote.
-  const oursRewrites = rewritesOf(ours).map(([entry]) => entry);
-  const theirsRewrites = rewritesOf(theirs).map(([entry]) => entry);
-  const oursBudget = { left: SIMILARITY_BUDGET };
-  const theirsBudget = { left: SIMILARITY_BUDGET };
-
-  const absorbedBy = (slot: Entry, list: readonly Entry[], budget: Budget): Entry | null => {
-    const words = wordsOf(slot);
-    if (words.size === 0 || budget.left < 0) return null;
-    const holder = list.find((entry) => holdsWords(entry, words, budget));
-    return holder ?? null;
+    if (near !== undefined) return near;
+    if (mine.budget.left < 0) return UNKNOWN;
+    const found = mine.rewrites.find(
+      (entry) => fresh(entry) && shareHeld(slot, entry, mine.budget) >= SAME_BLOCK,
+    );
+    if (found !== undefined) return found;
+    return mine.budget.left < 0 ? UNKNOWN : null;
   };
 
   const placeBoth = (index: number, slot: Entry, a: Entry, c: Entry) => {
@@ -319,12 +332,10 @@ export function mergeSequence(
     const a = at(ours.slots, index);
     const c = at(theirs.slots, index);
     if (a.state === 'deleted' && c.state === 'deleted') {
-      const oursNear =
-        rewriteNear(index, ours, theirs) ?? absorbedBy(slot, oursRewrites, oursBudget);
-      const theirsNear =
-        rewriteNear(index, theirs, ours) ?? absorbedBy(slot, theirsRewrites, theirsBudget);
-      if (oursNear !== null || theirsNear !== null) {
-        conflict(index, 'delete_vs_edit', oursNear, theirsNear);
+      const mine = rewriteOf(index, slot, oursSearch, theirsSearch);
+      const others = rewriteOf(index, slot, theirsSearch, oursSearch);
+      if (mine !== null || others !== null) {
+        conflict(index, 'delete_vs_edit', knownOf(mine), knownOf(others));
       }
     } else if (a.state === 'deleted' || c.state === 'deleted') {
       const kept = a.state === 'deleted' ? c : a;

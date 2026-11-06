@@ -59,10 +59,11 @@ function wellFormed(children: readonly unknown[]): boolean {
     const node = stack.pop();
     if (!isNode(node)) return false;
     const { children: inner, attributes } = node;
-    if (attributes !== undefined && !Array.isArray(attributes)) return false;
-    if (inner === undefined) continue;
-    if (!Array.isArray(inner)) return false;
-    for (const child of inner as readonly unknown[]) stack.push(child);
+    for (const list of [inner, attributes]) {
+      if (list === undefined) continue;
+      if (!Array.isArray(list)) return false;
+      for (const child of list as readonly unknown[]) stack.push(child);
+    }
   }
   return true;
 }

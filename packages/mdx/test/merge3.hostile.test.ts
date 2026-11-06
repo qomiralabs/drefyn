@@ -84,6 +84,11 @@ describe('merge3 on trees nobody should trust', () => {
     expect(merge3(base, withBlock(base, last), base)).toEqual(refused);
   });
 
+  it('refuses an attribute that is no node', () => {
+    const block = { type: 'mdxJsxFlowElement', name: 'a', attributes: [null], children: [] };
+    expect(merge3(base, withBlock(base, block), base)).toEqual(refused);
+  });
+
   it('takes attributes when they are a list, and a node with no children', () => {
     const block = { type: 'mdxJsxFlowElement', name: 'a', attributes: [], children: [] };
     const fine = withBlock(base, block);

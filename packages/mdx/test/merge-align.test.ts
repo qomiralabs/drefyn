@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rawOf } from '../src/index.ts';
-import { align, holdsWords, SIMILARITY_BUDGET, similarity } from '../src/merge-align.ts';
+import { align, shareHeld, SIMILARITY_BUDGET, similarity } from '../src/merge-align.ts';
 import type { Entry, MergeNode } from '../src/merge-align.ts';
 import type { MdxBlock } from '../src/index.ts';
 
@@ -55,19 +55,55 @@ describe('similarity', () => {
   });
 });
 
-describe('holdsWords', () => {
-  const words = new Set(['one', 'two']);
+describe('shareHeld', () => {
+  const quote = (value: string): Entry =>
+    entry({ type: 'blockquote', children: [paragraph(value)] });
 
-  it('needs every word', () => {
-    expect(holdsWords(line('two and one'), words, wide())).toBe(true);
-    expect(holdsWords(line('one alone'), words, wide())).toBe(false);
+  it('is the share of a block its rewrite still holds, whatever kind that is', () => {
+    expect(shareHeld(line('one two three four'), quote('one two three five'), wide())).toBe(0.75);
+    expect(shareHeld(line('one two'), quote('nothing here'), wide())).toBe(0);
   });
 
-  it('spends the words it checks, and may spend the last of its budget', () => {
-    const budget = { left: 2 };
-    expect(holdsWords(line('one two'), words, budget)).toBe(true);
+  it('measures against the block that went, not the one it landed in', () => {
+    expect(shareHeld(line('one two'), line('one two three four five six'), wide())).toBe(1);
+    expect(shareHeld(line('one two three four five six'), line('one two'), wide())).toBeCloseTo(
+      1 / 3,
+    );
+  });
+
+  it('tells blocks with no words apart by kind', () => {
+    const rule = () => entry({ type: 'thematicBreak' });
+    expect(shareHeld(rule(), rule(), wide())).toBe(1);
+    expect(shareHeld(rule(), entry({ type: 'html', value: '' }), wide())).toBe(0);
+    expect(shareHeld(rule(), line('words'), wide())).toBe(0);
+  });
+
+  it('charges one for the look and one for each word, and may spend the last of it', () => {
+    const budget = { left: 3 };
+    expect(shareHeld(line('one two'), line('one two'), budget)).toBe(1);
     expect(budget.left).toBe(0);
-    expect(holdsWords(line('one two'), words, { left: 1 })).toBe(false);
+    expect(shareHeld(line('one two'), line('one two'), { left: 2 })).toBe(0);
+  });
+
+  it('finds words in image text, links, titles, code and attributes', () => {
+    const held = (node: MergeNode, value: string) => shareHeld(line(value), entry(node), wide());
+    expect(held({ type: 'image', alt: 'hidden' }, 'hidden')).toBe(1);
+    expect(held({ type: 'image', url: 'https://hidden' }, 'hidden')).toBe(1);
+    expect(held({ type: 'image', title: 'hidden' }, 'hidden')).toBe(1);
+    expect(held({ type: 'code', value: 'hidden' }, 'hidden')).toBe(1);
+    expect(held({ type: 'mdxJsxFlowElement', name: 'Hidden' }, 'hidden')).toBe(1);
+    const attribute = { type: 'mdxJsxAttribute', name: 'a', value: 'hidden' };
+    expect(held({ type: 'mdxJsxFlowElement', attributes: [attribute] }, 'hidden')).toBe(1);
+    const expression = { type: 'mdxJsxAttributeValueExpression', value: 'hidden' };
+    const bound = { type: 'mdxJsxAttribute', name: 'a', value: expression };
+    expect(held({ type: 'mdxJsxFlowElement', attributes: [bound] }, 'hidden')).toBe(1);
+    const deep = {
+      type: 'blockquote',
+      children: [{ type: 'paragraph', children: [{ type: 'image', alt: 'hidden' }] }],
+    };
+    expect(held(deep, 'hidden')).toBe(1);
+    expect(held({ type: 'image', alt: 'other' }, 'hidden')).toBe(0);
+    expect(held({ type: 'html', value: null }, 'hidden')).toBe(0);
   });
 });
 

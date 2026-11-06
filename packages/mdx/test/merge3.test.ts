@@ -207,6 +207,80 @@ describe('merge3 scenarios', () => {
     expect(list.map(({ baseIndex, reason }) => [baseIndex, reason])).toEqual([[0, 'both_changed']]);
   });
 
+  describe('a delete against a block the other side changed', () => {
+    const para = 'The key is blue-harbor-12345 and it stays here.';
+    const changed = para.replace('stays', 'lives');
+    const fence = '```\nconst key = 1\nmore code\n```';
+    const image = '![a diagram](https://a.example/secret-key.png "Title")';
+    const top = 'Top block stays.';
+    const bottom = 'Bottom block stays.';
+
+    it.each([
+      ['same type, one word changed', para, changed],
+      ['a quote, all words kept', para, `> ${para}`],
+      ['a quote, one word changed', para, `> ${changed}`],
+      ['a heading, one word changed', para, `## ${changed}`],
+      ['a list item, one word changed', para, `- ${changed}`],
+      ['code in a quote, one word changed', fence, '> ```\n> const key = 2\n> more code\n> ```'],
+      ['an image in a quote', image, `> ${image}`],
+      ['a link around the words', para, `[${para}](https://a.example)`],
+    ])('%s is a recorded conflict, both ways', (_name, block, other) => {
+      const base = page(top, block, bottom);
+      const deleted = page(top, bottom);
+      const edited = page(top, other, bottom);
+      const here = conflicts(outcomeOf(base, deleted, edited));
+      const there = conflicts(outcomeOf(base, edited, deleted));
+      expect(here.map(({ baseIndex, reason }) => [baseIndex, reason])).toEqual([
+        [1, 'delete_vs_edit'],
+      ]);
+      expect(there.map(({ baseIndex, reason }) => [baseIndex, reason])).toEqual([
+        [1, 'delete_vs_edit'],
+      ]);
+      expect(here[0]?.theirs?.source?.raw).toBe(other);
+      expect(there[0]?.ours?.source?.raw).toBe(other);
+    });
+
+    it('finds the rewrite wherever the block went', () => {
+      const base = page(top, para, 'Middle one here.', 'Middle two now.', bottom);
+      const deleted = page(top, 'Middle one here.', 'Middle two now.', bottom);
+      const edited = page(top, 'Middle one here.', 'Middle two now.', `> ${changed}`, bottom);
+      const list = conflicts(outcomeOf(base, deleted, edited));
+      expect(list.map(({ reason }) => reason)).toContain('delete_vs_edit');
+    });
+
+    it('sees the words of an attribute', () => {
+      const jsx = '<Note title="quiet meadow" other={"green river"} />';
+      const base = page(top, jsx, bottom);
+      const deleted = page(top, bottom);
+      const edited = page(top, `> ${jsx}`, bottom);
+      const result = merge3(parsed(base, 'mdx'), parsed(deleted, 'mdx'), parsed(edited, 'mdx'));
+      expect(result.ok && result.value.kind).toBe('conflict');
+    });
+
+    it('calls it a conflict when the budget ran out before it could look', () => {
+      const rows = (word: string) =>
+        Array.from({ length: 3_000 }, (_, at) => `${word}${at}q ${word}${at}r ${word}${at}s`);
+      const base = page(top, ...rows('a'), para, bottom);
+      const ours = page(top, ...rows('c'), bottom);
+      const theirs = page(top, ...rows('b'), `> ${changed.replace('key', 'code')}`, bottom);
+      const list = conflicts(outcomeOf(base, ours, theirs));
+      expect(list.some(({ baseIndex }) => baseIndex === 3_001)).toBe(true);
+    }, 90_000);
+
+    it('lets two sides that agree on the rewrite stand', () => {
+      const base = page(top, para, bottom);
+      const edited = page(top, `> ${changed}`, bottom);
+      expect(clean(outcomeOf(base, edited, edited))).toBe(edited);
+    });
+
+    it('lets a delete stand beside a block that shares only a word or two', () => {
+      const base = page(top, para, 'A wholly different block.', bottom);
+      const deleted = page(top, 'A wholly different block.', bottom);
+      const edited = page(top, 'A wholly different block.', '> The sky is blue.', bottom);
+      expect(clean(outcomeOf(base, deleted, edited))).toBe(edited);
+    });
+  });
+
   it('move vs edit: the edit follows the block to where it moved', () => {
     const moved = 'Second paragraph with several other words here.';
     const ours = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);
@@ -785,13 +859,11 @@ describe('merge3 paths the outcome alone does not show', () => {
     expect(there[0]?.theirs?.source?.raw).toBe(rewrite);
   });
 
-  it('calls a shared rewrite no conflict, and a rewrite of another kind no rewrite', () => {
+  it('calls a shared rewrite no conflict, and an unrelated block no rewrite', () => {
     const base = page('Keep.', 'alpha beta gamma delta epsilon', 'Also.');
     const same = page('Keep.', 'alpha zeta eta theta iota kappa', 'Also.');
     expect(clean(outcomeOf(base, same, same))).toBe(same);
-    const kind = page('Keep.', '# alpha zeta eta theta iota kappa', 'Also.');
     const deleted = page('Keep.', 'Also.');
-    expect(clean(outcomeOf(base, kind, deleted))).toBe(kind);
     const unrelated = page('Keep.', 'nothing in common at all', 'Also.');
     expect(clean(outcomeOf(base, unrelated, deleted))).toBe(unrelated);
   });
@@ -889,6 +961,16 @@ describe('merge3 items crossing blocks', () => {
       '- aaa\n\nMiddle plain words here.\n\n+ bbb\n\n* ccc\n* ddd\n\nEnd plain words here.\n';
     const theirs = lists.replace('plain', 'THEIRS');
     expect(reasons(outcomeOf(lists, ours, theirs))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('raises a conflict when a retyped block fused into the list past an insert', () => {
+    const base =
+      'Keep this.\n\nAll through the process you will\n\n- configure things\n- create pages\n';
+    const ours =
+      'Keep this.\n\n- All through OURS process you will\n\n- configure things\n- create pages\n';
+    const theirs = base.replace('- configure', '## New heading\n\n- configure');
+    expect(conflicts(outcomeOf(base, ours, theirs)).length).toBeGreaterThan(0);
+    expect(conflicts(outcomeOf(base, theirs, ours)).length).toBeGreaterThan(0);
   });
 
   it('raises a conflict when a row crosses tables', () => {

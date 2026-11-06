@@ -39,14 +39,26 @@ export interface Alignment {
 
 const DELETED: Slot = { state: 'deleted' };
 
+const TEXT_FIELDS = ['value', 'alt', 'url', 'title', 'name'];
+
+// Everything a person could have put in a block. An image or a component holds its words in
+// fields a reader never sees as text, and they count: a delete has to be able to find them.
 function textOf(node: MergeNode): string {
-  if (typeof node.value === 'string') return node.value;
-  return (node.children ?? []).map(textOf).join(' ');
+  const own = TEXT_FIELDS.flatMap((field) => {
+    const value = node[field];
+    return typeof value === 'string' ? [value] : [];
+  });
+  const expression = typeof node.value === 'object' ? [node.value as MergeNode | null] : [];
+  const attributes = (node['attributes'] ?? []) as readonly MergeNode[];
+  const inner = [...expression, ...attributes, ...(node.children ?? [])].flatMap((child) =>
+    child === null ? [] : [textOf(child)],
+  );
+  return [...own, ...inner].join(' ');
 }
 
 const WORD = /[\p{L}\p{N}_]+/gu;
 
-export function wordsOf(entry: Entry): ReadonlySet<string> {
+function wordsOf(entry: Entry): ReadonlySet<string> {
   entry.words ??= new Set(textOf(entry.node).toLowerCase().match(WORD));
   return entry.words;
 }
@@ -56,9 +68,9 @@ export interface Budget {
 }
 
 // Comparisons and words per side. A rewritten 20,000 block page would otherwise compare every
-// pair, and running out is safe: an unpaired block is a delete and an insert, which still conflict
-// with an edit on the other side. Honest merges compare within small runs and never come near it.
-// Each side has its own, so swapping them changes nothing.
+// pair. Running out when pairing is safe: an unpaired block is a delete and an insert, which still
+// conflict with an edit on the other side. Honest merges compare within small runs and never come
+// near it. Each side has its own, so swapping them changes nothing.
 export const SIMILARITY_BUDGET = 2_000_000;
 
 export function similarity(a: Entry, b: Entry, budget: Budget): number {
@@ -74,17 +86,21 @@ export function similarity(a: Entry, b: Entry, budget: Budget): number {
   return shared / (left.size + right.size - shared);
 }
 
-// Whether a block holds every word of another, within the same budget as a comparison.
-export function holdsWords(block: Entry, words: ReadonlySet<string>, budget: Budget): boolean {
-  budget.left -= words.size;
-  if (budget.left < 0) return false;
+// How much of a block lives on in another, whatever kind that one is now: the share of its words
+// the other holds. Two blocks with no words at all can only be told apart by kind.
+export function shareHeld(slot: Entry, block: Entry, budget: Budget): number {
+  const words = wordsOf(slot);
+  budget.left -= words.size + 1;
+  if (budget.left < 0) return 0;
   const held = wordsOf(block);
-  for (const word of words) if (!held.has(word)) return false;
-  return true;
+  if (words.size === 0) return held.size === 0 && slot.node.type === block.node.type ? 1 : 0;
+  let shared = 0;
+  for (const word of words) if (held.has(word)) shared += 1;
+  return shared / words.size;
 }
 
 // Half the words in common is about where a person stops calling two blocks one block.
-const SAME_BLOCK = 0.5;
+export const SAME_BLOCK = 0.5;
 
 function closest(
   candidates: readonly number[],

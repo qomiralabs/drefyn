@@ -77,6 +77,11 @@ under the same queues, budgets and kill as a print. It answers `{ outcome, issue
   merges word by word. Code, HTML, JSX and frontmatter do not: two edits to one of those conflict.
 - Blocks compare on a hash of their own tree, never on the hash they carry, so a reformat raises
   no conflict and keeps its bytes.
+- A delete only stands if the block is gone from the other side too. A block that changed kind
+  never pairs with its slot, so a slot both sides seem to have deleted is checked by words, across
+  kinds and in alt text, URLs, titles and attributes: any word in a rewrite beside it, or half its
+  words in a rewrite anywhere, is a `delete_vs_edit`. A false conflict costs a person a look, and
+  a false clean costs the delete. If the search runs out of budget, that is a conflict as well.
 - A moved block takes the other side's edit with it. A move next to the other side's insert, or
   against its delete, is a conflict.
 - `partial` is for showing a person. It can hold both sides of a conflict and is never a version.

@@ -5,7 +5,13 @@ import { meaningOf } from '../src/meaning.ts';
 import { printPage } from '../src/print-job.ts';
 import type { BlockConflict, Dialect, MdxRoot, MergeOutcome } from '../src/index.ts';
 import { isolatedPolicy, parsed } from './helpers.ts';
-import { applyEdits, corpusPages, generatedPage, mergeCaseArbitrary } from './merge3-generators.ts';
+import {
+  applyEdits,
+  corpusPages,
+  generatedPage,
+  mergeCaseArbitrary,
+  retyped,
+} from './merge3-generators.ts';
 import type { MergeCase, Side, Tree } from './merge3-generators.ts';
 
 // A full 100,000 takes minutes, so the gate runs a slice with a fresh seed every time and
@@ -276,6 +282,45 @@ describe('merge3 over generated edits', () => {
       expect(stats.skipped).toBeLessThan(RUNS / 10);
       expect(stats.conflict).toBeGreaterThan(RUNS / 100);
       expect(stats.clean).toBeGreaterThan(RUNS / 2);
+    },
+    TIMEOUT_MS,
+  );
+
+  // The worst case has its own run: one side deletes a block, the other changes its kind and a word.
+  it(
+    'never lets a delete pass a block the other side retyped',
+    () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 2_000_000_000 }),
+          fc.nat(1_000),
+          fc.nat(1_000),
+          (seed, at, choice) => {
+            const text = generatedPage(seed);
+            const base = parsed(text, 'md');
+            const blocks = base.children;
+            const index = at % blocks.length;
+            const raw = blocks[index]?.source?.raw ?? '';
+            const swap = (next: string) => {
+              const before = blocks.slice(0, index).at(-1)?.source;
+              const start = text.indexOf(raw, before === undefined ? 0 : text.indexOf(before.raw));
+              return `${text.slice(0, start)}${next}${text.slice(start + raw.length)}`;
+            };
+            const edited = swap(retyped(raw, 'RETYPED', choice));
+            const deleted = swap('Unrelated zzz.').replace('Unrelated zzz.\n\n', '');
+            if (deleted.includes('Unrelated')) return;
+            for (const [ours, theirs] of [
+              [edited, deleted],
+              [deleted, edited],
+            ] as const) {
+              const result = merge3(base, parsed(ours, 'md'), parsed(theirs, 'md'));
+              if (!result.ok) throw new Error('refused an honest page');
+              expect(result.value.kind).toBe('conflict');
+            }
+          },
+        ),
+        { numRuns: Math.min(RUNS, 3_000), ...(SEED === undefined ? {} : { seed: Number(SEED) }) },
+      );
     },
     TIMEOUT_MS,
   );
