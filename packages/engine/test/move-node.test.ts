@@ -1,0 +1,313 @@
+import { DbError } from '@drefyn/db';
+import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
+import { describe, expect, it, vi } from 'vitest';
+import { createEngine, type EngineLogger } from '../src/index.ts';
+import { MAX_ORDER_KEY_CHARS } from '../src/order-key.ts';
+import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
+
+const tenant: TenantRef = {
+  organizationId: organizationId('01890a5d-ac96-774b-bcce-b302099a8001'),
+  projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8002'),
+};
+const NODE = idOf('nod', '01890a5d-ac96-774b-bcce-b302099a8003');
+const PARENT = idOf('nod', '01890a5d-ac96-774b-bcce-b302099a8004');
+const ANCHOR = idOf('nod', '01890a5d-ac96-774b-bcce-b302099a8005');
+const NEXT = idOf('nod', '01890a5d-ac96-774b-bcce-b302099a8006');
+const TYPE = '01890a5d-ac96-774b-bcce-b302099a8007';
+
+const has = (statement: Statement, text: string) => statement.sql.includes(text);
+
+const PLAN = { plan_tier: 'self_hosted', organization_read_only: null, project_read_only: null };
+
+interface Tree {
+  readonly chain?: readonly Record<string, unknown>[];
+  readonly anchor?: readonly Record<string, unknown>[];
+  readonly next?: readonly Record<string, unknown>[];
+}
+
+const treeOf =
+  ({
+    chain = [{ id: PARENT, deleted_at: null }],
+    anchor = [{ id: ANCHOR, order_key: 'a0' }],
+    next = [{ id: NEXT, order_key: 'a2' }],
+  }: Tree = {}): Responder =>
+  (statement) => {
+    if (has(statement, 'pg_advisory_xact_lock')) return [{}];
+    if (has(statement, 'for update')) {
+      return [{ id: NODE, family: 'docs_page', type_id: TYPE, head_version_id: null }];
+    }
+    if (has(statement, '"organizations"')) return [PLAN];
+    if (has(statement, 'with recursive')) return [...chain];
+    if (has(statement, 'update')) return [];
+    return has(statement, 'order by') ? [...next] : [...anchor];
+  };
+
+const build = (respond: Responder, on = true) => {
+  const scripted = scriptedStore(respond);
+  const logger: EngineLogger = { info: vi.fn(), warn: vi.fn() };
+  const engine = createEngine({
+    store: scripted.store,
+    parse: { print: () => Promise.reject(new Error('a move prints nothing')) },
+    parsePolicy: {
+      version: 1,
+      components: [],
+      rawHtml: 'sanitize',
+      remoteImages: 'proxy',
+      linkProtocols: ['https'],
+    },
+    flags: { evaluate: () => Promise.resolve({ value: on }) },
+    logger,
+  });
+  return { ...scripted, engine, logger };
+};
+
+const move = { tenant, nodeId: NODE, parentId: PARENT, afterId: ANCHOR };
+
+describe('moveNode', () => {
+  it('takes the lock first and alone, then writes one update with both tenant ids', async () => {
+    const { engine, statements, ends } = build(treeOf());
+    expect(await engine.moveNode(move)).toEqual({ ok: true, value: undefined });
+
+    expect(statements[0]?.sql).toMatch(/^select pg_advisory_xact_lock/);
+    expect(statements[0]?.sql).not.toMatch(/from/);
+    expect(statements[0]?.parameters.join()).toContain(tenant.organizationId);
+    expect(statements[0]?.parameters.join()).toContain(tenant.projectId);
+
+    const updates = statements.filter((statement) => has(statement, 'update "nodes"'));
+    expect(updates).toHaveLength(1);
+    const [update] = updates;
+    expect(update?.parameters).toEqual(
+      expect.arrayContaining([PARENT, 'a1', tenant.organizationId, tenant.projectId, NODE]),
+    );
+    expect(ends).toEqual(['commit']);
+  });
+
+  it('names both tenant ids in every statement after the lock', async () => {
+    const { engine, statements } = build(treeOf());
+    await engine.moveNode(move);
+    for (const statement of statements.slice(1)) {
+      expect(statement.parameters).toEqual(
+        expect.arrayContaining([tenant.organizationId, tenant.projectId]),
+      );
+    }
+  });
+
+  it('refuses when writes are off, with no statement', async () => {
+    const { engine, statements } = build(treeOf(), false);
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: { code: 'engine.forbidden' },
+    });
+    expect(statements).toEqual([]);
+  });
+
+  it.each([
+    ['an id that is no uuid', { ...move, nodeId: 'nope' }, 'nodeId'],
+    ['an unknown key', { ...move, orderKey: 'a1' }, ''],
+    ['a node after itself', { ...move, afterId: NODE }, 'afterId'],
+    ['a missing parent field', { tenant, nodeId: NODE, afterId: null }, 'parentId'],
+  ])('refuses %s before any statement', async (_name, input, path) => {
+    const { engine, statements } = build(treeOf());
+    const moved = await engine.moveNode(input as typeof move);
+    expect(moved).toMatchObject({ ok: false, error: { code: 'engine.validation_failed' } });
+    if (!moved.ok) expect(moved.error.issues.map((issue) => issue.path)).toContain(path);
+    expect(statements).toEqual([]);
+  });
+
+  it('skips the walk for a move to the root', async () => {
+    const { engine, statements } = build(treeOf());
+    expect(await engine.moveNode({ ...move, parentId: null })).toMatchObject({ ok: true });
+    expect(statements.some((statement) => has(statement, 'with recursive'))).toBe(false);
+    const update = statements.find((statement) => has(statement, 'update "nodes"'));
+    expect(update?.parameters).toEqual(expect.arrayContaining([null]));
+  });
+
+  it('puts a node first with no anchor, and last with nothing after the anchor', async () => {
+    const first = build(treeOf());
+    expect(await first.engine.moveNode({ ...move, afterId: null })).toMatchObject({ ok: true });
+    const firstUpdate = first.statements.find((statement) => has(statement, 'update "nodes"'));
+    expect(firstUpdate?.parameters).toEqual(expect.arrayContaining(['a1']));
+
+    const last = build(treeOf({ next: [] }));
+    expect(await last.engine.moveNode(move)).toMatchObject({ ok: true });
+    const lastUpdate = last.statements.find((statement) => has(statement, 'update "nodes"'));
+    expect(lastUpdate?.parameters).toEqual(expect.arrayContaining(['a1']));
+  });
+
+  it.each([
+    ['the node itself as parent', { chain: [{ id: NODE, deleted_at: null }] }],
+    [
+      'a descendant as parent',
+      {
+        chain: [
+          { id: PARENT, deleted_at: null },
+          { id: NODE, deleted_at: null },
+        ],
+      },
+    ],
+  ])('refuses %s and writes nothing', async (_name, tree) => {
+    const { engine, statements, ends } = build(treeOf(tree));
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'parentId', code: 'engine.cycle' }],
+      },
+    });
+    expect(statements.some((statement) => has(statement, 'update "nodes"'))).toBe(false);
+    expect(ends).toEqual(['rollback']);
+  });
+
+  it.each([
+    ['a parent that is gone', { chain: [] }],
+    ['a deleted parent', { chain: [{ id: PARENT, deleted_at: new Date(0) }] }],
+    [
+      'a deleted ancestor',
+      {
+        chain: [
+          { id: PARENT, deleted_at: null },
+          { id: ANCHOR, deleted_at: new Date(0) },
+        ],
+      },
+    ],
+    ['an anchor that is not a child of the parent', { anchor: [] }],
+  ])('answers not found for %s, with nothing naming which id', async (_name, tree) => {
+    const { engine, ends } = build(treeOf(tree));
+    expect(await engine.moveNode(move)).toEqual({
+      ok: false,
+      error: { code: 'engine.not_found', retryable: false, issues: [] },
+    });
+    expect(ends).toEqual(['rollback']);
+  });
+
+  it('refuses a read only project', async () => {
+    const respond = treeOf();
+    const { engine } = build((statement) =>
+      has(statement, '"organizations"')
+        ? [{ ...PLAN, project_read_only: new Date(0) }]
+        : respond(statement),
+    );
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: { code: 'engine.read_only' },
+    });
+  });
+
+  it('refuses a tie rather than landing somewhere else', async () => {
+    const { engine } = build(treeOf({ next: [{ id: NEXT, order_key: 'a0' }] }));
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'afterId', code: 'engine.order_key_no_room' }],
+      },
+    });
+  });
+
+  it('refuses a key past the cap rather than let the index refuse it', async () => {
+    const long = `a0${'V'.repeat(MAX_ORDER_KEY_CHARS)}1`;
+    const { engine } = build(
+      treeOf({
+        anchor: [{ id: ANCHOR, order_key: long }],
+        next: [{ id: NEXT, order_key: `${long}1` }],
+      }),
+    );
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: { code: 'engine.too_large', issues: [{ path: 'afterId', code: 'engine.too_large' }] },
+    });
+  });
+
+  it('turns a timeout into the one retryable answer', async () => {
+    const { engine } = build(() => {
+      throw new DbError('DB_TIMEOUT', 'busy');
+    });
+    expect(await engine.moveNode(move)).toMatchObject({
+      ok: false,
+      error: { code: 'engine.unavailable', retryable: true },
+    });
+  });
+
+  it('logs ids and the outcome, and never a key', async () => {
+    const { engine, logger } = build(treeOf());
+    await engine.moveNode(move);
+    expect(logger.info).toHaveBeenCalledWith(
+      'engine.move',
+      expect.objectContaining({
+        organization_id: tenant.organizationId,
+        project_id: tenant.projectId,
+        node_id: NODE,
+        parent_id: PARENT,
+      }),
+    );
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain('"a1"');
+  });
+
+  it('logs the refusal with its code', async () => {
+    const { engine, logger } = build(treeOf({ chain: [] }));
+    await engine.moveNode({ ...move, parentId: PARENT });
+    expect(logger.info).toHaveBeenCalledWith(
+      'engine.move.refused',
+      expect.objectContaining({ code: 'engine.not_found', parent_id: PARENT }),
+    );
+  });
+});
+
+describe('createNode with no key', () => {
+  const create = { tenant, family: 'docs_page', typeId: TYPE } as const;
+  const respond =
+    (last: readonly Record<string, unknown>[]): Responder =>
+    (statement) => {
+      if (has(statement, '"content_types"')) return [{ family: 'docs_page' }];
+      if (has(statement, '"organizations"')) return [PLAN];
+      if (has(statement, 'insert into "organization_node_counts"')) return [{ nodes: 1 }];
+      if (has(statement, 'insert into "nodes"')) return [{ id: NODE }];
+      if (has(statement, 'order by "order_key" desc')) return [...last];
+      return [];
+    };
+  const insertOf = (statements: readonly Statement[]) =>
+    statements.find((statement) => has(statement, 'insert into "nodes"'));
+
+  it('lands after the last sibling, under the lock', async () => {
+    const { engine, statements } = build(respond([{ id: ANCHOR, order_key: 'a5' }]));
+    expect(await engine.createNode(create)).toMatchObject({ ok: true });
+    expect(insertOf(statements)?.parameters).toContain('a6');
+    const lock = statements.findIndex((statement) => has(statement, 'pg_advisory_xact_lock'));
+    const read = statements.findIndex((statement) => has(statement, 'order by "order_key" desc'));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(lock).toBeLessThan(read);
+  });
+
+  it('starts at a0 with no siblings', async () => {
+    const { engine, statements } = build(respond([]));
+    expect(await engine.createNode(create)).toMatchObject({ ok: true });
+    expect(insertOf(statements)?.parameters).toContain('a0');
+  });
+
+  it('takes no lock for a key the caller chose', async () => {
+    const { engine, statements } = build(respond([]));
+    expect(await engine.createNode({ ...create, orderKey: 'a7' })).toMatchObject({ ok: true });
+    expect(insertOf(statements)?.parameters).toContain('a7');
+    expect(statements.some((statement) => has(statement, 'pg_advisory_xact_lock'))).toBe(false);
+  });
+
+  it.each(['a', 'a00', '!', `a${'1'.repeat(64)}`])('refuses %j as a key', async (orderKey) => {
+    const { engine, statements } = build(respond([]));
+    expect(await engine.createNode({ ...create, orderKey })).toMatchObject({
+      ok: false,
+      error: { code: 'engine.validation_failed' },
+    });
+    expect(statements).toEqual([]);
+  });
+
+  it('refuses when the last sibling has a key nothing can follow', async () => {
+    const { engine } = build(respond([{ id: ANCHOR, order_key: 'not a key' }]));
+    expect(await engine.createNode(create)).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'orderKey', code: 'engine.order_key_no_room' }],
+      },
+    });
+  });
+});
