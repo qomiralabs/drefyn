@@ -160,7 +160,8 @@ describe('chunkNode boundaries', () => {
   });
 
   it('counts empty headings against the budget too', () => {
-    const deep = Array.from({ length: 200_000 }, () => ({
+    // The most a tree may hold. Six elements on each row would pass the budget.
+    const deep = Array.from({ length: 50_000 }, () => ({
       raw: '#',
       heading: { depth: 6, text: 'x' } as const,
     }));
