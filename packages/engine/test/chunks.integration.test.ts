@@ -27,7 +27,6 @@ import {
 } from './support/fixture.ts';
 import { chunkForeignKeyCost } from './support/foreign-keys.ts';
 import { describeWithStack } from './support/presence.ts';
-import { sourceOf } from './support/tree.ts';
 
 const chunkOptions = {
   targetChars: DEFAULT_ENGINE_CONFIG.chunkTargetChars,
@@ -63,7 +62,7 @@ const countByNode = async (table: string, node: string): Promise<number> =>
   Number(await admin(`select count(*) from app.${table} where node_id = '${node}';`));
 
 const flagged = (chunkAtWrite: boolean): EngineFlags => ({
-  isOn: (name) => Promise.resolve(name === 'engine.writes' || chunkAtWrite),
+  evaluate: (name) => Promise.resolve({ value: name === 'engine.writes' || chunkAtWrite }),
 });
 
 const saveInput = async (seeded: Seeded, nodeId: NodeId, head: VersionId | null, text: string) => ({
@@ -88,6 +87,20 @@ afterAll(async () => {
 });
 
 describeWithStack('chunks in the save transaction', () => {
+  it('stores nothing a reader cannot see', async () => {
+    const node = await newNode(built.engine, home);
+    const page = '---\ntitle: hidden-words\n---\n\n# Guide\n\n<!-- hidden-words -->\n\nShown.\n';
+    const input = await saveInput(home, node, null, page);
+    const saved = await built.engine.saveDraft(input);
+    if (!saved.ok) throw new Error(saved.error.code);
+    const stored = await admin(
+      `select string_agg(body || array_to_string(heading_path, ' '), ' ')
+       from app.chunks where version_id = '${saved.value.versionId}';`,
+    );
+    expect(stored).toContain('Shown.');
+    expect(stored).not.toContain('hidden-words');
+  });
+
   it('stores the chunks of the saved tree, in order, with the outbox row', async () => {
     const node = await newNode(built.engine, home);
     const input = await saveInput(home, node, null, PAGE);
@@ -107,7 +120,6 @@ select coalesce(json_agg(json_build_object(
     ) as readonly Record<string, unknown>[];
 
     expect(rows.length).toBe(expected.length);
-    expect(rows.map(({ body }) => body).join('')).toBe(sourceOf(input.content));
     for (const [at, row] of rows.entries()) {
       expect(row).toMatchObject({
         ...expected[at],

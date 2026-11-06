@@ -92,7 +92,7 @@ const build = (respond: Responder, over: Partial<EngineDeps> = {}) => {
       remoteImages: 'proxy',
       linkProtocols: ['https'],
     },
-    flags: { isOn: () => Promise.resolve(true) },
+    flags: { evaluate: () => Promise.resolve({ value: true }) },
     ...over,
   });
   return { engine, ...scripted };
@@ -318,10 +318,10 @@ describe('the writes flag', () => {
   });
 
   it('asks with the tenant', async () => {
-    const isOn = vi.fn(() => Promise.resolve(true));
-    const { engine } = build(happy, { flags: { isOn } });
+    const evaluate = vi.fn(() => Promise.resolve({ value: true }));
+    const { engine } = build(happy, { flags: { evaluate } });
     await engine.saveDraft(save());
-    expect(isOn).toHaveBeenCalledWith('engine.writes', tenant);
+    expect(evaluate).toHaveBeenCalledWith('engine.writes', tenant);
   });
 });
 
@@ -606,7 +606,7 @@ describe('chunks at write', () => {
   const outboxWrites = (statements: readonly Statement[]) =>
     statements.filter((statement) => has(statement, 'insert into "engine_outbox"'));
   const onlyWrites = {
-    isOn: (name: string) => Promise.resolve(name === 'engine.writes'),
+    evaluate: (name: string) => Promise.resolve({ value: name === 'engine.writes' }),
   };
 
   it('writes chunks and one outbox row in the save transaction, after the version', async () => {
@@ -650,10 +650,73 @@ describe('chunks at write', () => {
   });
 
   it('asks for the flag with the tenant', async () => {
-    const isOn = vi.fn(() => Promise.resolve(true));
-    const { engine } = build(happy, { flags: { isOn } });
+    const evaluate = vi.fn(() => Promise.resolve({ value: true }));
+    const { engine } = build(happy, { flags: { evaluate } });
     await engine.saveDraft(save());
-    expect(isOn).toHaveBeenCalledWith('engine.chunk_at_write', tenant);
+    expect(evaluate).toHaveBeenCalledWith('engine.chunk_at_write', tenant);
+  });
+
+  describe('when the chunk flag cannot be read', () => {
+    const withoutChunkFlag = (answer: () => Promise<{ value: boolean; errorCode?: string }>) => ({
+      evaluate: (name: string) =>
+        name === 'engine.writes' ? Promise.resolve({ value: true }) : answer(),
+    });
+    const unread = [
+      ['a provider error', () => Promise.resolve({ value: false, errorCode: 'FLAG_TIMEOUT' })],
+      ['a missing flag', () => Promise.resolve({ value: false, errorCode: 'FLAG_NOT_FOUND' })],
+      ['a rejected read', () => Promise.reject(new Error('flagd is down'))],
+    ] as const;
+
+    it.each(unread)('refuses a save on %s, stores nothing and says so', async (_name, answer) => {
+      const lines: { event: string; fields: LogFields }[] = [];
+      const logger: EngineLogger = {
+        info: () => undefined,
+        warn: (event, fields) => lines.push({ event, fields }),
+      };
+      const flags = withoutChunkFlag(answer);
+      const { engine, statements } = build(happy, { flags, logger });
+      expect(await engine.saveDraft(save())).toMatchObject({
+        ok: false,
+        error: { code: 'engine.unavailable', retryable: true },
+      });
+      expect(statements).toEqual([]);
+      expect(lines).toEqual([
+        {
+          event: 'engine.flag_read_failed',
+          fields: expect.objectContaining({
+            organization_id: tenant.organizationId,
+            project_id: tenant.projectId,
+            flag: 'engine.chunk_at_write',
+          }) as LogFields,
+        },
+      ]);
+    });
+
+    it.each(unread)('refuses a rollback on %s and stores nothing', async (_name, answer) => {
+      const flags = withoutChunkFlag(answer);
+      const { engine, statements } = build(happy, { flags });
+      expect(
+        await engine.rollback({
+          tenant,
+          nodeId: NODE,
+          toVersionId: idOf('ver', VERSION),
+          expectedHeadVersionId: idOf('ver', VERSION),
+          actor: { kind: 'system', job: 'test' },
+          idempotencyKey: 'rollback',
+        }),
+      ).toMatchObject({ ok: false, error: { code: 'engine.unavailable' } });
+      expect(statements).toEqual([]);
+    });
+
+    it('keeps refusing writes as forbidden when the writes flag cannot be read', async () => {
+      const flags = { evaluate: () => Promise.reject(new Error('flagd is down')) };
+      const { engine, statements } = build(happy, { flags });
+      expect(await engine.saveDraft(save())).toMatchObject({
+        ok: false,
+        error: { code: 'engine.forbidden' },
+      });
+      expect(statements).toEqual([]);
+    });
   });
 
   it('writes nothing more for a replay', async () => {

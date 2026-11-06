@@ -94,7 +94,7 @@ export function buildEngine(db: Database, over: Partial<EngineDeps> = {}): Built
     store: databaseStore(db),
     parse,
     parsePolicy: PARSE_POLICY,
-    flags: { isOn: () => Promise.resolve(true) },
+    flags: { evaluate: () => Promise.resolve({ value: true }) },
     ...over,
   });
   return { engine, parse };
