@@ -54,6 +54,12 @@ const moved = async (
   if (!result.ok) throw new Error(`moveNode refused: ${result.error.code}`);
 };
 
+const nodeAt = (nodes: readonly NodeId[], at: number): NodeId => {
+  const node = nodes[at];
+  if (node === undefined) throw new Error(`no node at ${String(at)}`);
+  return node;
+};
+
 const codeOf = (result: EngineResult<unknown>) => (result.ok ? 'ok' : result.error.code);
 
 const children = async (seeded: Seeded, parent: NodeId | null): Promise<readonly string[]> => {
@@ -316,9 +322,7 @@ describeWithStack('moveNode against Postgres', () => {
             const nodes: NodeId[] = [];
             for (let at = 0; at < 8; at += 1) nodes.push(await created(home));
             const results = await Promise.all(
-              moves.map(([node, parent]) =>
-                move(home, nodes[node] as NodeId, nodes[parent] ?? null),
-              ),
+              moves.map(([node, parent]) => move(home, nodeAt(nodes, node), nodes[parent] ?? null)),
             );
             for (const result of results) {
               if (result.ok) continue;

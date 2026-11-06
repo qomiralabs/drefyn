@@ -99,6 +99,7 @@ describe('orderKeyBetween', () => {
   it('carries across a change of integer length, up and down', () => {
     expect(placed('az', null)).toBe('b00');
     expect(placed('bzz', null)).toBe('c000');
+    expect(placed('Yzz', null)).toBe('Z0');
     expect(placed('Zz', null)).toBe('a0');
     expect(placed(null, 'a0')).toBe('Zz');
     expect(placed(null, 'b00')).toBe('az');
@@ -117,7 +118,7 @@ describe('orderKeyBetween', () => {
     const largest = `z${'z'.repeat(26)}`;
     expect(isOrderKey(smallest)).toBe(true);
     expect(placed(largest, null) > largest).toBe(true);
-    const lower = placed(null, `${`A${'0'.repeat(26)}`}1`);
+    const lower = placed(null, `A${'0'.repeat(26)}1`);
     expect(lower < `A${'0'.repeat(26)}1`).toBe(true);
     expect(isOrderKey(lower)).toBe(true);
   });

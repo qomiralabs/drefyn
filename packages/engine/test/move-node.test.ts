@@ -44,7 +44,8 @@ const treeOf =
 
 const build = (respond: Responder, on = true) => {
   const scripted = scriptedStore(respond);
-  const logger: EngineLogger = { info: vi.fn(), warn: vi.fn() };
+  const info = vi.fn<EngineLogger['info']>();
+  const logger: EngineLogger = { info, warn: vi.fn() };
   const engine = createEngine({
     store: scripted.store,
     parse: { print: () => Promise.reject(new Error('a move prints nothing')) },
@@ -58,7 +59,7 @@ const build = (respond: Responder, on = true) => {
     flags: { evaluate: () => Promise.resolve({ value: on }) },
     logger,
   });
-  return { ...scripted, engine, logger };
+  return { ...scripted, engine, info };
 };
 
 const move = { tenant, nodeId: NODE, parentId: PARENT, afterId: ANCHOR };
@@ -229,9 +230,9 @@ describe('moveNode', () => {
   });
 
   it('logs ids and the outcome, and never a key', async () => {
-    const { engine, logger } = build(treeOf());
+    const { engine, info } = build(treeOf());
     await engine.moveNode(move);
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(info).toHaveBeenCalledWith(
       'engine.move',
       expect.objectContaining({
         organization_id: tenant.organizationId,
@@ -240,13 +241,13 @@ describe('moveNode', () => {
         parent_id: PARENT,
       }),
     );
-    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain('"a1"');
+    expect(JSON.stringify(info.mock.calls)).not.toContain('"a1"');
   });
 
   it('logs the refusal with its code', async () => {
-    const { engine, logger } = build(treeOf({ chain: [] }));
+    const { engine, info } = build(treeOf({ chain: [] }));
     await engine.moveNode({ ...move, parentId: PARENT });
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(info).toHaveBeenCalledWith(
       'engine.move.refused',
       expect.objectContaining({ code: 'engine.not_found', parent_id: PARENT }),
     );
