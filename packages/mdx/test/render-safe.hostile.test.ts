@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { RenderRefused, renderSafe } from '../src/render.ts';
+import { MAX_GROWTH, SIZE_RATIO, cheapestCpuMs, growthOf } from './cost.ts';
 import { policy } from './helpers.ts';
 import { dangerIn, rendered, rerendered, rootOf, toHtml } from './render-helpers.ts';
 import { MEASURED, OWASP } from './xss-payloads.ts';
 
-// Far above a fair run on a loaded machine, and far below a parser left to run: this catches a
-// hang and is no benchmark.
-const BUDGET_MS = 20_000;
+// Only for a failing run. A passing one costs a fraction of this, and a timeout cannot stop a
+// synchronous test anyway.
+const GROWTH_TIMEOUT_MS = 180_000;
+// Past each budget at both sizes, and small enough that with a budget removed the parser still
+// finishes and this fails, and does not hang the run.
+const REFUSED_SIZE = 15_000;
+// Nodes. Four times this is near the 50,000 a page may hold.
+const STORED_SIZE = 12_000;
+// Elements, each two tags. Four times this is near the 5,000 tags a page may hold.
+const RAW_SIZE = 600;
+const MAX_FOOTNOTES = 2_000;
+const MAX_ATTRIBUTES = 9_900;
+const MAX_ATTRIBUTES_CPU_MS = 3_000;
 
 const codeOf = (html: string): unknown => {
   try {
@@ -77,58 +88,198 @@ describe('the measured payloads, one by one', () => {
   });
 });
 
-describe('work a page can force', { timeout: 2 * BUDGET_MS }, () => {
-  const timed = (html: string): unknown => {
-    const started = performance.now();
-    const code = codeOf(html);
-    expect(performance.now() - started).toBeLessThan(BUDGET_MS);
-    return code;
+const numbered = (total: number, each: (index: number) => string) =>
+  Array.from({ length: total }, (_, index) => each(index)).join('');
+
+const text = (value: string) => ({ type: 'paragraph', children: [{ type: 'text', value }] });
+
+describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
+  const render = (html: string) => {
+    codeOf(html);
   };
 
-  it.each([
-    ['open elements', '<div>'.repeat(200_000)],
-    ['table cells', '<table><tr><td>'.repeat(60_000)],
-    ['formatting elements', '<b>'.repeat(200_000)],
-    ['closing tags', '</b>'.repeat(200_000)],
-    ['elements a parser compares', Array.from({ length: 60_000 }, (_, i) => `<b a=${i}>`).join('')],
-  ])('refuses a page of %s', (_name, html) => {
-    expect(timed(html)).toBe('render.too_complex');
+  // Past every limit, so these say what a refusal costs and that it is a refusal.
+  it.each<[string, (size: number) => string]>([
+    ['open elements', (size) => '<div>'.repeat(size)],
+    ['table cells', (size) => '<table><tr><td>'.repeat(size)],
+    ['formatting elements', (size) => '<b>'.repeat(size)],
+    ['closing tags', (size) => '</b>'.repeat(size)],
+    ['elements a parser compares', (size) => numbered(size, (i) => `<b a=${i}>`)],
+    ['attributes in one tag', (size) => `<a ${numbered(size, (i) => `x${i.toString(36)} `)}>`],
+    [
+      'attributes split by slashes',
+      (size) => `<a ${numbered(size, (i) => `x${i.toString(36)}/`)}>`,
+    ],
+    [
+      'attributes with no spaces',
+      (size) => `<a ${numbered(size, (i) => `x${i.toString(36)}=""`)}>`,
+    ],
+    [
+      'formatting that reopens in every block',
+      (size) => `${numbered(size, (i) => `<b a=${i}>`)}${'<p>'.repeat(size)}`,
+    ],
+  ])('refuses a page of %s at linear cost', (_name, page) => {
+    const small = page(REFUSED_SIZE);
+    const large = page(REFUSED_SIZE * SIZE_RATIO);
+    expect(codeOf(small)).toBe('render.too_complex');
+    expect(codeOf(large)).toBe('render.too_complex');
+    expect(
+      growthOf(
+        () => render(small),
+        () => render(large),
+      ),
+    ).toBeLessThan(MAX_GROWTH);
   });
 
-  it('refuses a page whose formatting reopens in every block', () => {
-    const page = `${Array.from({ length: 2_000 }, (_, i) => `<b a=${i}>`).join('')}${'<p>'.repeat(2_000)}`;
-    expect(timed(page)).toBe('render.too_complex');
+  // Inside every limit, so these go all the way through and are what a stored page can cost.
+  it.each<[string, (size: number) => unknown[]]>([
+    ['paragraphs', (size) => Array.from({ length: size / 2 }, (_, i) => text(`p ${i}`))],
+    [
+      'one paragraph of inline nodes',
+      (size) => [
+        {
+          type: 'paragraph',
+          children: Array.from({ length: size / 2 }, () => ({
+            type: 'emphasis',
+            children: [{ type: 'text', value: 'x' }],
+          })),
+        },
+      ],
+    ],
+    ['one long text', (size) => [text('word\n'.repeat(size))]],
+    [
+      'references and their definitions',
+      (size) => [
+        {
+          type: 'paragraph',
+          children: Array.from({ length: size / 2 }, (_, i) => ({
+            type: 'linkReference',
+            identifier: `r${i}`,
+            referenceType: 'full',
+            children: [],
+          })),
+        },
+        ...Array.from({ length: size / 2 }, (_, i) => ({
+          type: 'definition',
+          identifier: `r${i}`,
+          url: '/a',
+        })),
+      ],
+    ],
+    [
+      'a wide table',
+      (size) => [
+        {
+          type: 'table',
+          children: [
+            {
+              type: 'tableRow',
+              children: Array.from({ length: size / 2 }, () => ({
+                type: 'tableCell',
+                children: [{ type: 'text', value: 'x' }],
+              })),
+            },
+          ],
+        },
+      ],
+    ],
+    [
+      'a long list',
+      (size) => [
+        {
+          type: 'list',
+          children: Array.from({ length: size / 3 }, () => ({
+            type: 'listItem',
+            children: [text('x')],
+          })),
+        },
+      ],
+    ],
+    [
+      'images to check',
+      (size) => [
+        {
+          type: 'paragraph',
+          children: Array.from({ length: size }, () => ({ type: 'image', url: '/a.png' })),
+        },
+      ],
+    ],
+  ])('renders a stored page of %s at linear cost', (_name, children) => {
+    const small = rootOf(children(STORED_SIZE));
+    const large = rootOf(children(STORED_SIZE * SIZE_RATIO));
+    expect(dangerIn(toHtml(small))).toEqual([]);
+    expect(
+      growthOf(
+        () => toHtml(small),
+        () => toHtml(large),
+      ),
+    ).toBeLessThan(MAX_GROWTH);
+  });
+
+  // The parser's budget, which is the most raw HTML a page can have and still render.
+  it.each<[string, (size: number) => string]>([
+    ['closed elements', (size) => '<div>x</div>'.repeat(size)],
+    ['elements with attributes', (size) => '<span a="1" b="2" c="3">x</span>'.repeat(size)],
+    [
+      'formatting in table cells',
+      (size) => `<table>${'<tr><td><b>x</b></td></tr>'.repeat(size / 12)}</table>`,
+    ],
+  ])('parses raw %s at no worse than the budget allows', (_name, page) => {
+    const small = page(RAW_SIZE);
+    const large = page(RAW_SIZE * SIZE_RATIO);
+    expect(codeOf(small)).toBe('rendered');
+    expect(codeOf(large)).toBe('rendered');
+    expect(
+      growthOf(
+        () => render(small),
+        () => render(large),
+      ),
+    ).toBeLessThan(MAX_GROWTH);
+  });
+
+  // Quadratic by nature, so what is held is the budget and not the growth.
+  it('keeps one tag at its attribute budget cheap on the CPU', () => {
+    const page = `<a ${numbered(MAX_ATTRIBUTES, (i) => `x${i.toString(36)} `)}>y</a>`;
+    expect(codeOf(page)).toBe('rendered');
+    expect(cheapestCpuMs(() => render(page))).toBeLessThan(MAX_ATTRIBUTES_CPU_MS);
+  });
+
+  it('holds footnotes to a number their conversion can search', () => {
+    const page = (total: number) =>
+      rootOf([
+        {
+          type: 'paragraph',
+          children: Array.from({ length: total }, (_, i) => ({
+            type: 'footnoteReference',
+            identifier: `n${i}`,
+          })),
+        },
+        ...Array.from({ length: total }, (_, i) => ({
+          type: 'footnoteDefinition',
+          identifier: `n${i}`,
+          children: [text('x')],
+        })),
+      ]);
+    expect(() => renderSafe(page(MAX_FOOTNOTES), policy())).not.toThrow();
+    expect(() => renderSafe(page(MAX_FOOTNOTES + 1), policy())).toThrow(
+      new RenderRefused('render.too_complex'),
+    );
   });
 
   it('counts blocks outside the HTML against reopened formatting', () => {
-    const paragraphs = Array.from({ length: 1_500 }, () => ({
-      type: 'paragraph',
-      children: [{ type: 'text', value: 'x' }],
-    }));
-    const opening = Array.from({ length: 1_500 }, (_, i) => `<b a=${i}>`).join('');
+    const paragraphs = Array.from({ length: 1_500 }, () => text('x'));
+    const opening = numbered(1_500, (i) => `<b a=${i}>`);
     const tree = rootOf([{ type: 'html', value: opening }, ...paragraphs]);
-    expect(() => renderSafe(tree, policy())).toThrow(RenderRefused);
-  });
-
-  it('refuses one tag with a quadratic number of attributes', () => {
-    const attributes = Array.from({ length: 200_000 }, (_, i) => `x${i.toString(36)}`).join(' ');
-    expect(timed(`<a ${attributes}>`)).toBe('render.too_complex');
-  });
-
-  it('refuses attributes packed without spaces', () => {
-    const attributes = Array.from({ length: 200_000 }, (_, i) => `x${i.toString(36)}`).join('/');
-    expect(timed(`<a ${attributes}>`)).toBe('render.too_complex');
-    const quoted = Array.from({ length: 200_000 }, (_, i) => `x${i.toString(36)}=""`).join('');
-    expect(timed(`<a ${quoted}>`)).toBe('render.too_complex');
+    expect(() => renderSafe(tree, policy())).toThrow(new RenderRefused('render.too_complex'));
   });
 
   it('refuses nesting past the limit even when each tag closes in time', () => {
-    expect(timed(`${'<div>'.repeat(300)}${'</div>'.repeat(300)}`)).toBe('render.too_deep');
+    expect(codeOf(`${'<div>'.repeat(300)}${'</div>'.repeat(300)}`)).toBe('render.too_deep');
   });
 
   it('turns a stack overflow in a library into a refusal', () => {
     // Too deep is the same answer from a process with a bigger stack.
-    expect(timed('<div>'.repeat(4_900))).toMatch(/^render\.(?:failed|too_deep)$/);
+    expect(codeOf('<div>'.repeat(4_900))).toMatch(/^render\.(?:failed|too_deep)$/);
   });
 
   it('turns a crash in a library into a refusal', () => {
@@ -154,25 +305,6 @@ describe('work a page can force', { timeout: 2 * BUDGET_MS }, () => {
     for (let level = 0; level < 505; level += 1) node = { type: 'emphasis', children: [node] };
     const use = policy({ limits: { maxBytes: 1_048_576, maxDepth: 512, maxNodes: 50_000 } });
     expect(toHtml(rootOf([{ type: 'paragraph', children: [node] }]), use)).toContain('x');
-  });
-
-  it('holds on footnotes, which the Markdown conversion searches in a list', () => {
-    const total = 24_000;
-    const paragraph = {
-      type: 'paragraph',
-      children: Array.from({ length: total }, (_, i) => ({
-        type: 'footnoteReference',
-        identifier: `n${i}`,
-      })),
-    };
-    const notes = Array.from({ length: total }, (_, i) => ({
-      type: 'footnoteDefinition',
-      identifier: `n${i}`,
-      children: [],
-    }));
-    const started = performance.now();
-    toHtml(rootOf([paragraph, ...notes]));
-    expect(performance.now() - started).toBeLessThan(BUDGET_MS);
   });
 
   it('passes a large honest page of HTML', () => {

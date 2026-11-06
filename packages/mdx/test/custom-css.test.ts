@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { checkCustomCss } from '../src/render.ts';
 import type { CssProblemCode } from '../src/render.ts';
+import { MAX_GROWTH, SIZE_RATIO, growthOf } from './cost.ts';
 
-// Catches a rescan from each byte, which takes minutes. It is no benchmark.
-const LINEAR_MS = 10_000;
+const MAX_SHEET_BYTES = 131_072;
+// Only for a failing run. A passing one costs a fraction of this, and a timeout cannot stop a
+// synchronous test anyway.
+const GROWTH_TIMEOUT_MS = 120_000;
 
 const codes = (css: string): readonly CssProblemCode[] => {
   const result = checkCustomCss(css);
@@ -56,6 +59,13 @@ describe('custom CSS', () => {
     ['a { b: "c\n} d { background: url(http://a.example/e); } f { g: "; }', 'css.parse_failed'],
     ["a { b: 'c\n} d { background: url(http://a.example/e); } f { g: '; }", 'css.parse_failed'],
     ['a { b: "c', 'css.parse_failed'],
+    // Chromium reads the middle rule of these two as live, with the url.
+    ['x{a:\\/* "\n;}b{background:url(http://evil.test/x)}c{d:"*/}', 'css.parse_failed'],
+    ['a{b:url(/*)}\ne{f:"x\n;}b{background:url(http://evil.test/x)}g{h:"*/}', 'css.parse_failed'],
+    ['x{a:\\/* "\r;}b{background:url(http://evil.test/x)}c{d:"*/}', 'css.parse_failed'],
+    ["x{a:\\/* '\f;}b{behavior:url(/x.htc)}c{d:'*/}", 'css.parse_failed'],
+    ['a[b="c\n"]{d:e}', 'css.parse_failed'],
+    ['@media "c\n" { a { b: c; } }', 'css.parse_failed'],
     ['@font-face { src: url(ftp://a.example/b); }', 'css.foreign_url'],
     ['@media url(http://a.example) { a { b: c; } }', 'css.foreign_url'],
     ['a { width: expression(alert(1)); }', 'css.expression'],
@@ -111,18 +121,37 @@ describe('custom CSS', () => {
     expect(codes('a { content: "b\\\nc"; }')).toEqual([]);
   });
 
-  it.each([
-    ['one long word', `a{b:${'c'.repeat(130_000)}}`],
-    ['one long escape run', `a{b:${'\\c'.repeat(60_000)}}`],
-    ['open brackets', `a{b:${'c('.repeat(60_000)}}`],
-    ['open comments', '/*'.repeat(60_000)],
-    ['quotes', `a{b:${'"'.repeat(130_000)}}`],
-    ['escaped quotes ending in a backslash', `"${'\\"'.repeat(60_000)}\\`],
-    ['escaped single quotes ending in a backslash', `'${"\\'".repeat(60_000)}\\`],
-  ])('reads %s in linear time', { timeout: 2 * LINEAR_MS }, (_name, css) => {
-    const started = performance.now();
-    checkCustomCss(css);
-    expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+  const FULL = 128_000;
+  const QUARTER = FULL / SIZE_RATIO;
+
+  // Each makes one string or token as long as the sheet allows. Every case is given as its
+  // length in bytes, and the two sizes are compared.
+  it.each<[string, (bytes: number) => string]>([
+    ['one long word', (bytes) => `a{b:${'c'.repeat(bytes)}}`],
+    ['one long escape run', (bytes) => `a{b:${'\\c'.repeat(bytes / 2)}}`],
+    ['open brackets', (bytes) => `a{b:${'c('.repeat(bytes / 2)}}`],
+    ['open and closed brackets', (bytes) => `a{b:${'c(d)'.repeat(bytes / 4)}}`],
+    ['url brackets', (bytes) => `a{b:${'url('.repeat(bytes / 4)}}`],
+    ['open comments', (bytes) => '/*'.repeat(bytes / 2)],
+    ['comments in a value', (bytes) => `a{b:${'/**/c'.repeat(bytes / 5)}}`],
+    ['quotes', (bytes) => `a{b:${'"'.repeat(bytes)}}`],
+    ['escaped quotes ending in a backslash', (bytes) => `"${'\\"'.repeat(bytes / 2)}\\`],
+    ['escaped single quotes ending in a backslash', (bytes) => `'${"\\'".repeat(bytes / 2)}\\`],
+    ['strings', (bytes) => `a{b:${'"c" '.repeat(bytes / 4)}}`],
+    ['many rules', (bytes) => 'a{b:c}'.repeat(bytes / 6)],
+    ['many declarations', (bytes) => `a{${'b:c;'.repeat(bytes / 4)}}`],
+    ['open blocks', (bytes) => 'a{'.repeat(bytes / 2)],
+    ['at rules', (bytes) => '@media x{'.repeat(bytes / 9)],
+    ['escapes to decode', (bytes) => `a{b:${'\\75 rl('.repeat(bytes / 7)}}`],
+  ])('costs linear time on %s', { timeout: GROWTH_TIMEOUT_MS }, (_name, sheet) => {
+    const small = sheet(QUARTER);
+    const large = sheet(FULL);
+    expect(Buffer.byteLength(large)).toBeLessThanOrEqual(MAX_SHEET_BYTES);
+    const growth = growthOf(
+      () => checkCustomCss(small),
+      () => checkCustomCss(large),
+    );
+    expect(growth).toBeLessThan(MAX_GROWTH);
   });
 
   it('survives deep nesting', () => {
