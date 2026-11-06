@@ -22,8 +22,8 @@ public.
 - `createEngine(deps)`: the five calls below, over a store, a parse client, flags and a policy.
   `databaseStore(db)` makes the store from a `@drefyn/db` database.
 - `parseEngineConfig(env)`: reads the caps below.
-- `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
-  and options give the same chunks in the same order, and their bodies join back into the page.
+- `chunkNode(content, options)`: splits a tree into block aligned chunks of the text a reader sees.
+  Pure: the same content and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -74,6 +74,13 @@ A chunk is made of whole blocks and starts again at every heading, so a word edi
 cannot move text in another. It closes before it passes the target. A block over the target splits
 at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
 on a save, and under the lock on a rollback, where a replay must not pay for it.
+
+A chunk holds only what a reader sees, because chunks feed search, the assistant and MCP. It is
+read off the tree: text, code and image alt text, through a closed list of node types. Frontmatter,
+comments, raw HTML, expressions, imports, link targets, titles and component props stay out, and so
+does any node type added later until it joins that list. Heading text is capped at 200 characters
+and heading paths share a budget of 262,144 characters a page. Past it a chunk has an empty path, so
+one save cannot grow by repeating a long path on every row.
 
 ## Configuration
 
