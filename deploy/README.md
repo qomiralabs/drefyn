@@ -3,6 +3,9 @@
 Docker Compose files for running Drefyn yourself. Today the stack is Postgres with pgvector;
 other services join it as they are built.
 
+The parse host is the one service that does not start with the stack. It is off behind the
+`parse` compose profile until the app tier joins it. See [The parse host](#the-parse-host).
+
 ## Requirements
 
 - Docker Engine 25 or later, for the healthcheck's start interval
@@ -472,3 +475,29 @@ stack, labelled with the compose file path, can only be removed: `reset --yes` d
 Set `COMPOSE_PROJECT_NAME` (in the shell or in `deploy/.env`) and a different
 `DREFYN_POSTGRES_PORT` to run this stack beside another one, for example from another
 worktree.
+
+## The parse host
+
+Customer pages are hostile input, so they are parsed in a service of their own: the `parse-host`
+image, built from `deploy/parse-host/Dockerfile`. It holds no credentials, has no volume and
+publishes no port, and its `parse` network is `internal`, so it has no route to the internet or
+to the machine it runs on. Node has no network permission, so that network is the only thing
+closing egress. Keep it that way: anything on the `parse` network can reach the host, and only
+the app tier belongs there.
+
+```sh
+token="$(openssl rand -hex 32)"                 # goes to the app tier as DREFYN_PARSE_HOST_TOKEN
+printf '%s' "$token" | shasum -a 256            # goes in deploy/.env as DREFYN_PARSE_TOKEN_SHA256
+docker compose -f deploy/compose.yaml --profile parse up --detach --build --wait parse-host
+bash scripts/selfhost-parse-test.sh             # proves the boundary from real containers
+```
+
+The host keeps only the hash, and it will not start without one. `DREFYN_PARSE_HOST_MEMORY_MB`,
+default 2048, sets both the check the host makes at start and the container's memory limit. On a
+small machine lower `DREFYN_PARSE_WORKER_MEMORY_MB`, default 512, and
+`DREFYN_PARSE_MAX_HELD_BYTES`, default 268435456, as well: the host refuses to start unless two
+threads at that cap, three times the held bytes and 256 MB fit. 128 and 134217728 fit in 1024,
+and a page that needs more heap is refused with `mdx.out_of_memory`. The
+supervisor inside the container restarts a host that dies. A crash loop stops it for a minute
+and logs `mdx.parse_host_crash_loop` at error level, and the container reads unhealthy until it
+is back.

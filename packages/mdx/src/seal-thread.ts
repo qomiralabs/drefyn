@@ -49,7 +49,9 @@ refuseAll(childProcess, [
   'execFileSync',
   'fork',
 ]);
-refuseAll(process, ['binding', 'dlopen', 'kill']);
+refuseAll(process, ['binding', 'dlopen', 'kill', '_kill']);
+// A report prints the environment of the whole process, not of this thread.
+refuseAll(process.report, ['getReport', 'writeReport']);
 
 for (const name of ['fetch', 'WebSocket', 'EventSource']) {
   Reflect.deleteProperty(globalThis, name);

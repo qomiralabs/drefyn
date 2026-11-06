@@ -1,6 +1,7 @@
 export const DEFAULT_MAX_HELD_BYTES = 268_435_456;
 
 // One organization alone must not be able to fill the host, so it gets a quarter at most.
+// Below that the share follows what is free, which is what stops several filling it together.
 const ORGANIZATION_SHARE = 4;
 
 export interface HeldClaim {
@@ -26,7 +27,12 @@ export function createHeldBytes(total: number): HeldBytes {
     claim(organization) {
       let mine = 0;
       const heldBy = () => byOrganization.get(organization) ?? 0;
-      const fits = (bytes: number) => heldBy() + bytes <= share && all + bytes <= total;
+      // What stays free has to be at least what this organization then holds, so the room left
+      // halves with each newcomer and never reaches nothing, however many act together.
+      const fits = (bytes: number) => {
+        const after = heldBy() + bytes;
+        return after <= share && after <= total - all - bytes;
+      };
       return {
         fits,
         take(bytes) {

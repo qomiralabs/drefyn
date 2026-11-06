@@ -100,6 +100,40 @@ services:
       start_period: 10s
       start_interval: 1s
 
+  # Parses customer pages, which are hostile input. Off by default until the app tier joins this
+  # stack: docker compose --profile parse up. The boundary is this service: no credentials, no
+  # volume, no published port, and a network with no way out. Node has no network permission,
+  # so this is the only thing that closes egress. Anything added here must leave that true.
+  parse-host:
+    profiles: [parse]
+    build:
+      context: ..
+      dockerfile: deploy/parse-host/Dockerfile
+    image: drefyn-parse-host:local
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    # Two threads and the supervisor. A page that gets this far has no business with more.
+    pids_limit: 128
+    # Native memory passes the heap cap, so only the OS bounds this. The host checks the same
+    # number at start. No swap, or a flood would slow everyone down before it was stopped.
+    mem_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}m
+    memswap_limit: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}m
+    environment:
+      DREFYN_PARSE_BIND: 0.0.0.0
+      DREFYN_PARSE_PORT: '8787'
+      DREFYN_PARSE_HOST_MEMORY_MB: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}
+      # What the limit above has to fit, so a small machine lowers these first. The host refuses
+      # to start if they do not fit: threads times the first, three times the second, plus 256.
+      DREFYN_PARSE_WORKER_MEMORY_MB: ${DREFYN_PARSE_WORKER_MEMORY_MB:-512}
+      DREFYN_PARSE_MAX_HELD_BYTES: ${DREFYN_PARSE_MAX_HELD_BYTES:-268435456}
+      # The hash of the token the app tier sends. Empty stops the host: there is no default.
+      DREFYN_PARSE_TOKEN_SHA256: ${DREFYN_PARSE_TOKEN_SHA256:-}
+    networks: [parse]
+    # A page in flight can take a whole kill grace to end.
+    stop_grace_period: 15s
+    restart: unless-stopped
+
 secrets:
   postgres_password:
     environment: DREFYN_POSTGRES_PASSWORD
@@ -111,6 +145,16 @@ secrets:
     environment: DREFYN_PUBLIC_READER_PASSWORD
   drefyn_auth_password:
     environment: DREFYN_AUTH_PASSWORD
+
+networks:
+  # internal drops the route out, so nothing reaches the internet. It leaves the bridge an
+  # address on the machine, though, and anything listening on all interfaces answers there, so
+  # that goes too. The app tier joins this network to reach the parse host, and nothing else
+  # belongs on it.
+  parse:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: 'true'
 
 volumes:
   pgdata:

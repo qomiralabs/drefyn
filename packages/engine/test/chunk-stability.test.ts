@@ -7,7 +7,7 @@ import { createParseClient, type ParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chunkNode, type Chunk } from '../src/index.ts';
-import { startHost, type RunningHost } from './support/parse-host.ts';
+import { parseClientConfig, startHost, type RunningHost } from './support/parse-host.ts';
 import { chunksBySection, sectionOf } from './support/tree.ts';
 
 const WORD = /\b[A-Za-z]{4,}\b/;
@@ -162,7 +162,7 @@ describe('an edit on the corpus', () => {
 
   beforeAll(async () => {
     running = await startHost();
-    edits = await editsOnCorpus(createParseClient({ url: running.url }));
+    edits = await editsOnCorpus(createParseClient(parseClientConfig(running.url)));
   }, HOST_START_MS + CORPUS_MS);
 
   afterAll(() => {

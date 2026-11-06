@@ -216,14 +216,22 @@ describe('many hostile files', () => {
       const flood = Array.from({ length: 8 }, (_, tenant) =>
         Array.from({ length: 5 }, () => pool.parse(request(bomb, PROJECT_A, 'md', orgAt(tenant)))),
       ).flat();
-      // Eight projects hold 24 places, so this one takes the last and the next bomb finds none.
+      // Eight organizations hold 24 places, so this one takes the last. A newcomer after it takes
+      // places from them, until it holds as much as they do and has to wait with the rest.
       expect(pool.stats().queued).toBe(24);
       const honestPage = pool.parse(request(honest, PROJECT_A, 'md', orgAt(99)));
-      const late = pool.parse(request(bomb, PROJECT_A, 'md', orgAt(8)));
-      expect(codeOf(await late)).toBe('mdx.queue_full');
+      const late = [
+        pool.parse(request(bomb, projectAt(1), 'md', orgAt(8))),
+        pool.parse(request(bomb, projectAt(2), 'md', orgAt(8))),
+      ];
+      expect(pool.stats().queued).toBe(25);
+      const third = pool.parse(request(bomb, projectAt(3), 'md', orgAt(8)));
+      expect(codeOf(await third)).toBe('mdx.queue_full');
 
-      const codes = (await Promise.all(flood)).map(codeOf);
-      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.organization_limit']));
+      const codes = (await Promise.all([...flood, ...late])).map(codeOf);
+      expect(new Set(codes)).toEqual(
+        new Set(['mdx.parse_timeout', 'mdx.organization_limit', 'mdx.queue_full']),
+      );
       expect(codeOf(await honestPage)).toBe('ok');
       expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
       expect(pool.stats().threads).toBeLessThanOrEqual(2);
@@ -272,6 +280,55 @@ describe('many hostile files', () => {
       expect(saves.filter(({ code }) => code !== 'ok')).toEqual([]);
       // A thread stays free for other organizations, so a save never waits on a bomb.
       expect(Math.max(...saves.map(({ ms }) => ms))).toBeLessThan(5_000);
+    },
+    TIMEOUT_MS,
+  );
+
+  // Security's measured case: 1 of 296 honest pages from eight organizations with one project
+  // each, and two organizations filling the queue at the old share.
+  it(
+    'eight organizations acting together at the default limits leave a neighbour parsing',
+    async () => {
+      const pool = createParsePool(parsePoolConfig({}), {
+        logger: recordingLogger(),
+        onStuck: () => undefined,
+      });
+      pools.push(pool);
+      const bomb = lazyLines(60 * KB);
+      const until = performance.now() + 8_000;
+      const pace = (ms: number) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+
+      const attacker = async (index: number) => {
+        await Promise.all(
+          Array.from({ length: 12 }, async () => {
+            while (performance.now() < until) {
+              await pool.parse(request(bomb, projectAt(index), 'md', orgAt(index + 1)));
+              await pace(50);
+            }
+          }),
+        );
+      };
+      const saves: { code: string; ms: number }[] = [];
+      const honestSaves = async () => {
+        while (performance.now() < until) {
+          const began = performance.now();
+          const result = await pool.parse(request(honest, PROJECT_B, 'md', ORG_B));
+          saves.push({ code: codeOf(result), ms: performance.now() - began });
+          await pace(200);
+        }
+      };
+      await Promise.all([
+        ...Array.from({ length: 8 }, (_, index) => attacker(index)),
+        honestSaves(),
+      ]);
+
+      expect(saves.length).toBeGreaterThan(0);
+      expect(saves.filter(({ code }) => code !== 'ok')).toEqual([]);
+      // Turns go by organization: at worst eight bombs ahead, two threads, 2 s each. Load adds.
+      expect(Math.max(...saves.map(({ ms }) => ms))).toBeLessThan(30_000);
     },
     TIMEOUT_MS,
   );

@@ -19,8 +19,27 @@ describe('held bytes', () => {
 
   it('caps the host across organizations', () => {
     const held = createHeldBytes(400);
-    for (const org of ['a', 'b', 'c', 'd']) expect(held.claim(org).take(100)).toBe(true);
-    expect(held.claim('e').take(1)).toBe(false);
+    for (const org of ['a', 'b', 'c']) expect(held.claim(org).take(100)).toBe(true);
+    expect(held.claim('d').take(101)).toBe(false);
+    expect(held.bytes()).toBe(300);
+  });
+
+  it('never lets one organization hold more than stays free beside it', () => {
+    const held = createHeldBytes(400);
+    for (const org of ['a', 'b', 'c']) held.claim(org).take(100);
+    expect(held.claim('d').take(51)).toBe(false);
+    expect(held.claim('d').take(50)).toBe(true);
+    expect(held.claim('e').take(26)).toBe(false);
+    expect(held.claim('e').take(25)).toBe(true);
+  });
+
+  it('leaves room however many organizations act together', () => {
+    const held = createHeldBytes(268_435_456);
+    for (let org = 0; org < 12; org += 1) {
+      const claim = held.claim(String(org));
+      for (let chunk = 0; chunk < 4_000 && claim.take(65_536); chunk += 1);
+    }
+    expect(held.claim('honest').fits(6_000)).toBe(true);
   });
 
   it('gives bytes back once, however many times a claim is released', () => {
@@ -48,7 +67,6 @@ describe('held bytes', () => {
   it('sees the whole host in what fits', () => {
     const held = createHeldBytes(400);
     for (const org of ['a', 'b', 'c']) held.claim(org).take(100);
-    held.claim('d').take(50);
     expect(held.claim('e').fits(50)).toBe(true);
     expect(held.claim('e').fits(51)).toBe(false);
   });
