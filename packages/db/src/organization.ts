@@ -7,6 +7,7 @@ import type {
   InvitationBlocksTable,
   InvitationsTable,
   MembershipsTable,
+  NodeVersionsTable,
   OrganizationsTable,
   ProjectRolesTable,
   ProjectsTable,
@@ -31,7 +32,7 @@ type UpdatableOnly<T, K extends keyof T> = {
 // Plan, read only state and everything about an API key but its use and revoke times are set
 // at creation; organization work cannot change them. A role changes only under the actor guards, and a
 // project role never moves to another person or project. A resend rewrites an invitation in place but
-// never its address; a block is never edited.
+// never its address; a block is never edited. History is append only.
 type GrantedTables<S> = Omit<
   S,
   | 'organizations'
@@ -41,6 +42,7 @@ type GrantedTables<S> = Omit<
   | 'invitation_blocks'
   | 'api_keys'
   | 'api_key_projects'
+  | 'node_versions'
   | 'project_roles'
 > & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
@@ -49,6 +51,7 @@ type GrantedTables<S> = Omit<
   projects: UpdatableOnly<ProjectsTable, 'slug' | 'name' | 'updated_at'>;
   api_keys: UpdatableOnly<ApiKeysTable, 'last_used_at' | 'revoked_at'>;
   api_key_projects: UpdatableOnly<ApiKeyProjectsTable, never>;
+  node_versions: UpdatableOnly<NodeVersionsTable, never>;
   invitations: UpdatableOnly<
     InvitationsTable,
     | 'role'

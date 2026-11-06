@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { TestProject } from 'vitest/node';
+import { startHost } from './parse-host.ts';
 import { inCi, migrateCli, run, stackAbsence, superuser, urlFor } from './stack.ts';
 
 declare module 'vitest' {
   export interface ProvidedContext {
     engineStackAbsent: string | null;
     engineDatabase: string;
+    engineParseUrl: string;
   }
 }
 
@@ -36,6 +38,7 @@ export default async function setup(project: TestProject) {
     throw new Error(`engine integration tests need the stack in CI: ${absent}`);
   project.provide('engineStackAbsent', absent);
   project.provide('engineDatabase', '');
+  project.provide('engineParseUrl', '');
   if (absent !== null) return;
   const name = `drefyn_engineit_${randomBytes(4).toString('hex')}`;
   await cloneBootstrapped(name);
@@ -55,7 +58,10 @@ export default async function setup(project: TestProject) {
     throw error;
   }
   project.provide('engineDatabase', name);
+  const { url, host } = await startHost();
+  project.provide('engineParseUrl', url);
   return async () => {
+    host.kill('SIGKILL');
     await drop();
   };
 }

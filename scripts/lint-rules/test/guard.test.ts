@@ -221,13 +221,14 @@ describe('guard on file names and layouts it must not trust', () => {
     }
   });
 
+  // Copying and linting the whole tree took 50 s on a passing CI run and passed 60 s when package
+  // tests shared the runner, on branches that touch nothing here. It grows with the tree.
+  const REAL_TREE_TIMEOUT_MS = 180_000;
+
   // Temp repos lack the real layout, so a guard.sh edit keyed on a file that only the
   // real tree has would pass every other test here.
-  // Copies and lints every tracked file, so it runs longest when the rest of the gate is busy. It
-  // takes 9 s alone and passed 60 s on CI runners that were running every other suite beside it.
   it(
     'I6: on a copy of the real tree, lints exactly its source files and reports a raw call',
-    { timeout: 180_000 },
     () => {
       const copy = mkdtempSync(join(tmpdir(), 'drefyn-guard-copy-'));
       try {
@@ -269,6 +270,7 @@ describe('guard on file names and layouts it must not trust', () => {
         rmSync(copy, { recursive: true, force: true });
       }
     },
+    REAL_TREE_TIMEOUT_MS,
   );
 });
 
