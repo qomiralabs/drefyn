@@ -307,6 +307,37 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     return project;
   };
 
+  const holdingMost = () =>
+    [...organizations.values()].reduce<Organization | undefined>(
+      (most, organization) =>
+        most === undefined || organization.queued > most.queued ? organization : most,
+      undefined,
+    );
+
+  const longestQueue = ({ projects }: Organization) =>
+    [...projects.values()].reduce<Project | undefined>(
+      (most, project) =>
+        most === undefined || project.waiting.length > most.waiting.length ? project : most,
+      undefined,
+    );
+
+  // Limits on one organization cannot stop several filling the queue, and a new organization is
+  // cheap. So a full queue takes a page from whoever holds most for whoever holds less. Only a
+  // queue with one organization per place refuses a newcomer. The page given up never ran, so it
+  // costs its owner no budget, and it gets the same refusal as a full queue.
+  const makeRoomFor = (asking: Organization): boolean => {
+    const fullest = holdingMost();
+    if (fullest === undefined || fullest.queued <= asking.queued + 1) return false;
+    const item = longestQueue(fullest)?.waiting.pop();
+    if (item === undefined) return false;
+    queued -= 1;
+    fullest.queued -= 1;
+    const result = refused('mdx.queue_full');
+    report(item.fields, result);
+    item.resolve(result);
+    return true;
+  };
+
   const instant = (code: MdxIssueCode, fields: LogFields) => {
     const result = refused(code);
     report(fields, result);
@@ -337,7 +368,9 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     ) {
       return instant('mdx.project_limit', fields);
     }
-    if (queued >= settings.maxQueued) return instant('mdx.queue_full', fields);
+    if (queued >= settings.maxQueued && !makeRoomFor(organization)) {
+      return instant('mdx.queue_full', fields);
+    }
 
     return new Promise((resolve) => {
       project.waiting.push({ job, fields, queuedAt: now(), resolve });

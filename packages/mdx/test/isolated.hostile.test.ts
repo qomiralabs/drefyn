@@ -276,6 +276,55 @@ describe('many hostile files', () => {
     TIMEOUT_MS,
   );
 
+  // Security's measured case: 1 of 296 honest pages from eight organizations with one project
+  // each, and two organizations filling the queue at the old share.
+  it(
+    'eight organizations acting together at the default limits leave a neighbour parsing',
+    async () => {
+      const pool = createParsePool(parsePoolConfig({}), {
+        logger: recordingLogger(),
+        onStuck: () => undefined,
+      });
+      pools.push(pool);
+      const bomb = lazyLines(60 * KB);
+      const until = performance.now() + 8_000;
+      const pace = (ms: number) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+
+      const attacker = async (index: number) => {
+        await Promise.all(
+          Array.from({ length: 12 }, async () => {
+            while (performance.now() < until) {
+              await pool.parse(request(bomb, projectAt(index), 'md', orgAt(index + 1)));
+              await pace(50);
+            }
+          }),
+        );
+      };
+      const saves: { code: string; ms: number }[] = [];
+      const honestSaves = async () => {
+        while (performance.now() < until) {
+          const began = performance.now();
+          const result = await pool.parse(request(honest, PROJECT_B, 'md', ORG_B));
+          saves.push({ code: codeOf(result), ms: performance.now() - began });
+          await pace(200);
+        }
+      };
+      await Promise.all([
+        ...Array.from({ length: 8 }, (_, index) => attacker(index)),
+        honestSaves(),
+      ]);
+
+      expect(saves.length).toBeGreaterThan(0);
+      expect(saves.filter(({ code }) => code !== 'ok')).toEqual([]);
+      // Turns go by organization: at worst eight bombs ahead, two threads, 2 s each. Load adds.
+      expect(Math.max(...saves.map(({ ms }) => ms))).toBeLessThan(30_000);
+    },
+    TIMEOUT_MS,
+  );
+
   it(
     'closing during a stall ends with the kill and refuses what waits',
     async () => {

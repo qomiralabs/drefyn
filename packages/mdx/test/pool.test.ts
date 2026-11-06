@@ -631,3 +631,118 @@ describe('printing in the pool', () => {
     expect(JSON.stringify(logger)).not.toContain('CANARY');
   });
 });
+
+describe('a full queue', () => {
+  const FAIR = {
+    threads: 2,
+    orgThreads: 1,
+    maxQueued: 8,
+    maxQueuedPerOrg: 4,
+    maxQueuedPerProject: 2,
+  };
+  const holdThreads = (pool: ReturnType<typeof harness>['pool']) => {
+    void pool.parse(request(PROJECT_A, 'a', orgAt(100)));
+    void pool.parse(request(PROJECT_A, 'b', orgAt(101)));
+  };
+  const queueUp = (pool: ReturnType<typeof harness>['pool'], org: number, pages: number) =>
+    Array.from({ length: pages }, (_, index) =>
+      pool.parse(request(projectAt(index), `${org}:${index}`, orgAt(org))),
+    );
+
+  it('makes room for an organization holding nothing, from the one holding most', async () => {
+    const { pool } = harness(FAIR);
+    holdThreads(pool);
+    const first = queueUp(pool, 1, 4);
+    const second = queueUp(pool, 2, 4);
+    await flush();
+    expect(pool.stats().queued).toBe(8);
+
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+
+    expect(pool.stats().queued).toBe(8);
+    // One of the two gave up a page, and nothing else moved.
+    const lost = await Promise.race([
+      Promise.any([...first, ...second].map(codeOf)),
+      flush().then(() => 'none'),
+    ]);
+    expect(lost).toBe('mdx.queue_full');
+    expect(await Promise.race([honest.then(() => 'settled'), flush().then(() => 'waiting')])).toBe(
+      'waiting',
+    );
+  });
+
+  it('gives a colluding group no way to keep it full', async () => {
+    const { pool } = harness({
+      ...FAIR,
+      maxQueued: 64,
+      maxQueuedPerOrg: 8,
+      maxQueuedPerProject: 8,
+    });
+    holdThreads(pool);
+    for (let org = 0; org < 8; org += 1) queueUp(pool, org, 8);
+    await flush();
+    expect(pool.stats().queued).toBe(64);
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    await expect(
+      Promise.race([honest.then(() => 'settled'), flush().then(() => 'waiting')]),
+    ).resolves.toBe('waiting');
+    // A member of the group gets nothing back by asking again.
+    await expect(codeOf(pool.parse(request(projectAt(7), 'again', orgAt(1))))).resolves.toBe(
+      'mdx.organization_limit',
+    );
+  });
+
+  it('refuses when the one asking already holds about as much as anyone', async () => {
+    const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
+    holdThreads(pool);
+    queueUp(pool, 1, 2);
+    queueUp(pool, 2, 2);
+    await flush();
+    const extra = pool.parse(request(projectAt(9), 'extra', orgAt(3)));
+    void extra;
+    await flush();
+    await expect(codeOf(pool.parse(request(projectAt(8), 'next', orgAt(3))))).resolves.toBe(
+      'mdx.queue_full',
+    );
+  });
+
+  it('refuses when every place is held by a different organization', async () => {
+    const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
+    holdThreads(pool);
+    for (let org = 0; org < 4; org += 1) queueUp(pool, org, 1);
+    await flush();
+    await expect(codeOf(pool.parse(request(PROJECT_B, 'honest', ORG_B)))).resolves.toBe(
+      'mdx.queue_full',
+    );
+  });
+
+  it('logs the page it gave up, by hash and with both ids', async () => {
+    const { pool, logger } = harness(FAIR);
+    holdThreads(pool);
+    queueUp(pool, 1, 4);
+    queueUp(pool, 2, 4);
+    await flush();
+    void pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    const refusal = logger.entries.find(({ event }) => event === 'mdx.parse_refused');
+    expect(refusal?.fields).toMatchObject({ code: 'mdx.queue_full' });
+    expect(refusal?.fields['organizationId']).toBeDefined();
+    expect(refusal?.fields['projectId']).toBeDefined();
+    expect(refusal?.fields['sha256']).toHaveLength(64);
+  });
+
+  it('gets back what it gave up: the pool still settles every page', async () => {
+    const { pool, finish } = harness(FAIR);
+    holdThreads(pool);
+    const first = queueUp(pool, 1, 4);
+    void queueUp(pool, 2, 4);
+    await flush();
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    for (let turn = 0; turn < 10 && pool.stats().busy > 0; turn += 1) await finish();
+    await Promise.all([...first, honest]);
+    expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
+  });
+});
