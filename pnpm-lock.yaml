@@ -273,7 +273,18 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@drefyn/mdx':
+        specifier: workspace:*
+        version: link:../mdx
+    devDependencies:
+      '@drefyn/db':
+        specifier: workspace:*
+        version: link:../db
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
 
   packages/entitlements:
     devDependencies:

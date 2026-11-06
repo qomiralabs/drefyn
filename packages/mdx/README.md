@@ -178,6 +178,20 @@ Each page logs `mdx.parse_finished` or `mdx.parse_refused`, and a kill logs
 `mdx.parse_thread_killed` or `mdx.parse_thread_stuck`, with organization, project, path, byte
 count, SHA-256 and timings. Page text never reaches a log, a result or a process stream.
 
+## The frozen tree
+
+`node_versions.content` holds an `MdxRoot`, and `ast_version` says which shape it has. The version
+only goes forward, because stored content stays in the shape it was written in.
+`test/fixtures/ast/v<n>.json` pins the stored tree of each case in `test/ast-cases.ts` for version
+`n`, and `test/ast-freeze.test.ts` fails when the parser gives anything else. That covers new
+fields, renamed node types, changed hashes and a parser upgrade that moves any of them.
+
+If it fails and the change is meant:
+
+1. Raise `AST_VERSION` in `src/types.ts`.
+2. Run `pnpm --filter @drefyn/mdx pin:ast`, which writes the new pin. It refuses to replace one.
+3. Keep every older pin. Stored content still looks like them.
+
 ## Commands
 
 - `pnpm --filter @drefyn/mdx test`
