@@ -628,10 +628,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     const CAP = 3;
     const CROWD = 40;
     const inner = databaseStore(db);
-    let release = () => undefined as void;
-    const open = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: open, resolve: release } = Promise.withResolvers<undefined>();
     let holding = 0;
     const store: EngineStore = {
       tenant: (tenant, work, options) =>
@@ -661,7 +658,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     const answer = await held.engine.queryNodes(quiet.tenant, { typeId: quiet.typeId });
     expect(answer.ok).toBe(true);
 
-    release();
+    release(undefined);
     const results = await Promise.all(crowd);
     const served = results.filter((result) => result.ok);
     const busy = results.filter((result) => !result.ok);
