@@ -416,7 +416,7 @@ describe('queryNodes without a server', () => {
       typeId: TYPE,
       filter: { field: UNSLOTTED_WHEN, op: 'exists' },
     });
-    expect(pageSql(statements)?.sql).toMatch(/case when left\(.*'0000-' then null/);
+    expect(pageSql(statements)?.sql).toMatch(/case when starts_with\(.* then null/);
   });
 
   it('skips a node deleted since its row was read, and keeps order', async () => {

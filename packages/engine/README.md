@@ -138,6 +138,16 @@ declared `sortable` field, nulls come last in both directions, and pages walk by
 that holds only to the order it came from. With no sort, newest first. A list that passes
 `DREFYN_ENGINE_QUERY_TIMEOUT_MS` returns `engine.unavailable` and no partial page.
 
+A cursor names a node, the order and nothing else, so no field value is in a URL or an access log.
+The sort value is read back from that node on the next page. A cursor naming a node the tenant
+cannot see answers `engine.cursor_invalid`. Editing the sort field of the last item shown between
+two pages moves the place with it, so that walk can skip or repeat items near the edit.
+
+An organization runs at most `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT` lists at once in each process. The
+next one gets `engine.unavailable`, issue code `engine.query_busy`, and logs `engine.query_busy`.
+Nothing queues. Build one engine per process: the count lives in it. A date of year 0000 is refused
+on a save and in a filter, and one stored before that reads as missing.
+
 `drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's
 owner. It rebuilds the key with `reindex concurrently` past 30 percent bloat, estimated from the
 key's size against the heap, one run at a time, and prints one JSON line of counts with any alerts:
@@ -155,6 +165,7 @@ work and never tenant work. The role sees other roles' transactions only with `p
 | `DREFYN_CHUNK_TARGET_CHARS`               | 800     | Close a chunk before it passes this. At most the cap. |
 | `DREFYN_CHUNK_MAX_CHARS`                  | 2000    | Hard cap on a chunk, whatever the page holds.         |
 | `DREFYN_ENGINE_QUERY_TIMEOUT_MS`          | 2000    | `statement_timeout` for `queryNodes`, at most 60000.  |
+| `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT`       | 4       | Lists at once, per organization, per process.         |
 | `DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS` | 20000   | Largest type an undeclared filter may read.           |
 
 A tree is about 4 times its source at the corpus median and 7.5 times at worst, so a source cap
