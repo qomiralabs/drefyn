@@ -215,32 +215,138 @@ describe('a block that claims its stored bytes', () => {
     expect(kept(moved, words('b'))).toBe(true);
   });
 
-  it.each(['linkReference', 'imageReference', 'footnoteReference'])(
-    'lets %s settle to the text that names it, either way',
-    (type) => {
-      const asReference = reference(type, named);
-      expect(kept(stored(asReference), words('[a]'))).toBe(true);
-      expect(kept(stored(words('[a]')), asReference)).toBe(true);
-    },
-  );
+  const link = reference('linkReference', { referenceType: 'shortcut', label: 'a', ...named });
+  const image = reference('imageReference', { referenceType: 'shortcut', label: 'a', alt: 'a' });
+  const footnote = reference('footnoteReference', { label: 'a' });
+
+  it.each([
+    ['a shortcut link', link, '[a]'],
+    [
+      'a collapsed link',
+      reference('linkReference', { referenceType: 'collapsed', label: 'a', ...named }),
+      '[a][]',
+    ],
+    [
+      'a full link',
+      reference('linkReference', { referenceType: 'full', label: 'b', ...named }),
+      '[a][b]',
+    ],
+    ['a shortcut image', image, '![a]'],
+    [
+      'a full image',
+      reference('imageReference', { referenceType: 'full', label: 'b', alt: 'a' }),
+      '![a][b]',
+    ],
+    ['a footnote', footnote, '[^a]'],
+  ])('lets %s settle to the text that wrote it, either way', (_name, asReference, written) => {
+    expect(kept(stored(asReference), words(written))).toBe(true);
+    expect(kept(stored(words(written)), asReference)).toBe(true);
+  });
 
   it('finds a reference among other children', () => {
     const mixed = paragraph({ type: 'text', value: 'x ' }, { type: 'linkReference', ...named });
     expect(kept(stored(mixed), words('x [a]'))).toBe(true);
   });
 
-  it('still wants every word the tree held, in order and whole', () => {
-    expect(kept(stored(reference('linkReference', named)), words('b'))).toBe(false);
-    const two = paragraph({ type: 'text', value: 'ab' }, { type: 'linkReference', ...named });
-    expect(kept(stored(two), words('a b [a]'))).toBe(false);
+  it('reads what sits inside a reference', () => {
+    const marked = {
+      type: 'linkReference',
+      referenceType: 'full',
+      label: 'b',
+      children: [{ type: 'emphasis', children: [{ type: 'text', value: 'a' }] }],
+    };
+    const settled = paragraph(
+      { type: 'text', value: '[' },
+      { type: 'emphasis', children: [{ type: 'text', value: 'a' }] },
+      { type: 'text', value: '][b]' },
+    );
+    expect(kept(stored(paragraph(marked)), settled)).toBe(true);
   });
 
-  it('reads alt text, and nothing that is not text', () => {
-    const image = reference('imageReference', { alt: 'a' });
-    expect(kept(stored(image), words('![a]'))).toBe(true);
-    expect(kept(stored(image), words('b'))).toBe(false);
+  it('lets a URL inside a reference settle into a link', () => {
+    const url = 'www.example.com';
+    const asReference = reference('linkReference', {
+      referenceType: 'full',
+      label: 'b',
+      children: [{ type: 'text', value: url }],
+    });
+    const settled = paragraph(
+      { type: 'text', value: '[' },
+      { type: 'link', url: `http://${url}`, children: [{ type: 'text', value: url }] },
+      { type: 'text', value: '][b]' },
+    );
+    expect(kept(stored(asReference), settled)).toBe(true);
+    const elsewhere = paragraph(
+      { type: 'text', value: '[' },
+      { type: 'link', url: 'https://evil.test', children: [{ type: 'text', value: url }] },
+      { type: 'text', value: '][b]' },
+    );
+    expect(kept(stored(asReference), elsewhere)).toBe(false);
+  });
+
+  it.each([
+    ['a script scheme', 'javascript:x', 'javascript:x'],
+    ['a data scheme', 'data:text/html,x', 'data:text/html,x'],
+    ['bare words', 'evil.test', 'evil.test'],
+    ['http on bare words', 'evil.test', 'http://evil.test'],
+    ['mail on words with no address', 'evil', 'mailto:evil'],
+    ['mail with a scheme in it', 'a:b@c.d', 'mailto:a:b@c.d'],
+  ])('does not take a link with %s for a settled URL', (_name, words, url) => {
+    const asReference = paragraph(
+      { type: 'text', value: `${words} ` },
+      { type: 'linkReference', referenceType: 'shortcut', label: 'a', ...named },
+    );
+    const again = paragraph(
+      { type: 'link', url, children: [{ type: 'text', value: words }] },
+      { type: 'text', value: ' [a]' },
+    );
+    expect(kept(stored(asReference), again)).toBe(false);
+  });
+
+  it.each([
+    ['an https URL', 'https://a.test/b', 'https://a.test/b'],
+    ['an http URL', 'http://a.test', 'http://a.test'],
+    ['a www address', 'www.a.test', 'http://www.a.test'],
+    ['a mail address', 'a@b.test', 'mailto:a@b.test'],
+  ])('takes %s for a settled URL', (_name, words, url) => {
+    const asReference = paragraph(
+      { type: 'text', value: `${words} ` },
+      { type: 'linkReference', referenceType: 'shortcut', label: 'a', ...named },
+    );
+    const again = paragraph(
+      { type: 'link', url, children: [{ type: 'text', value: words }] },
+      { type: 'text', value: ' [a]' },
+    );
+    expect(kept(stored(asReference), again)).toBe(true);
+  });
+
+  it('wants what the tree said and nothing more', () => {
+    expect(kept(stored(link), words('b'))).toBe(false);
+    const two = paragraph({ type: 'text', value: 'ab' }, { type: 'linkReference', ...named });
+    expect(kept(stored(two), words('a b [a]'))).toBe(false);
+    expect(kept(stored(link), words('[a] and more'))).toBe(false);
+    expect(kept(stored(words('[a]')), paragraph({ type: 'text', value: 'x ' }, link))).toBe(false);
+  });
+
+  it('compares what a reference points through, not only its words', () => {
+    const full = (label: string) =>
+      reference('linkReference', { referenceType: 'full', label, ...named });
+    expect(kept(stored(full('b')), full('c'))).toBe(false);
+    const alt = (text: string) =>
+      reference('imageReference', { referenceType: 'full', label: 'b', alt: text });
+    expect(kept(stored(alt('a')), alt('b'))).toBe(false);
+  });
+
+  it('wants a block around a reference to stay the same block', () => {
+    const quoted = { type: 'blockquote', children: [link] };
+    expect(kept(stored(quoted), words('[a]'))).toBe(false);
+    expect(kept(stored(quoted), { type: 'blockquote', children: [words('[a]')] })).toBe(true);
+  });
+
+  it('reads nothing into a value that is not text', () => {
     const number = reference('linkReference', { value: 7, children: [] });
-    expect(kept(stored(number), words('nothing'))).toBe(true);
+    expect(kept(stored(number), words('[]'))).toBe(true);
+    expect(kept(stored(number), words('nothing'))).toBe(false);
   });
 
   it('skips what an editor left empty when it pairs the blocks', () => {

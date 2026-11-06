@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - deploy/**
+      - packages/mdx/src/**
+      - packages/tenancy/src/**
       - scripts/selfhost*.sh
       - .github/workflows/selfhost.yml
   push:
     branches: [development, staging, main]
     paths:
       - deploy/**
+      - packages/mdx/src/**
+      - packages/tenancy/src/**
       - scripts/selfhost*.sh
       - .github/workflows/selfhost.yml
 
@@ -24,7 +28,7 @@ jobs:
   compose:
     name: compose stack
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -67,6 +71,10 @@ jobs:
           docker image inspect --format 'digests {{.RepoDigests}}' "$(docker inspect --format '{{.Image}}' "$id")"
           curl -fsS --max-time 5 http://127.0.0.1:58025/readyz
           "${mailpit[@]}" rm --stop --force mailpit
+      # Off by default until the app tier joins the stack. Builds the image, so it runs here and
+      # not in the gate, and checks the boundary from real containers.
+      - name: Parse host is closed, and comes back when killed
+        run: bash scripts/selfhost-parse-test.sh
       - name: Tear down
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove

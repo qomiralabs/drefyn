@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { TenantRef } from '@drefyn/tenancy';
@@ -23,6 +24,9 @@ import {
 export interface ParseHostOptions {
   readonly config: ParsePoolConfig;
   readonly port: number;
+  // Explicit, so no deployment listens on every interface by leaving this out.
+  readonly bind: string;
+  readonly tokenSha256: string;
   readonly logger: ParseLogger;
   readonly maxHeldBytes?: number;
   readonly startThread?: () => ParseThread;
@@ -31,6 +35,9 @@ export interface ParseHostOptions {
 export interface ParseHost {
   readonly pool: ParsePool;
   readonly server: Server;
+  readonly held: HeldBytes;
+  // Stops taking pages, finishes what it holds and refuses what waits.
+  close(): Promise<void>;
 }
 
 const MAX_PARSE_BODY = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
@@ -51,6 +58,25 @@ const statusOf = (result: JobResult) =>
 const empty = (response: ServerResponse, status: number) => {
   response.writeHead(status).end();
 };
+
+const BEARER = 'Bearer ';
+const sha256 = (text: string) => createHash('sha256').update(text).digest();
+
+// Both sides are hashes of one length, so the compare says nothing about either.
+function holdsToken(request: IncomingMessage, expected: Buffer): boolean {
+  const header = request.headers.authorization ?? '';
+  return (
+    header.startsWith(BEARER) && timingSafeEqual(sha256(header.slice(BEARER.length)), expected)
+  );
+}
+
+// Nothing of a stranger's request is read or logged, and the connection goes with the answer.
+function refuseStranger(request: IncomingMessage, response: ServerResponse, logger: ParseLogger) {
+  logger.warn('mdx.parse_host_unauthorized', {});
+  response.writeHead(401, { connection: 'close' }).end(() => {
+    request.destroy();
+  });
+}
 
 function readBody(
   request: IncomingMessage,
@@ -156,15 +182,25 @@ async function serveClaimed(
   }
 }
 
+interface Served {
+  readonly pool: ParsePool;
+  readonly held: HeldBytes;
+  readonly token: Buffer;
+  readonly logger: ParseLogger;
+}
+
 async function serve(
-  pool: ParsePool,
-  held: HeldBytes,
+  { pool, held, token, logger }: Served,
   request: IncomingMessage,
   response: ServerResponse,
 ) {
   const { url = '', method } = request;
   if (url === '/health') {
     empty(response, 200);
+    return;
+  }
+  if (!holdsToken(request, token)) {
+    refuseStranger(request, response, logger);
     return;
   }
   if (method !== 'POST' || (url !== '/parse' && url !== '/print')) {
@@ -185,7 +221,7 @@ async function serve(
 }
 
 // The boundary is this process: started with --permission and an env allow list, on a network
-// the platform closes. A thread inside it is only the per page kill.
+// the platform closes, answering only the app tier. A thread inside it is only the per page kill.
 export async function startParseHost(options: ParseHostOptions): Promise<ParseHost> {
   const { config, logger } = options;
   const held = createHeldBytes(options.maxHeldBytes ?? DEFAULT_MAX_HELD_BYTES);
@@ -198,16 +234,22 @@ export async function startParseHost(options: ParseHostOptions): Promise<ParseHo
     },
     ...(options.startThread && { startThread: options.startThread }),
   });
+  const served = { pool, held, logger, token: Buffer.from(options.tokenSha256, 'hex') };
   const server = createServer((request, response) => {
-    void serve(pool, held, request, response);
+    void serve(served, request, response);
   });
   server.requestTimeout = REQUEST_TIMEOUT_MS;
   server.maxConnections = MAX_CONNECTIONS;
   await new Promise<void>((resolve) => {
-    server.listen(options.port, resolve);
+    server.listen(options.port, options.bind, resolve);
   });
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : options.port;
   process.stdout.write(`${JSON.stringify({ event: 'mdx.parse_host_listening', port })}\n`);
-  return { pool, server };
+  const close = async () => {
+    await pool.close();
+    server.closeIdleConnections();
+    await new Promise((resolve) => server.close(resolve));
+  };
+  return { pool, server, held, close };
 }

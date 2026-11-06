@@ -176,6 +176,13 @@ describe('content', () => {
     expect(print).toHaveBeenCalledOnce();
   });
 
+  it('asks the host to treat a save as someone waiting', async () => {
+    const print = vi.fn(() => Promise.resolve(printed(page)));
+    const { engine } = build(happy, { parse: { print } });
+    await engine.saveDraft(save());
+    expect(print).toHaveBeenCalledWith(expect.objectContaining({ priority: 'interactive' }));
+  });
+
   const refusedBy = (code: MdxIssueCode) => ({
     print: () =>
       Promise.resolve<PrintResult>({

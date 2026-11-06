@@ -1,0 +1,11 @@
+# A list of what goes in, so a new file at the root never ends up in the image by accident.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.npmrc
+!scripts/patches
+!packages/mdx/package.json
+!packages/mdx/src
+!packages/tenancy/package.json
+!packages/tenancy/src
