@@ -17,7 +17,7 @@ import type { EngineConfig } from './config.ts';
 import { Refusal } from './errors.ts';
 import { parseSlotMap, type SlotMap } from './filter-slots.ts';
 import type { EngineTx } from './store.ts';
-import type { NodeId, NodePage, NodeSummary, SortDirection } from './types.ts';
+import type { NodePage, NodeSummary, SortDirection } from './types.ts';
 import type { NodeFamily, NodeLifecycle } from './vocabulary.ts';
 
 const NOT_DECLARED_MESSAGE = 'Declare this field as filterable to filter a type of this size.';
@@ -189,12 +189,12 @@ function fromClause(route: Route, tenant: TenantRef, typeId: string): Raw {
   const { organizationId, projectId } = tenant;
   return route === 'slots'
     ? sql`app.node_filter_rows f
-          where f.organization_id = ${organizationId as string}::uuid
-            and f.project_id = ${projectId as string}::uuid
+          where f.organization_id = ${organizationId}::uuid
+            and f.project_id = ${projectId}::uuid
             and f.type_id = ${typeId}::uuid`
     : sql`app.nodes n
-          where n.organization_id = ${organizationId as string}::uuid
-            and n.project_id = ${projectId as string}::uuid
+          where n.organization_id = ${organizationId}::uuid
+            and n.project_id = ${projectId}::uuid
             and n.type_id = ${typeId}::uuid
             and n.deleted_at is null`;
 }
@@ -253,7 +253,7 @@ async function summaries(
     if (node === undefined) return [];
     return [
       {
-        nodeId: idOf('nod', node.id) as NodeId,
+        nodeId: idOf('nod', node.id),
         family: node.family as NodeFamily,
         typeId: node.type_id,
         lifecycle: node.lifecycle as NodeLifecycle,
@@ -275,8 +275,8 @@ async function fitsScan(
   const { rows } = await sql<{ items: number }>`
     select count(*) as items from (
       select 1 from app.node_filter_rows f
-      where f.organization_id = ${tenant.organizationId as string}::uuid
-        and f.project_id = ${tenant.projectId as string}::uuid
+      where f.organization_id = ${tenant.organizationId}::uuid
+        and f.project_id = ${tenant.projectId}::uuid
         and f.type_id = ${typeId}::uuid
       limit ${max + 1}) type_items`.execute(tx);
   return (rows[0]?.items ?? 0) <= max;

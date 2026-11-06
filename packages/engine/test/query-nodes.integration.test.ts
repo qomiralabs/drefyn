@@ -736,7 +736,7 @@ describeWithStack('filter rows in a save', () => {
     await declare(built, seeded, FIELDS);
     const node = await newItem(built, seeded);
     const values = (count: number) =>
-      Array.from({ length: count }, (_, at) => `${String(at)}`.padStart(32, 'x'));
+      Array.from({ length: count }, (_, at) => String(at).padStart(32, 'x'));
     const fits = await saveItem(built, seeded, node, null, {
       [TAGS]: values(32),
     });
@@ -750,9 +750,7 @@ describeWithStack('filter rows in a save', () => {
     const done = await built.engine.declareSchema({
       tenant: seeded.tenant,
       typeId: seeded.typeId,
-      schema: schemaOf(seeded, [
-        listField(fieldId(), 'tags', { filterable: true, maxItems: 33 } as Partial<FieldDef>),
-      ]),
+      schema: schemaOf(seeded, [listField(fieldId(), 'tags', { filterable: true, maxItems: 33 })]),
     });
     expect(done).toMatchObject({
       ok: false,
@@ -771,7 +769,7 @@ describeWithStack('filter rows in a save', () => {
     ];
     await declare(built, seeded, [
       ...[a, b, c, d].map((id, at) =>
-        textField(id, `f${String(at)}`, { filterable: true, maxLength: 256 } as Partial<FieldDef>),
+        textField(id, `f${String(at)}`, { filterable: true, maxLength: 256 }),
       ),
       listField(e, 'tags', { filterable: true }),
     ]);

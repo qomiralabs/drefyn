@@ -177,7 +177,7 @@ export async function runMaintain(options: MaintainCommandOptions): Promise<numb
       await client.end();
     }
   } catch (error) {
-    const code = error instanceof Error ? Reflect.get(error, 'code') : undefined;
+    const code: unknown = error instanceof Error ? Reflect.get(error, 'code') : undefined;
     stderr.write(`drefyn maintain: failed (${typeof code === 'string' ? code : 'unknown'})\n`);
     return EXIT_FAILED;
   }

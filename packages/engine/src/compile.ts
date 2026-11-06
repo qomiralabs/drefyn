@@ -71,7 +71,7 @@ function typeOf(field: FieldDef): ValueType {
   }
 }
 
-const headValue = (id: FieldId): Raw => sql`n.head_fields ->> ${id as string}::text`;
+const headValue = (id: FieldId): Raw => sql`n.head_fields ->> ${id}::text`;
 
 export function headOperand(field: FieldDef): Operand {
   const isList = field.kind === 'list' || (field.kind === 'reference' && field.many);
@@ -79,7 +79,7 @@ export function headOperand(field: FieldDef): Operand {
     const element = field.kind === 'list' ? field.of : { ...field, many: false };
     return {
       shape: 'json_list',
-      expression: sql`n.head_fields -> ${field.id as string}::text`,
+      expression: sql`n.head_fields -> ${field.id}::text`,
       element,
     };
   }

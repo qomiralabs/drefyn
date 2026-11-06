@@ -20,10 +20,10 @@ const rowsOf = (
   action: 'fill' | 'clear',
 ) =>
   work.map(({ fieldId, column }) => ({
-    organization_id: tenant.organizationId as string,
-    project_id: tenant.projectId as string,
+    organization_id: tenant.organizationId,
+    project_id: tenant.projectId,
     type_id: typeId,
-    field_id: fieldId as string,
+    field_id: fieldId,
     slot_column: column,
     action,
   }));
@@ -94,8 +94,8 @@ export async function declareSchema(
   if (clears.length > 0) {
     await sql`
       update app.filter_backfills set done_at = now()
-      where organization_id = ${tenant.organizationId as string}::uuid
-        and project_id = ${tenant.projectId as string}::uuid
+      where organization_id = ${tenant.organizationId}::uuid
+        and project_id = ${tenant.projectId}::uuid
         and type_id = ${typeId}::uuid
         and action = 'fill'
         and done_at is null

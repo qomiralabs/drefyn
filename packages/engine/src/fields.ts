@@ -20,14 +20,20 @@ function textValue(value: unknown, maxBytes: number): string | null {
   return encoder.encode(value).length <= maxBytes ? value : null;
 }
 
-function numberValue(field: FieldDef & { kind: 'number' }, value: unknown): string | null {
+function unitsOf(field: FieldDef & { kind: 'number' }, value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const units = parseUnits(value, field.scale);
-  if (units === null) return null;
+  return units === null ? null : String(units);
+}
+
+function numberValue(field: FieldDef & { kind: 'number' }, value: unknown): string | null {
+  const text = unitsOf(field, value);
+  if (text === null) return null;
+  const units = BigInt(text);
   const min = field.min === undefined ? null : parseUnits(field.min, field.scale);
   const max = field.max === undefined ? null : parseUnits(field.max, field.scale);
   if ((min !== null && units < min) || (max !== null && units > max)) return null;
-  return String(units);
+  return text;
 }
 
 function dateValue(field: FieldDef & { kind: 'date' }, value: unknown): string | null {
@@ -37,11 +43,6 @@ function dateValue(field: FieldDef & { kind: 'date' }, value: unknown): string |
   const instant = new Date(value as string).toISOString();
   return FOUR_DIGIT_YEAR.test(instant) ? instant : null;
 }
-
-const bare = (field: FieldDef & { kind: 'number' }): FieldDef & { kind: 'number' } => {
-  const { min: _min, max: _max, ...rest } = field;
-  return rest;
-};
 
 // One form for a save and a filter, so a slot, a scan and the value compared with them agree.
 // Numbers are integer units in a string: JSON numbers would pass through a float.
@@ -73,7 +74,7 @@ export function filterValue(field: FieldDef, value: unknown): StoredScalar | nul
     case 'markdown':
       return typeof value === 'string' ? value : null;
     case 'number':
-      return typeof value === 'string' ? numberValue(bare(field), value) : null;
+      return unitsOf(field, value);
     default:
       return canonicalValue(field, value);
   }

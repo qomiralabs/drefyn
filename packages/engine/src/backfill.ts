@@ -76,9 +76,9 @@ async function writeBatch(
   await sql`
     update app.node_filter_rows f set ${target} = ${value}
     from app.nodes n
-    where n.organization_id = ${tenant.organizationId as string}::uuid
-      and n.project_id = ${tenant.projectId as string}::uuid
-      and n.id = any(${ids as string[]}::uuid[])
+    where n.organization_id = ${tenant.organizationId}::uuid
+      and n.project_id = ${tenant.projectId}::uuid
+      and n.id = any(${ids}::uuid[])
       and f.organization_id = n.organization_id
       and f.project_id = n.project_id
       and f.type_id = n.type_id

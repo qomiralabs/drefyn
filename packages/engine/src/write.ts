@@ -284,10 +284,10 @@ async function writeSlots(
   await sql`
     update app.node_filter_rows f set ${sql.join(assignments)}
     from (select ${sql.join(values)}) v
-    where f.organization_id = ${tenant.organizationId as string}::uuid
-      and f.project_id = ${tenant.projectId as string}::uuid
+    where f.organization_id = ${tenant.organizationId}::uuid
+      and f.project_id = ${tenant.projectId}::uuid
       and f.type_id = ${node.typeId}::uuid
-      and f.node_id = ${node.id as string}::uuid
+      and f.node_id = ${node.id}::uuid
       and (${sql.join(current)}) is distinct from (${sql.join(next)})`.execute(tx);
 }
 

@@ -377,7 +377,7 @@ async function scanRun(): Promise<boolean> {
 
 const headRows = z.array(z.tuple([z.string(), z.string()]));
 
-async function startWriter(): Promise<Promise<object>> {
+async function startWriter(): Promise<{ readonly finished: Promise<object> }> {
   const text = await superuser(
     `select coalesce(json_agg(json_build_array(id, head_version_id)), '[]')
      from app.nodes where type_id = '${typeId}';`,
@@ -397,14 +397,16 @@ async function startWriter(): Promise<Promise<object>> {
     seconds: env.DREFYN_BENCH_SECONDS,
   };
   const worker = new Worker(new URL('./query-writer.ts', import.meta.url), { workerData });
-  return new Promise<object>((done, fail) => {
-    worker.once('message', done);
-    worker.once('error', fail);
-  });
+  return {
+    finished: new Promise<object>((done, fail) => {
+      worker.once('message', done);
+      worker.once('error', fail);
+    }),
+  };
 }
 
 async function writeRun(): Promise<boolean> {
-  const finished = await startWriter();
+  const { finished } = await startWriter();
   const samples = new Map<string, number[]>(SHAPES.map((shape) => [shape.name, []]));
   const interval = 1000 / LISTS_PER_SECOND;
   const started = performance.now();
