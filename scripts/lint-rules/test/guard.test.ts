@@ -221,49 +221,57 @@ describe('guard on file names and layouts it must not trust', () => {
     }
   });
 
+  // Copying and linting the whole tree took 50 s on a passing CI run and passed 60 s when package
+  // tests shared the runner, on branches that touch nothing here. It grows with the tree.
+  const REAL_TREE_TIMEOUT_MS = 180_000;
+
   // Temp repos lack the real layout, so a guard.sh edit keyed on a file that only the
   // real tree has would pass every other test here.
-  it('I6: on a copy of the real tree, lints exactly its source files and reports a raw call', () => {
-    const copy = mkdtempSync(join(tmpdir(), 'drefyn-guard-copy-'));
-    try {
-      const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' })
-        .split('\0')
-        .filter((file) => file !== '' && existsSync(join(repoRoot, file)));
-      for (const file of tracked) {
-        const from = join(repoRoot, file);
-        mkdirSync(dirname(join(copy, file)), { recursive: true });
-        // Copy a link as a link; the checker, not this test, refuses links.
-        if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), join(copy, file));
-        else copyFileSync(from, join(copy, file));
+  it(
+    'I6: on a copy of the real tree, lints exactly its source files and reports a raw call',
+    () => {
+      const copy = mkdtempSync(join(tmpdir(), 'drefyn-guard-copy-'));
+      try {
+        const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' })
+          .split('\0')
+          .filter((file) => file !== '' && existsSync(join(repoRoot, file)));
+        for (const file of tracked) {
+          const from = join(repoRoot, file);
+          mkdirSync(dirname(join(copy, file)), { recursive: true });
+          // Copy a link as a link; the checker, not this test, refuses links.
+          if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), join(copy, file));
+          else copyFileSync(from, join(copy, file));
+        }
+        execFileSync('git', ['init', '-q'], { cwd: copy });
+        // A folder name the real tree cannot already hold.
+        const probe = relative(copy, mkdtempSync(join(copy, 'guard-probe-')));
+        writeFileSync(join(copy, probe, 'net.ts'), RAW);
+        execFileSync('git', ['add', '-A'], { cwd: copy });
+        const result = spawnSync('bash', [guard, '--format', 'json'], {
+          cwd: copy,
+          encoding: 'utf8',
+        });
+        const parsed = JSON.parse(result.stdout) as { filePath: string; messages: unknown[] }[];
+        const real = realpathSync(copy);
+        const linted = parsed.map((r) => relative(real, r.filePath)).sort();
+        const sources = [...tracked, `${probe}/net.ts`]
+          .filter(
+            (file) =>
+              /\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('scripts/lint-rules/test/fixtures/'),
+          )
+          .sort();
+        expect(linted).toEqual(sources);
+        const flagged = parsed
+          .filter((r) => r.messages.length > 0)
+          .map((r) => relative(real, r.filePath));
+        expect(flagged).toEqual([`${probe}/net.ts`]);
+        expect(result.status).toBe(1);
+      } finally {
+        rmSync(copy, { recursive: true, force: true });
       }
-      execFileSync('git', ['init', '-q'], { cwd: copy });
-      // A folder name the real tree cannot already hold.
-      const probe = relative(copy, mkdtempSync(join(copy, 'guard-probe-')));
-      writeFileSync(join(copy, probe, 'net.ts'), RAW);
-      execFileSync('git', ['add', '-A'], { cwd: copy });
-      const result = spawnSync('bash', [guard, '--format', 'json'], {
-        cwd: copy,
-        encoding: 'utf8',
-      });
-      const parsed = JSON.parse(result.stdout) as { filePath: string; messages: unknown[] }[];
-      const real = realpathSync(copy);
-      const linted = parsed.map((r) => relative(real, r.filePath)).sort();
-      const sources = [...tracked, `${probe}/net.ts`]
-        .filter(
-          (file) =>
-            /\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('scripts/lint-rules/test/fixtures/'),
-        )
-        .sort();
-      expect(linted).toEqual(sources);
-      const flagged = parsed
-        .filter((r) => r.messages.length > 0)
-        .map((r) => relative(real, r.filePath));
-      expect(flagged).toEqual([`${probe}/net.ts`]);
-      expect(result.status).toBe(1);
-    } finally {
-      rmSync(copy, { recursive: true, force: true });
-    }
-  });
+    },
+    REAL_TREE_TIMEOUT_MS,
+  );
 });
 
 describe('guard catches what per package lint can miss', () => {

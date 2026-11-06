@@ -33,23 +33,23 @@ const show = (value: unknown): string =>
 
 describe('checkLimit at the boundary', () => {
   it('allows usage equal to the limit', () => {
-    expect(checkLimit('free', 'org.seats', 2)).toMatchObject({
+    expect(checkLimit('free', 'org.seats', 5)).toMatchObject({
       status: 'allowed',
       tier: 'free',
       key: 'org.seats',
-      limit: 2,
-      usage: 2,
+      limit: 5,
+      usage: 5,
       grace: 0,
     });
   });
 
   it('refuses one past the limit as over limit, read only', () => {
-    expect(checkLimit('free', 'org.seats', 3)).toMatchObject({
+    expect(checkLimit('free', 'org.seats', 6)).toMatchObject({
       status: 'over_limit',
       tier: 'free',
       key: 'org.seats',
-      limit: 2,
-      usage: 3,
+      limit: 5,
+      usage: 6,
       grace: 0,
       excess: 1,
       access: 'read_only',
@@ -148,7 +148,7 @@ describe('downgrades never delete', () => {
   it('keeps seats, read only, after Scale (unlimited) to Free', () => {
     expect(checkLimit('free', 'org.seats', 40)).toMatchObject({
       status: 'over_limit',
-      excess: 38,
+      excess: 35,
       access: 'read_only',
     });
   });
@@ -176,14 +176,14 @@ describe('downgrades never delete', () => {
   });
 
   it('does not let a caller change later answers by mutating a result', () => {
-    const first = checkLimit('free', 'org.seats', 3) as unknown as Record<string, unknown>;
+    const first = checkLimit('free', 'org.seats', 6) as unknown as Record<string, unknown>;
     try {
       first['status'] = 'allowed';
       first['limit'] = UNLIMITED;
     } catch {
       // A frozen result is fine too.
     }
-    expect(checkLimit('free', 'org.seats', 3).status).toBe('over_limit');
+    expect(checkLimit('free', 'org.seats', 6).status).toBe('over_limit');
   });
 });
 
@@ -231,7 +231,7 @@ describe('send caps and the grace for eligible sends', () => {
 
   it('ignores the grace option on limits that are not sends', () => {
     const eligible = { graceEligible: true } as const;
-    expect(checkLimit('free', 'org.seats', 3, eligible).status).toBe('over_limit');
+    expect(checkLimit('free', 'org.seats', 6, eligible).status).toBe('over_limit');
     expect(checkLimit('free', 'status.monitors', 11, eligible).status).toBe('over_limit');
   });
 

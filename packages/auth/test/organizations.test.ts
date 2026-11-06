@@ -397,7 +397,7 @@ describe('listMyOrganizationSeats', () => {
     const { orgs, scripted } = setup(answer);
     const list = await orgs.listMyOrganizationSeats(access());
     expect(list.map((o) => [o.slug, o.seats])).toEqual([
-      ['acme', { used: 4, limit: 5 }],
+      ['acme', { used: 4, limit: 10 }],
       ['beta', { used: 2, limit: 'unlimited' }],
     ]);
     const begins = scripted.events.filter((e) => e.kind === 'begin');

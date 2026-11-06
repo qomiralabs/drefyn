@@ -39,6 +39,7 @@ describe('flag names', () => {
       | 'product.status'
       | 'dashboard.shell'
       | 'email.smtp_delivery'
+      | 'engine.writes'
     >();
   });
 

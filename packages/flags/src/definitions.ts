@@ -7,6 +7,7 @@ export type FlagKind = (typeof FLAG_KINDS)[number];
 export const FLAG_AREAS = Object.freeze([
   'product',
   'content',
+  'engine',
   'docs',
   'studio',
   'status',
