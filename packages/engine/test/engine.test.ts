@@ -300,7 +300,7 @@ describe('the writes flag', () => {
               type_id: TYPE,
               lifecycle: 'draft',
               head_version_id: null,
-              head_content: null,
+              content: null,
               seq: null,
               ast_version: null,
             },
@@ -524,7 +524,7 @@ describe('history', () => {
       type_id: TYPE,
       lifecycle: 'draft',
       head_version_id: VERSION,
-      head_content: page,
+      content: page,
       seq: 2,
       ast_version: 1,
     };
@@ -598,6 +598,47 @@ describe('observability', () => {
       `engine.save.chunk ${NODE}`,
       `engine.save.write ${NODE}`,
     ]);
+  });
+});
+
+describe('the head copy', () => {
+  const nodeUpdate = (statements: readonly Statement[]) =>
+    statements.find((statement) => has(statement, 'update "nodes"'));
+
+  it('writes none for a docs page', async () => {
+    const { engine, statements } = build(happy);
+    await engine.saveDraft(save());
+    expect(nodeUpdate(statements)?.parameters).not.toContain(JSON.stringify(page));
+  });
+
+  it('keeps one for a Studio item', async () => {
+    const studio: Responder = (statement) =>
+      has(statement, 'for update') ? [{ ...NODE_ROW, family: 'studio_item' }] : happy(statement);
+    const { engine, statements } = build(studio);
+    await engine.saveDraft(save());
+    expect(nodeUpdate(statements)?.parameters).toContain(JSON.stringify(page));
+  });
+
+  it('reads the head by key for a page with no copy', async () => {
+    const reads: Responder = (statement) =>
+      has(statement, 'coalesce("n"."head_content", "v"."content")')
+        ? [
+            {
+              family: 'docs_page',
+              type_id: TYPE,
+              lifecycle: 'draft',
+              head_version_id: VERSION,
+              content: page,
+              seq: 3,
+              ast_version: 1,
+            },
+          ]
+        : happy(statement);
+    const { engine } = build(reads);
+    expect(await engine.getHead(tenant, NODE)).toMatchObject({
+      ok: true,
+      value: { seq: 3, content: { type: 'root' } },
+    });
   });
 });
 

@@ -52,6 +52,44 @@ const BUSY_OR_LOST = ['engine.version_conflict', 'engine.unavailable'];
 
 const codeOf = (result: EngineResult<unknown>) => (result.ok ? 'ok' : result.error.code);
 
+const headCopy = (node: string) =>
+  admin(`select coalesce(head_content::text, 'none') from app.nodes where id = '${node}';`);
+
+describeWithStack('the head copy', () => {
+  it('is not kept for a docs page, and the head still reads the same', async () => {
+    const node = await newNode(built.engine, home);
+    const first = await save(built, home, node, null, 'First.\n');
+    expect(await headCopy(node)).toBe('none');
+    expect(await built.engine.getHead(home.tenant, node)).toMatchObject({
+      ok: true,
+      value: { versionId: first.versionId, seq: 1, content: { type: 'root' } },
+    });
+    const head = await built.engine.getHead(home.tenant, node);
+    if (!head.ok || head.value.content === null) throw new Error('no head');
+    expect(head.value.content.children[0]?.source?.raw).toBe('First.');
+  });
+
+  it('is cleared by a save, so an older row cannot go stale', async () => {
+    const node = await newNode(built.engine, home);
+    const first = await save(built, home, node, null, 'First.\n');
+    await admin(`update app.nodes set head_content = '{"old":true}' where id = '${node}';`);
+    await save(built, home, node, first.versionId, 'Second.\n');
+    expect(await headCopy(node)).toBe('none');
+  });
+
+  it('stays on a Studio item, whose list scans read it', async () => {
+    const studio = await seed({ family: 'studio_item' });
+    const made = await built.engine.createNode({
+      tenant: studio.tenant,
+      family: 'studio_item',
+      typeId: studio.typeId,
+    });
+    if (!made.ok) throw new Error(made.error.code);
+    await save(built, studio, made.value.nodeId, null, 'Item.\n');
+    expect(await headCopy(made.value.nodeId)).toContain('"type": "root"');
+  });
+});
+
 describeWithStack('saveDraft against Postgres', () => {
   beforeAll(async () => {
     db = await openDatabase();
