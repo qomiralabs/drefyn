@@ -5,6 +5,7 @@ export { createEngine, type Engine, type EngineDeps } from './engine.ts';
 export type { EngineError, EngineIssue, EngineResult } from './errors.ts';
 export {
   noopTracer,
+  type EngineFlagAnswer,
   type EngineFlags,
   type EngineLogger,
   type EngineTracer,

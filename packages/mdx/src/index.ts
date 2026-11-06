@@ -15,6 +15,7 @@ export type {
   MdxRoot,
   ParseResult,
   PrintResult,
+  PrintTiming,
   RenderPolicy,
   Result,
 } from './types.ts';
