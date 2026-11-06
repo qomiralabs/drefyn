@@ -1,0 +1,30 @@
+[
+ [
+  "<script>alert(1)</script>",
+  ""
+ ],
+ [
+  "<img src=x onerror=alert(1)>",
+  "<img src=\"x\" loading=\"lazy\"/>"
+ ],
+ [
+  "[x](javascript:alert(1))",
+  "<p><a>x</a></p>"
+ ],
+ [
+  "[x][ref]\n\n[ref]: javascript:alert(1)",
+  "<p><a>x</a></p>"
+ ],
+ [
+  "<svg><script>alert(1)</script></svg>",
+  "<p></p>"
+ ],
+ [
+  "<iframe src=\"https://example.com\"></iframe>",
+  ""
+ ],
+ [
+  "<a href=\"  JaVaScRiPt:alert(1)\">x</a>",
+  "<p><a>x</a></p>"
+ ]
+]
