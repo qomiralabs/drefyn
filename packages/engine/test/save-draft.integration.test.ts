@@ -231,6 +231,26 @@ describeWithStack('saveDraft against Postgres', () => {
     expect(await versionCount(node)).toBe(1);
   });
 
+  it('never replays a key from another project of the organization', async () => {
+    const sibling = await seed({ organization: home.organization });
+    const theirs = await newNode(engine, sibling);
+    const idempotencyKey = key();
+    const content = await tree(parse, sibling, 'Theirs.\n');
+    const request = {
+      expectedHeadVersionId: null,
+      content,
+      origin: 'human',
+      actor: ACTOR,
+      idempotencyKey,
+    } as const;
+    const first = await engine.saveDraft({ ...request, tenant: sibling.tenant, nodeId: theirs });
+    const mine = await newNode(engine, home);
+    const second = await engine.saveDraft({ ...request, tenant: home.tenant, nodeId: mine });
+    if (!first.ok || !second.ok) throw new Error('refused');
+    expect(second.value.versionId).not.toBe(first.value.versionId);
+    expect(second.value.seq).toBe(1);
+  });
+
   it('refuses the same key on another node, and with another origin', async () => {
     const node = await newNode(engine, home);
     const spare = await newNode(engine, home);

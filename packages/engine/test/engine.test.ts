@@ -65,8 +65,22 @@ const has = (statement: Statement, text: string) => statement.sql.includes(text)
 const PLAN = { plan_tier: 'self_hosted', organization_read_only: null, project_read_only: null };
 const NODE_ROW = { id: NODE, family: 'docs_page', type_id: TYPE, head_version_id: null };
 
+const WRITE_READ = 'as "head_seq"';
+
+// The one read after the lock: a row always, as the type exists, with no replay in it by default.
+const writeRead = (over: Record<string, unknown> = {}) => [
+  { head_seq: null, schema_version: 1, replay_id: null, ...over },
+];
+
+const replayOf = ({ id, ...row }: Record<string, unknown>) =>
+  writeRead({
+    replay_id: id,
+    ...Object.fromEntries(Object.entries(row).map(([name, value]) => [`replay_${name}`, value])),
+  });
+
 const happy: Responder = (statement) => {
   if (has(statement, 'for update')) return [NODE_ROW];
+  if (has(statement, WRITE_READ)) return writeRead();
   if (has(statement, 'from "organizations"')) return [{ ...PLAN, nodes: 1 }];
   if (has(statement, 'insert into "node_versions"')) {
     return [{ id: VERSION, seq: 1, content_sha256: SHA }];
@@ -400,7 +414,7 @@ describe('history', () => {
   const withHead: Responder = (statement) => {
     if (has(statement, 'for update')) return [{ ...NODE_ROW, head_version_id: VERSION }];
     if (has(statement, 'content::text')) return [target];
-    if (has(statement, 'select "seq" from "node_versions"')) return [{ seq: 4 }];
+    if (has(statement, WRITE_READ)) return writeRead({ head_seq: 4 });
     if (has(statement, 'insert into "node_versions"')) {
       return [{ id: VERSION, seq: 5, content_sha256: SHA }];
     }
@@ -443,9 +457,7 @@ describe('history', () => {
   const replaying =
     (row: Record<string, unknown>): Responder =>
     (statement) =>
-      has(statement, 'where "organization_id" = $1 and "project_id" = $2 and "idempotency_key"')
-        ? [row]
-        : happy(statement);
+      has(statement, WRITE_READ) ? replayOf(row) : happy(statement);
   const hashOfPage = createHash('sha256').update(JSON.stringify(page)).digest();
 
   it('replays with no write', async () => {
@@ -601,6 +613,42 @@ describe('observability', () => {
   });
 });
 
+describe('reads after the lock', () => {
+  const reads = (statements: readonly Statement[]) =>
+    statements.filter(
+      (s) => s.sql.startsWith('select') && !has(s, 'for update') && !has(s, 'from "organizations"'),
+    );
+
+  it('asks for the replay, the head seq and the schema version in one statement', async () => {
+    const { engine, statements } = build(happy);
+    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    expect(reads(statements)).toHaveLength(1);
+  });
+
+  it('binds the tenant on each table it reads', async () => {
+    const { engine, statements } = build(happy);
+    await engine.saveDraft(save());
+    const [read] = reads(statements);
+    const count = (value: string) =>
+      read?.parameters.filter((parameter) => parameter === value).length;
+    expect(count(tenant.organizationId)).toBe(3);
+    expect(count(tenant.projectId)).toBe(3);
+  });
+
+  it('takes the next seq from the head it read', async () => {
+    const onward: Responder = (statement) =>
+      has(statement, WRITE_READ)
+        ? writeRead({ head_seq: 7 })
+        : has(statement, 'for update')
+          ? [{ ...NODE_ROW, head_version_id: VERSION }]
+          : happy(statement);
+    const { engine, statements } = build(onward);
+    await engine.saveDraft(save({ expectedHeadVersionId: idOf('ver', VERSION) }));
+    const insert = statements.find((s) => has(s, 'insert into "node_versions"'));
+    expect(insert?.parameters).toContain(8);
+  });
+});
+
 describe('the head copy', () => {
   const nodeUpdate = (statements: readonly Statement[]) =>
     statements.find((statement) => has(statement, 'update "nodes"'));
@@ -723,6 +771,14 @@ describe('chunks at write', () => {
     }
   });
 
+  it('writes the outbox row in the same statement as the last chunks', async () => {
+    const { engine, statements } = build(happy);
+    await engine.saveDraft(save());
+    const [write, ...others] = outboxWrites(statements);
+    expect(others).toEqual([]);
+    expect(write?.sql).toContain('insert into "chunks"');
+  });
+
   it('stores the sha256 of each body beside it', async () => {
     const { engine, statements } = build(happy);
     await engine.saveDraft(save());
@@ -813,18 +869,16 @@ describe('chunks at write', () => {
 
   it('writes nothing more for a replay', async () => {
     const replayed: Responder = (statement) =>
-      has(statement, '"idempotency_key" = ')
-        ? [
-            {
-              id: VERSION,
-              seq: 1,
-              node_id: NODE,
-              parent_version_id: null,
-              origin: 'human',
-              actor: { kind: 'system', job: 'test' },
-              content_sha256: createHash('sha256').update(JSON.stringify(page)).digest(),
-            },
-          ]
+      has(statement, WRITE_READ)
+        ? replayOf({
+            id: VERSION,
+            seq: 1,
+            node_id: NODE,
+            parent_version_id: null,
+            origin: 'human',
+            actor: { kind: 'system', job: 'test' },
+            content_sha256: createHash('sha256').update(JSON.stringify(page)).digest(),
+          })
         : happy(statement);
     const { engine, statements } = build(replayed);
     expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
