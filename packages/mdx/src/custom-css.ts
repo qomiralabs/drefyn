@@ -60,12 +60,6 @@ const ESCAPE = /\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|\r\n|([^]))/gi;
 const TOKEN =
   /"(?:[^"\\]|\\[^])*"?|'(?:[^'\\]|\\[^])*'?|((?:[-\w]|[^\0-\x7f]|\\[0-9a-f]{1,6}[ \t\n\r\f]?|\\[^])+)(\(\s*(?:"((?:[^"\\]|\\[^])*)"?|'((?:[^'\\]|\\[^])*)'?|((?:[^)\\]|\\[^])*))?)?/gi;
 
-// A browser ends a string at a bare line break and keeps reading rules. postcss reads on to the
-// closing quote, so what looks like one string here can hold a live rule there. Each string
-// ends in a match of some kind, so a failed one never restarts from the next quote.
-const STRING_OR_COMMENT =
-  /\/\*[^]*?(?:\*\/|$)|"(?:[^"\\\n\r\f]|\\[^])*(["\n\r\f]|\\?$)|'(?:[^'\\\n\r\f]|\\[^])*(['\n\r\f]|\\?$)/g;
-
 // http, so a URL that takes its scheme from here cannot pass as https.
 const SITE_BASE = 'http://page.invalid/';
 const SITE_ORIGIN = 'http://page.invalid';
@@ -128,10 +122,35 @@ function problemsOf(node: ChildNode): CssProblemCode[] {
   return [];
 }
 
+const LINE_BREAKS = new Set(['\n', '\r', '\f']);
+
+// Where the string opening here ends, or -1 if it never closes on its own line.
+function endOfString(css: string, open: number): number {
+  for (let at = open + 1; at < css.length; at += 1) {
+    const char = css.charAt(at);
+    if (char === css.charAt(open)) return at + 1;
+    if (LINE_BREAKS.has(char)) return -1;
+    if (char === '\\') at += 1;
+  }
+  return -1;
+}
+
+// A browser ends a string at a bare line break and keeps reading rules. postcss reads on to the
+// closing quote, so what looks like one string here can hold a live rule there. A plain scan
+// and not a pattern, so a sheet of quotes and backslashes costs one pass.
 function hasBrokenString(css: string): boolean {
-  for (const [, double, single] of css.matchAll(STRING_OR_COMMENT)) {
-    const end = double ?? single;
-    if (end !== undefined && end !== '"' && end !== "'") return true;
+  let at = 0;
+  while (at !== -1 && at < css.length) {
+    const char = css.charAt(at);
+    if (char === '"' || char === "'") {
+      at = endOfString(css, at);
+      if (at === -1) return true;
+    } else if (css.startsWith('/*', at)) {
+      at = css.indexOf('*/', at + 2);
+      if (at !== -1) at += 2;
+    } else {
+      at += 1;
+    }
   }
   return false;
 }

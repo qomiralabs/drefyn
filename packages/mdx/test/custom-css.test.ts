@@ -102,6 +102,11 @@ describe('custom CSS', () => {
     expect(codes(`a{b:c}`.repeat(50_000))).toEqual(['css.too_large']);
   });
 
+  it('reads quotes inside a comment as comment', () => {
+    expect(codes('/* it\'s */ a { b: c; } /* " */')).toEqual([]);
+    expect(codes('a { b: c; } /* never closed "')).toEqual([]);
+  });
+
   it('keeps a string split with a backslash', () => {
     expect(codes('a { content: "b\\\nc"; }')).toEqual([]);
   });
