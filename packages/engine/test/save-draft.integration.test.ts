@@ -364,14 +364,14 @@ describeWithStack('saveDraft against Postgres', () => {
   // Built by copying one block, as parsing a page this size can pass the host's kill on a slow
   // runner. The cap has to refuse it before the host sees it anyway.
   it('refuses a tree past the default cap without asking the host', async () => {
-    const print = vi.fn(parse.print);
+    const print = vi.fn<ParseClient['print']>((request) => parse.print(request));
     const capped = buildEngine(db, { parse: { print } }).engine;
     const node = await newNode(capped, home);
     const draft = await input(node, null, `${'a'.repeat(100)}\n`);
     const [block] = draft.content.children;
     const done = await capped.saveDraft({
       ...draft,
-      content: { ...draft.content, children: new Array(24_000).fill(block) } as never,
+      content: { ...draft.content, children: new Array(24_000).fill(block) },
     });
     expect(done).toMatchObject({
       ok: false,
