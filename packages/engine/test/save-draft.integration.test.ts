@@ -361,11 +361,23 @@ describeWithStack('saveDraft against Postgres', () => {
     expect(await versionCount(node)).toBe(0);
   });
 
-  it('refuses at the default cap the page that grew 85 times', async () => {
-    const node = await newNode(engine, home);
-    const small = 'a\n\n'.repeat(24_999);
-    const done = await engine.saveDraft(await input(node, null, small));
-    expect(codeOf(done)).toBe('engine.too_large');
+  // Built by copying one block, as parsing a page this size can pass the host's kill on a slow
+  // runner. The cap has to refuse it before the host sees it anyway.
+  it('refuses a tree past the default cap without asking the host', async () => {
+    const print = vi.fn(parse.print);
+    const capped = buildEngine(db, { parse: { print } }).engine;
+    const node = await newNode(capped, home);
+    const draft = await input(node, null, `${'a'.repeat(100)}\n`);
+    const [block] = draft.content.children;
+    const done = await capped.saveDraft({
+      ...draft,
+      content: { ...draft.content, children: new Array(24_000).fill(block) } as never,
+    });
+    expect(done).toMatchObject({
+      ok: false,
+      error: { code: 'engine.too_large', issues: [{ code: 'tree.too_large' }] },
+    });
+    expect(print).not.toHaveBeenCalled();
     expect(await versionCount(node)).toBe(0);
   });
 
