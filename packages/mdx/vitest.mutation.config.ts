@@ -15,6 +15,7 @@ export default defineConfig({
       'test/merge3.test.ts',
       'test/merge3.hostile.test.ts',
       'test/merge-align.test.ts',
+      'test/merge-count.test.ts',
       'test/merge-nodes.test.ts',
     ],
     restoreMocks: true,

@@ -143,24 +143,29 @@ function checkPlacement(
   return undefined;
 }
 
-// Words a side keeps in one leaf stay in one leaf, unless the other side itself pulled them apart.
-function checkMembership(merged: Leaves, sides: readonly Leaves[]): string | undefined {
+// Words a side keeps in one leaf stay in one leaf, unless a side pulled that leaf apart: a word
+// added to a paragraph the other side split lands in one piece, and that is the right answer.
+function checkMembership(
+  merged: Leaves,
+  sides: readonly Leaves[],
+  split: ReadonlySet<string>,
+): string | undefined {
+  const apart = (first: string, second: string) =>
+    sides.some(
+      ({ leaf }) => leaf.has(first) && leaf.has(second) && leaf.get(first) !== leaf.get(second),
+    );
   for (const { leaf } of sides) {
     const groups = new Map<number, string[]>();
     for (const [word, place] of leaf) groups.set(place, [...(groups.get(place) ?? []), word]);
     for (const words of groups.values()) {
+      const pulled =
+        words.some((word) => split.has(word)) ||
+        words.some((first, index) => words.slice(index + 1).some((word) => apart(first, word)));
+      if (pulled) continue;
       const [first, ...rest] = words.filter((word) => merged.leaf.has(word));
       if (first === undefined) continue;
-      for (const word of rest) {
-        if (merged.leaf.get(word) === merged.leaf.get(first)) continue;
-        const apart = sides.some(
-          (side) =>
-            side.leaf.has(word) &&
-            side.leaf.has(first) &&
-            side.leaf.get(word) !== side.leaf.get(first),
-        );
-        if (!apart) return `${first} and ${word} split across leaves`;
-      }
+      const stray = rest.find((word) => merged.leaf.get(word) !== merged.leaf.get(first));
+      if (stray !== undefined) return `${first} and ${stray} split across leaves`;
     }
   }
   return undefined;
@@ -238,7 +243,8 @@ function checkCount(base: MdxRoot, ours: MdxRoot, theirs: MdxRoot, merged: MdxRo
     const three = mine + other - was;
     const least = Math.min(mine, other);
     if (now > Math.max(three, least)) return `kept ${word}: more than the sides explain`;
-    if (now < Math.max(0, Math.min(three, least))) return `lost ${word}: fewer than they explain`;
+    const most = Math.max(mine, other);
+    if (now < Math.max(0, Math.min(three, most))) return `lost ${word}: fewer than they explain`;
   }
   return undefined;
 }
@@ -325,7 +331,7 @@ function failureIn(input: MergeCase): string | undefined {
   const movedTheirs = travelling(flipped(sideTheirs.moved, baseLeaves, theirsLeaves), documents);
   const failure =
     checkPlacement(mergedLeaves, oursLeaves, theirsLeaves, movedOurs, movedTheirs) ??
-    checkMembership(mergedLeaves, sides) ??
+    checkMembership(mergedLeaves, sides, new Set([...sideOurs.split, ...sideTheirs.split])) ??
     checkPrints(outcome.merged);
   if (failure !== undefined) return failure;
   const again = treeOf(swapped.value);

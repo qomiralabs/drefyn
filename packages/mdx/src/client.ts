@@ -235,8 +235,8 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       }
       const frame: WireMerge = { tenant, path, trees, policy: wireOf(policy), priority };
       const body = JSON.stringify(frame);
-      const answer = await post({ route: '/merge', body, tenant, path, check: checkMerged });
-      return answer as MergeAnswer;
+      const check = (answer: JobResult) => checkMerged(answer, { base, ours, theirs });
+      return (await post({ route: '/merge', body, tenant, path, check })) as MergeAnswer;
     },
   };
 }

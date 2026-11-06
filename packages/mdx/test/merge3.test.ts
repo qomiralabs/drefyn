@@ -276,7 +276,7 @@ describe('merge3 scenarios', () => {
     it('lets a delete stand beside a block that shares only a word or two', () => {
       const base = page(top, para, 'A wholly different block.', bottom);
       const deleted = page(top, 'A wholly different block.', bottom);
-      const edited = page(top, 'A wholly different block.', '> The sky is blue.', bottom);
+      const edited = page(top, 'A wholly different block.', '> Sky blue today.', bottom);
       expect(clean(outcomeOf(base, deleted, edited))).toBe(edited);
     });
   });
@@ -731,12 +731,6 @@ describe('the whole page count decides what is clean', () => {
 
   it.each([
     [
-      'a sentence deleted against Enter',
-      edge(sentences),
-      edge('First sentence here.'),
-      edge('First sentence here.', `Second sentence ${secret} here.`),
-    ],
-    [
       'a list item deleted against moving it into a quote',
       edge(four),
       edge('- item one\n- item two\n- item four'),
@@ -750,6 +744,13 @@ describe('the whole page count decides what is clean', () => {
     ],
   ])('%s is a page level conflict, both ways', (_name, base, one, other) => {
     for (const outcome of both(base, one, other)) unexplained(outcome);
+  });
+
+  it('a sentence deleted against Enter is a conflict, both ways', () => {
+    const base = edge(sentences);
+    const deleted = edge('First sentence here.');
+    const split = edge('First sentence here.', `Second sentence ${secret} here.`);
+    for (const outcome of both(base, deleted, split)) expect(outcome.kind).toBe('conflict');
   });
 
   it('a quote split by a note against deleting its second paragraph', () => {
@@ -802,25 +803,23 @@ describe('the whole page count decides what is clean', () => {
     for (const outcome of both(base, deleted, edited)) expect(outcome.kind).toBe('conflict');
   });
 
-  it('leaves the word it counted out of the record and the log', () => {
-    const outcome = outcomeOf(
-      edge(sentences),
-      edge('First sentence here.'),
-      edge('First sentence here.', `Second sentence ${secret} here.`),
-    );
-    if (outcome.kind !== 'conflict') throw new Error('merged clean');
-    expect(JSON.stringify(outcome.conflicts)).not.toContain(secret);
-    expect(outcome.unexplained).toBeGreaterThan(0);
-  });
+  describe('a breach', () => {
+    const base = edge(four);
+    const deleted = edge('- item one\n- item two\n- item four');
+    const moved = edge('- item one\n- item two\n- item four', '> item blue harbor three');
 
-  it('keeps the merged page to show a person', () => {
-    const outcome = outcomeOf(
-      edge(sentences),
-      edge('First sentence here.'),
-      edge('First sentence here.', `Second sentence ${secret} here.`),
-    );
-    if (outcome.kind !== 'conflict') throw new Error('merged clean');
-    expect(outcome.partial.children.length).toBeGreaterThan(0);
+    it('keeps the word it counted out of the record', () => {
+      const outcome = outcomeOf(base, deleted, moved);
+      if (outcome.kind !== 'conflict') throw new Error('merged clean');
+      expect(JSON.stringify(outcome.conflicts)).not.toContain('harbor');
+      expect(outcome.unexplained).toBeGreaterThan(0);
+    });
+
+    it('keeps the merged page to show a person', () => {
+      const outcome = outcomeOf(base, deleted, moved);
+      if (outcome.kind !== 'conflict') throw new Error('merged clean');
+      expect(outcome.partial.children.length).toBeGreaterThan(0);
+    });
   });
 
   it.each([
@@ -834,9 +833,9 @@ describe('the whole page count decides what is clean', () => {
     ['the same delete', edge('Aaa bbb.', 'Ccc ddd.'), edge('Ccc ddd.'), edge('Ccc ddd.')],
     [
       'Enter with an edit elsewhere',
-      edge('Aaa bbb. Ccc ddd.', 'Eee fff.'),
-      edge('Aaa bbb.', 'Ccc ddd.', 'Eee fff.'),
-      edge('Aaa bbb. Ccc ddd.', 'Eee THEIRS.'),
+      edge('Aaa bbb. Ccc ddd.', 'Eee fff ggg hhh.'),
+      edge('Aaa bbb.', 'Ccc ddd.', 'Eee fff ggg hhh.'),
+      edge('Aaa bbb. Ccc ddd.', 'Eee fff ggg THEIRS.'),
     ],
     [
       'a reformat',
@@ -846,9 +845,9 @@ describe('the whole page count decides what is clean', () => {
     ],
     [
       'a move',
-      edge('Aaa bbb.', 'Ccc ddd.', 'Eee fff.'),
-      edge('Ccc ddd.', 'Eee fff.', 'Aaa bbb.'),
-      edge('Aaa bbb.', 'Ccc THEIRS.', 'Eee fff.'),
+      edge('Aaa bbb.', 'Ccc ddd eee fff.', 'Ggg hhh.', 'Iii jjj.'),
+      edge('Ccc ddd eee fff.', 'Ggg hhh.', 'Iii jjj.', 'Aaa bbb.'),
+      edge('Aaa bbb.', 'Ccc ddd eee THEIRS.', 'Ggg hhh.', 'Iii jjj.'),
     ],
     [
       'a common word cut on both sides',

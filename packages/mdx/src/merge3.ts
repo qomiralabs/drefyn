@@ -1,4 +1,5 @@
 import { digest, sourceOf } from './canonical.ts';
+import { unexplainedTokens } from './merge-count.ts';
 import type { Entry, MergeNode } from './merge-align.ts';
 import { printAlone, withoutSource } from './merge-nodes.ts';
 import type { Definitions, MergeContext } from './merge-nodes.ts';
@@ -213,8 +214,21 @@ function mergeRoots(
     children: placed(items, `${newline}${newline}`),
     ...tailFrom(base, ours, theirs),
   };
-  if (conflicts.length === 0) return { kind: 'clean', merged: tree };
-  return { kind: 'conflict', partial: tree, conflicts: conflicts.map(recorded).sort(bySlot) };
+  if (conflicts.length > 0) {
+    return { kind: 'conflict', partial: tree, conflicts: conflicts.map(recorded).sort(bySlot) };
+  }
+  // Slot rules find where two sides clash. Whether a result may call itself clean is not theirs to
+  // say: content can move in more shapes than they will ever look at, and a word that came back
+  // sits in a slot no rule reads. This count does not care how it got there.
+  const unexplained = unexplainedTokens(base, ours, theirs, tree);
+  if (unexplained === 0) return { kind: 'clean', merged: tree };
+  const conflict = {
+    baseIndex: null,
+    ours: null,
+    theirs: null,
+    reason: 'unexplained_change',
+  } as const;
+  return { kind: 'conflict', partial: tree, conflicts: [conflict], unexplained };
 }
 
 // Three way merge of untrusted trees, per base slot. Pure, and blocks compare on their own trees,

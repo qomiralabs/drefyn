@@ -24,6 +24,7 @@ describe('the bounds on one token', () => {
     ['both added one of their own', 1, 2, 2, 3],
     ['the same edit on both sides of a common word', 3, 2, 2, 2],
     ['two sides cut one each from a common word', 3, 2, 2, 1],
+    ['ours adding two, one of them shared', 0, 2, 1, 2],
     ['nobody has it', 0, 0, 0, 0],
   ])('explains %s', (_name, b, o, t, m) => {
     expect(judge(b, o, t, m)).toBe(0);
@@ -135,11 +136,13 @@ describe('the tokens of a tree', () => {
     expect(tokenCounts(tree({ type: 'code', value: 'a' })).size).toBe(1);
   });
 
-  it('cannot tell a marker of its own from a word on the page', () => {
-    const typed = tree(text('thematicBreak'));
-    const rule = tree({ type: 'thematicBreak' });
-    expect(unexplainedTokens(typed, rule, typed, rule)).toBeGreaterThan(0);
-    expect([...tokenCounts(rule).keys()]).not.toContain('thematicBreak');
+  it('cannot mistake a word on the page for its token for a node', () => {
+    const typed = [...tokenCounts(tree(text('thematicBreak'))).keys()];
+    const rule = [...tokenCounts(tree({ type: 'thematicBreak' })).keys()];
+    expect(typed).toHaveLength(1);
+    expect(rule).toHaveLength(1);
+    expect(rule).not.toEqual(typed);
+    expect(rule[0]).toMatch(/\s/);
   });
 
   it('sees no change in a reformat', () => {

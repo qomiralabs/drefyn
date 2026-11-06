@@ -51,6 +51,8 @@ export interface Side {
   readonly text: string;
   // Tokens in blocks this side moved. Order against them follows the mover, not the other side.
   readonly moved: ReadonlySet<string>;
+  // Tokens in a paragraph this side split. One token alone cannot show that it happened.
+  readonly split: ReadonlySet<string>;
 }
 
 const asBlock = (node: Tree) => node as unknown as MdxBlock;
@@ -229,6 +231,7 @@ export function applyEdits(
     return { node: structuredClone(withoutSource(node)), raw: source.raw, gap: source.gapBefore };
   });
   const moved = new Set<string>();
+  const split = new Set<string>();
   let count = 0;
   const token = () => {
     count += 1;
@@ -303,6 +306,7 @@ export function applyEdits(
       const first = parts(words.slice(0, cut).join(' '), dialect);
       const second = parts(words.slice(cut).join(' '), dialect);
       if (first === undefined || second === undefined) continue;
+      for (const word of tokensOf(block.node)) split.add(word);
       blocks.splice(index, 1, first, second);
     } else if (kind === 'join') {
       const next = blocks[index + 1];
@@ -316,6 +320,7 @@ export function applyEdits(
       if (items === undefined || items.length < 2 || item?.type !== 'paragraph') continue;
       const out = parts(`> ${printed(item, dialect)}`, dialect);
       if (out === undefined) continue;
+      for (const word of tokensOf(item)) moved.add(word);
       items.pop();
       reprint(block);
       blocks.splice(index + 1, 0, out);
@@ -334,7 +339,7 @@ export function applyEdits(
     if (index === 0) return raw;
     return `${/\n[ \t]*\n/.test(gap) ? gap : '\n\n'}${raw}`;
   });
-  return { text: `${lines.join('')}\n`, moved };
+  return { text: `${lines.join('')}\n`, moved, split };
 }
 
 const editArbitrary: fc.Arbitrary<Edit> = fc.record({

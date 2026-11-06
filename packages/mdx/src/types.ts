@@ -104,7 +104,7 @@ export type ParseResult = Result<
 >;
 
 export type BlockConflictReason =
-  'both_changed' | 'delete_vs_edit' | 'both_inserted' | 'move_vs_edit';
+  'both_changed' | 'delete_vs_edit' | 'both_inserted' | 'move_vs_edit' | 'unexplained_change';
 
 // One place a person has to decide. A side that holds no block here deleted it.
 export interface BlockConflict {
@@ -122,6 +122,8 @@ export type MergeOutcome =
       readonly kind: 'conflict';
       readonly partial: MdxRoot;
       readonly conflicts: readonly BlockConflict[];
+      // Tokens the whole page count could not account for. A number, as a token may be a secret.
+      readonly unexplained?: number;
     };
 
 export type MergeResult = Result<MergeOutcome, readonly MdxIssue[]>;

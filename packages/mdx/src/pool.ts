@@ -486,7 +486,15 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     const base = { organizationId, projectId, path, bytes };
     if (bytes > maxMergeTreesBytes(policy.limits.maxBytes)) return instant('mdx.too_large', base);
     const job = { trees, policy, maxBlocks: settings.maxMergeBlocks };
-    return (await enqueue(job, trees, tenant, base, request.priority)) as MergeAnswer;
+    const answer = (await enqueue(job, trees, tenant, base, request.priority)) as MergeAnswer;
+    if (answer.ok && answer.value.outcome.kind === 'conflict') {
+      const { unexplained } = answer.value.outcome;
+      // A count and never a token, which may be a secret. A rising rate here is a merge bug.
+      if (unexplained !== undefined) {
+        log('warn', 'mdx.merge_unexplained', { ...base, tokens: unexplained });
+      }
+    }
+    return answer;
   };
 
   const allProjects = () =>

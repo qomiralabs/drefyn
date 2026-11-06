@@ -750,7 +750,8 @@ describe('the client', () => {
         url: 'http://parse.internal',
         fetch: answering(200, answer(outcome)),
       });
-      await expect(client.merge(mergeRequest())).resolves.toMatchObject({ ok: true });
+      const request = mergeRequest({ base: GOOD_ROOT, ours: GOOD_ROOT, theirs: GOOD_ROOT });
+      await expect(client.merge(request)).resolves.toMatchObject({ ok: true });
     }
   });
 

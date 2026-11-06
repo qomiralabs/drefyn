@@ -70,9 +70,18 @@ under the same queues, budgets and kill as a print. It answers `{ outcome, issue
 - Nothing is ever dropped to resolve an overlap. Each side lines up against the base one slot at a
   time, so an edit, an insert or a delete either lands or becomes a `BlockConflict` with both
   versions in it. Below the top level a conflict takes the whole block to a person.
-- `reason` is `both_changed`, `delete_vs_edit`, `both_inserted` or `move_vs_edit`. A record with
-  `baseIndex`, `ours` and `theirs` all null means every block merged but the page cannot be stored
-  as a whole, as when a fence left open at the end of a file swallows what a move put after it.
+- `reason` is `both_changed`, `delete_vs_edit`, `both_inserted`, `move_vs_edit` or
+  `unexplained_change`. A record with `baseIndex`, `ours` and `theirs` all null is about the page
+  and not a block: either it cannot be stored as a whole, as when a fence left open at the end of
+  a file swallows what a move put after it, or the count below failed.
+- **Clean has a definition that does not trust the merge.** Slot rules find where two sides clash,
+  and a separate whole page count decides whether a result may be clean. With `b`, `o`, `t` and `m`
+  a token's count in base, ours, theirs and the merged tree, and `three = o + t - b`, it needs
+  `max(0, min(three, max(o, t))) <= m <= max(three, min(o, t))`. Tokens are non space runs of the
+  text, `alt`, `url`, `title`, `lang`, `meta`, `name` and attribute values at any depth, plus one for
+  a node with nothing to read. A breach is `unexplained_change`, it logs a number and never a token,
+  and the client repeats the count on the trees it sent. It sees no order and no formatting, and
+  a false conflict is the worst it can do.
 - Lists, tables and quotes recurse, and a paragraph, heading or table cell edited on both sides
   merges word by word. Code, HTML, JSX and frontmatter do not: two edits to one of those conflict.
 - Blocks compare on a hash of their own tree, never on the hash they carry, so a reformat raises

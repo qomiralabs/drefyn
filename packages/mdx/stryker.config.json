@@ -15,6 +15,7 @@
     "src/held-bytes.ts",
     "src/merge3.ts",
     "src/merge-align.ts",
+    "src/merge-count.ts",
     "src/merge-diff.ts",
     "src/merge-job.ts",
     "src/merge-nodes.ts",
