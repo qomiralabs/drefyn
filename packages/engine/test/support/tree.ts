@@ -24,11 +24,17 @@ export function treeOf(specs: readonly BlockSpec[], tail = ''): MdxRoot {
   return { type: 'root', astVersion: 1, dialect: 'md', eol: 'lf', children, tail, tailOf: '' };
 }
 
-export const sourceOf = (root: MdxRoot): string =>
-  root.children.reduce(
-    (text, { source }) => text + (source?.gapBefore ?? '') + (source?.raw ?? ''),
-    '',
-  ) + root.tail;
+const textOf = (block: MdxBlock): string =>
+  'children' in block
+    ? block.children.map((child) => ('value' in child ? child.value : '')).join('')
+    : '';
+
+// What these trees show a reader, blocks a blank line apart.
+export const visibleOf = (root: MdxRoot): string =>
+  root.children
+    .map(textOf)
+    .filter((text) => text.trim() !== '')
+    .join('\n\n');
 
 // A section runs from one heading to the next, and whatever comes before the first is section 0.
 export function sectionOf(root: MdxRoot, blockIndex: number): number {

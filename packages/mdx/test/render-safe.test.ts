@@ -427,4 +427,20 @@ describe('refusals', () => {
       expect((error as Error).message).not.toContain('div');
     }
   });
+
+  it.each([
+    ['tight', '- a\n- b\n', '<ul>\n<li>a</li>\n<li>b</li>\n</ul>'],
+    [
+      'loose by a blank line',
+      '- a\n\n- b\n',
+      '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>',
+    ],
+    [
+      'loose by one item',
+      '- a\n- b\n\n  c\n- d\n',
+      '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n<p>c</p>\n</li>\n<li>\n<p>d</p>\n</li>\n</ul>',
+    ],
+  ])('renders a %s list as it always has', (_name, source, html) => {
+    expect(rendered(source)).toBe(html);
+  });
 });

@@ -23,7 +23,7 @@ public.
   `databaseStore(db)` makes the store from a `@drefyn/db` database.
 - `parseEngineConfig(env)`: reads the caps below.
 - `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
-  and options give the same chunks in the same order, and their bodies join back into the page.
+  and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -58,6 +58,9 @@ row lock, so saves to a node queue and sequence numbers have no gaps. A retry wi
 `idempotencyKey` and the same input gets the first version, even after the head moved or the
 organization went read only. The same key with anything else is `engine.idempotency_conflict`.
 
+A docs page keeps no second copy of its tree: `nodes.head_content` stays null, and `getHead` reads
+the head version by key. Studio items keep the copy, as their list scans read it.
+
 `node_versions` is append only: `drefyn_app` holds select and insert on it and nothing more. Limits
 come from `@drefyn/entitlements` and count per organization in `organization_node_counts`, updated
 in the transaction that creates the node. A read only organization or project, or one over its
@@ -69,11 +72,26 @@ With `engine.chunk_at_write` on, off in production, a save or rollback writes th
 and one `embed_chunks` row in `engine_outbox` in the version's own transaction, so a version never
 commits without them. Embedding runs later and never in this path. A replay writes nothing, and a
 page with no text gets no outbox row. Chunks belong to a version and are not replaced by the next.
+A failed read of that flag refuses the write with `engine.unavailable` and logs
+`engine.flag_read_failed`, as counting it as off would commit a version with no chunks.
 
 A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
 cannot move text in another. It closes before it passes the target. A block over the target splits
 at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
 on a save, and under the lock on a rollback, where a replay must not pay for it.
+
+Chunk text is read off the tree through a closed list of node types, so frontmatter, comments,
+imports, expressions, link targets and component props stay out. This is a stopgap, and it is not
+yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
+footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
+the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
+characters a page. Past it a chunk has an empty path, so one save cannot grow by repeating a long
+path on every row.
+
+A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
+`engine.save.write`. The parse host reports its steps, and the engine records them through
+`tracer.record` as `engine.save.host.queue`, `.thread`, `.decode`, `.print`, `.reparse` and
+`.compare`. Those are times only, and the same fields appear on the host's `mdx.parse_finished` line.
 
 ## Configuration
 

@@ -1093,9 +1093,9 @@ describeWithStack('the engine tables', () => {
   });
 
   describe('the migration', () => {
-    const stepsBack = () => {
+    const stepsBack = (name = '_engine_tables.sql') => {
       const shipped = shippedMigrations();
-      const at = shipped.findIndex((file) => file.endsWith('_engine_tables.sql'));
+      const at = shipped.findIndex((file) => file.endsWith(name));
       expect(at).toBeGreaterThanOrEqual(0);
       return shipped.length - at;
     };
@@ -1152,7 +1152,9 @@ describeWithStack('the engine tables', () => {
       expect(await privileges()).toBe('0');
       expect(await keyColumns('nodes_head_version_fkey')).toBe('4');
 
-      const down = await migrate(['migrate', 'down', '1'], { url: fresh.owner });
+      const down = await migrate(['migrate', 'down', String(stepsBack('_engine_write_path.sql'))], {
+        url: fresh.owner,
+      });
       expect(down.code, describeFailure(down)).toBe(0);
       expect(await privileges()).toBe('2');
       expect(await keyColumns('nodes_head_version_fkey')).toBe('3');
