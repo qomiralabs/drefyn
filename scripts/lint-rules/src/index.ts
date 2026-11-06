@@ -5,6 +5,7 @@ import { noMdxEvaluate } from './no-mdx-evaluate.ts';
 import { noOperatorAuth } from './no-operator-auth.ts';
 import { noRawEgress } from './no-raw-egress.ts';
 import { noSelectAll } from './no-select-all.ts';
+import { noTierLiterals } from './no-tier-literals.ts';
 
 export {
   allowListProblems,
@@ -23,6 +24,7 @@ const plugin = {
     'no-operator-auth': noOperatorAuth,
     'no-raw-egress': noRawEgress,
     'no-select-all': noSelectAll,
+    'no-tier-literals': noTierLiterals,
   },
 } satisfies ESLint.Plugin;
 

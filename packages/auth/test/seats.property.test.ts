@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { PRODUCTS } from '@drefyn/entitlements';
+import { PRODUCTS, checkLimit } from '@drefyn/entitlements';
 import { countSeats, type SeatHolder } from '../src/index.ts';
 import { runs } from './support.ts';
 
@@ -15,6 +15,42 @@ const invitationArb = fc
   .tuple(localPart, fc.constantFrom('example.com', 'example.org'))
   .map(([local, domain]) => invited(`${local}@${domain}`));
 const holders = fc.array(fc.oneof(memberArb, invitationArb), { maxLength: 60 });
+
+describe('the seat count against the plan caps', () => {
+  // Spelled out so a change to the caps has to touch this test as well.
+  const plans = fc.constantFrom(
+    { tier: 'free', cap: 5 } as const,
+    { tier: 'starter', cap: 10 } as const,
+  );
+  const distinct = (seats: number) => Array.from({ length: seats }, (_, i) => member(`u_${i}`));
+
+  it('allows every count up to the cap and refuses the next one', () => {
+    fc.assert(
+      fc.property(plans, fc.nat({ max: 30 }), ({ tier, cap }, people) => {
+        const used = countSeats(distinct(people));
+        const allowed = checkLimit(tier, 'org.seats', used).status === 'allowed';
+        return allowed === used <= cap;
+      }),
+      runs,
+    );
+  });
+
+  it('never refuses a person already holding a seat in another product', () => {
+    fc.assert(
+      fc.property(
+        plans,
+        fc.array(fc.subarray([...PRODUCTS], { minLength: 1 }), { minLength: 1, maxLength: 12 }),
+        ({ tier, cap }, people) => {
+          const perProduct = people.flatMap((products, i) => products.map(() => member(`u_${i}`)));
+          const allowed =
+            checkLimit(tier, 'org.seats', countSeats(perProduct)).status === 'allowed';
+          return allowed === people.length <= cap;
+        },
+      ),
+      runs,
+    );
+  });
+});
 
 describe('seats are counted once per organization', () => {
   it('project roles in three products never change the count', () => {
