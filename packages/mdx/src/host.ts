@@ -1,18 +1,30 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { TenantRef } from '@drefyn/tenancy';
+import { createHeldBytes, DEFAULT_MAX_HELD_BYTES } from './held-bytes.ts';
+import type { HeldBytes, HeldClaim } from './held-bytes.ts';
 import { DEFAULT_LIMITS } from './policy.ts';
 import { createParsePool } from './pool.ts';
 import type { ParseLogger, ParsePool } from './pool.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
 import type { ParseThread } from './thread.ts';
-import type { MdxIssueCode, ParseResult } from './types.ts';
-import { maxBodyBytes, wireRequestSchema } from './wire.ts';
+import { refused } from './result.ts';
+import type { JobResult } from './result.ts';
+import type { MdxIssueCode } from './types.ts';
+import {
+  maxBodyBytes,
+  maxPrintBodyBytes,
+  maxTreeBytes,
+  ORGANIZATION_HEADER,
+  wirePrintSchema,
+  wireRequestSchema,
+} from './wire.ts';
 
 export interface ParseHostOptions {
   readonly config: ParsePoolConfig;
   readonly port: number;
   readonly logger: ParseLogger;
+  readonly maxHeldBytes?: number;
   readonly startThread?: () => ParseThread;
 }
 
@@ -21,7 +33,9 @@ export interface ParseHost {
   readonly server: Server;
 }
 
-const MAX_BODY_BYTES = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
+const MAX_PARSE_BODY = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
+const MAX_PRINT_BODY = maxPrintBodyBytes(maxTreeBytes(DEFAULT_LIMITS.maxBytes));
+const BUSY_BODY = Symbol('busy');
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_CONNECTIONS = 256;
 
@@ -31,23 +45,32 @@ const BUSY: ReadonlySet<MdxIssueCode> = new Set([
   'mdx.project_limit',
 ]);
 
-const statusOf = (result: ParseResult) =>
+const statusOf = (result: JobResult) =>
   !result.ok && result.error[0] !== undefined && BUSY.has(result.error[0].code) ? 429 : 200;
 
 const empty = (response: ServerResponse, status: number) => {
   response.writeHead(status).end();
 };
 
-function readBody(request: IncomingMessage): Promise<string | undefined> {
+function readBody(
+  request: IncomingMessage,
+  cap: number,
+  claim: HeldClaim,
+): Promise<string | undefined | typeof BUSY_BODY> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
     request.on('data', (chunk: Buffer) => {
       bytes += chunk.byteLength;
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > cap) {
         resolve(undefined);
         request.destroy();
-      } else chunks.push(chunk);
+      } else if (claim.take(chunk.byteLength)) chunks.push(chunk);
+      else {
+        request.removeAllListeners('data');
+        request.pause();
+        resolve(BUSY_BODY);
+      }
     });
     request.once('end', () => {
       resolve(Buffer.concat(chunks).toString('utf8'));
@@ -58,27 +81,72 @@ function readBody(request: IncomingMessage): Promise<string | undefined> {
   });
 }
 
-async function serve(pool: ParsePool, request: IncomingMessage, response: ServerResponse) {
-  if (request.url === '/health') {
-    empty(response, 200);
+// Refused unread where it can be, so the connection goes too: the rest of the body is not wanted.
+function refuseBusy(request: IncomingMessage, response: ServerResponse) {
+  response
+    .writeHead(429, { 'content-type': 'application/json', connection: 'close' })
+    .end(JSON.stringify(refused('mdx.queue_full')), () => {
+      request.destroy();
+    });
+}
+
+function jobFor(
+  pool: ParsePool,
+  url: string,
+  body: string,
+  organization: string,
+): Promise<JobResult> {
+  const json: unknown = JSON.parse(body);
+  const checked = <T extends { tenant: { organizationId: string } }>(frame: T): T => {
+    if (frame.tenant.organizationId !== organization) throw new Error('not the same organization');
+    return frame;
+  };
+  if (url === '/print') {
+    const frame = checked(wirePrintSchema.parse(json));
+    return pool.print({
+      ...frame,
+      tenant: frame.tenant as TenantRef,
+      policy: { ...frame.policy, components: new Set(frame.policy.components) },
+    });
+  }
+  const frame = checked(wireRequestSchema.parse(json));
+  return pool.parse({
+    ...frame,
+    tenant: frame.tenant as TenantRef,
+    policy: { ...frame.policy, components: new Set(frame.policy.components) },
+  });
+}
+
+async function serveClaimed(
+  pool: ParsePool,
+  request: IncomingMessage,
+  response: ServerResponse,
+  organization: string,
+  claim: HeldClaim,
+) {
+  const url = request.url ?? '';
+  const cap = url === '/print' ? MAX_PRINT_BODY : MAX_PARSE_BODY;
+  const declared = Number(request.headers['content-length'] ?? 0);
+  if (declared > cap) {
+    empty(response, 413);
+    request.destroy();
     return;
   }
-  if (request.method !== 'POST' || request.url !== '/parse') {
-    empty(response, 404);
+  if (!claim.fits(declared)) {
+    refuseBusy(request, response);
     return;
   }
-  const body = await readBody(request);
+  const body = await readBody(request, cap, claim);
+  if (body === BUSY_BODY) {
+    refuseBusy(request, response);
+    return;
+  }
   if (body === undefined) {
     empty(response, 413);
     return;
   }
   try {
-    const frame = wireRequestSchema.parse(JSON.parse(body));
-    const result = await pool.parse({
-      ...frame,
-      tenant: frame.tenant as TenantRef,
-      policy: { ...frame.policy, components: new Set(frame.policy.components) },
-    });
+    const result = await jobFor(pool, url, body, organization);
     response
       .writeHead(statusOf(result), { 'content-type': 'application/json' })
       .end(JSON.stringify(result));
@@ -88,10 +156,39 @@ async function serve(pool: ParsePool, request: IncomingMessage, response: Server
   }
 }
 
+async function serve(
+  pool: ParsePool,
+  held: HeldBytes,
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  const { url = '', method } = request;
+  if (url === '/health') {
+    empty(response, 200);
+    return;
+  }
+  if (method !== 'POST' || (url !== '/parse' && url !== '/print')) {
+    empty(response, 404);
+    return;
+  }
+  const organization = request.headers[ORGANIZATION_HEADER];
+  if (typeof organization !== 'string' || organization === '') {
+    empty(response, 400);
+    return;
+  }
+  const claim = held.claim(organization);
+  try {
+    await serveClaimed(pool, request, response, organization, claim);
+  } finally {
+    claim.release();
+  }
+}
+
 // The boundary is this process: started with --permission and an env allow list, on a network
 // the platform closes. A thread inside it is only the per page kill.
 export async function startParseHost(options: ParseHostOptions): Promise<ParseHost> {
   const { config, logger } = options;
+  const held = createHeldBytes(options.maxHeldBytes ?? DEFAULT_MAX_HELD_BYTES);
   const pool = createParsePool(config, {
     logger,
     // terminate has no bound on native work. SIGKILL does, and the supervisor restarts us.
@@ -102,7 +199,7 @@ export async function startParseHost(options: ParseHostOptions): Promise<ParseHo
     ...(options.startThread && { startThread: options.startThread }),
   });
   const server = createServer((request, response) => {
-    void serve(pool, request, response);
+    void serve(pool, held, request, response);
   });
   server.requestTimeout = REQUEST_TIMEOUT_MS;
   server.maxConnections = MAX_CONNECTIONS;

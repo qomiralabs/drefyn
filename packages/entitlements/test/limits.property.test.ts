@@ -480,3 +480,49 @@ describe('fuzzed input fails closed', () => {
     expect([...FEATURE_KEYS].sort()).toEqual([...pricing.FEATURE_KEYS].sort());
   });
 });
+
+describe('Docs monthly limits waiting for calibration', () => {
+  const calibrating = fc.constantFrom(
+    'docs.mcp_requests_per_month',
+    'docs.feedback_items_per_month',
+    'docs.assistant_questions_per_month',
+  ) as fc.Arbitrary<LimitKey>;
+  const hostedArb = fc.constantFrom(...(pricing.HOSTED_LADDER as readonly Tier[]));
+  const positive = fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER });
+
+  it('refuses any use on a hosted tier and keeps what exists read only', () => {
+    fc.assert(
+      fc.property(hostedArb, calibrating, positive, (t, k, usage) => {
+        expect(checkLimit(t, k, usage)).toMatchObject({
+          status: 'not_entitled',
+          access: 'read_only',
+          limit: 0,
+        });
+      }),
+      RUNS,
+    );
+  });
+
+  it('allows any use on self_hosted', () => {
+    fc.assert(
+      fc.property(calibrating, positive, (k, usage) => {
+        return checkLimit('self_hosted', k, usage).status === 'allowed';
+      }),
+      RUNS,
+    );
+  });
+
+  it('opens to exactly the raise a contract grants', () => {
+    fc.assert(
+      fc.property(hostedArb, calibrating, positive, (t, k, raise) => {
+        const overrides = { [k]: raise };
+        return (
+          checkLimit(t, k, raise, { overrides }).status === 'allowed' &&
+          (raise === Number.MAX_SAFE_INTEGER ||
+            checkLimit(t, k, raise + 1, { overrides }).status === 'over_limit')
+        );
+      }),
+      RUNS,
+    );
+  });
+});

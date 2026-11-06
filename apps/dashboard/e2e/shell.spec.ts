@@ -211,7 +211,7 @@ test.describe('top bar', () => {
     const menu = page.getByRole('menu', { name: 'Organization' });
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: /^Acme/ })).toContainText(
-      'Starter, 4 of 5 seats',
+      'Starter, 4 of 10 seats',
     );
     for (const item of [
       'Plan and usage',
@@ -277,7 +277,7 @@ test.describe('answers', () => {
   test('seats and plan come from the organization, not from page copy', async ({ page }) => {
     await openShell(page, ROUTES.overview);
     await expect(main(page)).toContainText('Acme is on Starter');
-    await expect(main(page)).toContainText('4 of 5 seats used.');
+    await expect(main(page)).toContainText('4 of 10 seats used.');
     await expect(main(page)).toContainText('Starter includes 1 Docs project.');
     await expect(main(page)).not.toContainText('$');
   });

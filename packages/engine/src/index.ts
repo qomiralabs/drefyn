@@ -1,6 +1,8 @@
 // Each list is frozen and each union comes from its list, so the database check, the runtime
 // value and the type cannot name different sets.
 
+export { astVersionOf, type NodeContent } from './content.ts';
+
 export const NODE_FAMILIES = Object.freeze([
   'docs_page',
   'studio_item',

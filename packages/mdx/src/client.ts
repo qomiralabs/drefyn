@@ -2,9 +2,12 @@ import type { TenantRef } from '@drefyn/tenancy';
 import { z } from 'zod';
 import { DEFAULT_LIMITS } from './policy.ts';
 import { refused, wireResultSchema } from './result.ts';
+import { rootSchema } from './root-schema.ts';
+import type { JobResult } from './result.ts';
 import type { IsolatedPolicy } from './thread.ts';
-import type { Dialect, ParseResult } from './types.ts';
-import type { WireRequest } from './wire.ts';
+import type { Dialect, MdxRoot, ParseResult, PrintResult } from './types.ts';
+import { maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
+import type { WirePrint, WireRequest } from './wire.ts';
 
 export interface ParseClientRequest {
   readonly tenant: TenantRef;
@@ -15,10 +18,21 @@ export interface ParseClientRequest {
   readonly policy: IsolatedPolicy;
 }
 
+export interface PrintClientRequest {
+  readonly tenant: TenantRef;
+  // Logged by the host, so it never holds page text.
+  readonly path: string;
+  readonly root: MdxRoot;
+  readonly policy: IsolatedPolicy;
+}
+
 export interface ParseClient {
   // Never parses here, and has no fallback that does. Resolves with a refusal for anything
   // about the page, the load or the host, so a save keeps its last good version.
   parse(request: ParseClientRequest): Promise<ParseResult>;
+  // Prints in the host and reparses what it printed, so nothing reaches git that means
+  // something other than the tree. Store the tree this hands back, not the one sent.
+  print(request: PrintClientRequest): Promise<PrintResult>;
 }
 
 export interface ParseClientConfig {
@@ -40,6 +54,22 @@ const configSchema = z.object({
 
 const BUSY = 429;
 
+const printedSchema = z.object({ text: z.string(), ast: rootSchema });
+
+// A caller stores what this hands back, so a malformed answer must not look like a success.
+function readPrinted(answer: JobResult): PrintResult {
+  if (!answer.ok) return answer;
+  return printedSchema.safeParse(answer.value).success
+    ? (answer as PrintResult)
+    : refused('mdx.parse_failed');
+}
+
+const wireOf = (policy: IsolatedPolicy) => ({
+  ...policy,
+  components: [...policy.components],
+  linkProtocols: [...policy.linkProtocols],
+});
+
 async function readCapped(response: Response, cap: number): Promise<string | undefined> {
   const reader = response.body?.getReader();
   if (reader === undefined) return undefined;
@@ -58,7 +88,7 @@ async function readCapped(response: Response, cap: number): Promise<string | und
   return text + decoder.decode();
 }
 
-function readAnswer(text: string | undefined): ParseResult {
+function readAnswer(text: string | undefined): JobResult {
   if (text === undefined) return refused('mdx.parse_failed');
   try {
     const answer = wireResultSchema.safeParse(JSON.parse(text));
@@ -71,7 +101,27 @@ function readAnswer(text: string | undefined): ParseResult {
 export function createParseClient(config: ParseClientConfig): ParseClient {
   const { url, timeoutMs, maxAnswerBytes } = configSchema.parse(config);
   const send = config.fetch ?? fetch;
-  const endpoint = new URL('/parse', url);
+
+  const post = async (path: string, body: string, tenant: TenantRef): Promise<JobResult> => {
+    try {
+      const response = await send(new URL(path, url), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          [ORGANIZATION_HEADER]: tenant.organizationId,
+        },
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (response.status !== 200 && response.status !== BUSY) {
+        return refused('mdx.parse_unavailable');
+      }
+      return readAnswer(await readCapped(response, maxAnswerBytes));
+    } catch {
+      // Down, killed or slow: none of it is a verdict on the page.
+      return refused('mdx.parse_unavailable');
+    }
+  };
 
   return {
     async parse(request) {
@@ -79,32 +129,23 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       if (Buffer.byteLength(source, 'utf8') > policy.limits.maxBytes) {
         return refused('mdx.too_large');
       }
-      const frame: WireRequest = {
-        tenant,
-        path,
-        source,
-        dialect,
-        policy: {
-          ...policy,
-          components: [...policy.components],
-          linkProtocols: [...policy.linkProtocols],
-        },
-      };
+      const frame: WireRequest = { tenant, path, source, dialect, policy: wireOf(policy) };
+      return await post('/parse', JSON.stringify(frame), tenant);
+    },
+    async print(request) {
+      const { tenant, path, root, policy } = request;
+      let tree: string;
       try {
-        const response = await send(endpoint, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(frame),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (response.status !== 200 && response.status !== BUSY) {
-          return refused('mdx.parse_unavailable');
-        }
-        return readAnswer(await readCapped(response, maxAnswerBytes));
+        tree = JSON.stringify(root);
       } catch {
-        // Down, killed or slow: none of it is a verdict on the page.
-        return refused('mdx.parse_unavailable');
+        // Only a tree far past any depth limit can overflow this.
+        return refused('mdx.too_deep');
       }
+      if (Buffer.byteLength(tree, 'utf8') > maxTreeBytes(policy.limits.maxBytes)) {
+        return refused('mdx.too_large');
+      }
+      const frame: WirePrint = { tenant, path, tree, policy: wireOf(policy) };
+      return readPrinted(await post('/print', JSON.stringify(frame), tenant));
     },
   };
 }

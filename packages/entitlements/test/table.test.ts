@@ -6,6 +6,7 @@ import {
   TIERS,
   UNCALIBRATED,
   UNLIMITED,
+  checkLimit,
   featureInfo,
   graceAllowance,
   hasFeature,
@@ -13,6 +14,7 @@ import {
   limitInfo,
 } from '../src/index.ts';
 import * as pricing from './fixtures/pricing.ts';
+import type { FeatureKey, HostedTier, LimitKey } from '../src/index.ts';
 import { isLimitValue } from './support/assert.ts';
 
 const sorted = (values: readonly string[]) => [...values].sort();
@@ -238,6 +240,89 @@ describe('uncalibrated placeholders', () => {
       ] as const) {
         expect(limitFor(tier, key), `${tier} ${key}`).toBe(0);
       }
+    }
+  });
+});
+
+// Spelled out here as well as in the fixture, so these rows cannot move with a careless
+// edit of both files.
+const LADDER = ['free', 'starter', 'growth', 'scale', 'enterprise'] as const;
+const withFeature = (feature: FeatureKey) => LADDER.filter((tier) => hasFeature(tier, feature));
+const from = (tier: HostedTier) => LADDER.slice(LADDER.indexOf(tier));
+
+describe('Docs plan rows', () => {
+  it('gives Free the OpenAPI reference and MCP, without the retrieval API', () => {
+    expect(hasFeature('free', 'docs.openapi_reference')).toBe(true);
+    expect(hasFeature('free', 'docs.mcp')).toBe(true);
+    expect(hasFeature('free', 'docs.retrieval_api')).toBe(false);
+  });
+
+  it('keeps MCP on Free to Docs, with Studio and Status agent access at Growth', () => {
+    for (const feature of [
+      'docs.retrieval_api',
+      'studio.mcp',
+      'status.mcp_and_retrieval',
+    ] as const) {
+      expect(featureInfo(feature).since, feature).toBe('growth');
+    }
+  });
+
+  it('starts Docs localization at Growth and leaves Studio localization there', () => {
+    expect(withFeature('docs.localization')).toEqual(from('growth'));
+    expect(featureInfo('studio.localization').since).toBe('growth');
+  });
+
+  it.each(['docs.remove_badge', 'status.remove_badge'] as const)(
+    'lets %s hide Powered by Drefyn only from Scale',
+    (feature) => {
+      for (const tier of ['free', 'starter', 'growth'] as const) {
+        expect(hasFeature(tier, feature), tier).toBe(false);
+      }
+      for (const tier of ['scale', 'enterprise', 'self_hosted'] as const) {
+        expect(hasFeature(tier, feature), tier).toBe(true);
+      }
+    },
+  );
+
+  it.each([
+    ['docs.private_password', 'starter'],
+    ['docs.reader_feedback', 'starter'],
+    ['docs.update_drafts', 'growth'],
+    ['docs.reader_assistant', 'growth'],
+    ['docs.preview_deployments', 'growth'],
+    ['docs.instant_rollback', 'growth'],
+    ['docs.private_reader_login', 'scale'],
+  ] as const)('starts %s at %s, in the open core', (feature, since) => {
+    expect(featureInfo(feature)).toEqual({ feature, scope: 'docs', since, openCore: true });
+    expect(withFeature(feature)).toEqual(from(since));
+  });
+});
+
+describe('Docs limits waiting for calibration', () => {
+  const NEW_LIMITS: readonly (readonly [LimitKey, HostedTier])[] = [
+    ['docs.mcp_requests_per_month', 'free'],
+    ['docs.feedback_items_per_month', 'starter'],
+    ['docs.assistant_questions_per_month', 'growth'],
+  ];
+  const listed = (key: LimitKey) =>
+    UNCALIBRATED.filter((entry) => entry.key === key).map((entry) => entry.tier);
+
+  it.each(NEW_LIMITS)('holds %s at 0 on every hosted tier', (key) => {
+    expect(limitInfo(key)).toEqual({ key, scope: 'docs', direction: 'max', grace: false });
+    for (const tier of LADDER) {
+      expect(limitFor(tier, key), tier).toBe(0);
+      expect(checkLimit(tier, key, 1), tier).toMatchObject({
+        status: 'not_entitled',
+        access: 'read_only',
+      });
+    }
+  });
+
+  it.each(NEW_LIMITS)('lists %s as unset from %s up and nowhere below', (key, since) => {
+    expect(listed(key)).toEqual(from(since));
+    for (const entry of UNCALIBRATED.filter((e) => e.key === key)) {
+      expect(entry.basis).toBe('unset');
+      expect(entry.value).toBe(0);
     }
   });
 });

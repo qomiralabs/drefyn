@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { afterAll, describe, expect, it } from 'vitest';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import type { Dialect, MdxIssueCode } from '../src/index.ts';
 import { createParsePool } from '../src/pool.ts';
 import { isolatedPolicy, ORG_A, poolConfig, projectAt, recordingLogger } from './helpers.ts';

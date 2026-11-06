@@ -68,6 +68,7 @@ export default tseslint.config(
       '**/test-results/**',
       '**/playwright-report/**',
       '**/.next/**',
+      '**/.stryker-tmp/**',
       '**/next-env.d.ts',
       // Broken on purpose: the lint rule tests run ESLint on them with their own config.
       'scripts/lint-rules/test/fixtures/**',
@@ -93,6 +94,7 @@ export default tseslint.config(
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
       'drefyn/no-mdx-evaluate': 'error',
+      'drefyn/no-tier-literals': 'error',
       // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * is refused
       // there for every role, so it must not compile into a query either. A test holds this
       // list to that one.
@@ -101,6 +103,12 @@ export default tseslint.config(
         { tables: ['users', 'password_credentials', 'known_devices'] },
       ],
     },
+  },
+  {
+    // Display names for the plans, keyed by tier so a new tier cannot miss one. Words decide
+    // nothing, so this one table is allowed the names.
+    files: ['apps/dashboard/src/server/plan-labels.ts'],
+    rules: { 'drefyn/no-tier-literals': 'off' },
   },
   {
     // Operator only: no web route may mint a sign in link or act for a bare user id.

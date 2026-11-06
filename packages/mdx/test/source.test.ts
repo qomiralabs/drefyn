@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AST_VERSION, serialize } from '../src/index.ts';
+import { AST_VERSION } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { parsed } from './helpers.ts';
 
 const BOM = String.fromCharCode(0xfeff);
