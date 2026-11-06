@@ -621,7 +621,7 @@ describe('the head copy', () => {
 
   it('reads the head by key for a page with no copy', async () => {
     const reads: Responder = (statement) =>
-      has(statement, 'coalesce("n"."head_content", "v"."content")')
+      has(statement, 'coalesce(n.head_content, v.content)')
         ? [
             {
               family: 'docs_page',

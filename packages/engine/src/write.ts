@@ -34,6 +34,10 @@ export interface NewVersion {
 
 const OUTBOX_EMBED_CHUNKS = 'embed_chunks';
 
+// A second copy of a whole tree on every save. Studio list scans read content straight off the
+// node, which is what the copy is for. Pages filter through filter rows and are read by key.
+const headCopyOf = (node: LockedNode, json: string) => (node.family === 'docs_page' ? null : json);
+
 // A page of bare headings gives a row per heading, up to about 25,000, and one statement can
 // bind 65,535 values. Batches keep that page legal and leave a normal page one statement.
 const CHUNK_ROWS_PER_INSERT = 500;
@@ -211,7 +215,11 @@ export async function appendVersion(
   }
   await tx
     .updateTable('nodes')
-    .set({ head_version_id: inserted.id, head_content: draft.json, updated_at: new Date() })
+    .set({
+      head_version_id: inserted.id,
+      head_content: headCopyOf(node, draft.json),
+      updated_at: new Date(),
+    })
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', node.id)

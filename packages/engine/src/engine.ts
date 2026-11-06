@@ -340,7 +340,7 @@ export function createEngine(deps: EngineDeps): Engine {
               'n.type_id',
               'n.lifecycle',
               'n.head_version_id',
-              'n.head_content',
+              sql<unknown>`coalesce(n.head_content, v.content)`.as('content'),
               'v.seq',
               'v.ast_version',
             ])
@@ -358,7 +358,7 @@ export function createEngine(deps: EngineDeps): Engine {
             versionId: row.head_version_id === null ? null : idOf('ver', row.head_version_id),
             seq: row.seq,
             astVersion: row.ast_version,
-            content: row.head_content as NodeContent | null,
+            content: row.content as NodeContent | null,
           };
         }),
       );

@@ -58,6 +58,9 @@ row lock, so saves to a node queue and sequence numbers have no gaps. A retry wi
 `idempotencyKey` and the same input gets the first version, even after the head moved or the
 organization went read only. The same key with anything else is `engine.idempotency_conflict`.
 
+A docs page keeps no second copy of its tree: `nodes.head_content` stays null, and `getHead` reads
+the head version by key. Studio items keep the copy, as their list scans read it.
+
 `node_versions` is append only: `drefyn_app` holds select and insert on it and nothing more. Limits
 come from `@drefyn/entitlements` and count per organization in `organization_node_counts`, updated
 in the transaction that creates the node. A read only organization or project, or one over its

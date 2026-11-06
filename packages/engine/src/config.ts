@@ -5,7 +5,7 @@ export interface EngineConfig {
   // Source bytes of one node. The host sizes its request limit from the same default, so this
   // can only come down.
   readonly maxNodeBytes: number;
-  // Stored JSON of one tree, copied into a version and into head_content on every save.
+  // Stored JSON of one tree, in a version on every save, and in head_content outside docs pages.
   readonly maxTreeBytes: number;
   // Close a chunk before it passes this.
   readonly chunkTargetChars: number;
