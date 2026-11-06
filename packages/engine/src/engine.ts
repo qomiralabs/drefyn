@@ -6,15 +6,21 @@ import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
 import type { NodeContent } from './content.ts';
 import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
+import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
 import {
+  backfillInput,
   createNodeSchema,
+  declareSchemaInput,
   issuesOf,
   pageSchema,
+  querySchema,
   readSchema,
   rollbackSchema,
   saveDraftSchema,
 } from './input.ts';
+import { backfillStep } from './backfill.ts';
+import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
 import {
   noopLogger,
@@ -24,11 +30,17 @@ import {
   type EngineTracer,
   type LogFields,
 } from './ports.ts';
+import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
 import type {
+  BackfillState,
   CreateNodeInput,
+  DeclaredSchema,
+  DeclareSchemaInput,
   NodeHead,
   NodeId,
+  NodePage,
+  NodeQuery,
   NodeRef,
   Page,
   PageArgs,
@@ -60,6 +72,10 @@ export interface Engine {
     nodeId: NodeId,
     page: PageArgs,
   ): Promise<EngineResult<Page<VersionSummary>>>;
+  queryNodes(tenant: TenantRef, query: NodeQuery): Promise<EngineResult<NodePage>>;
+  declareSchema(input: DeclareSchemaInput): Promise<EngineResult<DeclaredSchema>>;
+  // One batch. runFilterBackfill paces these.
+  backfillFilters(tenant: TenantRef): Promise<EngineResult<BackfillState>>;
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
@@ -211,6 +227,16 @@ export function createEngine(deps: EngineDeps): Engine {
                 })
                 .returning('id')
                 .executeTakeFirstOrThrow();
+              // Lists read only this row, so a node without one would never be listed.
+              await tx
+                .insertInto('node_filter_rows')
+                .values({
+                  organization_id: tenant.organizationId,
+                  project_id: tenant.projectId,
+                  type_id: typeId,
+                  node_id: row.id,
+                })
+                .execute();
               return { nodeId: idOf('nod', row.id), family, typeId };
             }),
           ),
@@ -252,6 +278,8 @@ export function createEngine(deps: EngineDeps): Engine {
                   actor,
                   idempotencyKey: input.value.idempotencyKey,
                   expectedHeadVersionId: input.value.expectedHeadVersionId,
+                  rawFields: input.value.fields,
+                  maxFieldsBytes: config.maxNodeBytes,
                   chunksOf: () => {
                     written = chunks.length;
                     return chunks;
@@ -288,6 +316,7 @@ export function createEngine(deps: EngineDeps): Engine {
                   'ast_version',
                   'schema_version',
                   'origin',
+                  'fields',
                 ])
                 .where('organization_id', '=', tenant.organizationId)
                 .where('project_id', '=', tenant.projectId)
@@ -306,6 +335,8 @@ export function createEngine(deps: EngineDeps): Engine {
                 actor,
                 idempotencyKey: input.value.idempotencyKey,
                 expectedHeadVersionId: input.value.expectedHeadVersionId,
+                storedFields: target.fields as StoredFields,
+                maxFieldsBytes: config.maxNodeBytes,
                 // Chunked again and not copied: the target may predate chunking, and its rows
                 // belong to its own version.
                 chunksOf: () => {
@@ -340,6 +371,7 @@ export function createEngine(deps: EngineDeps): Engine {
               'n.type_id',
               'n.lifecycle',
               'n.head_version_id',
+              'n.head_fields',
               sql`coalesce(n.head_content, v.content)`.as('content'),
               'v.seq',
               'v.ast_version',
@@ -359,6 +391,7 @@ export function createEngine(deps: EngineDeps): Engine {
             seq: row.seq,
             astVersion: row.ast_version,
             content: row.content as NodeContent | null,
+            fields: row.head_fields as StoredFields,
           };
         }),
       );
@@ -413,6 +446,60 @@ export function createEngine(deps: EngineDeps): Engine {
           }));
           return { items, nextBefore: rows.length > limit ? (items.at(-1)?.seq ?? null) : null };
         }),
+      );
+    },
+
+    async queryNodes(rawTenant, rawQuery) {
+      const input = parsedOrRefused(querySchema, { tenant: rawTenant, query: rawQuery });
+      if (!input.ok) return input;
+      const { tenant, query } = input.value;
+      let route = 'slots';
+      return logged(
+        'engine.query',
+        { ...tenantFields(tenant), type_id: query.typeId },
+        () =>
+          settled(() =>
+            store.tenant(
+              tenant,
+              async (tx) => {
+                const outcome = await runQuery(tx, tenant, query, config);
+                ({ route } = outcome);
+                return outcome.page;
+              },
+              { timeoutMs: config.queryTimeoutMs },
+            ),
+          ),
+        (value) => ({
+          route,
+          items: value.items.length,
+          backfilling: value.backfilling.length > 0,
+        }),
+      );
+    },
+
+    async declareSchema(raw) {
+      const input = parsedOrRefused(declareSchemaInput, raw);
+      if (!input.ok) return input;
+      const { tenant, typeId } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.declare_schema',
+        { ...tenantFields(tenant), type_id: typeId },
+        () => settled(() => store.tenant(tenant, (tx) => declareSchema(tx, tenant, input.value))),
+        (value) => ({ version: value.version, backfills: value.backfills }),
+      );
+    },
+
+    async backfillFilters(rawTenant) {
+      const input = parsedOrRefused(backfillInput, { tenant: rawTenant });
+      if (!input.ok) return input;
+      const { tenant } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.filter_backfill',
+        tenantFields(tenant),
+        () => settled(() => backfillStep(store, tenant)),
+        (state) => ({ state }),
       );
     },
   };

@@ -343,6 +343,19 @@ select name, last_run_at, next_run_at from app.scheduled_jobs;
 
 With no dashboard server running, nothing is deleted until one starts.
 
+Content lists read one shared table, and that table needs looking after. After a bulk import, and
+on a schedule of your choosing, run this with `DREFYN_MIGRATION_DATABASE_URL` set:
+
+```sh
+drefyn maintain filter-rows --after-import   # once an import ends
+drefyn maintain filter-rows                  # rebuilds the key only when it has bloated
+```
+
+Each run prints one JSON line of counts. Alert on `alerts` being non empty: an open transaction past
+5 minutes or more than 20,000 dead rows both slow every content list. A run takes a few seconds on
+a small table and scales with the table, and two runs never overlap. To see transactions of other
+roles the migration role needs `pg_read_all_stats`, which only a superuser can grant.
+
 ## Mail for tests
 
 A test profile adds Mailpit (MIT), pinned by digest, for the auth flows and end to end tests.
