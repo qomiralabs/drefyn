@@ -17,16 +17,24 @@ function quadratic(size: number): void {
 describe('the growth check', () => {
   it('passes linear work', { timeout: 60_000 }, () => {
     const growth = growthOf(
-      () => linear(SMALL),
-      () => linear(SMALL * SIZE_RATIO),
+      () => {
+        linear(SMALL);
+      },
+      () => {
+        linear(SMALL * SIZE_RATIO);
+      },
     );
     expect(growth).toBeLessThan(MAX_GROWTH);
   });
 
   it('catches quadratic work', { timeout: 60_000 }, () => {
     const growth = growthOf(
-      () => quadratic(SMALL),
-      () => quadratic(SMALL * SIZE_RATIO),
+      () => {
+        quadratic(SMALL);
+      },
+      () => {
+        quadratic(SMALL * SIZE_RATIO);
+      },
     );
     expect(growth).toBeGreaterThan(MAX_GROWTH);
     expect(sink).toBeGreaterThanOrEqual(0);

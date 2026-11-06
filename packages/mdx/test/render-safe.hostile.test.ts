@@ -16,8 +16,11 @@ const STORED_SIZE = 12_000;
 // Elements, each two tags. Four times this is near the 5,000 tags a page may hold.
 const RAW_SIZE = 600;
 const MAX_FOOTNOTES = 2_000;
+const MAX_LIST_ITEMS = 5_000;
 const MAX_ATTRIBUTES = 9_900;
-const MAX_ATTRIBUTES_CPU_MS = 3_000;
+// A library is quadratic up to each of these budgets, so growth says nothing. CPU time at the
+// budget does, and other work on the machine barely moves it.
+const MAX_BUDGETED_CPU_MS = 3_000;
 
 const codeOf = (html: string): unknown => {
   try {
@@ -125,8 +128,12 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
     expect(codeOf(large)).toBe('render.too_complex');
     expect(
       growthOf(
-        () => render(small),
-        () => render(large),
+        () => {
+          render(small);
+        },
+        () => {
+          render(large);
+        },
       ),
     ).toBeLessThan(MAX_GROWTH);
   });
@@ -184,18 +191,6 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
       ],
     ],
     [
-      'a long list',
-      (size) => [
-        {
-          type: 'list',
-          children: Array.from({ length: size / 3 }, () => ({
-            type: 'listItem',
-            children: [text('x')],
-          })),
-        },
-      ],
-    ],
-    [
       'images to check',
       (size) => [
         {
@@ -219,7 +214,7 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
   // The parser's budget, which is the most raw HTML a page can have and still render.
   it.each<[string, (size: number) => string]>([
     ['closed elements', (size) => '<div>x</div>'.repeat(size)],
-    ['elements with attributes', (size) => '<span a="1" b="2" c="3">x</span>'.repeat(size)],
+    ['elements with attributes', (size) => '<span a="1">x</span>'.repeat(size)],
     [
       'formatting in table cells',
       (size) => `<table>${'<tr><td><b>x</b></td></tr>'.repeat(size / 12)}</table>`,
@@ -231,8 +226,12 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
     expect(codeOf(large)).toBe('rendered');
     expect(
       growthOf(
-        () => render(small),
-        () => render(large),
+        () => {
+          render(small);
+        },
+        () => {
+          render(large);
+        },
       ),
     ).toBeLessThan(MAX_GROWTH);
   });
@@ -241,7 +240,11 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
   it('keeps one tag at its attribute budget cheap on the CPU', () => {
     const page = `<a ${numbered(MAX_ATTRIBUTES, (i) => `x${i.toString(36)} `)}>y</a>`;
     expect(codeOf(page)).toBe('rendered');
-    expect(cheapestCpuMs(() => render(page))).toBeLessThan(MAX_ATTRIBUTES_CPU_MS);
+    expect(
+      cheapestCpuMs(() => {
+        render(page);
+      }),
+    ).toBeLessThan(MAX_BUDGETED_CPU_MS);
   });
 
   it('holds footnotes to a number their conversion can search', () => {
@@ -260,8 +263,26 @@ describe('work a page can force', { timeout: GROWTH_TIMEOUT_MS }, () => {
           children: [text('x')],
         })),
       ]);
-    expect(() => renderSafe(page(MAX_FOOTNOTES), policy())).not.toThrow();
+    expect(cheapestCpuMs(() => renderSafe(page(MAX_FOOTNOTES), policy()))).toBeLessThan(
+      MAX_BUDGETED_CPU_MS,
+    );
     expect(() => renderSafe(page(MAX_FOOTNOTES + 1), policy())).toThrow(
+      new RenderRefused('render.too_complex'),
+    );
+  });
+
+  it('holds a list to a length its conversion can search', () => {
+    const page = (total: number) =>
+      rootOf([
+        {
+          type: 'list',
+          children: Array.from({ length: total }, () => ({ type: 'listItem', children: [] })),
+        },
+      ]);
+    expect(cheapestCpuMs(() => renderSafe(page(MAX_LIST_ITEMS), policy()))).toBeLessThan(
+      MAX_BUDGETED_CPU_MS,
+    );
+    expect(() => renderSafe(page(MAX_LIST_ITEMS + 1), policy())).toThrow(
       new RenderRefused('render.too_complex'),
     );
   });

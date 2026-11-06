@@ -1,4 +1,9 @@
-import postcss from 'postcss';
+// A reference and not an import, as the file holds only an ambient module, and it has to reach
+// whichever package compiles this source.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="./postcss-tokenize.d.ts" />
+import postcss, { Input } from 'postcss';
+import tokenizer from 'postcss/lib/tokenize';
 import type { AtRule, ChildNode, Container, Declaration, Rule } from 'postcss';
 import type { Result } from './types.ts';
 
@@ -124,33 +129,44 @@ function problemsOf(node: ChildNode): CssProblemCode[] {
 
 const LINE_BREAKS = new Set(['\n', '\r', '\f']);
 
-// Where the string opening here ends, or -1 if it never closes on its own line.
-function endOfString(css: string, open: number): number {
-  for (let at = open + 1; at < css.length; at += 1) {
-    const char = css.charAt(at);
-    if (char === css.charAt(open)) return at + 1;
-    if (LINE_BREAKS.has(char)) return -1;
-    if (char === '\\') at += 1;
+function hasBareBreak(text: string): boolean {
+  for (let at = 0; at < text.length; at += 1) {
+    if (text.charAt(at) === '\\') at += 1;
+    else if (LINE_BREAKS.has(text.charAt(at))) return true;
   }
-  return -1;
+  return false;
 }
 
-// A browser ends a string at a bare line break and keeps reading rules. postcss reads on to the
-// closing quote, so what looks like one string here can hold a live rule there. A plain scan
-// and not a pattern, so a sheet of quotes and backslashes costs one pass.
-function hasBrokenString(css: string): boolean {
-  let at = 0;
-  while (at !== -1 && at < css.length) {
-    const char = css.charAt(at);
-    if (char === '"' || char === "'") {
-      at = endOfString(css, at);
-      if (at === -1) return true;
-    } else if (css.startsWith('/*', at)) {
-      at = css.indexOf('*/', at + 2);
-      if (at !== -1) at += 2;
-    } else {
-      at += 1;
+function endsInEscape(text: string): boolean {
+  let at = text.length;
+  while (at > 0 && text.charAt(at - 1) === '\\') at -= 1;
+  return (text.length - at) % 2 === 1;
+}
+
+// Rejects the places where a browser and postcss split a sheet differently, since a rule that
+// postcss takes for a string or a comment is live in the browser and no check below sees it:
+// a browser ends a string at a bare line break, reads \/ as an escape where postcss opens a
+// comment, and reads anything after url( but a string as one raw URL, quotes and comments
+// included, while postcss only does so for the exact lowercase spelling. Honest sheets lose
+// little: a comment inside brackets, or url( with a space and no quotes.
+function splitsLikeNoBrowser(css: string): boolean {
+  const tokens = tokenizer(new Input(css, { map: false }));
+  let previous: readonly [string, string, ...number[]] | undefined;
+  let depth = 0;
+  let afterUrl = false;
+  for (let token = tokens.nextToken(); token !== undefined; token = tokens.nextToken()) {
+    const [type, text] = token;
+    if (type === 'space') continue;
+    if (afterUrl && type !== 'string') return true;
+    afterUrl = false;
+    if (type === 'string' && hasBareBreak(text)) return true;
+    if (type === 'comment' && (depth > 0 || endsInEscape(previous?.[1] ?? ''))) return true;
+    if (type === '(') {
+      depth += 1;
+      afterUrl = previous?.[0] === 'word' && nameOf(previous[1]) === 'url';
     }
+    if (type === ')') depth = Math.max(0, depth - 1);
+    previous = token;
   }
   return false;
 }
@@ -185,9 +201,9 @@ export function checkCustomCss(css: string): Result<string, readonly CssProblem[
   if (typeof css !== 'string') return refuse('css.parse_failed');
   if (Buffer.byteLength(css, 'utf8') > MAX_BYTES) return refuse('css.too_large');
   if (MARKUP.test(css)) return refuse('css.markup');
-  if (hasBrokenString(css)) return refuse('css.parse_failed');
   const problems: CssProblem[] = [];
   try {
+    if (splitsLikeNoBrowser(css)) return refuse('css.parse_failed');
     // Without map: false postcss reads whatever file a source map comment names.
     walk(postcss.parse(css, { map: false }), problems);
   } catch {

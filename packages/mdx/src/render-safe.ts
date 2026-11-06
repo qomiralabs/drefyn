@@ -37,9 +37,14 @@ export class RenderRefused extends Error {
 // first. Every count below is an upper bound whatever state the parser is in: a comment or a
 // quoted value can only make them higher.
 const MAX_RAW_TAGS = 5_000;
-const MAX_RAW_ATTRIBUTES = 20_000;
+const MAX_RAW_ATTRIBUTES = 10_000;
 // Each block reopens every formatting element left open, so a page can ask for the product.
 const MAX_REOPENED = 500_000;
+
+// The Markdown conversion searches a list of all footnotes for each reference, and all the items
+// of a list for each item. No thread can stop it either.
+const MAX_FOOTNOTES = 2_000;
+const MAX_LIST_ITEMS = 5_000;
 
 const TAG = /<\/?[a-z]/gi;
 const ATTRIBUTE = /[\s/"'][^\s/"'>]/g;
@@ -71,6 +76,19 @@ function censusOf(tree: Nodes): { elements: number; raw: string[] } {
     if ('children' in node) pending.push(...node.children);
   }
   return census;
+}
+
+function holdConversion(root: MdxRoot): void {
+  let footnotes = 0;
+  const pending: MdastNodes[] = [...root.children];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (node.type === 'footnoteReference') footnotes += 1;
+    if (node.type === 'list' && node.children.length > MAX_LIST_ITEMS) {
+      throw new RenderRefused('render.too_complex');
+    }
+    if ('children' in node) pending.push(...node.children);
+  }
+  if (footnotes > MAX_FOOTNOTES) throw new RenderRefused('render.too_complex');
 }
 
 function holdRawBudget(rawHtml: string, elements: number): void {
@@ -178,6 +196,7 @@ function clean(tree: Nodes, policy: RenderPolicy): Nodes {
 }
 
 function transform(root: MdxRoot, policy: RenderPolicy): ReactElement {
+  holdConversion(root);
   let tree = toHastTree(root, policy);
   const census = censusOf(tree);
   if (census.raw.length > 0) {
