@@ -80,12 +80,14 @@ cannot move text in another. It closes before it passes the target. A block over
 at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
 on a save, and under the lock on a rollback, where a replay must not pay for it.
 
-A chunk holds only what a reader sees, because chunks feed search, the assistant and MCP. It is
-read off the tree: text, code and image alt text, through a closed list of node types. Frontmatter,
-comments, raw HTML, expressions, imports, link targets, titles and component props stay out, and so
-does any node type added later until it joins that list. Heading text is capped at 200 characters
-and heading paths share a budget of 262,144 characters a page. Past it a chunk has an empty path, so
-one save cannot grow by repeating a long path on every row.
+A chunk holds only what a reader sees, because chunks feed search, the assistant and MCP. Its text
+comes from `readerBlocks` in `@drefyn/mdx`, the rule `renderSafe` applies: a closed list of node
+types, children of registered components only, and footnotes something shown refers to. All raw HTML
+content stays out, from an open tag to its close across blocks, to the end of the page if it never
+closes. So a page's chunks are always part of what renders, and a tag left open costs search the
+rest of that page. A chunk read later, on a rollback, uses the registry of that moment. Heading text
+is capped at 200 characters and heading paths share a budget of 262,144 characters a page. Past it a
+chunk has an empty path, so one save cannot grow by repeating a long path on every row.
 
 A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
 `engine.save.write`. The parse host reports its steps, and the engine records them through

@@ -1,4 +1,4 @@
-import type { MdxBlock } from '@drefyn/mdx';
+import { readerBlocks } from '@drefyn/mdx';
 import type { NodeContent } from './content.ts';
 
 export interface ChunkOptions {
@@ -6,6 +6,8 @@ export interface ChunkOptions {
   readonly targetChars: number;
   // No chunk ever passes this.
   readonly maxChars: number;
+  // The registry pages render with. Without it no component's children are shown.
+  readonly components?: ReadonlySet<string>;
 }
 
 export interface Chunk {
@@ -36,70 +38,10 @@ const splitsPair = (text: string, at: number): boolean => {
 
 const cutPoint = (text: string, at: number): number => (splitsPair(text, at) ? at - 1 : at);
 
-const VALUE_NODES: ReadonlySet<string> = new Set(['text', 'inlineCode', 'code']);
-const ALT_NODES: ReadonlySet<string> = new Set(['image', 'imageReference']);
+const headingText = (text: string): string =>
+  text.length > MAX_HEADING_CHARS ? text.slice(0, cutPoint(text, MAX_HEADING_CHARS)) : text;
 
-// Each node a reader sees the children of, and what goes between them. A list and not a filter:
-// a node type added later stays out until someone decides a reader sees it.
-const CONTAINERS: ReadonlyMap<string, string> = new Map([
-  ['paragraph', ''],
-  ['heading', ''],
-  ['emphasis', ''],
-  ['strong', ''],
-  ['delete', ''],
-  ['link', ''],
-  ['linkReference', ''],
-  ['tableCell', ''],
-  ['mdxJsxTextElement', ''],
-  ['tableRow', '\t'],
-  ['table', '\n'],
-  ['blockquote', '\n'],
-  ['list', '\n'],
-  ['listItem', '\n'],
-  ['footnoteDefinition', '\n'],
-  ['mdxJsxFlowElement', '\n'],
-]);
-
-interface WalkedNode {
-  readonly type?: unknown;
-  readonly value?: unknown;
-  readonly alt?: unknown;
-  readonly children?: unknown;
-}
-
-// Read off the tree, never off a block's source: that holds frontmatter, comments, raw HTML, link
-// targets and component props, and chunks go on to search, the assistant and MCP. Keeps its own
-// stack, as a rollback reads a tree nothing has walked in this process. Separators sit on the
-// stack with the nodes, so they come out in reading order.
-function visibleText(block: MdxBlock, limit = Infinity): string {
-  let text = '';
-  const stack: (WalkedNode | string)[] = [block];
-  while (stack.length > 0 && text.length < limit) {
-    const item = stack.pop();
-    if (typeof item === 'string') {
-      text += item;
-      continue;
-    }
-    const type = String(item?.type);
-    const { value, alt, children } = item ?? {};
-    const between = CONTAINERS.get(type);
-    if (VALUE_NODES.has(type) && typeof value === 'string') text += value;
-    else if (ALT_NODES.has(type) && typeof alt === 'string') text += alt;
-    else if (type === 'break') text += '\n';
-    else if (between !== undefined && Array.isArray(children)) {
-      for (let at = children.length - 1; at >= 0; at -= 1) {
-        stack.push(children[at] as WalkedNode);
-        if (at > 0 && between !== '') stack.push(between);
-      }
-    }
-  }
-  return text;
-}
-
-function headingText(block: MdxBlock): string {
-  const text = visibleText(block, MAX_HEADING_CHARS);
-  return text.length > MAX_HEADING_CHARS ? text.slice(0, cutPoint(text, MAX_HEADING_CHARS)) : text;
-}
+const NO_COMPONENTS: ReadonlySet<string> = new Set();
 
 function linesOf(text: string): string[] {
   const lines: string[] = [];
@@ -192,15 +134,16 @@ export function chunkNode(content: NodeContent, options: ChunkOptions): readonly
     open += text;
   };
 
+  const texts = readerBlocks(content, { components: options.components ?? NO_COMPONENTS });
   content.children.forEach((block, index) => {
+    const text = texts[index] ?? '';
     if (block.type === 'heading') {
       close();
       while ((headings.at(-1)?.depth ?? 0) >= block.depth) headings.pop();
-      headings.push({ depth: block.depth, text: headingText(block) });
+      headings.push({ depth: block.depth, text: headingText(text) });
       openHeadings = headings.map(({ text }) => text);
       openHeadingsCost = openHeadings.reduce((sum, text) => sum + text.length + 1, 0);
     }
-    const text = visibleText(block);
     if (text.trim() !== '') place(String(index), text);
   });
   close();

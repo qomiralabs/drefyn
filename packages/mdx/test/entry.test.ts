@@ -46,6 +46,7 @@ describe('the way into the parser', () => {
       'AST_VERSION',
       'DEFAULT_LIMITS',
       'rawOf',
+      'readerBlocks',
       'validateTree',
     ]);
     expect(Object.keys(client)).toEqual(['createParseClient']);

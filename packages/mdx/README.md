@@ -25,6 +25,14 @@ since the previous block, so it ends at a line start and holds a BOM if the file
 root keeps `tail`, everything after the last block, `tailOf`, its hash, and `eol`, the majority
 line ending.
 
+## What a reader gets
+
+`readerBlocks(root, { components })` gives the text of each top level block a reader can get, with
+no parser and in linear time, so a save can call it. Search, the assistant and MCP read this, so
+nothing a page hides may reach them. It shows less than a render, never more: raw HTML content stays
+out from an open tag to its close, even under tags a render would keep, and a tag left open hides
+the rest of the page.
+
 ## Changed blocks
 
 `client.print({ tenant, path, root, policy })` gives back the bytes of a tree, the tree they parse

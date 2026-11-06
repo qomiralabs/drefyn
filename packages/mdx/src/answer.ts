@@ -22,7 +22,8 @@ export function bytesOfTree(root: MdxRoot): string | undefined {
 
 const parsedSchema = z.looseObject({ ast: rootSchema });
 const time = z.number().min(0);
-const timingSchema = z.object({
+// The pool checks this too, ahead of a log line, as the thread that sends it runs hostile pages.
+export const timingSchema = z.object({
   decodeMs: time,
   printMs: time,
   reparseMs: time,

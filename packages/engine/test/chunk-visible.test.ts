@@ -107,6 +107,8 @@ const RAW_HTML_PAGES = [
   'Shown <script title="></script>">secret-quoted-close</script> end.',
   'Shown <TEMPLATE>secret-upper-case</TEMPLATE> end.',
   'Open <template>\n\nsecret-next-block',
+  '<style>\n\n</style> secret-close-in-a-paragraph',
+  '<noscript><span>\n\n| secret | cell |\n</noscript>\n\nsecret-after',
 ] as const;
 
 const MDX_HIDDEN_PAGES = [

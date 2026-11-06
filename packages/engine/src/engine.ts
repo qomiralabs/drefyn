@@ -131,6 +131,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const chunkOptions: ChunkOptions = {
     targetChars: config.chunkTargetChars,
     maxChars: config.chunkMaxChars,
+    components: new Set(deps.parsePolicy.components),
   };
 
   const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {

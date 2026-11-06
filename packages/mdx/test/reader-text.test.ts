@@ -4,16 +4,15 @@ import type { MdxBlock, MdxRoot } from '../src/index.ts';
 
 const NONE = { components: new Set<string>() };
 
-const rootOf = (children: readonly unknown[]): MdxRoot =>
-  ({
-    type: 'root',
-    astVersion: 1,
-    dialect: 'md',
-    eol: 'lf',
-    children: children as readonly MdxBlock[],
-    tail: '',
-    tailOf: '',
-  }) as MdxRoot;
+const rootOf = (children: readonly unknown[]): MdxRoot => ({
+  type: 'root',
+  astVersion: 1,
+  dialect: 'md',
+  eol: 'lf',
+  children: children as readonly MdxBlock[],
+  tail: '',
+  tailOf: '',
+});
 
 const text = (value: string) => ({ type: 'text', value });
 const paragraph = (...children: readonly unknown[]) => ({ type: 'paragraph', children });
@@ -91,6 +90,12 @@ describe('readerBlocks', () => {
 
   it('holds a raw text element open to a close tag only', () => {
     expect(read(html('<style></styled>'), paragraph(text('in')))).toEqual(['', '']);
+  });
+
+  it('takes a close only in the parent that opened the tag', () => {
+    expect(
+      read(html('<div>'), paragraph(html('</div>'), text('in')), paragraph(text('also in'))),
+    ).toEqual(['', '', '']);
   });
 
   it('walks a registered component and nothing else', () => {
