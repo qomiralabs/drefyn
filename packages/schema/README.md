@@ -1,9 +1,10 @@
 # `@drefyn/schema`
 
 The content type definition behind Studio's editor, validation and generated APIs. It is
-pure and has one dependency, zod, so the same rules can run in a browser and on a server.
-Nothing here logs, reads a clock or does I/O. Tenant IDs live on the rows that store a
-schema, not inside the definition.
+pure in the plain sense: nothing here logs, reads a clock or does I/O, and the same input
+gives the same output. It uses zod to read untrusted input, so it is not listed in
+`drefyn.pureEntries`, which allows no package at run time. Tenant IDs live on the rows
+that store a schema, not inside the definition.
 
 Schemas and filters come from customers. Treat both as untrusted. Errors carry fixed
 codes, schema key paths and checked ids, and never repeat input text.

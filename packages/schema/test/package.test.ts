@@ -10,17 +10,15 @@ const src = join(root, 'src');
 
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
   exports: Record<string, string>;
-  drefyn?: { pureEntries?: string[] };
   dependencies?: Record<string, string>;
 };
 
 describe('package layout', () => {
-  it('has one pure entry, so Studio can run the same rules in a browser', () => {
+  it('has one entry', () => {
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
       './package.json': './package.json',
     });
-    expect(manifest.drefyn?.pureEntries).toEqual(['.']);
   });
 
   it('depends on zod and nothing else', () => {

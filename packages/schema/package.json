@@ -9,11 +9,6 @@
     ".": "./src/index.ts",
     "./package.json": "./package.json"
   },
-  "drefyn": {
-    "pureEntries": [
-      "."
-    ]
-  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
