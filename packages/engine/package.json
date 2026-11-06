@@ -11,6 +11,14 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@drefyn/mdx": "workspace:*"
+  },
+  "devDependencies": {
+    "@drefyn/db": "workspace:*",
+    "@drefyn/tenancy": "workspace:*"
   }
 }

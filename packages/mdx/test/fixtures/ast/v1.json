@@ -1,0 +1,812 @@
+{
+  "empty": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [],
+    "tail": "",
+    "tailOf": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "blocks": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "heading",
+        "depth": 1,
+        "children": [
+          {
+            "type": "text",
+            "value": "Heading"
+          }
+        ],
+        "source": {
+          "raw": "# Heading",
+          "gapBefore": "",
+          "rawOf": "27c76e35e6572add548bd609e9b3c625176f7c48368c7e32a926287adb7f1173",
+          "sourceOf": "a3352f8f9fc7fb20b5354a2c33b4f858d8be40b69773adcb0c6e521ff8e5ce78"
+        }
+      },
+      {
+        "type": "heading",
+        "depth": 1,
+        "children": [
+          {
+            "type": "text",
+            "value": "Setext"
+          }
+        ],
+        "source": {
+          "raw": "Setext\n======",
+          "gapBefore": "\n\n",
+          "rawOf": "c9246188df81ed6dce2f1ddbaae2c7c4933822c23bb6539f6869d06f5971d723",
+          "sourceOf": "4f97f53176055ca9b72736ce20a74e64bb8b32ccc36fdebf0ce148c5a7bfcedf"
+        }
+      },
+      {
+        "type": "blockquote",
+        "children": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "A quote"
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "> A quote",
+          "gapBefore": "\n\n",
+          "rawOf": "44f14a490eaa159cf4bb8481f2715b4cbc007a58f3720fba267e263d39c4e0ef",
+          "sourceOf": "6c6cbe96401447a78553ec92e074888a443f84d8aab9c2d8eef6f4d396a536e2"
+        }
+      },
+      {
+        "type": "list",
+        "ordered": false,
+        "start": null,
+        "spread": false,
+        "children": [
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": null,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "one"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": null,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "two"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "- one\n- two",
+          "gapBefore": "\n\n",
+          "rawOf": "0b3051f1c65d8f1a79a69efe073a2a26b2230b0d8f20b60b367d49b75ba2a5a6",
+          "sourceOf": "fe3c17eea797b6611f3662e06b00be1465fd3aad233464be1b35509fb419464d"
+        }
+      },
+      {
+        "type": "list",
+        "ordered": true,
+        "start": 3,
+        "spread": false,
+        "children": [
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": null,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "three"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": null,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "four"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "3. three\n4. four",
+          "gapBefore": "\n\n",
+          "rawOf": "037068b974bec60dadf273b80a5f2f378228c1e5b3b181849fa5a4836bb2c208",
+          "sourceOf": "7c8ebe8ddbb2079b1165c1e2c3014b535952c814001d2d858b0b2e00e36e4ee4"
+        }
+      },
+      {
+        "type": "code",
+        "lang": "ts",
+        "meta": "title=\"a.ts\"",
+        "value": "const a = 1;",
+        "source": {
+          "raw": "```ts title=\"a.ts\"\nconst a = 1;\n```",
+          "gapBefore": "\n\n",
+          "rawOf": "624a70568532bc24653b5bd4c9c67cc64e190f197c6ed9e3537c854db1234af0",
+          "sourceOf": "23bc1ca70fa62469c9e795a74ca244f6150b97c2aee278031870c57e8342c414"
+        }
+      },
+      {
+        "type": "code",
+        "lang": null,
+        "meta": null,
+        "value": "indented code",
+        "source": {
+          "raw": "    indented code",
+          "gapBefore": "\n\n",
+          "rawOf": "852598613cd17a0d93332a49a006a13bd58dbfff0bcede20f94f56906410ef55",
+          "sourceOf": "3c1cfcbb9680408634151ba5afb4fdc7c026c3fb1691f6d5c2fa9e0bad5263be"
+        }
+      },
+      {
+        "type": "thematicBreak",
+        "source": {
+          "raw": "---",
+          "gapBefore": "\n\n",
+          "rawOf": "9ca8a9c983ab4554e0a4d2139448233f63ef2b5976db1ce79d11eb058c214af0",
+          "sourceOf": "a9c9978833bd2bcc26f9118e8e6945964a079ff0e0f33cf00a0425c826b76775"
+        }
+      },
+      {
+        "type": "html",
+        "value": "<div>html</div>",
+        "source": {
+          "raw": "<div>html</div>",
+          "gapBefore": "\n\n",
+          "rawOf": "270445948abdc00d3cea5c9a9b8091a749d12d8a5556cc608243df05379eee84",
+          "sourceOf": "a57678692c4ae7bc7fbd914b7ef3de12c86f3859cd41945126b539cd914409c8"
+        }
+      },
+      {
+        "type": "definition",
+        "identifier": "ref",
+        "label": "ref",
+        "title": "Title",
+        "url": "https://example.com",
+        "source": {
+          "raw": "[ref]: https://example.com \"Title\"",
+          "gapBefore": "\n\n",
+          "rawOf": "2f50993f0b745acc57a0f6ac39b471a2983271925300a44dc83bb37925624946",
+          "sourceOf": "670ca51896d0f9b6d2b2a57df2f262712210440cfd28da4eafc7266aa4eecf65"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "inlines": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Plain "
+          },
+          {
+            "type": "emphasis",
+            "children": [
+              {
+                "type": "text",
+                "value": "emphasis"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "strong"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "inlineCode",
+            "value": "code"
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "link",
+            "title": "t",
+            "url": "https://example.com",
+            "children": [
+              {
+                "type": "text",
+                "value": "link"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": ".\nA hard"
+          },
+          {
+            "type": "break"
+          },
+          {
+            "type": "text",
+            "value": "break, "
+          },
+          {
+            "type": "image",
+            "title": "alt",
+            "url": "a.png",
+            "alt": "image"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "linkReference",
+            "children": [
+              {
+                "type": "text",
+                "value": "ref"
+              }
+            ],
+            "label": "ref",
+            "identifier": "ref",
+            "referenceType": "full"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "imageReference",
+            "alt": "image ref",
+            "label": "ref",
+            "identifier": "ref",
+            "referenceType": "full"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "source": {
+          "raw": "Plain *emphasis* **strong** `code` [link](https://example.com \"t\").\nA hard  \nbreak, ![image](a.png \"alt\"), [ref][ref], ![image ref][ref].",
+          "gapBefore": "",
+          "rawOf": "592bb72cac852e7e419c50eba0cf7e170618518d6a6bc976a13466934d495541",
+          "sourceOf": "67d126aaebb425286a68e30f414dab7c7e9ab0cb11a3d5578a86c0b431f093b8"
+        }
+      },
+      {
+        "type": "definition",
+        "identifier": "ref",
+        "label": "ref",
+        "title": null,
+        "url": "https://example.com",
+        "source": {
+          "raw": "[ref]: https://example.com",
+          "gapBefore": "\n\n",
+          "rawOf": "8651b9530097e00288ec3bf90e3b5892a5ffd4432d92300c289bff9c92e9d058",
+          "sourceOf": "6a04144794a7ada15ebcef8578efb3d156210d11ed7caf31fd80f07039cb6926"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "gfm": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "table",
+        "align": ["left", "right"],
+        "children": [
+          {
+            "type": "tableRow",
+            "children": [
+              {
+                "type": "tableCell",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "tableRow",
+            "children": [
+              {
+                "type": "tableCell",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "1"
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "2"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "| a | b |\n| :-- | --: |\n| 1 | 2 |",
+          "gapBefore": "",
+          "rawOf": "2bd20c615e839ee9d232685848091d169de7ab98d2109b362e80a15070531a04",
+          "sourceOf": "c9f00ea79031bb440ae0e0f4fae210b4de417e6fc26232cfcded4345fcd26810"
+        }
+      },
+      {
+        "type": "list",
+        "ordered": false,
+        "start": null,
+        "spread": false,
+        "children": [
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": true,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "done"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "spread": false,
+            "checked": false,
+            "children": [
+              {
+                "type": "paragraph",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "open"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "- [x] done\n- [ ] open",
+          "gapBefore": "\n\n",
+          "rawOf": "fb9023df649a5c20cbd81eb3a0c9b9bb00f7ac5518a641482cbe9e1c67b95848",
+          "sourceOf": "0124b01b566305123e511a00d15dca16845ff56a1f694803260e330d06d3a927"
+        }
+      },
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "delete",
+            "children": [
+              {
+                "type": "text",
+                "value": "gone"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "link",
+            "title": null,
+            "url": "https://example.com",
+            "children": [
+              {
+                "type": "text",
+                "value": "https://example.com"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " note"
+          },
+          {
+            "type": "footnoteReference",
+            "identifier": "1",
+            "label": "1"
+          }
+        ],
+        "source": {
+          "raw": "~~gone~~ https://example.com note[^1]",
+          "gapBefore": "\n\n",
+          "rawOf": "0fcfa297c0b8209b6e23a376b1cb3164b6e2d21fd9eff6e9ac190d3b0fa3a2dc",
+          "sourceOf": "2fc6138baa5e8a5237a576d1269b0193a42f67696adfbefaa34fc1d40702e5b0"
+        }
+      },
+      {
+        "type": "footnoteDefinition",
+        "identifier": "1",
+        "label": "1",
+        "children": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The note."
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "[^1]: The note.",
+          "gapBefore": "\n\n",
+          "rawOf": "e23e802b4de5161cd89a1cc9fe063dfbcd108f5db3db1585b532976b82058633",
+          "sourceOf": "f427df01d4e8dbd737d69f4f21157b2269074332366bf384f42a5eb8738359f5"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "yaml": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "yaml",
+        "value": "title: A",
+        "source": {
+          "raw": "---\ntitle: A\n---",
+          "gapBefore": "",
+          "rawOf": "fc833c9a1e38370e9883174c8563a5329c0efdee2f89c983c5045c473fdd90cc",
+          "sourceOf": "5e58c9e541c77ed4ea6f061c2ce67f7c32c92e382dce2463ddf156df88932979"
+        }
+      },
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Body"
+          }
+        ],
+        "source": {
+          "raw": "Body",
+          "gapBefore": "\n\n",
+          "rawOf": "59de7e62bf68c63ae94439d18088df75a055ac1e95fbd940d724647f3f11397a",
+          "sourceOf": "5779a61e13848f9d0006e71395d3973dfd26645522b92ffb0a7c9ed7ee81b483"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "mdx": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "mdx",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "mdxjsEsm",
+        "value": "import { a } from './a.js';",
+        "source": {
+          "raw": "import { a } from './a.js';",
+          "gapBefore": "",
+          "rawOf": "0ff4c663ef10d143fe5ac37e26a656b9d6912f6616f1bd649aa3bec8138b1ab1",
+          "sourceOf": "1337f918e4ca65e959f7797de6f59491307b6aa21f5f064bb984c938c85f9e06"
+        }
+      },
+      {
+        "type": "mdxjsEsm",
+        "value": "export const b = 1;",
+        "source": {
+          "raw": "export const b = 1;",
+          "gapBefore": "\n\n",
+          "rawOf": "9b8bb5fd57aeb8e75bc99eb74d008a45aa6820a26d2a4d5eeac0f4da9781ca46",
+          "sourceOf": "0f4e7d24042df7916426781f0d58075235e7a8d8468601772a6f8ce3bcf2b340"
+        }
+      },
+      {
+        "type": "mdxJsxFlowElement",
+        "name": "Callout",
+        "attributes": [
+          {
+            "type": "mdxJsxAttribute",
+            "name": "kind",
+            "value": "note"
+          },
+          {
+            "type": "mdxJsxAttribute",
+            "name": "open",
+            "value": null
+          }
+        ],
+        "children": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Inside"
+              }
+            ]
+          }
+        ],
+        "source": {
+          "raw": "<Callout kind=\"note\" open>\n  Inside\n</Callout>",
+          "gapBefore": "\n\n",
+          "rawOf": "eb293265b1dbea9bcd800b8c12b3adc723026d7769ba7382d899d4189a355dd5",
+          "sourceOf": "a8db7982520a6ea9c3c29d37a1debca56c1911e0ff9d9c26d5903101504c3732"
+        }
+      },
+      {
+        "type": "mdxFlowExpression",
+        "value": "a + b",
+        "source": {
+          "raw": "{a + b}",
+          "gapBefore": "\n\n",
+          "rawOf": "ef39bc3ac065f7c4e25197e5661006e3f449e3caf27e7f95c4c262586df6da00",
+          "sourceOf": "fd1c20162bd3d7fcd1157d0687343d2c3e119d62d500e174f5c3c3d1e4003f8f"
+        }
+      },
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Text with "
+          },
+          {
+            "type": "mdxJsxTextElement",
+            "name": "Badge",
+            "attributes": [
+              {
+                "type": "mdxJsxAttribute",
+                "name": "label",
+                "value": "new"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "text",
+            "value": " and "
+          },
+          {
+            "type": "mdxTextExpression",
+            "value": "b"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "source": {
+          "raw": "Text with <Badge label=\"new\" /> and {b}.",
+          "gapBefore": "\n\n",
+          "rawOf": "e1b7125be68ba0df5f503f90deb5bbc2cd541990ea6bb687064fd55a0717eb96",
+          "sourceOf": "d3c0caebcee202e350dd1a25a659dbdf7345bf6040eb42d4d2c8d35cbf9d7585"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "crlf": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "crlf",
+    "children": [
+      {
+        "type": "heading",
+        "depth": 1,
+        "children": [
+          {
+            "type": "text",
+            "value": "A"
+          }
+        ],
+        "source": {
+          "raw": "# A",
+          "gapBefore": "",
+          "rawOf": "cd19f57ad7d8bdb3d57feb6bd26815cd6fee4d82f6eda11c5be7d3e134e3fa98",
+          "sourceOf": "7407c381064fb142a41706f9219f29942180c5cb3d5424580fdcbf22a3359549"
+        }
+      },
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Some text\r\nover two lines"
+          }
+        ],
+        "source": {
+          "raw": "Some text\r\nover two lines",
+          "gapBefore": "\r\n\r\n",
+          "rawOf": "f9c1ce3d451dabffd301b23878f00229175530da6865ed60471b876cf22baef2",
+          "sourceOf": "cd6f27e966ab73036ce4faeb9aa39a9607d405702d0dbebe5bb104a7f2d8ae06"
+        }
+      }
+    ],
+    "tail": "\r\n",
+    "tailOf": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+  },
+  "bom": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "heading",
+        "depth": 1,
+        "children": [
+          {
+            "type": "text",
+            "value": "A"
+          }
+        ],
+        "source": {
+          "raw": "# A",
+          "gapBefore": "﻿",
+          "rawOf": "cd19f57ad7d8bdb3d57feb6bd26815cd6fee4d82f6eda11c5be7d3e134e3fa98",
+          "sourceOf": "f359930632cd7aefaed73db930169165c03588dd82c626c4039090b501dc54ab"
+        }
+      }
+    ],
+    "tail": "\n",
+    "tailOf": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "gaps-and-tail": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "heading",
+        "depth": 1,
+        "children": [
+          {
+            "type": "text",
+            "value": "Indented"
+          }
+        ],
+        "source": {
+          "raw": "  # Indented",
+          "gapBefore": "\n\n",
+          "rawOf": "a865bfa2ce59eb241d2603116b6559b51abc1efddab221ed4ecbadf56ba28f3e",
+          "sourceOf": "00d3453d658ec7b99d220e24d3da55b58ad44a285cffa7436d6f56d161459b6b"
+        }
+      },
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Last"
+          }
+        ],
+        "source": {
+          "raw": "Last",
+          "gapBefore": "\n\n\n\n",
+          "rawOf": "45f00e48b9b6f11049118e8cc09c1676b5e37c5a8c6ac8f37184db81b16e95f8",
+          "sourceOf": "36f83b45205c0c7642255bdb36460e8615b9b4ee088fe0b01dccee8c50a5109c"
+        }
+      }
+    ],
+    "tail": "\n\n\n",
+    "tailOf": "6a3cf5192354f71615ac51034b3e97c20eda99643fcaf5bbe6d41ad59bd12167"
+  },
+  "no-final-newline": {
+    "type": "root",
+    "astVersion": 1,
+    "dialect": "md",
+    "eol": "lf",
+    "children": [
+      {
+        "type": "paragraph",
+        "children": [
+          {
+            "type": "text",
+            "value": "Last"
+          }
+        ],
+        "source": {
+          "raw": "Last",
+          "gapBefore": "",
+          "rawOf": "45f00e48b9b6f11049118e8cc09c1676b5e37c5a8c6ac8f37184db81b16e95f8",
+          "sourceOf": "9785d878af0268bf6b28f19e6dae18fca0233b1721f1a6f532fac2c5e10a2912"
+        }
+      }
+    ],
+    "tail": "",
+    "tailOf": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

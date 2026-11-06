@@ -15,7 +15,8 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:fuzz": "node fuzz/run.ts",
-    "bench": "node bench/roundtrip.ts"
+    "bench": "node bench/roundtrip.ts",
+    "pin:ast": "node test/pin-ast.ts"
   },
   "dependencies": {
     "@drefyn/tenancy": "workspace:*",
