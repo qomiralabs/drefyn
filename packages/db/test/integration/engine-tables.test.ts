@@ -707,7 +707,9 @@ describeWithStack('the engine tables', () => {
     it('is one row an organization reaches from each of its projects', async () => {
       const seen = await as(A, async (client) => {
         await add(client, A.org, 'docs_page');
-        const read = await client.query(`select nodes from app.organization_node_counts`);
+        const read = await client.query<{ nodes: string }>(
+          `select nodes from app.organization_node_counts`,
+        );
         return read.rows;
       });
       expect(seen).toEqual([{ nodes: '1' }]);
