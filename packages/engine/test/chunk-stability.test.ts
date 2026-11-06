@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_LIMITS, type Dialect, type MdxRoot } from '@drefyn/mdx';
+import { DEFAULT_LIMITS, type Dialect, type MdxIssueCode, type MdxRoot } from '@drefyn/mdx';
 import { createParseClient, type ParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -16,11 +17,6 @@ const CORPUS_MS = 180_000;
 
 const corpus = join(import.meta.dirname, '..', '..', 'mdx', 'test', 'fixtures', 'corpus');
 
-const tenant = {
-  organizationId: organizationId('01890a5d-ac96-774b-bcce-b302099a8101'),
-  projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8102'),
-};
-
 const policy = {
   version: 1,
   components: new Set<string>(),
@@ -30,10 +26,26 @@ const policy = {
   limits: DEFAULT_LIMITS,
 } as const;
 
-// A page the parser refuses, for a component this policy does not list, is not a page to edit.
+const BUSY: ReadonlySet<MdxIssueCode> = new Set([
+  'mdx.queue_full',
+  'mdx.organization_limit',
+  'mdx.project_limit',
+  'mdx.parse_unavailable',
+  'mdx.parse_timeout',
+]);
+
+// A new tenant for each call, as the parse budget is per organization and one slow run would
+// otherwise spend it. A page refused for a component this policy does not list is not a page to
+// edit, but a busy host says nothing about the page, and skipping there would shrink the sample.
 async function parsed(client: ParseClient, source: string, dialect: Dialect) {
+  const tenant = {
+    organizationId: organizationId(randomUUID()),
+    projectId: projectId(randomUUID()),
+  };
   const answer = await client.parse({ tenant, path: 'corpus', source, dialect, policy });
-  return answer.ok ? answer.value.ast : null;
+  if (answer.ok) return answer.value.ast;
+  if (answer.error.some(({ code }) => BUSY.has(code))) throw new Error('the parse host is busy');
+  return null;
 }
 
 // One word of the block at this share of the page's paragraphs, in place in the file.
@@ -94,7 +106,7 @@ describe('a one word edit on the corpus', () => {
   });
 
   it('reaches every page position', () => {
-    expect(edits.length).toBeGreaterThan(400);
+    expect(edits.length).toBe(466);
   });
 
   // Any edit changes at least the chunk holding the word, so a page under 20 chunks cannot reach
