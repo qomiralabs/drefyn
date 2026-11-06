@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeFailure, migrate } from './support/cli.ts';
+import { describeFailure, migrate, shippedMigrations } from './support/cli.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
 import { describeWithStack } from './support/presence.ts';
 import { superuser } from './support/stack.ts';
@@ -30,12 +30,20 @@ const step = async (db: TestDatabase, args: readonly string[]) => {
   expect(result.code, describeFailure(result)).toBe(0);
 };
 
+// However many have landed after it.
+function stepsBack(): number {
+  const shipped = shippedMigrations();
+  const at = shipped.findIndex((file) => file.endsWith('_engine_lz4.sql'));
+  expect(at).toBeGreaterThanOrEqual(0);
+  return shipped.length - at;
+}
+
 describeWithStack('the engine lz4 migration', () => {
   it('sets lz4 on both content columns, and down puts the default back', async () => {
     const db = await dbs.fresh('migrated');
     expect(await compressionOf(db)).toEqual(COLUMNS.map((column) => `${column}=l`));
 
-    await step(db, ['migrate', 'down', '1']);
+    await step(db, ['migrate', 'down', String(stepsBack())]);
     expect(await compressionOf(db)).toEqual(COLUMNS.map((column) => `${column}=`));
 
     await step(db, ['migrate', 'up']);
