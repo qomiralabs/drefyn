@@ -371,6 +371,12 @@ async function refusal(work: Promise<unknown>): Promise<Refusal> {
   throw new Error('the database accepted the write');
 }
 
+const firstId = (result: pg.QueryResult<{ id: string }>) => {
+  const row = result.rows[0];
+  if (row === undefined) throw new Error('the insert returned no row');
+  return row.id;
+};
+
 const keys = async (client: pg.Client, spec: EngineTable): Promise<readonly string[]> => {
   const result = await client.query<{ key: string }>(
     `select ${spec.key}::text as key from app.${spec.table} order by 1`,
@@ -623,7 +629,7 @@ describeWithStack('the engine tables', () => {
     it('a version refuses a parent version of another node', async () => {
       const refused = await as(A, async (client) => {
         const other = await insertOtherVersion(client);
-        return refusal(run(client, insertVersion(A.org, A.project, { parent: other.rows[0]?.id })));
+        return refusal(run(client, insertVersion(A.org, A.project, { parent: firstId(other) })));
       });
       expect(refused).toMatchObject({
         code: '23503',
@@ -652,7 +658,7 @@ describeWithStack('the engine tables', () => {
            values ($1, $2, 'studio_item', 'other') returning id`,
           [A.org, A.project],
         );
-        return refusal(run(client, insertFilterRow(A.org, A.project, { type: other.rows[0]?.id })));
+        return refusal(run(client, insertFilterRow(A.org, A.project, { type: firstId(other) })));
       });
       expect(refused).toMatchObject({ code: '23503', constraint: 'node_filter_rows_node_fkey' });
     });
@@ -783,7 +789,7 @@ describeWithStack('the engine tables', () => {
            values ($1, $2, $3, 'of-family') returning id`,
           [A.org, A.project, family],
         );
-        return run(client, insertNode(A.org, A.project, { family, type: type.rows[0]?.id }));
+        return run(client, insertNode(A.org, A.project, { family, type: firstId(type) }));
       });
       expect(done.rowCount).toBe(1);
     });
