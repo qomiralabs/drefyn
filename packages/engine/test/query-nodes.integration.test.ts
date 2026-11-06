@@ -5,7 +5,13 @@ import fc from 'fast-check';
 import pg from 'pg';
 import { sql } from 'kysely';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createEngine, DEFAULT_ENGINE_CONFIG, type NodeId } from '../src/index.ts';
+import {
+  createEngine,
+  databaseStore,
+  DEFAULT_ENGINE_CONFIG,
+  type EngineStore,
+  type NodeId,
+} from '../src/index.ts';
 import {
   admin,
   ACTOR,
@@ -330,11 +336,79 @@ describeWithStack('queryNodes', () => {
     expect(tail.issues[0]?.code).toBe(code);
     const garbage = await refusal(seeded, { cursor: 'not a cursor' });
     expect(garbage.issues[0]?.code).toBe(code);
-    const forged = Buffer.from(
-      JSON.stringify({ s: PRICE, d: 'asc', v: `1'; drop`, n: randomUUID() }),
-    ).toString('base64url');
-    const bad = await refusal(seeded, { sort: { field: PRICE }, cursor: forged });
+    const forged = (held: object) => Buffer.from(JSON.stringify(held)).toString('base64url');
+    const bad = await refusal(seeded, {
+      sort: { field: PRICE },
+      cursor: forged({ s: PRICE, d: 'asc', v: `1'; drop`, n: randomUUID() }),
+    });
     expect(bad.issues[0]?.code).toBe(code);
+    const unknown = await refusal(seeded, {
+      sort: { field: PRICE },
+      cursor: forged({ s: PRICE, d: 'asc', n: randomUUID() }),
+    });
+    expect(unknown.issues[0]?.code).toBe(code);
+    const plain = await refusal(seeded, {
+      cursor: forged({ s: null, d: 'desc', n: randomUUID() }),
+    });
+    expect(plain.issues[0]?.code).toBe(code);
+  });
+
+  // Each of these reached Postgres when the sort value travelled in the cursor.
+  it.each([
+    ['a far offset', '2026-01-01T00:00:00+23:00'],
+    ['year 0000', '0000-01-01T00:00:00Z'],
+  ])('refuses a cursor carrying %s, with no server error', async (_name, v) => {
+    const seeded = await stocked();
+    const made = await addItem(built, seeded, { [AT]: '2026-01-01T00:00:00Z' });
+    const cursor = Buffer.from(JSON.stringify({ s: AT, d: 'asc', v, n: made })).toString(
+      'base64url',
+    );
+    const error = await refusal(seeded, { sort: { field: AT }, cursor });
+    expect(error.issues[0]?.code).toBe('engine.cursor_invalid');
+  });
+
+  it('holds no field value in a cursor, and still walks a tied sort', async () => {
+    const seeded = await stocked();
+    const value = 'a value that must stay out of logs';
+    const made = [
+      await addItem(built, seeded, { [NAME]: value }),
+      await addItem(built, seeded, { [NAME]: value }),
+      await addItem(built, seeded, { [NAME]: value }),
+    ];
+    const first = await list(seeded, { sort: { field: NAME }, limit: 1 });
+    const decoded = Buffer.from(first.nextCursor ?? '', 'base64url').toString();
+    expect(decoded).not.toContain(value);
+    const second = await list(seeded, {
+      sort: { field: NAME },
+      limit: 5,
+      cursor: first.nextCursor ?? '',
+    });
+    const seen = [...first.items, ...second.items].map((item) => item.nodeId as string);
+    expect(seen.sort()).toEqual([...made].sort());
+  });
+
+  it('walks on past a node deleted between pages, on both routes', async () => {
+    const seeded = await stocked();
+    const made = [
+      await addItem(built, seeded, { [PRICE]: '1', [NOTE]: 'x' }),
+      await addItem(built, seeded, { [PRICE]: '2', [NOTE]: 'x' }),
+      await addItem(built, seeded, { [PRICE]: '3', [NOTE]: 'x' }),
+    ];
+    const queries = [{}, { filter: { field: NOTE, op: 'eq', value: 'x' } }] as const;
+    const sort = { field: PRICE };
+    const pages = await Promise.all(
+      queries.map((query) => list(seeded, { ...query, sort, limit: 1 })),
+    );
+    await admin(`update app.nodes set deleted_at = now() where id = '${made[0] ?? ''}'`);
+    for (const [index, query] of queries.entries()) {
+      const next = await list(seeded, {
+        ...query,
+        sort,
+        limit: 5,
+        cursor: pages[index]?.nextCursor ?? '',
+      });
+      expect(next.items.map((item) => item.nodeId)).toEqual([made[1], made[2]]);
+    }
   });
 
   it('refuses a sort that is not declared', async () => {
@@ -360,6 +434,43 @@ describeWithStack('queryNodes', () => {
     const value = '9999-12-31T23:59:59-01:00';
     const error = await refusal(seeded, { filter: { field: AT, op: 'gt', value } });
     expect(error.issues[0]?.code).toBe('filter.value_invalid');
+  });
+
+  it.each([
+    ['a plain year 0000', '0000-06-01T00:00:00Z'],
+    ['a shift into year 0000', '0001-01-01T00:00:00+02:00'],
+  ])('refuses %s in a filter, and in a save, with no server error', async (_name, value) => {
+    const seeded = await stocked();
+    const error = await refusal(seeded, { filter: { field: AT, op: 'eq', value } });
+    expect(error.issues[0]?.code).toBe('filter.value_invalid');
+    const node = await newItem(built, seeded);
+    const saved = await built.engine.saveDraft({
+      tenant: seeded.tenant,
+      nodeId: node,
+      expectedHeadVersionId: null,
+      content: await tree(built.parse, seeded, 'A body.'),
+      origin: 'human',
+      actor: ACTOR,
+      idempotencyKey: key(),
+      fields: { [AT]: value },
+    });
+    expect(saved).toMatchObject({
+      ok: false,
+      error: { issues: [{ code: 'engine.field_invalid' }] },
+    });
+  });
+
+  it('reads a year 0000 value stored before it was refused as missing', async () => {
+    const seeded = await stocked();
+    const other = fieldId();
+    await declare(built, seeded, [...FIELDS, dateField(other, 'seen')], 2);
+    const old = await addItem(built, seeded, { [other]: '2026-01-01T00:00:00Z' });
+    const fine = await addItem(built, seeded, { [other]: '2026-02-01T00:00:00Z' });
+    await admin(`
+update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-06-01T00:00:00.000Z"')
+  where id = '${old}';`);
+    const page = await list(seeded, { filter: { field: other, op: 'exists' } });
+    expect(page.items.map((item) => item.nodeId)).toEqual([fine]);
   });
 
   it('matches a filter past a bound or length rather than failing', async () => {
@@ -470,8 +581,15 @@ describeWithStack('queryNodes', () => {
       await addItem(built, other, {});
       const theirs = await list(other, { limit: 1 });
       const mine = await addItem(built, home, {});
-      const page = await list(home, { cursor: theirs.nextCursor ?? '' });
-      expect(page.items.map((item) => item.nodeId).filter((id) => id !== mine)).toEqual([]);
+      const page = await built.engine.queryNodes(home.tenant, {
+        typeId: home.typeId,
+        cursor: theirs.nextCursor ?? '',
+      });
+      expect(page).toMatchObject({
+        ok: false,
+        error: { issues: [{ code: 'engine.cursor_invalid' }] },
+      });
+      expect((await list(home, {})).items.map((item) => item.nodeId)).toEqual([mine]);
     });
 
     it('policy alone hides filter rows, even with no filter on the tenant', async () => {
@@ -498,6 +616,69 @@ describeWithStack('queryNodes', () => {
         ),
       ).rejects.toMatchObject({ code: 'DB_RLS_VIOLATION' });
     });
+  });
+
+  // Connections are held open until the end, so without the cap the crowd would fill the pool
+  // and the second organization would wait out poolWaitMs.
+  it('holds one organization to its cap under load, and others get their answer', async () => {
+    const crowded = await stocked();
+    const quiet = await stocked();
+    await addItem(built, crowded, {});
+    await addItem(built, quiet, {});
+    const CAP = 3;
+    const CROWD = 40;
+    const inner = databaseStore(db);
+    let release = () => undefined as void;
+    const open = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = 0;
+    const store: EngineStore = {
+      tenant: (tenant, work, options) =>
+        inner.tenant(
+          tenant,
+          async (tx) => {
+            if (tenant.organizationId === crowded.tenant.organizationId) {
+              holding += 1;
+              await open;
+            }
+            return work(tx);
+          },
+          options,
+        ),
+    };
+    const held = itemEngine(db, {
+      store,
+      config: { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: CAP },
+    });
+    const crowd = Array.from({ length: CROWD }, () =>
+      held.engine.queryNodes(crowded.tenant, { typeId: crowded.typeId }),
+    );
+    await vi.waitFor(() => {
+      expect(holding).toBe(CAP);
+    });
+
+    const answer = await held.engine.queryNodes(quiet.tenant, { typeId: quiet.typeId });
+    expect(answer.ok).toBe(true);
+
+    release();
+    const results = await Promise.all(crowd);
+    const served = results.filter((result) => result.ok);
+    const busy = results.filter((result) => !result.ok);
+    expect(served).toHaveLength(CAP);
+    expect(busy).toHaveLength(CROWD - CAP);
+    for (const result of busy) {
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'engine.unavailable',
+          retryable: true,
+          issues: [{ path: 'query', code: 'engine.query_busy' }],
+        },
+      });
+    }
+    const again = await held.engine.queryNodes(crowded.tenant, { typeId: crowded.typeId });
+    expect(again.ok).toBe(true);
   });
 
   it('a timed out query is a stable error with no partial page', async () => {

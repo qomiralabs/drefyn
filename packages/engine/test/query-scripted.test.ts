@@ -1,6 +1,7 @@
 import { DbError } from '@drefyn/db';
 import type { ContentSchema, FieldDef, FieldId, TypeId } from '@drefyn/schema';
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
+import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BACKFILL_BATCH,
@@ -25,6 +26,7 @@ const COUNT = id(2);
 const WHEN = id(3);
 const NOTE = id(4);
 const NODE = id(5);
+const UNSLOTTED_WHEN = id(7);
 
 const FIELDS: readonly FieldDef[] = [
   {
@@ -58,6 +60,14 @@ const FIELDS: readonly FieldDef[] = [
     withTime: true,
   },
   { id: NOTE, apiName: 'note', label: 'Note', required: false, kind: 'text', maxLength: 64 },
+  {
+    id: UNSLOTTED_WHEN,
+    apiName: 'seen',
+    label: 'Seen',
+    required: false,
+    kind: 'date',
+    withTime: true,
+  },
 ];
 
 const SCHEMA: ContentSchema = {
@@ -97,16 +107,27 @@ interface Script {
   readonly page?: readonly object[];
   readonly nodes?: readonly object[];
   readonly items?: number;
+  // The node a cursor names, or null when no such node is found.
+  readonly anchor?: object | null;
 }
 
 const answering =
-  ({ type = typeRow(), page = [], nodes = [nodeRow], items = 0 }: Script): Responder =>
+  ({
+    type = typeRow(),
+    page = [],
+    nodes = [nodeRow],
+    items = 0,
+    anchor = { anchor_value: null },
+  }: Script): Responder =>
   ({ sql }: Statement) => {
     if (sql.includes('from "content_types"')) {
       return type === null ? [] : [type as Record<string, unknown>];
     }
     if (sql.includes('count(*) as items')) return [{ items }];
-    if (sql.includes('as sort_value')) return page as Record<string, unknown>[];
+    if (sql.includes('as anchor_value')) {
+      return anchor === null ? [] : [anchor as Record<string, unknown>];
+    }
+    if (sql.includes('order by')) return page as Record<string, unknown>[];
     if (sql.includes('from "nodes"')) return nodes as Record<string, unknown>[];
     return [];
   };
@@ -130,7 +151,13 @@ const deps = (respond: Responder, over: Partial<EngineDeps> = {}) => {
 };
 
 const pageSql = (statements: readonly Statement[]) =>
-  statements.find((statement) => statement.sql.includes('as sort_value'));
+  statements.find((statement) => statement.sql.includes('order by'));
+
+const anchorSql = (statements: readonly Statement[]) =>
+  statements.find((statement) => statement.sql.includes('as anchor_value'));
+
+const encoded = (value: unknown) =>
+  Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
 
 describe('queryNodes without a server', () => {
   it('refuses bad input before reading anything', async () => {
@@ -147,7 +174,7 @@ describe('queryNodes without a server', () => {
   });
 
   it('names the tenant in every statement it writes', async () => {
-    const { engine, statements } = deps(answering({ page: [{ id: NODE, sort_value: null }] }));
+    const { engine, statements } = deps(answering({ page: [{ id: NODE }] }));
     await engine.queryNodes(tenant, { typeId: TYPE });
     expect(statements.length).toBeGreaterThanOrEqual(3);
     for (const { parameters } of statements) {
@@ -209,23 +236,20 @@ describe('queryNodes without a server', () => {
   });
 
   it('continues from a cursor on each column type', async () => {
-    const rows = [
-      { id: NODE, sort_value: 'b' },
-      { id: id(6), sort_value: 'c' },
-    ];
+    const rows = [{ id: NODE }, { id: id(6) }];
     for (const [field, value, cast] of [
       [NAME, 'b', '::text'],
       [COUNT, '12', '::bigint'],
       [WHEN, '2026-01-01T00:00:00+00:00', '::timestamptz'],
     ] as const) {
-      const first = deps(answering({ page: rows.map((row) => ({ ...row, sort_value: value })) }));
+      const first = deps(answering({ page: rows }));
       const page = await first.engine.queryNodes(tenant, {
         typeId: TYPE,
         sort: { field, direction: 'desc' },
         limit: 1,
       });
       if (!page.ok || page.value.nextCursor === null) throw new Error('no cursor');
-      const next = deps(answering({}));
+      const next = deps(answering({ anchor: { anchor_value: value } }));
       const after = await next.engine.queryNodes(tenant, {
         typeId: TYPE,
         sort: { field, direction: 'desc' },
@@ -240,33 +264,48 @@ describe('queryNodes without a server', () => {
     }
   });
 
-  it('takes a cursor for the longest sort value, however it escapes', async () => {
-    const value = '\u0001'.repeat(256);
-    const rows = [
-      { id: NODE, sort_value: value },
-      { id: id(6), sort_value: value },
-    ];
-    const first = deps(answering({ page: rows }));
-    const page = await first.engine.queryNodes(tenant, {
-      typeId: TYPE,
-      sort: { field: NAME },
-      limit: 1,
-    });
+  it('keeps the sort value out of the cursor', async () => {
+    const value = 'a customer value';
+    const { engine } = deps(
+      answering({
+        page: [
+          { id: NODE, sort_value: value },
+          { id: id(6), sort_value: value },
+        ],
+      }),
+    );
+    const page = await engine.queryNodes(tenant, { typeId: TYPE, sort: { field: NAME }, limit: 1 });
     if (!page.ok || page.value.nextCursor === null) throw new Error('no cursor');
-    const next = deps(answering({}));
-    const after = await next.engine.queryNodes(tenant, {
+    const held: unknown = JSON.parse(Buffer.from(page.value.nextCursor, 'base64url').toString());
+    expect(held).toEqual({ s: NAME, d: 'asc', n: NODE });
+  });
+
+  it('reads a sort value back from the node the cursor names, in this tenant', async () => {
+    const next = deps(answering({ anchor: { anchor_value: 'b' } }));
+    const cursor = encoded({ s: NAME, d: 'asc', n: NODE });
+    await next.engine.queryNodes(tenant, { typeId: TYPE, sort: { field: NAME }, cursor });
+    const sent = anchorSql(next.statements);
+    expect(sent?.sql).toContain('app.node_filter_rows f');
+    expect(sent?.parameters).toEqual(
+      expect.arrayContaining([tenant.organizationId, tenant.projectId, TYPE, NODE]),
+    );
+  });
+
+  it('finds a deleted node on the scan route, so a walk can pass it', async () => {
+    const next = deps(answering({ items: 3 }));
+    const cursor = encoded({ s: null, d: 'desc', n: NODE });
+    await next.engine.queryNodes(tenant, {
       typeId: TYPE,
-      sort: { field: NAME },
-      cursor: page.value.nextCursor,
+      filter: { field: NOTE, op: 'eq', value: 'a' },
+      cursor,
     });
-    expect(after.ok).toBe(true);
+    const sent = anchorSql(next.statements)?.sql;
+    expect(sent).toContain('app.nodes n');
+    expect(sent).not.toContain('deleted_at');
   });
 
   it('continues past a null sort value inside the nulls', async () => {
-    const rows = [
-      { id: NODE, sort_value: null },
-      { id: id(6), sort_value: null },
-    ];
+    const rows = [{ id: NODE }, { id: id(6) }];
     const first = deps(answering({ page: rows }));
     const page = await first.engine.queryNodes(tenant, {
       typeId: TYPE,
@@ -284,10 +323,7 @@ describe('queryNodes without a server', () => {
   });
 
   it('continues a default list on the id alone', async () => {
-    const rows = [
-      { id: NODE, sort_value: null },
-      { id: id(6), sort_value: null },
-    ];
+    const rows = [{ id: NODE }, { id: id(6) }];
     const first = deps(answering({ page: rows }));
     const page = await first.engine.queryNodes(tenant, { typeId: TYPE, limit: 1 });
     if (!page.ok || page.value.nextCursor === null) throw new Error('no cursor');
@@ -296,31 +332,98 @@ describe('queryNodes without a server', () => {
     expect(pageSql(next.statements)?.parameters).toContain(NODE);
   });
 
+  it.each<[string, string]>([
+    ['text that is not base64 of JSON', 'not a cursor'],
+    ['JSON that is not an object', encoded('null')],
+    ['an array', encoded([NAME, 'asc', NODE])],
+    ['a missing node', encoded({ s: NAME, d: 'asc' })],
+    ['a node that is not an id', encoded({ s: NAME, d: 'asc', n: `'; drop` })],
+    ['a direction out of the list', encoded({ s: NAME, d: 'up', n: NODE })],
+    [
+      'a sort value, which cursors no longer carry',
+      encoded({ s: NAME, d: 'asc', v: 'a', n: NODE }),
+    ],
+    ['a year 0000 sort value', encoded({ s: WHEN, d: 'asc', v: '0000-01-01T00:00:00Z', n: NODE })],
+    ['an offset Postgres refuses', encoded({ s: WHEN, d: 'asc', v: 'x+23:00', n: NODE })],
+    ['a NUL', encoded({ s: NAME, d: 'asc', v: 'a\u0000', n: NODE })],
+  ])('refuses %s as a cursor before any page is read', async (_name, cursor) => {
+    const { engine, statements } = deps(answering({}));
+    const page = await engine.queryNodes(tenant, {
+      typeId: TYPE,
+      sort: { field: NAME, direction: 'asc' },
+      cursor,
+    });
+    expect(page).toEqual({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        retryable: false,
+        issues: [{ path: 'cursor', code: 'engine.cursor_invalid' }],
+      },
+    });
+    expect(pageSql(statements)).toBeUndefined();
+  });
+
   it.each([
-    ['a number column', COUNT, 'twelve'],
-    ['a time column', WHEN, 'soon'],
-    ['a NUL', NAME, 'a\u0000'],
-  ])('refuses a cursor whose value does not fit %s', async (_name, field, v) => {
-    const cursor = Buffer.from(
-      JSON.stringify({ s: field, d: 'asc', v, n: '01890a5d-ac96-774b-bcce-b302099a8099' }),
-    ).toString('base64url');
-    const { engine } = deps(answering({}));
-    const page = await engine.queryNodes(tenant, { typeId: TYPE, sort: { field }, cursor });
+    ['sorted', { sort: { field: NAME } }, { s: NAME, d: 'asc', n: NODE }],
+    ['unsorted', {}, { s: null, d: 'desc', n: NODE }],
+  ])('refuses a %s cursor naming a node this tenant cannot see', async (_name, query, held) => {
+    const { engine, statements } = deps(answering({ anchor: null }));
+    const page = await engine.queryNodes(tenant, {
+      typeId: TYPE,
+      ...query,
+      cursor: encoded(held),
+    });
     expect(page).toMatchObject({
       ok: false,
       error: { issues: [{ code: 'engine.cursor_invalid' }] },
     });
+    expect(pageSql(statements)).toBeUndefined();
+  });
+
+  it('never throws on whatever comes back as a cursor', async () => {
+    const shapes = fc.oneof(
+      fc.string({ unit: 'binary', minLength: 1, maxLength: 64 }),
+      fc.json().map(encoded),
+      fc
+        .record({
+          s: fc.option(fc.string({ unit: 'binary' })),
+          d: fc.string(),
+          v: fc.option(fc.string({ unit: 'binary' })),
+          n: fc.string(),
+        })
+        .map(encoded),
+    );
+    await fc.assert(
+      fc.asyncProperty(shapes, async (cursor) => {
+        const { engine } = deps(answering({ anchor: null }));
+        const page = await engine.queryNodes(tenant, {
+          typeId: TYPE,
+          sort: { field: WHEN },
+          cursor,
+        });
+        expect(page).toMatchObject({
+          ok: false,
+          error: { issues: [{ code: 'engine.cursor_invalid' }] },
+        });
+      }),
+    );
+  });
+
+  it('reads an unreadable stored date as missing on a scan, and does not throw', async () => {
+    const { engine, statements } = deps(answering({ items: 3 }));
+    await engine.queryNodes(tenant, {
+      typeId: TYPE,
+      filter: { field: UNSLOTTED_WHEN, op: 'exists' },
+    });
+    expect(pageSql(statements)?.sql).toMatch(/case when left\(.*'0000-' then null/);
   });
 
   it('skips a node deleted since its row was read, and keeps order', async () => {
     const second = { ...nodeRow, id: id(6) };
     const { engine } = deps(
       answering({
-        page: [
-          { id: id(6), sort_value: null },
-          { id: id(7), sort_value: null },
-          { id: NODE, sort_value: null },
-        ],
+        page: [{ id: id(6) }, { id: id(7), sort_value: null }, { id: NODE }],
         nodes: [nodeRow, second],
       }),
     );
@@ -580,5 +683,145 @@ describe('the filter backfill without a server', () => {
     await engine.backfillFilters(tenant);
     expect(lines.join()).toContain('engine.filter_backfill');
     expect(lines.join()).toContain(tenant.organizationId);
+  });
+});
+
+describe('queryNodes under load', () => {
+  const CAP = 4;
+  const other: TenantRef = { ...tenant, organizationId: organizationId(id(900)) };
+
+  // Work waits at the gate, so the test decides what is in flight and no timing is involved.
+  const gated = () => {
+    const inner = scriptedStore(answering({}));
+    const waiting: (() => void)[] = [];
+    const entered: string[] = [];
+    const store: EngineDeps['store'] = {
+      tenant: (ref, work) =>
+        inner.store.tenant(ref, async (tx) => {
+          entered.push(ref.organizationId);
+          await new Promise<void>((open) => waiting.push(open));
+          return work(tx);
+        }),
+    };
+    const release = () => {
+      for (const open of waiting.splice(0)) open();
+    };
+    return { store, entered, release };
+  };
+
+  const crowd = (engine: ReturnType<typeof deps>['engine'], size: number) =>
+    Array.from({ length: size }, () => engine.queryNodes(tenant, { typeId: TYPE }));
+
+  const held = (over: Partial<EngineDeps> = {}) => {
+    const gate = gated();
+    const { engine } = deps(answering({}), {
+      store: gate.store,
+      config: { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: CAP },
+      ...over,
+    });
+    return { engine, ...gate };
+  };
+
+  it('admits the cap out of a crowd and refuses the rest, retryable', async () => {
+    const { engine, entered, release } = held();
+    const running = crowd(engine, 500);
+    await vi.waitFor(() => {
+      expect(entered).toHaveLength(CAP);
+    });
+    release();
+    const results = await Promise.all(running);
+    expect(entered).toHaveLength(CAP);
+    expect(results.filter((result) => result.ok)).toHaveLength(CAP);
+    const refused = results.filter((result) => !result.ok);
+    expect(refused).toHaveLength(496);
+    expect(refused[0]).toEqual({
+      ok: false,
+      error: {
+        code: 'engine.unavailable',
+        retryable: true,
+        issues: [{ path: 'query', code: 'engine.query_busy' }],
+      },
+    });
+  });
+
+  it('leaves another organization its own places', async () => {
+    const { engine, entered, release } = held();
+    const running = [...crowd(engine, 50), engine.queryNodes(other, { typeId: TYPE })];
+    await vi.waitFor(() => {
+      expect(entered).toHaveLength(CAP + 1);
+    });
+    expect(entered.filter((org) => org === other.organizationId)).toHaveLength(1);
+    release();
+    const results = await Promise.all(running);
+    expect(results.at(-1)?.ok).toBe(true);
+  });
+
+  it('takes queries again once the crowd has gone', async () => {
+    const { engine, entered, release } = held();
+    const running = crowd(engine, 20);
+    await vi.waitFor(() => {
+      expect(entered).toHaveLength(CAP);
+    });
+    release();
+    await Promise.all(running);
+    const next = engine.queryNodes(tenant, { typeId: TYPE });
+    await vi.waitFor(() => {
+      expect(entered).toHaveLength(CAP + 1);
+    });
+    release();
+    expect((await next).ok).toBe(true);
+  });
+
+  it('gives a place back when a query is refused, times out or breaks', async () => {
+    const failures = [
+      () => {
+        throw new Error('a bug');
+      },
+      () => {
+        throw new DbError('DB_TIMEOUT', 'timed out');
+      },
+    ];
+    for (const failure of failures) {
+      const { engine } = deps(failure, {
+        config: { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: 1 },
+      });
+      await engine.queryNodes(tenant, { typeId: TYPE }).catch(() => undefined);
+      const next = await engine
+        .queryNodes(tenant, { typeId: TYPE })
+        .catch((error: unknown) => error);
+      expect(next).not.toMatchObject({ error: { issues: [{ code: 'engine.query_busy' }] } });
+    }
+    const missing = deps(answering({ type: null }), {
+      config: { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: 1 },
+    });
+    await missing.engine.queryNodes(tenant, { typeId: TYPE });
+    const next = await missing.engine.queryNodes(tenant, { typeId: TYPE });
+    expect(next).toMatchObject({ error: { code: 'engine.not_found' } });
+  });
+
+  it('does not count a query refused on its input', async () => {
+    const { engine, entered } = held();
+    const bad = await Promise.all(
+      Array.from({ length: 20 }, () => engine.queryNodes(tenant, { typeId: 'x' })),
+    );
+    expect(bad.every((result) => !result.ok)).toBe(true);
+    expect(entered).toEqual([]);
+  });
+
+  it('logs a busy refusal with ids and the cap, and no query text', async () => {
+    const warn = vi.fn<EngineLogger['warn']>();
+    const logger: EngineLogger = { info: vi.fn(), warn };
+    const { engine, entered, release } = held({ logger });
+    const running = crowd(engine, CAP + 1);
+    await vi.waitFor(() => {
+      expect(entered).toHaveLength(CAP);
+    });
+    release();
+    await Promise.all(running);
+    expect(warn).toHaveBeenCalledExactlyOnceWith('engine.query_busy', {
+      organization_id: tenant.organizationId,
+      project_id: tenant.projectId,
+      max_in_flight: CAP,
+    });
   });
 });
