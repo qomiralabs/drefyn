@@ -3,8 +3,8 @@ import { raw } from 'hast-util-raw';
 import { sanitize } from 'hast-util-sanitize';
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import type { Jsx } from 'hast-util-to-jsx-runtime';
-import type { Nodes as MdastNodes, Root as MdastRoot } from 'mdast';
-import { toHast } from 'mdast-util-to-hast';
+import type { List, ListItem, Nodes as MdastNodes, Root as MdastRoot } from 'mdast';
+import { defaultHandlers, toHast } from 'mdast-util-to-hast';
 import type { Handler } from 'mdast-util-to-hast';
 import type { ReactElement } from 'react';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
@@ -172,6 +172,25 @@ function prepare(tree: Nodes, policy: RenderPolicy): void {
   }
 }
 
+const isLooseItem = ({ spread, children }: ListItem) => spread ?? children.length > 1;
+
+// The library scans every item of a list for each item it converts, which is quadratic in a page
+// the author controls. The answer is the same for all of them, so it gets the answer once, as a
+// list with no items to scan. The output does not change.
+function listItemOnce(): Handler {
+  const answered = new Map<List, List>();
+  return (state, node: ListItem, parent) => {
+    if (parent?.type !== 'list') return defaultHandlers.listItem(state, node, parent);
+    let summary = answered.get(parent);
+    if (summary === undefined) {
+      const spread = Boolean(parent.spread) || parent.children.some(isLooseItem);
+      summary = { type: 'list', spread, children: [] };
+      answered.set(parent, summary);
+    }
+    return defaultHandlers.listItem(state, node, summary);
+  };
+}
+
 function toHastTree(root: MdxRoot, policy: RenderPolicy): Nodes {
   // Props are dropped whatever they hold, so no expression is ever read, let alone run. Only
   // the name decides, and a name outside the registry takes its children with it.
@@ -180,6 +199,7 @@ function toHastTree(root: MdxRoot, policy: RenderPolicy): Nodes {
   return toHast(root as unknown as MdastRoot, {
     allowDangerousHtml: policy.rawHtml === 'sanitize',
     handlers: {
+      listItem: listItemOnce(),
       mdxFlowExpression: nothing,
       mdxJsxFlowElement: element,
       mdxJsxTextElement: element,
