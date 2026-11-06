@@ -185,7 +185,7 @@ const engine = createEngine({
   parse,
   parsePolicy,
   tracer,
-  flags: { isOn: () => Promise.resolve(true) },
+  flags: { evaluate: () => Promise.resolve({ value: true }) },
 });
 
 async function treeOf(tenant: TenantRef, source: string): Promise<MdxRoot> {

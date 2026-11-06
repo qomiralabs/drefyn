@@ -13,8 +13,17 @@ export interface EngineTracer {
   span<T>(name: string, fields: LogFields, work: () => Promise<T>): Promise<T>;
 }
 
+export interface EngineFlagAnswer {
+  readonly value: boolean;
+  // Set when the value is a fallback and not a reading, which a plain boolean cannot show.
+  readonly errorCode?: string;
+}
+
 export interface EngineFlags {
-  isOn(name: 'engine.writes' | 'engine.chunk_at_write', context: FlagContext): Promise<boolean>;
+  evaluate(
+    name: 'engine.writes' | 'engine.chunk_at_write',
+    context: FlagContext,
+  ): Promise<EngineFlagAnswer>;
 }
 
 export const noopLogger: EngineLogger = { info: () => undefined, warn: () => undefined };

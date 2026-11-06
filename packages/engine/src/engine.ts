@@ -62,6 +62,8 @@ export interface Engine {
   ): Promise<EngineResult<Page<VersionSummary>>>;
 }
 
+const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
+
 const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE']);
 
 // A refusal becomes a result, and a busy database a retryable one. Anything else is a bug and
@@ -131,10 +133,34 @@ export function createEngine(deps: EngineDeps): Engine {
     maxChars: config.chunkMaxChars,
   };
 
-  const isOn = (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) =>
-    flags.isOn(name, { organizationId: tenant.organizationId, projectId: tenant.projectId });
-  const writesOn = (tenant: TenantRef) => isOn('engine.writes', tenant);
-  const chunkingOn = (tenant: TenantRef) => isOn('engine.chunk_at_write', tenant);
+  const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
+    try {
+      return await flags.evaluate(name, {
+        organizationId: tenant.organizationId,
+        projectId: tenant.projectId,
+      });
+    } catch {
+      return { value: false, errorCode: 'FLAG_GENERAL' };
+    }
+  };
+  // A failed read gives false here too, and off refuses, so this one fails closed by itself.
+  const writesOn = async (tenant: TenantRef) => {
+    const { value, errorCode } = await read('engine.writes', tenant);
+    return value && errorCode === undefined;
+  };
+  // A failed read must not count as off: the version would commit with no chunks, and nothing
+  // would ever notice. Null refuses the write, and the caller can try again.
+  const chunkingOn = async (tenant: TenantRef): Promise<boolean | null> => {
+    const name = 'engine.chunk_at_write';
+    const { value, errorCode } = await read(name, tenant);
+    if (errorCode === undefined) return value;
+    logger.warn('engine.flag_read_failed', {
+      ...tenantFields(tenant),
+      flag: name,
+      code: errorCode,
+    });
+    return null;
+  };
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
   const logged = async <T>(
@@ -198,6 +224,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const { tenant, nodeId, content, origin, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
       const chunking = await chunkingOn(tenant);
+      if (chunking === null) return refuse('engine.unavailable', FLAG_UNREAD);
       const fields = { ...tenantFields(tenant), node_id: nodeId };
       // Counted when written, so a replay does not report rows it never made.
       let written = 0;
@@ -244,6 +271,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const { tenant, nodeId, toVersionId, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
       const chunking = await chunkingOn(tenant);
+      if (chunking === null) return refuse('engine.unavailable', FLAG_UNREAD);
       let written = 0;
       return logged(
         'engine.rollback',

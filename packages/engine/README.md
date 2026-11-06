@@ -69,6 +69,8 @@ With `engine.chunk_at_write` on, off in production, a save or rollback writes th
 and one `embed_chunks` row in `engine_outbox` in the version's own transaction, so a version never
 commits without them. Embedding runs later and never in this path. A replay writes nothing, and a
 page with no text gets no outbox row. Chunks belong to a version and are not replaced by the next.
+A failed read of that flag refuses the write with `engine.unavailable` and logs
+`engine.flag_read_failed`, as counting it as off would commit a version with no chunks.
 
 A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
 cannot move text in another. It closes before it passes the target. A block over the target splits
