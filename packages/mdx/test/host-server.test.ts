@@ -6,7 +6,7 @@ import type { ParseHost } from '../src/host.ts';
 import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
 import { refused } from '../src/result.ts';
-import { maxBodyBytes } from '../src/wire.ts';
+import { maxBodyBytes, maxMergeBodyBytes } from '../src/wire.ts';
 import {
   isolatedPolicy,
   ORG_A,
@@ -16,6 +16,11 @@ import {
   PROJECT_A,
   PROJECT_B,
 } from './helpers.ts';
+
+const wireOf = (policy: ReturnType<typeof isolatedPolicy>) => ({
+  ...policy,
+  components: [...policy.components],
+});
 
 // The server alone, with threads that answer by rule. Real hosts are in host.test.ts.
 describe('the host server', () => {
@@ -105,6 +110,50 @@ describe('the host server', () => {
     await expect.poll(() => hold.length).toBe(1);
     hold.shift()?.(refused('mdx.print_changed_meaning'));
     await expect(printed).resolves.toEqual(refused('mdx.print_changed_meaning'));
+  });
+
+  it('takes a merge on its own route, under the same limits', async () => {
+    const client = createParseClient({ url });
+    const root = parsed('a\n', 'md');
+    const merged = client.merge({
+      tenant: { organizationId: ORG_A, projectId: PROJECT_A },
+      path: 'docs/page.mdx',
+      base: root,
+      ours: root,
+      theirs: root,
+      policy: isolatedPolicy(),
+    });
+    await expect.poll(() => hold.length).toBe(1);
+    hold.shift()?.(refused('mdx.merge_limit'));
+    await expect(merged).resolves.toEqual(refused('mdx.merge_limit'));
+  });
+
+  it('refuses a merge frame that is not one, and cuts a body past its cap', async () => {
+    const headers = { 'x-drefyn-organization': ORG_A };
+    const response = await fetch(`${url}/merge`, {
+      method: 'POST',
+      body: 'CANARY-PAGE-TEXT',
+      headers,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('');
+    expect((await fetch(`${url}/merge`)).status).toBe(404);
+    const tenant = { organizationId: ORG_B, projectId: PROJECT_A };
+    const frame = { tenant, path: 'a.md', trees: '{}', policy: wireOf(isolatedPolicy()) };
+    const other = await fetch(`${url}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(frame),
+      headers,
+    });
+    expect(other.status).toBe(400);
+    const declared = maxMergeBodyBytes(DEFAULT_LIMITS.maxBytes) + 1;
+    const big = await fetch(`${url}/merge`, {
+      method: 'POST',
+      body: new Uint8Array(1),
+      headers: { ...headers, 'content-length': String(declared) },
+      duplex: 'half',
+    } as RequestInit).catch(() => undefined);
+    expect(big === undefined || big.status === 413).toBe(true);
   });
 
   it('refuses a print frame that is not one, and says nothing about it', async () => {

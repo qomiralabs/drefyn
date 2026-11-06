@@ -118,6 +118,7 @@ export const POOL_CONFIG: ParsePoolConfig = {
   projectBudgetMs: 60_000,
   windowMs: 120_000,
   killGraceMs: 2_000,
+  maxMergeBlocks: 20_000,
 };
 
 // The outer budget follows the window, so a test can shrink one without restating the other.
