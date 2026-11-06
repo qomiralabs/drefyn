@@ -1,0 +1,470 @@
+[
+ [
+  "<SCRIPT SRC=https://xss.example/xss.js></SCRIPT>",
+  ""
+ ],
+ [
+  "javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+alert(1)//'>",
+  "<p>javascript:/<em>--&gt;&lt;svg/onload=&#x27;+/&quot;/+/onmouseover=1/+/[</em>/[]/+alert(1)//&#x27;&gt;</p>"
+ ],
+ [
+  "<IMG SRC=\"javascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=javascript:alert('XSS')>",
+  "<p>&lt;IMG SRC=javascript:alert(&#x27;XSS&#x27;)&gt;</p>"
+ ],
+ [
+  "<IMG SRC=JaVaScRiPt:alert('XSS')>",
+  "<p>&lt;IMG SRC=JaVaScRiPt:alert(&#x27;XSS&#x27;)&gt;</p>"
+ ],
+ [
+  "<IMG SRC=javascript:alert(&quot;XSS&quot;)>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=`javascript:alert(\"RSnake says, 'XSS'\")`>",
+  "<p>&lt;IMG SRC=<code>javascript:alert(&quot;RSnake says, &#x27;XSS&#x27;&quot;)</code>&gt;</p>"
+ ],
+ [
+  "<a onmouseover=\"alert(document.cookie)\">xxs link</a>",
+  "<p><a>xxs link</a></p>"
+ ],
+ [
+  "<a onmouseover=alert(document.cookie)>xxs link</a>",
+  "<p><a>xxs link</a></p>"
+ ],
+ [
+  "<IMG \"\"\"><SCRIPT>alert(\"XSS\")</SCRIPT>\">",
+  "<p>&lt;IMG &quot;&quot;&quot;&gt;&quot;&gt;</p>"
+ ],
+ [
+  "<IMG SRC=javascript:alert(String.fromCharCode(88,83,83))>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=# onmouseover=\"alert('xxs')\">",
+  "<img src=\"#\" loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC= onmouseover=\"alert('xxs')\">",
+  "<img src=\"onmouseover=&quot;alert(&#x27;xxs&#x27;)&quot;\" loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG onmouseover=\"alert('xxs')\">",
+  "<img/>"
+ ],
+ [
+  "<IMG SRC=/ onerror=\"alert(String.fromCharCode(88,83,83))\"></img>",
+  "<p><img src=\"/\" loading=\"lazy\"/></p>"
+ ],
+ [
+  "<img src=x onerror=\"&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000039&#0000088&#0000083&#0000083&#0000039&#0000041\">",
+  "<img src=\"x\" loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000039&#0000088&#0000083&#0000083&#0000039&#0000041>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=&#x6A&#x61&#x76&#x61&#x73&#x63&#x72&#x69&#x70&#x74&#x3A&#x61&#x6C&#x65&#x72&#x74&#x28&#x27&#x58&#x53&#x53&#x27&#x29>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\"jav\tascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\"jav&#x09;ascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\"jav&#x0A;ascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\"jav&#x0D;ascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\" &#14;  javascript:alert('XSS');\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<SCRIPT/XSS SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  "<p>&lt;SCRIPT/XSS SRC=&quot;<a href=\"https://xss.example/xss.js%22%3E\">https://xss.example/xss.js&quot;&gt;</a></p>"
+ ],
+ [
+  "<BODY onload!#$%&()*~+-_.,:;?@[/|\\]^`=alert(\"XSS\")>",
+  ""
+ ],
+ [
+  "<SCRIPT/SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  "<p>&lt;SCRIPT/SRC=&quot;<a href=\"https://xss.example/xss.js%22%3E\">https://xss.example/xss.js&quot;&gt;</a></p>"
+ ],
+ [
+  "<<SCRIPT>alert(\"XSS\");//\\<</SCRIPT>",
+  "<p>&lt;</p>"
+ ],
+ [
+  "<SCRIPT SRC=https://xss.example/xss.js?< B >",
+  ""
+ ],
+ [
+  "<SCRIPT SRC=//xss.example/.j>",
+  ""
+ ],
+ [
+  "<IMG SRC=\"`('XSS')\"`",
+  "<p>&lt;IMG SRC=&quot;<code>(&#x27;XSS&#x27;)&quot;</code></p>"
+ ],
+ [
+  "<iframe src=https://xss.example/scriptlet.html <",
+  ""
+ ],
+ [
+  "\\\";alert('XSS');//",
+  "<p>&quot;;alert(&#x27;XSS&#x27;);//</p>"
+ ],
+ [
+  "</script><script>alert('XSS');</script>",
+  "<p></p>"
+ ],
+ [
+  "</TITLE><SCRIPT>alert(\"XSS\");</SCRIPT>",
+  ""
+ ],
+ [
+  "<INPUT TYPE=\"IMAGE\" SRC=\"javascript:alert('XSS');\">",
+  "<input disabled=\"\" type=\"checkbox\"/>"
+ ],
+ [
+  "<BODY BACKGROUND=\"javascript:alert('XSS')\">",
+  ""
+ ],
+ [
+  "<IMG DYNSRC=\"javascript:alert('XSS')\">",
+  "<img/>"
+ ],
+ [
+  "<IMG LOWSRC=\"javascript:alert('XSS')\">",
+  "<img/>"
+ ],
+ [
+  "<STYLE>li {list-style-image: url(\"javascript:alert('XSS')\");}</STYLE><UL><LI>XSS</br>",
+  "<ul><li>XSS<br/></li></ul>"
+ ],
+ [
+  "<IMG SRC='vbscript:msgbox(\"XSS\")'>",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<IMG SRC=\"livescript:[code]\">",
+  "<img loading=\"lazy\"/>"
+ ],
+ [
+  "<svg/onload=alert('XSS')>",
+  "<p>&lt;svg/onload=alert(&#x27;XSS&#x27;)&gt;</p>"
+ ],
+ [
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"/>",
+  ""
+ ],
+ [
+  "<svg><a xlink:href=\"javascript:alert(1)\"><text x=20 y=20>x</text></a></svg>",
+  "<p></p>"
+ ],
+ [
+  "<svg><animate attributeName=href to=javascript:alert(1) /><a id=x><text>x</text></a></svg>",
+  "<p></p>"
+ ],
+ [
+  "<math><mi xlink:href=\"javascript:alert(1)\">x</mi></math>",
+  "<p></p>"
+ ],
+ [
+  "<math href=\"javascript:alert(1)\">CLICKME</math>",
+  "<p></p>"
+ ],
+ [
+  "<BODY ONLOAD=alert('XSS')>",
+  ""
+ ],
+ [
+  "<BGSOUND SRC=\"javascript:alert('XSS');\">",
+  ""
+ ],
+ [
+  "<BR SIZE=\"&{alert('XSS')}\">",
+  "<br/>"
+ ],
+ [
+  "<LINK REL=\"stylesheet\" HREF=\"javascript:alert('XSS');\">",
+  ""
+ ],
+ [
+  "<LINK REL=\"stylesheet\" HREF=\"https://xss.example/xss.css\">",
+  ""
+ ],
+ [
+  "<STYLE>@import'https://xss.example/xss.css';</STYLE>",
+  ""
+ ],
+ [
+  "<META HTTP-EQUIV=\"Link\" Content=\"<https://xss.example/xss.css>; REL=stylesheet\">",
+  ""
+ ],
+ [
+  "<STYLE>BODY{-moz-binding:url(\"https://xss.example/xssmoz.xml#xss\")}</STYLE>",
+  ""
+ ],
+ [
+  "<STYLE>@im\\port'\\ja\\vasc\\ript:alert(\"XSS\")';</STYLE>",
+  ""
+ ],
+ [
+  "<IMG STYLE=\"xss:expr/*XSS*/ession(alert('XSS'))\">",
+  "<img/>"
+ ],
+ [
+  "exp/*<A STYLE='no\\xss:noxss(\"*//*\");xss:ex/*XSS*//*/*/pression(alert(\"XSS\"))'>",
+  "<p>exp/*<a></a></p>"
+ ],
+ [
+  "<STYLE TYPE=\"text/javascript\">alert('XSS');</STYLE>",
+  ""
+ ],
+ [
+  "<STYLE>.XSS{background-image:url(\"javascript:alert('XSS')\");}</STYLE><A CLASS=XSS></A>",
+  "<a class=\"\"></a>"
+ ],
+ [
+  "<STYLE type=\"text/css\">BODY{background:url(\"javascript:alert('XSS')\")}</STYLE>",
+  ""
+ ],
+ [
+  "<XSS STYLE=\"xss:expression(alert('XSS'))\">",
+  ""
+ ],
+ [
+  "<XSS STYLE=\"behavior: url(xss.htc);\">",
+  ""
+ ],
+ [
+  "<META HTTP-EQUIV=\"refresh\" CONTENT=\"0;url=javascript:alert('XSS');\">",
+  ""
+ ],
+ [
+  "<META HTTP-EQUIV=\"refresh\" CONTENT=\"0;url=data:text/html base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4K\">",
+  ""
+ ],
+ [
+  "<META HTTP-EQUIV=\"Set-Cookie\" Content=\"USERID=<SCRIPT>alert('XSS')</SCRIPT>\">",
+  ""
+ ],
+ [
+  "<IFRAME SRC=\"javascript:alert('XSS');\"></IFRAME>",
+  ""
+ ],
+ [
+  "<IFRAME SRC=# onmouseover=\"alert(document.cookie)\"></IFRAME>",
+  ""
+ ],
+ [
+  "<FRAMESET><FRAME SRC=\"javascript:alert('XSS');\"></FRAMESET>",
+  ""
+ ],
+ [
+  "<TABLE BACKGROUND=\"javascript:alert('XSS')\">",
+  "<table></table>"
+ ],
+ [
+  "<TABLE><TD BACKGROUND=\"javascript:alert('XSS')\">",
+  "<table><tbody><tr><td></td></tr></tbody></table>"
+ ],
+ [
+  "<DIV STYLE=\"background-image: url(javascript:alert('XSS'))\">",
+  "<div></div>"
+ ],
+ [
+  "<DIV STYLE=\"background-image:\\0075\\0072\\006C\\0028'\\006a\\0061\\0076\\0061\\0073\\0063\\0072\\0069\\0070\\0074\\003a\\0061\\006c\\0065\\0072\\0074\\0028.1027\\0058.1053\\0053\\0027\\0029'\\0029\">",
+  "<div></div>"
+ ],
+ [
+  "<DIV STYLE=\"width: expression(alert('XSS'));\">",
+  "<div></div>"
+ ],
+ [
+  "<!--[if gte IE 4]><SCRIPT>alert('XSS');</SCRIPT><![endif]-->",
+  ""
+ ],
+ [
+  "<BASE HREF=\"javascript:alert('XSS');//\">",
+  ""
+ ],
+ [
+  "<OBJECT TYPE=\"text/x-scriptlet\" DATA=\"https://xss.example/scriptlet.html\"></OBJECT>",
+  "<p></p>"
+ ],
+ [
+  "<EMBED SRC=\"https://xss.example/xss.swf\" AllowScriptAccess=\"always\"></EMBED>",
+  "<p></p>"
+ ],
+ [
+  "<EMBED SRC=\"data:image/svg+xml;base64,PHN2Zz48c2NyaXB0PmFsZXJ0KDEpPC9zY3JpcHQ+PC9zdmc+\" type=\"image/svg+xml\"></EMBED>",
+  "<p></p>"
+ ],
+ [
+  "<XML ID=\"xss\"><I><B><IMG SRC=\"javas<!-- -->cript:alert('XSS')\"></B></I></XML><SPAN DATASRC=\"#xss\" DATAFLD=\"B\" DATAFORMATAS=\"HTML\"></SPAN>",
+  "<p><i><b><img loading=\"lazy\"/></b></i><span></span></p>"
+ ],
+ [
+  "<HTML xmlns:xss><?import namespace=\"xss\" implementation=\"https://xss.example/xss.htc\"><xss:xss>XSS</xss:xss></HTML>",
+  "XSS"
+ ],
+ [
+  "<SCRIPT a=\">\" SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  ""
+ ],
+ [
+  "<SCRIPT =\">\" SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  ""
+ ],
+ [
+  "<SCRIPT a=\">'>\" SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  ""
+ ],
+ [
+  "<SCRIPT>document.write(\"<SCRI\");</SCRIPT>PT SRC=\"https://xss.example/xss.js\"></SCRIPT>",
+  "PT SRC=&quot;https://xss.example/xss.js&quot;&gt;"
+ ],
+ [
+  "<A HREF=\"//www.example.com/\">XSS</A>",
+  "<p><a href=\"//www.example.com/\">XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"javascript:document.location='https://xss.example/'\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"\tjavascript:alert(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"java&Tab;script:alert(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"java&NewLine;script:alert(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"javascript&colon;alert(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"&#1;javascript:alert(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"vbscript:msgbox(1)\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"file:///etc/passwd\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"blob:https://example.com/x\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<A HREF=\"ftp://example.com/x\">XSS</A>",
+  "<p><a>XSS</a></p>"
+ ],
+ [
+  "<form action=\"javascript:alert(1)\"><button formaction=\"javascript:alert(1)\">x</button></form>",
+  "x"
+ ],
+ [
+  "<form id=\"test\"></form><button form=\"test\" formaction=\"javascript:alert(1)\">x</button>",
+  "x"
+ ],
+ [
+  "<isindex type=image src=1 onerror=alert(1)>",
+  ""
+ ],
+ [
+  "<input autofocus onfocus=alert(1)>",
+  "<input disabled=\"\" type=\"checkbox\"/>"
+ ],
+ [
+  "<select autofocus onfocus=alert(1)>",
+  ""
+ ],
+ [
+  "<textarea autofocus onfocus=alert(1)>",
+  ""
+ ],
+ [
+  "<details open ontoggle=alert(1)>x</details>",
+  "<details open=\"\">x</details>"
+ ],
+ [
+  "<video><source onerror=alert(1)></video>",
+  "<p></p>"
+ ],
+ [
+  "<audio src=x onerror=alert(1)>",
+  ""
+ ],
+ [
+  "<marquee onstart=alert(1)>",
+  ""
+ ],
+ [
+  "<img src=\"https://example.com/a.png\" srcset=\"javascript:alert(1) 1x\">",
+  "<img src=\"https://example.com/a.png\" loading=\"lazy\"/>"
+ ],
+ [
+  "<div contenteditable onblur=alert(1) autofocus>x</div>",
+  "<div>x</div>"
+ ],
+ [
+  "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\">",
+  "<p></p><p title=\"&lt;/noscript&gt;&lt;img src=x onerror=alert(1)&gt;\"></p>"
+ ],
+ [
+  "<template><script>alert(1)</script></template>",
+  "<p></p>"
+ ],
+ [
+  "<table><td><style><img src=x onerror=alert(1)></style></td></table>",
+  "<table><tbody><tr><td></td></tr></tbody></table>"
+ ],
+ [
+  "<math><mtext><table><mglyph><style><!--</style><img title=\"--&gt;&lt;img src=1 onerror=alert(1)&gt;\">",
+  "<p></p>"
+ ],
+ [
+  "<svg></p><style><a id=\"</style><img src=1 onerror=alert(1)>\">",
+  "<p></p><img src=\"1\" loading=\"lazy\"/>&quot;&gt;<p></p>"
+ ],
+ [
+  "<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>",
+  ""
+ ],
+ [
+  "<a id=defaultView name=body href=https://example.com>clobber</a><img name=getElementById>",
+  "<p>&lt;a id=defaultView name=body href=<a href=\"https://example.com%3Eclobber\">https://example.com&gt;clobber</a><img/></p>"
+ ]
+]
