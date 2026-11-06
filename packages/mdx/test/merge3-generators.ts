@@ -17,7 +17,10 @@ export interface Edit {
     | 'addRow'
     | 'deleteRow'
     | 'reformat'
-    | 'retype';
+    | 'retype'
+    | 'split'
+    | 'join'
+    | 'pullOut';
   readonly at: number;
   readonly choice: number;
 }
@@ -206,6 +209,13 @@ const SIDE_BLOCKS = (word: string) => [
   `> quoted ${word}`,
 ];
 
+// A block from text, or nothing if the text does not stay one block.
+function parts(raw: string, dialect: Dialect): SideBlock | undefined {
+  const [node, extra] = parsed(`${raw}\n`, dialect).children as unknown as readonly Tree[];
+  if (node === undefined || extra !== undefined) return undefined;
+  return { raw, gap: '\n\n', node: withoutSource(node) };
+}
+
 // Applies a script through the tree and the printer, the way an editor change would.
 export function applyEdits(
   text: string,
@@ -286,6 +296,29 @@ export function applyEdits(
         rows.splice(1 + (choice % (rows.length - 1)), 1);
       }
       reprint(block);
+    } else if (kind === 'split') {
+      const words = block.raw.split(' ');
+      if (block.node.type !== 'paragraph' || words.length < 4 || block.raw.includes('\n')) continue;
+      const cut = 1 + (choice % (words.length - 1));
+      const first = parts(words.slice(0, cut).join(' '), dialect);
+      const second = parts(words.slice(cut).join(' '), dialect);
+      if (first === undefined || second === undefined) continue;
+      blocks.splice(index, 1, first, second);
+    } else if (kind === 'join') {
+      const next = blocks[index + 1];
+      if (block.node.type !== 'paragraph' || next?.node.type !== 'paragraph') continue;
+      const whole = parts(`${block.raw} ${next.raw}`, dialect);
+      if (whole === undefined) continue;
+      blocks.splice(index, 2, { ...whole, gap: block.gap });
+    } else if (kind === 'pullOut') {
+      const items = block.node.type === 'list' ? block.node.children : undefined;
+      const item = items?.at(-1)?.children?.[0];
+      if (items === undefined || items.length < 2 || item?.type !== 'paragraph') continue;
+      const out = parts(`> ${printed(item, dialect)}`, dialect);
+      if (out === undefined) continue;
+      items.pop();
+      reprint(block);
+      blocks.splice(index + 1, 0, out);
     } else if (kind === 'retype') {
       if (block.node.type === 'yaml') continue;
       block.raw = retyped(block.raw, token(), choice);
@@ -318,6 +351,9 @@ const editArbitrary: fc.Arbitrary<Edit> = fc.record({
     'deleteRow',
     'reformat',
     'retype',
+    'split',
+    'join',
+    'pullOut',
   ),
   at: fc.nat(1_000_000),
   choice: fc.nat(1_000_000),

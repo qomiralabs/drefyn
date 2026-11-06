@@ -754,6 +754,32 @@ describe('the client', () => {
     }
   });
 
+  it('runs the count on what it sent, so a taken host cannot report clean over a drop', async () => {
+    const base = parsed('One line here.\n\nTwo lines here.\n', 'md');
+    const ours = parsed('One OURS here.\n\nTwo lines here.\n', 'md');
+    const dropped = parsed('Two lines here.\n', 'md');
+    const warnings: string[] = [];
+    const answer = (merged: MdxRoot) =>
+      JSON.stringify({ ok: true, value: { issues: [], outcome: { kind: 'clean', merged } } });
+    const clientFor = (merged: MdxRoot) =>
+      createParseClient({
+        ...CLIENT,
+        logger: {
+          warn: (event) => {
+            warnings.push(event);
+          },
+        },
+        url: 'http://parse.internal',
+        fetch: answering(200, answer(merged)),
+      });
+    const request = mergeRequest({ base, ours, theirs: base });
+    await expect(clientFor(dropped).merge(request)).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+    expect(warnings).toEqual(['mdx.parse_bad_answer']);
+    await expect(clientFor(ours).merge(request)).resolves.toMatchObject({ ok: true });
+  });
+
   it('passes a refusal through', async () => {
     const answer =
       '{"ok":false,"error":[{"code":"mdx.merge_limit","severity":"error","line":1,"column":1}]}';

@@ -707,6 +707,160 @@ describe('merge3 output', () => {
   });
 });
 
+describe('the whole page count decides what is clean', () => {
+  const top = 'Top block stays.';
+  const bottom = 'Bottom block stays.';
+  const edge = (...blocks: readonly string[]) => page(top, ...blocks, bottom);
+  const unexplained = (outcome: MergeOutcome) => {
+    const list = conflicts(outcome);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      baseIndex: null,
+      ours: null,
+      theirs: null,
+      reason: 'unexplained_change',
+    });
+  };
+  const both = (base: string, one: string, other: string) => [
+    outcomeOf(base, one, other),
+    outcomeOf(base, other, one),
+  ];
+  const secret = 'blue-harbor-9';
+  const sentences = `First sentence here. Second sentence ${secret} here.`;
+  const four = '- item one\n- item two\n- item blue harbor three\n- item four';
+
+  it.each([
+    [
+      'a sentence deleted against Enter',
+      edge(sentences),
+      edge('First sentence here.'),
+      edge('First sentence here.', `Second sentence ${secret} here.`),
+    ],
+    [
+      'a list item deleted against moving it into a quote',
+      edge(four),
+      edge('- item one\n- item two\n- item four'),
+      edge('- item one\n- item two\n- item four', '> item blue harbor three'),
+    ],
+    [
+      'the same with a word edited',
+      edge(four),
+      edge('- item one\n- item two\n- item four'),
+      edge('- item one\n- item two\n- item four', '> item blue harbor 3'),
+    ],
+  ])('%s is a page level conflict, both ways', (_name, base, one, other) => {
+    for (const outcome of both(base, one, other)) unexplained(outcome);
+  });
+
+  it('a quote split by a note against deleting its second paragraph', () => {
+    const quote = '> first para words\n>\n> second para blue harbor words';
+    const base = edge(quote);
+    const deleted = edge('> first para words');
+    const noted = edge('> first para words', 'A note.', '> second para blue harbor words');
+    for (const outcome of both(base, deleted, noted)) {
+      expect(outcome.kind).toBe('conflict');
+    }
+  });
+
+  it.each([
+    ['punctuation', '$$$ !!! ???', '> $$$ !!! ???'],
+    ['an emoji', '🙂 🙃', '> 🙂 🙃'],
+    ['a fence of braces', '```\n{}\n```', '> ```\n> {}\n> ```'],
+    ['a table of punctuation', '| ! |\n| - |\n| ? |', '> | ! |\n> | - |\n> | ? |'],
+    ['a rule', '---', '> ---'],
+    [
+      'an image with only its address kept',
+      '![alt words](https://a.example/b.png)',
+      '> ![](https://a.example/b.png)',
+    ],
+  ])('%s deleted against wrapping it is a conflict, both ways', (_name, block, other) => {
+    for (const outcome of both(edge(block), edge(), edge(other))) {
+      expect(outcome.kind).toBe('conflict');
+    }
+  });
+
+  it('a far rewrite keeping under half the words still answers a delete', () => {
+    const base = edge(
+      `Plenty of words sit around the ${secret} value in here.`,
+      'Keep me.',
+      'Keep too.',
+    );
+    const deleted = edge('Keep me.', 'Keep too.');
+    const edited = edge('Keep me.', 'Keep too.', `> It mentions ${secret} once.`);
+    for (const outcome of both(base, deleted, edited)) expect(outcome.kind).toBe('conflict');
+  });
+
+  it('a split with the pieces far apart still answers a delete of one', () => {
+    const base = edge(`One two three four. Five six ${secret} eight.`, 'Keep me.', 'Keep too.');
+    const deleted = edge('One two three four.', 'Keep me.', 'Keep too.');
+    const edited = edge(
+      'One two three four.',
+      'Keep me.',
+      'Keep too.',
+      `Five six ${secret} eight.`,
+    );
+    for (const outcome of both(base, deleted, edited)) expect(outcome.kind).toBe('conflict');
+  });
+
+  it('leaves the word it counted out of the record and the log', () => {
+    const outcome = outcomeOf(
+      edge(sentences),
+      edge('First sentence here.'),
+      edge('First sentence here.', `Second sentence ${secret} here.`),
+    );
+    if (outcome.kind !== 'conflict') throw new Error('merged clean');
+    expect(JSON.stringify(outcome.conflicts)).not.toContain(secret);
+    expect(outcome.unexplained).toBeGreaterThan(0);
+  });
+
+  it('keeps the merged page to show a person', () => {
+    const outcome = outcomeOf(
+      edge(sentences),
+      edge('First sentence here.'),
+      edge('First sentence here.', `Second sentence ${secret} here.`),
+    );
+    if (outcome.kind !== 'conflict') throw new Error('merged clean');
+    expect(outcome.partial.children.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [
+      'far edits',
+      edge('Aaa bbb.', 'Ccc ddd.'),
+      edge('Aaa OURS.', 'Ccc ddd.'),
+      edge('Aaa bbb.', 'Ccc THEIRS.'),
+    ],
+    ['the same edit', edge('Aaa bbb.'), edge('Aaa SAME.'), edge('Aaa SAME.')],
+    ['the same delete', edge('Aaa bbb.', 'Ccc ddd.'), edge('Ccc ddd.'), edge('Ccc ddd.')],
+    [
+      'Enter with an edit elsewhere',
+      edge('Aaa bbb. Ccc ddd.', 'Eee fff.'),
+      edge('Aaa bbb.', 'Ccc ddd.', 'Eee fff.'),
+      edge('Aaa bbb. Ccc ddd.', 'Eee THEIRS.'),
+    ],
+    [
+      'a reformat',
+      edge('- aaa\n- bbb', 'Ccc ddd.'),
+      edge('* aaa\n* bbb', 'Ccc ddd.'),
+      edge('- aaa\n- bbb', 'Ccc THEIRS.'),
+    ],
+    [
+      'a move',
+      edge('Aaa bbb.', 'Ccc ddd.', 'Eee fff.'),
+      edge('Ccc ddd.', 'Eee fff.', 'Aaa bbb.'),
+      edge('Aaa bbb.', 'Ccc THEIRS.', 'Eee fff.'),
+    ],
+    [
+      'a common word cut on both sides',
+      edge('the a the b the c'),
+      edge('the a the b c'),
+      edge('the a the b c'),
+    ],
+  ])('%s stays clean, both ways', (_name, base, one, other) => {
+    for (const outcome of both(base, one, other)) expect(outcome.kind).toBe('clean');
+  });
+});
+
 describe('merge3 paths the outcome alone does not show', () => {
   const partialOf = (outcome: MergeOutcome) => {
     if (outcome.kind !== 'conflict') throw new Error('merged clean');

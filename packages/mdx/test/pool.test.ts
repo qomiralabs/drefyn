@@ -700,6 +700,46 @@ describe('merging in the pool', () => {
     await expect(pool.merge(forged as MergeRequest)).rejects.toThrow();
   });
 
+  it('logs a count breach as a number, with no word from the page', async () => {
+    const { pool, threads, logger } = harness();
+    const merged = pool.merge(merging('{}'));
+    await flush();
+    const outcome = {
+      kind: 'conflict',
+      partial: {},
+      conflicts: [],
+      unexplained: 2,
+      note: 'CANARY',
+    };
+    const result = {
+      ok: true,
+      value: { outcome, issues: [] },
+    } as unknown as ThreadAnswer['result'];
+    threads[0]?.jobs[0]?.({ result, end: 'reusable', workMs: 0 });
+    await merged;
+    expect(logger.entries).toContainEqual(
+      expect.objectContaining({
+        event: 'mdx.merge_unexplained',
+        fields: expect.objectContaining({ tokens: 2 }) as unknown,
+      }),
+    );
+    expect(JSON.stringify(logger.entries)).not.toContain('CANARY');
+  });
+
+  it('logs nothing of the kind for a merge the count explains', async () => {
+    const { pool, threads, logger } = harness();
+    const merged = pool.merge(merging('{}'));
+    await flush();
+    const outcome = { kind: 'clean', merged: {} };
+    const result = {
+      ok: true,
+      value: { outcome, issues: [] },
+    } as unknown as ThreadAnswer['result'];
+    threads[0]?.jobs[0]?.({ result, end: 'reusable', workMs: 0 });
+    await merged;
+    expect(logger.entries.map(({ event }) => event)).not.toContain('mdx.merge_unexplained');
+  });
+
   it('logs the size and hash of the trees, and never the trees', async () => {
     const { pool, threads, logger } = harness();
     const merged = pool.merge(merging('{"CANARY":1}'));

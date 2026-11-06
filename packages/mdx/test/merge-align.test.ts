@@ -232,6 +232,16 @@ describe('align', () => {
     expect(spent.after.flat()).toHaveLength(1);
   });
 
+  it('gives up pairing at its default budget, where a wider one would go on', () => {
+    const rows = 3_000;
+    const row = (at: number, last: string) => line(`w${at}a w${at}b w${at}c ${last}`);
+    const base = Array.from({ length: rows }, (_, at) => row(at, 'x'));
+    const side = Array.from({ length: rows }, (_, at) => row(at, 'y'));
+    const last = (budget?: { left: number }) => align(base, side, budget).slots.at(-1)?.state;
+    expect(last()).toBe('deleted');
+    expect(last({ left: Infinity })).toBe('changed');
+  });
+
   it('still takes an exact move with no budget left', () => {
     expect(states([a, b, c], [b, c, a], { left: -1 })).toEqual(['moved', 'same', 'same']);
   });

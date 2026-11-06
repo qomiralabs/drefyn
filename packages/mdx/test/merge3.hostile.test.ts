@@ -217,6 +217,18 @@ describe('the merge job', () => {
     });
   });
 
+  it('records a count breach on the path that prints, ahead of the print', () => {
+    const start = parsed('First sentence here. Second sentence here.\n', 'md');
+    const ours = parsed('First sentence here.\n', 'md');
+    const theirs = parsed('First sentence here.\n\nSecond sentence here.\n', 'md');
+    const result = mergePage(job(JSON.stringify({ base: start, ours, theirs })));
+    if (!result.ok) throw new Error('refused');
+    expect(result.value.outcome).toMatchObject({
+      kind: 'conflict',
+      conflicts: [{ reason: 'unexplained_change' }],
+    });
+  });
+
   it('applies its block limit', () => {
     const result = mergePage(job(treesOf(base, base), 1));
     expect(!result.ok && result.error[0]?.code).toBe('mdx.merge_limit');

@@ -193,6 +193,56 @@ function checkPresence(
 
 const use = isolatedPolicy();
 
+// A second opinion on clean, written apart from the product's count so one bug cannot hide in
+// both: a plain recursive read of each tree into a list of words, and bounds worked out per word.
+const WORD_KEYS = ['value', 'alt', 'url', 'title', 'lang', 'meta', 'name'];
+
+function wordsOfTree(value: unknown, found: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value as readonly unknown[]) wordsOfTree(item, found);
+    return found;
+  }
+  if (typeof value !== 'object' || value === null) return found;
+  const node = value as Readonly<Record<string, unknown>>;
+  for (const key of WORD_KEYS) {
+    const field = node[key];
+    if (typeof field === 'string') found.push(...field.split(/\s+/).filter(Boolean));
+    else if (key === 'value') wordsOfTree(field, found);
+  }
+  wordsOfTree(node['attributes'], found);
+  wordsOfTree(node['children'], found);
+  const hasChildren = Array.isArray(node['children']) && node['children'].length > 0;
+  if (!hasChildren && typeof node['value'] !== 'string') found.push(`<${String(node['type'])}>`);
+  return found;
+}
+
+function checkCount(base: MdxRoot, ours: MdxRoot, theirs: MdxRoot, merged: MdxRoot) {
+  const tally = (root: MdxRoot) => {
+    const counts = new Map<string, number>();
+    for (const word of wordsOfTree(root.children)) counts.set(word, (counts.get(word) ?? 0) + 1);
+    return counts;
+  };
+  const [b, o, t, m] = [base, ours, theirs, merged].map(tally) as [
+    Map<string, number>,
+    Map<string, number>,
+    Map<string, number>,
+    Map<string, number>,
+  ];
+  for (const word of new Set([...b.keys(), ...o.keys(), ...t.keys(), ...m.keys()])) {
+    const [was, mine, other, now] = [b, o, t, m].map((map) => map.get(word) ?? 0) as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    const three = mine + other - was;
+    const least = Math.min(mine, other);
+    if (now > Math.max(three, least)) return `kept ${word}: more than the sides explain`;
+    if (now < Math.max(0, Math.min(three, least))) return `lost ${word}: fewer than they explain`;
+  }
+  return undefined;
+}
+
 function checkPrints(root: MdxRoot): string | undefined {
   const printed = printPage({ tree: JSON.stringify(root), policy: use });
   if (!printed.ok) return `refused to print: ${printed.error[0]?.code ?? 'unknown'}`;
@@ -268,6 +318,8 @@ function failureIn(input: MergeCase): string | undefined {
   if (lost !== undefined) return lost;
   if (outcome.kind === 'conflict') return undefined;
 
+  const counted = checkCount(base, ours, theirs, outcome.merged);
+  if (counted !== undefined) return counted;
   const sides = [oursLeaves, theirsLeaves];
   const movedOurs = travelling(flipped(sideOurs.moved, baseLeaves, oursLeaves), documents);
   const movedTheirs = travelling(flipped(sideTheirs.moved, baseLeaves, theirsLeaves), documents);
