@@ -633,6 +633,418 @@ describe('merge3 output', () => {
   });
 });
 
+describe('merge3 paths the outcome alone does not show', () => {
+  const partialOf = (outcome: MergeOutcome) => {
+    if (outcome.kind !== 'conflict') throw new Error('merged clean');
+    return outcome.partial.children.map((block) => block.source?.raw);
+  };
+  const moved = 'Second paragraph with several other words here.';
+  const movedDown = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);
+
+  it('leaves ours on the page in a conflict, with theirs in the record', () => {
+    const ours = replaced('several plain', 'several OURS');
+    const theirs = replaced('several plain', 'several THEIRS');
+    expect(partialOf(outcomeOf(BASE, ours, theirs))).toContain(
+      'First paragraph with several OURS words here.',
+    );
+  });
+
+  it('leaves the edit on the page when the other side deleted the block, either way', () => {
+    const gone = replaced(`${moved}\n\n`, '');
+    const edit = replaced('Second paragraph', 'Second EDIT paragraph');
+    const raw = 'Second EDIT paragraph with several other words here.';
+    expect(partialOf(outcomeOf(BASE, gone, edit))).toContain(raw);
+    expect(partialOf(outcomeOf(BASE, edit, gone))).toContain(raw);
+  });
+
+  it('leaves ours in place at its slot when both move a block apart', () => {
+    const theirs = `${moved}\n\n${replaced(`${moved}\n\n`, '')}`;
+    const partial = partialOf(outcomeOf(BASE, movedDown, theirs));
+    expect(partial[2]).toBe(moved);
+    expect(partial.filter((raw) => raw === moved)).toHaveLength(1);
+  });
+
+  it('applies a one side change from whichever side made it', () => {
+    const ours = replaced('First paragraph', 'OURS paragraph');
+    expect(clean(outcomeOf(BASE, ours, BASE))).toBe(ours);
+    expect(clean(outcomeOf(BASE, BASE, ours))).toBe(ours);
+  });
+
+  it('carries an edit to code along with a move, as nothing has to merge', () => {
+    const code = '```\none line\ntwo line\nthree line\n```';
+    const base = page('Above.', code, 'Middle.', 'Below.');
+    const ours = page('Above.', 'Middle.', 'Below.', code);
+    const theirs = page('Above.', code.replace('two', 'THEIRS'), 'Middle.', 'Below.');
+    const expected = page('Above.', 'Middle.', 'Below.', code.replace('two', 'THEIRS'));
+    expect(clean(outcomeOf(base, ours, theirs))).toBe(expected);
+    expect(clean(outcomeOf(base, theirs, ours))).toBe(expected);
+  });
+
+  it('merges a move and edit from theirs with an edit from ours', () => {
+    const ours = replaced('words here.\n\nThird', 'words OURS here.\n\nThird');
+    const theirs = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\nTHEIRS ${moved}`);
+    expect(clean(outcomeOf(BASE, ours, theirs))).toContain(
+      'THEIRS Second paragraph with several other words OURS here.',
+    );
+  });
+
+  it('records ours and theirs in their own places when a moved and edited block conflicts', () => {
+    const ours = replaced('several other', 'OURS other');
+    const theirs = replaced(`${moved}\n\n`, '').replace(
+      'nicely.',
+      `nicely.\n\n${moved.replace('several', 'THEIRS')}`,
+    );
+    const [record] = conflicts(outcomeOf(BASE, ours, theirs));
+    expect(record?.ours?.source?.raw).toContain('OURS');
+    expect(record?.theirs?.source?.raw).toContain('THEIRS');
+  });
+
+  it('calls both sides moving a block to one spot an insert clash if anything else is there', () => {
+    const ours = movedDown.replace(moved, `${moved}\n\nNew OURS block.`);
+    const list = conflicts(outcomeOf(BASE, ours, movedDown));
+    expect(list.map(({ reason }) => reason)).toEqual(['both_inserted']);
+    const swapped = conflicts(outcomeOf(BASE, movedDown, ours));
+    expect(swapped.map(({ reason }) => reason)).toEqual(['both_inserted']);
+  });
+
+  it('calls one block moved to one spot by both, with different edits, a conflict', () => {
+    const ours = movedDown.replace('several', 'OURS');
+    const theirs = movedDown.replace('several other', 'THEIRS other');
+    const list = conflicts(outcomeOf(BASE, ours, theirs));
+    expect(list.map(({ reason }) => reason)).toContain('move_vs_edit');
+  });
+
+  describe('a run of blocks moved away', () => {
+    const blocks = ['Aaa aaa.', 'Bbb bbb.', 'Ccc ccc.', 'Ddd ddd.', 'Eee eee.', 'Fff fff.'];
+    const [a, b, c, d, e, f] = blocks as [string, string, string, string, string, string];
+    const base = page(...blocks);
+    const ours = page(a, d, e, f, b, c);
+    const places = (theirs: string) =>
+      conflicts(outcomeOf(base, ours, theirs)).map(({ baseIndex, reason }) => [baseIndex, reason]);
+    const both = [
+      [1, 'move_vs_edit'],
+      [2, 'move_vs_edit'],
+    ];
+
+    it('answers an insert above the run from every block in it', () => {
+      expect(places(page(a, 'New.', b, c, d, e, f))).toEqual(both);
+    });
+
+    it('answers an insert below the run from every block in it', () => {
+      expect(places(page(a, b, c, 'New.', d, e, f))).toEqual(both);
+    });
+
+    it('answers an insert inside the run from every block in it', () => {
+      expect(places(page(a, b, 'New.', c, d, e, f))).toEqual(both);
+    });
+
+    it('stays clear of an insert past a block that stayed', () => {
+      const theirs = page(a, b, c, d, 'New.', e, f);
+      expect(clean(outcomeOf(base, ours, theirs))).toBe(page(a, d, 'New.', e, f, b, c));
+    });
+  });
+
+  it('leaves an insert far from a moved block alone', () => {
+    const blocks = ['Aaa aaa.', 'Bbb bbb.', 'Ccc ccc.', 'Ddd ddd.', 'Eee eee.'];
+    const [a, b, c, d, e] = blocks as [string, string, string, string, string];
+    const ours = page(c, a, b, d, e);
+    const theirs = page(a, b, c, d, 'New THEIRS.', e);
+    expect(clean(outcomeOf(page(...blocks), ours, theirs))).toBe(
+      page(c, a, b, d, 'New THEIRS.', e),
+    );
+  });
+
+  it('keeps inserts that differ in part apart, and a shared one once', () => {
+    const edit = (text: string) => replaced('Second paragraph', `${text}\n\nSecond paragraph`);
+    const list = conflicts(outcomeOf(BASE, edit('Aaa.\n\nBbb.'), edit('Aaa.\n\nCcc.')));
+    expect(list.map(({ reason }) => reason)).toEqual(['both_inserted', 'both_inserted']);
+  });
+
+  it('puts conflicts in page order, with the top first', () => {
+    const blocks = ['Aaa aaa.', 'Bbb bbb.', 'Ccc ccc.', 'Ddd ddd.', 'Eee eee.', 'Fff fff.'];
+    const [a, b, c, d, e, f] = blocks as [string, string, string, string, string, string];
+    const ours = page('Top OURS.', a, 'Bbb OURS.', c, e, f, d);
+    const theirs = page('Top THEIRS.', a, 'Bbb THEIRS.', c, f);
+    const list = conflicts(outcomeOf(page(...blocks), ours, theirs));
+    const places = list.map(({ baseIndex }) => baseIndex ?? -1);
+    expect(list[0]?.baseIndex).toBeNull();
+    expect(places).toEqual([...places].sort((left, right) => left - right));
+  });
+
+  it('answers a delete from both with a rewrite on either side', () => {
+    const blocks = ['Keep this.', 'alpha beta gamma delta epsilon', 'Keep that.'];
+    const [one, gone, two] = blocks as [string, string, string];
+    const rewrite = 'alpha zeta eta theta iota kappa lambda';
+    const base = page(one, gone, two);
+    const deleted = page(one, two);
+    const here = conflicts(outcomeOf(base, page(one, rewrite, two), deleted));
+    const there = conflicts(outcomeOf(base, deleted, page(one, rewrite, two)));
+    expect(here[0]?.ours?.source?.raw).toBe(rewrite);
+    expect(here[0]?.theirs).toBeNull();
+    expect(there[0]?.ours).toBeNull();
+    expect(there[0]?.theirs?.source?.raw).toBe(rewrite);
+  });
+
+  it('calls a shared rewrite no conflict, and a rewrite of another kind no rewrite', () => {
+    const base = page('Keep.', 'alpha beta gamma delta epsilon', 'Also.');
+    const same = page('Keep.', 'alpha zeta eta theta iota kappa', 'Also.');
+    expect(clean(outcomeOf(base, same, same))).toBe(same);
+    const kind = page('Keep.', '# alpha zeta eta theta iota kappa', 'Also.');
+    const deleted = page('Keep.', 'Also.');
+    expect(clean(outcomeOf(base, kind, deleted))).toBe(kind);
+    const unrelated = page('Keep.', 'nothing in common at all', 'Also.');
+    expect(clean(outcomeOf(base, unrelated, deleted))).toBe(unrelated);
+  });
+
+  it('does not take a moved block for a rewrite of what both deleted', () => {
+    const base = page('alpha beta', 'alpha gamma', 'Keep.', 'Also.');
+    const ours = page('Keep.', 'alpha beta', 'Also.');
+    const theirs = page('alpha beta', 'Keep.', 'Also.');
+    expect(clean(outcomeOf(base, ours, theirs))).toBe(ours);
+  });
+
+  it('does not read a moved block as having taken in what both deleted', () => {
+    const big = 'alpha beta gamma delta';
+    const base = page(big, 'alpha beta', 'Keep one.', 'Also two.', 'Last three.');
+    const ours = page('Keep one.', 'Also two.', 'Last three.', big);
+    const theirs = page(big, 'Keep one.', 'Also two.', 'Last three.');
+    expect(clean(outcomeOf(base, ours, theirs))).toBe(ours);
+  });
+
+  it('resolves references against every definition on the page', () => {
+    const base =
+      'See [one][a] and [two][b] for more words.\n\n[a]: https://a.example\n\n[b]: https://b.example\n';
+    const ours = base.replace('See', 'OURS');
+    const theirs = base.replace('more words', 'more THEIRS');
+    const outcome = outcomeOf(base, ours, theirs);
+    if (outcome.kind !== 'clean') throw new Error('expected clean');
+    const types = JSON.stringify(outcome.merged.children[0]).match(/linkReference/g);
+    expect(types).toHaveLength(2);
+  });
+
+  it('finds no absorbed words in a block with none to find', () => {
+    const base = page('Keep.', '---', 'Also more words.');
+    const ours = page('Keep.', 'Also more words and more.');
+    const theirs = page('Keep.', 'Also more words.');
+    expect(clean(outcomeOf(base, ours, theirs))).toBe(ours);
+  });
+
+  it('answers a both sides delete when theirs took the words in', () => {
+    const base = '    first code\n\n```\nmiddle\n```\n\n    second code\n\nWords.\n';
+    const fused = '    second code\n\n    first code\n\n```\nmiddle\n```\n\nWords.\n';
+    const deleted = '    first code\n\n```\nmiddle\n```\n\nWords.\n';
+    const list = conflicts(outcomeOf(base, deleted, fused));
+    const found = list.find(({ reason }) => reason === 'delete_vs_edit');
+    expect(found?.theirs?.source?.raw).toContain('second code');
+    expect(found?.ours).toBeNull();
+  });
+});
+
+describe('merge3 items crossing blocks', () => {
+  const lists =
+    '- aaa\n- bbb\n\nMiddle plain words here.\n\n* ccc\n* ddd\n\nEnd plain words here.\n';
+  const quotes =
+    '> aaa\n>\n> bbb\n\nMiddle plain words here.\n\n> ccc\n>\n> ddd\n\nEnd plain words here.\n';
+  const tables =
+    '| h |\n| - |\n| aaa |\n| bbb |\n\nMiddle plain words here.\n\n| h |\n| - |\n| ccc |\n| ddd |\n\nEnd plain words here.\n';
+  const reasons = (outcome: MergeOutcome) =>
+    conflicts(outcome).map(({ baseIndex, reason }) => [baseIndex, reason]);
+
+  it('raises a conflict when an item crosses lists past the other side edit', () => {
+    const ours =
+      '- aaa\n- bbb\n- ccc\n\nMiddle plain words here.\n\n* ddd\n\nEnd plain words here.\n';
+    const theirs = lists.replace('plain', 'THEIRS');
+    expect(reasons(outcomeOf(lists, ours, theirs))).toContainEqual([0, 'both_changed']);
+    expect(reasons(outcomeOf(lists, theirs, ours))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('raises a conflict for an item that went the other way', () => {
+    const ours =
+      '- aaa\n\nMiddle plain words here.\n\n* bbb\n* ccc\n* ddd\n\nEnd plain words here.\n';
+    const theirs = lists.replace(
+      'Middle plain words here.\n\n',
+      'Middle plain words here.\n\nNew THEIRS.\n\n',
+    );
+    expect(reasons(outcomeOf(lists, ours, theirs))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('raises a conflict when an item went into a new list', () => {
+    const ours =
+      '- aaa\n\nMiddle plain words here.\n\n+ bbb\n\n* ccc\n* ddd\n\nEnd plain words here.\n';
+    const theirs = lists.replace('plain', 'THEIRS');
+    expect(reasons(outcomeOf(lists, ours, theirs))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('raises a conflict when a row crosses tables', () => {
+    const ours = tables.replace('| bbb |\n', '').replace('| ccc |', '| bbb |\n| ccc |');
+    const theirs = tables.replace('plain', 'THEIRS');
+    expect(reasons(outcomeOf(tables, ours, theirs))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('raises a conflict when a paragraph crosses quotes', () => {
+    const ours = quotes.replace('> aaa\n>\n> bbb', '> aaa').replace('> ccc', '> bbb\n>\n> ccc');
+    const theirs = quotes.replace('plain', 'THEIRS');
+    expect(reasons(outcomeOf(quotes, ours, theirs))).toContainEqual([0, 'both_changed']);
+  });
+
+  it('lets a crossing stand when the other side stayed out of the span', () => {
+    const ours =
+      '- aaa\n- bbb\n- ccc\n\nMiddle plain words here.\n\n* ddd\n\nEnd plain words here.\n';
+    const theirs = lists.replace('End', 'THEIRS');
+    expect(clean(outcomeOf(lists, ours, theirs))).toBe(ours.replace('End', 'THEIRS'));
+  });
+
+  it('counts an item both lists held as crossing only out of those lists', () => {
+    const base =
+      '- aaa\n- same\n\nMiddle plain words here.\n\n* ccc\n* same\n\nEnd plain words here.\n';
+    const ours =
+      '- aaa\n- same\n- new\n\nMiddle plain words here.\n\n* ccc\n* same\n\nEnd plain words here.\n';
+    const theirs = base.replace('plain', 'THEIRS');
+    expect(clean(outcomeOf(base, ours, theirs))).toContain('THEIRS');
+  });
+
+  it('counts a side that changed nothing as staying out', () => {
+    const ours =
+      '- aaa\n- bbb\n- ccc\n\nMiddle plain words here.\n\n* ddd\n\nEnd plain words here.\n';
+    expect(clean(outcomeOf(lists, ours, lists))).toBe(ours);
+    expect(clean(outcomeOf(lists, lists, ours))).toBe(ours);
+  });
+
+  it('treats a list that took in a moved block as a rewrite only for a block it holds', () => {
+    const base = '- item one\n\n> quote\n\n    code words\n\nEnd.\n';
+    const theirs = '- item one\n\n    code words\n\nEnd.\n';
+    const ours = base.replace('End.', 'End OURS.');
+    expect(clean(outcomeOf(base, ours, theirs))).toContain('End OURS.');
+  });
+
+  it('raises one conflict for one span, however many items crossed it', () => {
+    const ours =
+      '- aaa\n- bbb\n- ccc\n- ddd\n\nMiddle plain words here.\n\nEnd plain words here.\n';
+    const theirs = lists.replace('plain', 'THEIRS');
+    const crossings = reasons(outcomeOf(lists, ours, theirs)).filter(
+      ([, reason]) => reason === 'both_changed',
+    );
+    expect(crossings).toHaveLength(new Set(crossings.map(String)).size);
+  });
+
+  it('does not treat nested items as crossing', () => {
+    const base = '- aaa\n\n  - bbb\n\nMiddle plain words here.\n';
+    const ours = '- aaa OURS\n\n  - bbb\n\nMiddle plain words here.\n';
+    const theirs = '- aaa\n\n  - bbb THEIRS\n\nMiddle plain words here.\n';
+    expect(clean(outcomeOf(base, ours, theirs))).toBe(
+      '- aaa OURS\n\n  - bbb THEIRS\n\nMiddle plain words here.\n',
+    );
+  });
+});
+
+describe('merge3 gaps and tails', () => {
+  it('keeps a kept gap with spaces on the blank line', () => {
+    const base = 'One.\n  \nTwo.\n\nThree.\n';
+    const ours = 'New.\n\nOne.\n  \nTwo.\n\nThree.\n';
+    const theirs = 'One.\n  \nThree.\n';
+    expect(clean(outcomeOf(base, ours, theirs))).toBe('New.\n\nOne.\n  \nThree.\n');
+  });
+
+  it('opens a gap of one line in a CRLF file with a CRLF blank line', () => {
+    const base = '# Title\r\nTight.\r\n\r\nOther block.\r\n';
+    const ours = '# Title\r\nTight.\r\n\r\nOther OURS.\r\n';
+    const theirs = '# Changed\r\n\r\n# Title\r\nTight.\r\n\r\nOther block.\r\n';
+    const moved = 'Above.\r\n\r\n# Title\r\nTight.\r\n';
+    expect(clean(outcomeOf(base, ours, theirs))).toContain('Other OURS.\r\n');
+    const text = clean(outcomeOf(base, moved, base.replace('# Title\r\n', '')));
+    expect(text).toContain('\r\n\r\nTight.');
+  });
+
+  it('keeps a kept gap that holds a blank line in old Mac endings', () => {
+    const base = 'One.\r\rTwo.\n\nThree.\n';
+    const ours = 'One.\r\rThree.\n';
+    expect(parsed(base, 'md').children).toHaveLength(3);
+    const theirs = base.replace('Two.', 'New.\n\nTwo.');
+    expect(clean(outcomeOf(base, ours, theirs))).toContain('New.');
+  });
+
+  it.each([
+    ['a blank line', '\n\n'],
+    ['spaces on it', '\n  \n'],
+    ['one tab on it', '\n\t\n'],
+    ['CRLF', '\r\n\r\n'],
+    ['old Mac endings', '\r\r'],
+  ])('keeps a gap with %s when the block above it goes', (_name, gap) => {
+    const base = `One.${gap}Two.${gap}Three.\n`;
+    const root = parsed(base, 'md');
+    const result = merge3(root, withoutMiddle(root), root);
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe(`One.${gap}Three.\n`);
+  });
+
+  it('opens a tight gap when the block above it goes', () => {
+    const base = 'One.\n\n# Two\nThree.\n';
+    const root = parsed(base, 'md');
+    const result = merge3(root, withoutMiddle(root), root);
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe('One.\n\nThree.\n');
+  });
+
+  it('drops the gap of a block a delete left on top', () => {
+    const root = parsed('# Title\n\nWords.\n\nMore.\n', 'md');
+    const ours = { ...root, children: root.children.slice(1) };
+    const result = merge3(root, ours, root);
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe('Words.\n\nMore.\n');
+  });
+
+  it('holds a block that was first in its place on the first line', () => {
+    const base = '\n\n# Title\n\nWords.\n';
+    expect(clean(outcomeOf(base, base, base.replace('Words', 'THEIRS')))).toBe(
+      '\n\n# Title\n\nTHEIRS.\n',
+    );
+  });
+
+  it('prints a new block on top with no gap', () => {
+    const base = 'Words.\n\nMore.\n';
+    const ours = parsed(base, 'md');
+    const added = {
+      type: 'paragraph' as const,
+      children: [{ type: 'text' as const, value: 'New.' }],
+    };
+    const inserted = { ...ours, children: [added, ...ours.children] };
+    const result = merge3(parsed(base, 'md'), inserted, parsed(base, 'md'));
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe('New.\n\nWords.\n\nMore.\n');
+  });
+
+  it('leaves a new block in the middle with no source', () => {
+    const base = 'Words.\n\nMore words here.\n';
+    const root = parsed(base, 'md');
+    const added = {
+      type: 'paragraph' as const,
+      children: [{ type: 'text' as const, value: 'New.' }],
+    };
+    const inserted = {
+      ...root,
+      children: [root.children[0] as MdxBlock, added, root.children[1] as MdxBlock],
+    };
+    const result = merge3(root, inserted, parsed(base.replace('More', 'Other'), 'md'));
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(result.value.merged.children[1]).toEqual(added);
+  });
+
+  it('picks the same tail whichever side comes first when both changed it', () => {
+    const base = 'One.\n';
+    const left = 'One.\n\n';
+    const right = 'One.\n\n\n';
+    expect(clean(outcomeOf(base, left, right))).toBe(left);
+    expect(clean(outcomeOf(base, right, left))).toBe(left);
+  });
+
+  it('keeps the tail hash with its tail', () => {
+    const outcome = outcomeOf('One.\n', 'One.\n\n', 'One.\n');
+    expect(outcome.kind === 'clean' && printed(outcome.merged)).toBe('One.\n\n');
+    const swapped = outcomeOf('One.\n', 'One.\n\n\n', 'One.\n\n');
+    expect(swapped.kind === 'clean' && printed(swapped.merged)).toBe('One.\n\n');
+  });
+});
+
 describe('merge3 limits', () => {
   const pageOf = (blocks: number) =>
     Array.from({ length: blocks }, (_, index) => `Block ${index}.`).join('\n\n');

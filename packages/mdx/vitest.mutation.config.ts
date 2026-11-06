@@ -14,11 +14,9 @@ export default defineConfig({
       'test/merge-diff.test.ts',
       'test/merge3.test.ts',
       'test/merge3.hostile.test.ts',
-      'test/merge3.property.test.ts',
+      'test/merge-align.test.ts',
+      'test/merge-nodes.test.ts',
     ],
-    // A slice on one seed: a merge is judged on what it keeps, which generated edits show best,
-    // and a mutant has to be caught the same way on every run.
-    env: { MERGE_PROPERTY_RUNS: '400', MERGE_PROPERTY_SEED: '20261106' },
     restoreMocks: true,
   },
 });

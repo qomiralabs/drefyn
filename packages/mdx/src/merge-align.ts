@@ -135,7 +135,6 @@ function detectMoves(
   // Moved and edited, so the other side's delete or edit still has to meet it.
   let open = slots.flatMap((slot, index) => (movable(slot, at(base, index)) ? [index] : []));
   for (const entry of inserted) {
-    if (budget.left < 0) return;
     if (entry.movedFrom !== undefined) continue;
     const index = closest(open, base, entry, budget);
     if (index === undefined) continue;
@@ -148,8 +147,11 @@ function detectMoves(
 // Lines one side up against the base. What the hashes cannot match pairs by similarity, in
 // order, so an insert beside an edit cannot steal the edit's slot. A block with an exact copy in
 // the base is never an edit of something else: that is a move.
-export function align(base: readonly Entry[], side: readonly Entry[]): Alignment {
-  const budget = { left: SIMILARITY_BUDGET };
+export function align(
+  base: readonly Entry[],
+  side: readonly Entry[],
+  budget: Budget = { left: SIMILARITY_BUDGET },
+): Alignment {
   const slots: Slot[] = base.map(() => DELETED);
   const after: Inserted[][] = Array.from({ length: base.length + 1 }, () => []);
   const known = new Set(base.map(({ hash }) => hash));

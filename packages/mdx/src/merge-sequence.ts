@@ -2,7 +2,14 @@ import { rawOf } from './canonical.ts';
 import { align, holdsWords, SIMILARITY_BUDGET, similarity, wordsOf } from './merge-align.ts';
 import type { Alignment, Budget, Entry, Inserted, MergeNode, Slot } from './merge-align.ts';
 import { at } from './merge-diff.ts';
-import { isEmptied, mergedEntry, mergeNode, settle, withoutSource } from './merge-nodes.ts';
+import {
+  childrenOf,
+  isEmptied,
+  mergedEntry,
+  mergeNode,
+  settle,
+  withoutSource,
+} from './merge-nodes.ts';
 import type { MergeContext } from './merge-nodes.ts';
 import type { BlockConflictReason, MdxBlock } from './types.ts';
 
@@ -43,12 +50,8 @@ function bytesOf(base: Entry, ours: Entry, theirs: Entry): Entry {
 
 const RUNS_OF_ITEMS = new Set(['list', 'blockquote', 'table']);
 
-function childrenOf({ node }: Entry): readonly MergeNode[] {
-  return RUNS_OF_ITEMS.has(node.type) ? (node.children ?? []) : [];
-}
-
-const untouched = ({ slots, after }: Alignment) =>
-  slots.every(({ state }) => state === 'same') && after.every(({ length }) => length === 0);
+const itemsOf = ({ node }: Entry): readonly MergeNode[] =>
+  RUNS_OF_ITEMS.has(node.type) ? childrenOf(node) : [];
 
 function touches({ slots, after }: Alignment, low: number, high: number): boolean {
   for (let index = low; index <= high; index += 1) {
@@ -82,7 +85,7 @@ function crossings(
   const { slots, after } = alignment;
   const spans: (readonly [number, number])[] = [];
   const look = (entry: Entry, here: number) => {
-    for (const child of childrenOf(entry)) {
+    for (const child of itemsOf(entry)) {
       const from = owners.get(hashOf(child));
       if (from === undefined || from.has(here)) continue;
       const first = Math.min(...from);
@@ -118,10 +121,9 @@ function crossingConflicts(
   theirs: Alignment,
   conflict: (index: number, reason: BlockConflictReason, a: Entry | null, c: Entry | null) => void,
 ) {
-  if (untouched(ours) || untouched(theirs)) return;
   const owners = new Map<string, Set<number>>();
   for (const [index, entry] of base.entries()) {
-    for (const child of childrenOf(entry)) {
+    for (const child of itemsOf(entry)) {
       const hash = hashOf(child);
       const known = owners.get(hash);
       if (known === undefined) owners.set(hash, new Set([index]));
@@ -351,9 +353,9 @@ export function mergeChildren(
   context: MergeContext,
 ): readonly MergeNode[] | undefined {
   const { items, conflicts } = mergeSequence(
-    entriesOf((base.children ?? []).map(withoutSource)),
-    entriesOf((ours.children ?? []).map(withoutSource)),
-    entriesOf((theirs.children ?? []).map(withoutSource)),
+    entriesOf(childrenOf(base).map(withoutSource)),
+    entriesOf(childrenOf(ours).map(withoutSource)),
+    entriesOf(childrenOf(theirs).map(withoutSource)),
     context,
     false,
   );

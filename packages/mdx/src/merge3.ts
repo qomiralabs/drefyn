@@ -6,7 +6,6 @@ import { mergeChildren, mergeSequence } from './merge-sequence.ts';
 import type { SlotConflict } from './merge-sequence.ts';
 import { parseForStore } from './parse.ts';
 import { DEFAULT_LIMITS, DEFAULT_MERGE_MAX_BLOCKS } from './policy.ts';
-import { MdxPrintError } from './print.ts';
 import { refused } from './result.ts';
 import { rootSchema } from './root-schema.ts';
 import { checkTree } from './tree-limits.ts';
@@ -55,7 +54,8 @@ const isNode = (value: unknown): value is Unknown =>
 // at its word: a node has a type, and children are a list of nodes.
 function wellFormed(children: readonly unknown[]): boolean {
   const stack = [...children];
-  for (let node = stack.pop(); node !== undefined || stack.length > 0; node = stack.pop()) {
+  while (stack.length > 0) {
+    const node = stack.pop();
     if (!isNode(node)) return false;
     const { children: inner, attributes } = node;
     if (attributes !== undefined && !Array.isArray(attributes)) return false;
@@ -70,9 +70,8 @@ function withinLimits(root: MdxRoot, policy: RenderPolicy): boolean {
   try {
     checkTree(root.children, policy.limits);
     return true;
-  } catch (error) {
-    if (error instanceof MdxPrintError) return false;
-    throw error;
+  } catch {
+    return false;
   }
 }
 
@@ -233,10 +232,11 @@ export function merge3(
   const refusal = refusalFor([base, ours, theirs], settings);
   if (refusal !== undefined) return refused(refusal);
   const entries = [base, ours, theirs].map(entriesOfRoot);
-  const [fromBase, fromOurs, fromTheirs] = entries;
-  if (fromBase === undefined || fromOurs === undefined || fromTheirs === undefined) {
-    return refused('mdx.block_not_printable');
-  }
-  const trio = [fromBase, fromOurs, fromTheirs] as const;
+  if (entries.includes(undefined)) return refused('mdx.block_not_printable');
+  const trio = entries as unknown as readonly [
+    readonly Entry[],
+    readonly Entry[],
+    readonly Entry[],
+  ];
   return { ok: true, value: mergeRoots(base, ours, theirs, trio, settings.policy) };
 }

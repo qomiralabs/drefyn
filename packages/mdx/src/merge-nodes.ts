@@ -1,5 +1,5 @@
 import type { Entry, MergeNode } from './merge-align.ts';
-import { mergeSequences } from './merge-diff.ts';
+import { at, mergeSequences } from './merge-diff.ts';
 import { parseForStore } from './parse.ts';
 import { printCanonical } from './print.ts';
 import type { Dialect, MdxBlock, RenderPolicy } from './types.ts';
@@ -25,6 +25,10 @@ export interface MergeContext {
 // the text exactly, so a merge of tokens can only lose what a side deleted.
 const TOKEN = /\s+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]|[\p{L}\p{N}_]+|[\s\S]/gu;
 
+const tokensOf = (text: string) => Array.from(text.matchAll(TOKEN), ([token]) => token);
+
+export const childrenOf = ({ children }: MergeNode) => children ?? [];
+
 export function withoutSource(node: MergeNode): MergeNode {
   const copy: { -readonly [Key in keyof MergeNode]: MergeNode[Key] } = { ...node };
   delete copy.source;
@@ -43,14 +47,12 @@ export function printAlone(node: MergeNode, dialect: Dialect): string | undefine
 function parseAlone(text: string, context: MergeContext): MergeNode | undefined {
   const definitions = context.definitions();
   if (definitions === undefined) return undefined;
-  const { text: others, count } = definitions;
-  const page = others === '' ? `${text}\n` : `${text}\n\n${others}\n`;
+  const page = `${text}\n\n${definitions.text}\n`;
   const parsed = parseForStore(page, context.dialect, context.policy);
   if (!parsed.ok) return undefined;
   const blocks = parsed.value.ast.children as unknown as readonly MergeNode[];
   // A count that moved means this text ate a definition or became two blocks.
-  const block = blocks[0];
-  return blocks.length === count + 1 && block !== undefined ? withoutSource(block) : undefined;
+  return blocks.length === definitions.count + 1 ? withoutSource(at(blocks, 0)) : undefined;
 }
 
 function mergeInline(
@@ -60,21 +62,17 @@ function mergeInline(
   context: MergeContext,
 ): MergeNode | undefined {
   const asBlock = (node: MergeNode): MergeNode =>
-    node.type === 'tableCell' ? { type: 'paragraph', children: node.children ?? [] } : node;
+    node.type === 'tableCell' ? { type: 'paragraph', children: childrenOf(node) } : node;
   const texts = [base, ours, theirs].map((node) => printAlone(asBlock(node), context.dialect));
   const [baseText, oursText, theirsText] = texts;
   if (baseText === undefined || oursText === undefined || theirsText === undefined) {
     return undefined;
   }
-  const merged = mergeSequences(
-    baseText.match(TOKEN) ?? [],
-    oursText.match(TOKEN) ?? [],
-    theirsText.match(TOKEN) ?? [],
-  );
+  const merged = mergeSequences(tokensOf(baseText), tokensOf(oursText), tokensOf(theirsText));
   if (merged === undefined) return undefined;
   const block = parseAlone(merged.join(''), context);
   if (block?.type !== asBlock(base).type) return undefined;
-  return base.type === 'tableCell' ? { ...base, children: block.children ?? [] } : block;
+  return base.type === 'tableCell' ? { ...base, children: childrenOf(block) } : block;
 }
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -118,9 +116,10 @@ function mergeTable(
   context: MergeContext,
 ): MergeNode | undefined {
   const merged = mergeFieldsAndChildren(base, ours, theirs, ['align'], context);
-  const rows = merged?.children ?? [];
-  const width = rows[0]?.children?.length;
-  return rows.every(({ children }) => children?.length === width) ? merged : undefined;
+  if (merged === undefined) return undefined;
+  const rows = childrenOf(merged);
+  const even = rows.every((row) => childrenOf(row).length === childrenOf(at(rows, 0)).length);
+  return even ? merged : undefined;
 }
 
 // One node two sides both changed. Undefined means a person decides.
@@ -132,13 +131,11 @@ export function mergeNode(
 ): MergeNode | undefined {
   if (base.type !== ours.type || base.type !== theirs.type) return undefined;
   switch (base.type) {
+    // A heading's depth is in its printed words, so two depths clash like two edits.
+    case 'heading':
     case 'paragraph':
     case 'tableCell':
       return mergeInline(base, ours, theirs, context);
-    case 'heading':
-      return mergeFields(base, ours, theirs, ['depth']) === undefined
-        ? undefined
-        : mergeInline(base, ours, theirs, context);
     case 'list':
       return mergeFieldsAndChildren(base, ours, theirs, ['ordered', 'start', 'spread'], context);
     case 'listItem':
@@ -153,8 +150,9 @@ export function mergeNode(
   }
 }
 
-export const isEmptied = ({ type, children }: MergeNode) =>
-  (type === 'list' || type === 'table' || type === 'blockquote') && children?.length === 0;
+const RUNS = new Set(['list', 'table', 'blockquote']);
+
+export const isEmptied = (node: MergeNode) => RUNS.has(node.type) && childrenOf(node).length === 0;
 
 // What gets stored is what the print parses to, so a merged block takes that shape now. If it
 // stops being one block, the merge was not sound and a person decides.

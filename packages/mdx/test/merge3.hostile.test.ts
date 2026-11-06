@@ -65,6 +65,40 @@ describe('merge3 on trees nobody should trust', () => {
     });
   });
 
+  it.each([
+    ['a null', null],
+    ['a list', ['paragraph']],
+    ['text', 'paragraph'],
+    ['a node with a numeric type', { type: 3 }],
+    ['a node with no type', {}],
+  ])('refuses %s deep in a tree', (_name, child) => {
+    const block = { type: 'blockquote', children: [{ type: 'paragraph', children: [child] }] };
+    expect(merge3(base, withBlock(base, block), base)).toEqual(refused);
+  });
+
+  it('checks every node, the first of a list as well as the last', () => {
+    const good = { type: 'text', value: 'a' };
+    const first = { type: 'paragraph', children: [7, good, good] };
+    const last = { type: 'paragraph', children: [good, good, 7] };
+    expect(merge3(base, withBlock(base, first), base)).toEqual(refused);
+    expect(merge3(base, withBlock(base, last), base)).toEqual(refused);
+  });
+
+  it('takes attributes when they are a list, and a node with no children', () => {
+    const block = { type: 'mdxJsxFlowElement', name: 'a', attributes: [], children: [] };
+    const fine = withBlock(base, block);
+    expect(merge3(base, fine, fine).ok).toBe(true);
+  });
+
+  it('refuses an unprintable definition by conflict, not by throwing', () => {
+    const start = parsed('Some plain words on a line here.\n', 'md');
+    const ours = parsed('OURS plain words on a line here.\n', 'md');
+    const theirs = parsed('Some plain words on a line THEIRS.\n', 'md');
+    const alien = { type: 'definition', identifier: 7 };
+    const result = merge3(start, withBlock(ours, alien), theirs);
+    expect(result.ok && result.value.kind).toBe('conflict');
+  });
+
   it('refuses sides of different dialects', () => {
     const other = parsed(BASE, 'mdx');
     const mismatch = {
@@ -157,6 +191,25 @@ describe('the merge job', () => {
     const result = mergePage(job(trees));
     if (!result.ok) throw new Error('refused');
     expect(result.value.outcome.kind).toBe('conflict');
+  });
+
+  it('leaves a conflict as it found it, even with a partial page that cannot print', () => {
+    const start = parsed('One line here.\n', 'md');
+    const ours = parsed('One OURS here.\n', 'md');
+    const theirs = parsed('One THEIRS here.\n', 'md');
+    const alien = { type: 'alien' };
+    const trees = JSON.stringify({
+      base: start,
+      ours: withBlock(ours, alien),
+      theirs: withBlock(theirs, { type: 'other' }),
+    });
+    const result = mergePage(job(trees));
+    if (!result.ok) throw new Error('refused');
+    expect(result.value.outcome).toMatchObject({
+      conflicts: expect.arrayContaining([
+        expect.objectContaining({ reason: 'both_changed', baseIndex: 0 }),
+      ]) as unknown,
+    });
   });
 
   it('applies its block limit', () => {
