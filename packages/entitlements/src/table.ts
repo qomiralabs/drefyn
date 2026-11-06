@@ -62,7 +62,7 @@ const row = (
 });
 
 export const LIMITS = {
-  'org.seats': row('org', [2, 5, 20, U, U]),
+  'org.seats': row('org', [5, 10, 20, U, U]),
   'org.docs_projects': row('org', [1, 1, 3, 10, atLeast(10)]),
   'org.studio_projects': row('org', [1, 1, 3, 10, atLeast(10)]),
   // Every status page counts here; private pages also count against the next row.
@@ -85,6 +85,12 @@ export const LIMITS = {
     atLeast(100 * GB),
     atLeast(100 * GB),
   ]),
+
+  // Numbers come from calibration, so these stay shut on hosted until then. The 0 below a
+  // feature's first tier is the real value, not a placeholder.
+  'docs.mcp_requests_per_month': row('docs', [unset, unset, unset, unset, unset]),
+  'docs.feedback_items_per_month': row('docs', [0, unset, unset, unset, unset]),
+  'docs.assistant_questions_per_month': row('docs', [0, 0, unset, unset, unset]),
 
   // Studio caps are promised but not yet numbered, so hosted Studio stays closed.
   'studio.items': row('studio', [unset, unset, unset, unset, unset]),
@@ -132,18 +138,29 @@ export const FEATURES = {
   'docs.visual_editing': feature('docs', 'free'),
   'docs.search': feature('docs', 'free'),
   'docs.custom_domain': feature('docs', 'free'),
-  'docs.remove_badge': feature('docs', 'starter'),
-  'docs.openapi_reference': feature('docs', 'starter'),
+  // Includes Try it.
+  'docs.openapi_reference': feature('docs', 'free'),
+  // MCP is on Free for Docs only. The retrieval API behind it stays at Growth, gated at the
+  // surface: the content MCP serves on Free is public anyway.
+  'docs.mcp': feature('docs', 'free'),
   'docs.staleness_basic': feature('docs', 'starter'),
   'docs.analytics_basic': feature('docs', 'starter'),
+  'docs.private_password': feature('docs', 'starter'),
+  'docs.reader_feedback': feature('docs', 'starter'),
   'docs.staleness_automatic': feature('docs', 'growth'),
   'docs.versioning': feature('docs', 'growth'),
   'docs.editorial_workflow': feature('docs', 'growth'),
   'docs.widgets': feature('docs', 'growth'),
   'docs.retrieval_api': feature('docs', 'growth'),
-  'docs.mcp': feature('docs', 'growth'),
   'docs.incident_banners': feature('docs', 'growth'),
-  'docs.localization': feature('docs', 'scale'),
+  'docs.localization': feature('docs', 'growth'),
+  'docs.update_drafts': feature('docs', 'growth'),
+  'docs.reader_assistant': feature('docs', 'growth'),
+  'docs.preview_deployments': feature('docs', 'growth'),
+  'docs.instant_rollback': feature('docs', 'growth'),
+  // Powered by Drefyn brings in new users, so only Scale and up may hide it.
+  'docs.remove_badge': feature('docs', 'scale'),
+  'docs.private_reader_login': feature('docs', 'scale'),
   'docs.support_integrations': feature('docs', 'scale'),
   'docs.advanced_roles': feature('docs', 'scale'),
   'docs.advanced_analytics': feature('docs', 'scale'),
@@ -172,7 +189,6 @@ export const FEATURES = {
   'status.notify_teams': feature('status', 'free'),
   'status.notify_discord': feature('status', 'free'),
   'status.custom_domain': feature('status', 'starter'),
-  'status.remove_badge': feature('status', 'starter'),
   'status.heartbeat_checks': feature('status', 'starter'),
   'status.ssl_checks': feature('status', 'starter'),
   'status.notify_sms': feature('status', 'starter'),
@@ -189,6 +205,7 @@ export const FEATURES = {
   'status.approval_rules': feature('status', 'growth'),
   'status.sla_reports': feature('status', 'growth'),
   'status.multi_language_pages': feature('status', 'growth'),
+  'status.remove_badge': feature('status', 'scale'),
   'status.browser_checks': feature('status', 'scale'),
   'status.html_templating': feature('status', 'scale'),
   'status.white_label': feature('status', 'scale'),

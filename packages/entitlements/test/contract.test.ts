@@ -4,6 +4,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  FEATURE_KEYS,
+  LIMIT_KEYS,
   PRODUCTS,
   UNLIMITED,
   checkLimit,
@@ -20,6 +22,35 @@ import { RUNS, caughtCode, expectEntitlementError } from './support/assert.ts';
 const tier = (value: unknown) => value as Tier;
 const key = (value: unknown) => value as LimitKey;
 const overrides = (value: unknown) => value as LimitOverrides;
+
+describe('the table and the fixture agree', () => {
+  it('on every limit cell, reading each cell through limitFor', () => {
+    expect([...LIMIT_KEYS].sort()).toEqual([...pricing.LIMIT_KEYS].sort());
+    for (const k of pricing.LIMIT_KEYS) {
+      const row: pricing.LimitRow = pricing.LIMITS[k];
+      expect(limitInfo(k).scope, k).toBe(row.scope);
+      expect(limitInfo(k).direction, k).toBe(row.direction);
+      for (const t of pricing.TIERS) {
+        const cell = row.cells[t];
+        const open = pricing.isPlaceholder(cell) ? (cell.atLeast ?? cell.atMost ?? 0) : cell;
+        expect(limitFor(t, k), `${t} ${k}`).toBe(open);
+      }
+    }
+  });
+
+  it('on every feature, its scope, first tier and place in the open core', () => {
+    expect([...FEATURE_KEYS].sort()).toEqual([...pricing.FEATURE_KEYS].sort());
+    for (const feature of pricing.FEATURE_KEYS) {
+      const row: pricing.FeatureRow = pricing.FEATURES[feature];
+      expect(featureInfo(feature), feature).toEqual({
+        feature,
+        scope: row.scope,
+        since: row.since,
+        openCore: row.selfHosted,
+      });
+    }
+  });
+});
 
 describe('validation order: tier, then key, then overrides, then usage', () => {
   const lowering = overrides({ 'status.monitors': 1 });
