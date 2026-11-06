@@ -89,7 +89,7 @@ afterAll(async () => {
 describeWithStack('chunks in the save transaction', () => {
   it('stores nothing a reader cannot see', async () => {
     const node = await newNode(built.engine, home);
-    const page = '---\ntitle: hidden-words\n---\n\n# Guide\n\n<!-- hidden-words -->\n\nShown.\n';
+    const page = '---\ntitle: hidden-words\n---\n\n# Guide\n\n{/* hidden-words */}\n\nShown.\n';
     const input = await saveInput(home, node, null, page);
     const saved = await built.engine.saveDraft(input);
     if (!saved.ok) throw new Error(saved.error.code);
