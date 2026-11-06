@@ -66,6 +66,8 @@ async function compileOnly(): Promise<void> {
     await tx.updateTable('project_roles').set({ target_project_id: 'x' }).execute();
     // @ts-expect-error nor a project's read only state
     await tx.updateTable('projects').set({ read_only_since: null }).execute();
+    // @ts-expect-error history is append only
+    await tx.updateTable('node_versions').set({ ast_version: 2 }).execute();
     await tx
       .updateTable('invitations')
       .set({ role: 'admin', send_count: 2, expires_at: new Date() })

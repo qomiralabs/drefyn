@@ -326,6 +326,7 @@ describe('the area list', () => {
         'billing',
         'github',
         'dashboard',
+        'engine',
       ].sort(),
     );
   });
