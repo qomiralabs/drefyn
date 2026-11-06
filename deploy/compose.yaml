@@ -140,10 +140,14 @@ secrets:
     environment: DREFYN_AUTH_PASSWORD
 
 networks:
-  # internal means no gateway out: not to the internet and not to the host. The app tier joins
-  # this network to reach the parse host, and nothing else belongs on it.
+  # internal drops the route out, so nothing reaches the internet. It leaves the bridge an
+  # address on the machine, though, and anything listening on all interfaces answers there, so
+  # that goes too. The app tier joins this network to reach the parse host, and nothing else
+  # belongs on it.
   parse:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: 'true'
 
 volumes:
   pgdata:

@@ -23,7 +23,13 @@ const composeSchema = z.object({
       env_file: z.unknown().optional(),
     }),
   ),
-  networks: z.record(z.string(), z.looseObject({ internal: z.boolean().optional() })),
+  networks: z.record(
+    z.string(),
+    z.looseObject({
+      internal: z.boolean().optional(),
+      driver_opts: z.record(z.string(), z.string()).optional(),
+    }),
+  ),
 });
 
 const compose = composeSchema.parse(parse(read('deploy/compose.yaml')));
@@ -34,6 +40,14 @@ describe('the parse host service', () => {
   it('sits only on a network with no way out', () => {
     expect(service.networks).toEqual(['parse']);
     expect(compose.networks['parse']?.internal).toBe(true);
+  });
+
+  // Found on a real engine: internal drops the route, but the bridge keeps an address on the
+  // machine, and a listener on all interfaces answers there.
+  it('leaves the machine no address on that network', () => {
+    expect(compose.networks['parse']?.driver_opts).toEqual({
+      'com.docker.network.bridge.inhibit_ipv4': 'true',
+    });
   });
 
   it('is the only service on it until an app tier joins', () => {

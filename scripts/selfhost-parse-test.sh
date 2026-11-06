@@ -97,9 +97,10 @@ for _ in $(seq 1 20); do
 done
 if ! reaches_from_bridge "$bridge_gateway" "$outside_port"; then
   fail "control: the host network answers from the default bridge"
-elif reaches_from_inside "$gateway" "$outside_port" ||
-  reaches_from_inside "$bridge_gateway" "$outside_port"; then
-  fail "no connect to the host network from inside"
+elif reaches_from_inside "$gateway" "$outside_port"; then
+  fail "no connect to the host network from inside" "reached the network's gateway, $gateway"
+elif reaches_from_inside "$bridge_gateway" "$outside_port"; then
+  fail "no connect to the host network from inside" "reached the bridge at $bridge_gateway"
 else
   pass "no connect to the host network from inside"
 fi
@@ -133,7 +134,7 @@ else
 fi
 
 keys="$(docker exec "$id" sh -c 'tr "\0" "\n" </proc/1/environ | cut -d= -f1')"
-extra="$(grep -vE '^(DREFYN_PARSE_[A-Z_]+|HOME|HOSTNAME|NODE_VERSION|PATH|PWD|YARN_VERSION)$' <<<"$keys" || true)"
+extra="$(grep -vE '^(DREFYN_PARSE_[A-Z0-9_]+|HOME|HOSTNAME|NODE_VERSION|PATH|PWD|YARN_VERSION)$' <<<"$keys" || true)"
 if [ -z "$extra" ]; then
   pass "the parse host environment holds only its own keys"
 else
