@@ -81,21 +81,18 @@ const refOf = (
   contentSha256: row.content_sha256.toString('hex'),
 });
 
+interface StoredVersion {
+  readonly id: string;
+  readonly seq: number;
+  readonly node_id: string;
+  readonly parent_version_id: string | null;
+  readonly origin: string;
+  readonly actor: unknown;
+  readonly content_sha256: Buffer;
+}
+
 // The same request again gets the version it made, whatever has happened to the head since.
-async function replay(
-  tx: EngineTx,
-  tenant: TenantRef,
-  node: LockedNode,
-  draft: NewVersion,
-): Promise<VersionRef | null> {
-  const row = await tx
-    .selectFrom('node_versions')
-    .select(['id', 'seq', 'node_id', 'parent_version_id', 'origin', 'actor', 'content_sha256'])
-    .where('organization_id', '=', tenant.organizationId)
-    .where('project_id', '=', tenant.projectId)
-    .where('idempotency_key', '=', draft.idempotencyKey)
-    .executeTakeFirst();
-  if (row === undefined) return null;
+function replayed(node: LockedNode, draft: NewVersion, row: StoredVersion): VersionRef {
   const same =
     row.node_id === node.id &&
     row.parent_version_id === draft.expectedHeadVersionId &&
@@ -106,27 +103,81 @@ async function replay(
   return refOf(node.id, row);
 }
 
-async function headSeq(tx: EngineTx, tenant: TenantRef, head: VersionId | null): Promise<number> {
-  if (head === null) return 0;
-  const row = await tx
-    .selectFrom('node_versions')
-    .select('seq')
-    .where('organization_id', '=', tenant.organizationId)
-    .where('project_id', '=', tenant.projectId)
-    .where('id', '=', head)
-    .executeTakeFirstOrThrow();
-  return row.seq;
+interface WriteRead {
+  readonly replay: StoredVersion | null;
+  readonly headSeq: number;
+  readonly schemaVersion: number;
 }
 
-async function schemaVersionOf(tx: EngineTx, tenant: TenantRef, typeId: string): Promise<number> {
+// One statement for all a write needs to know, as each one more is a round trip under the row
+// lock. It starts from the type, which every node has, so there is always a row. Every join names
+// the tenant: a key or a head from elsewhere must read as absent, not rely on policy alone.
+async function readForWrite(
+  tx: EngineTx,
+  tenant: TenantRef,
+  node: LockedNode,
+  draft: NewVersion,
+): Promise<WriteRead> {
   const row = await tx
-    .selectFrom('content_types')
-    .select('current_schema_version')
+    .selectFrom('content_types as t')
+    .leftJoin('node_versions as h', (join) =>
+      join
+        .on('h.organization_id', '=', tenant.organizationId)
+        .on('h.project_id', '=', tenant.projectId)
+        .on('h.id', '=', node.headVersionId),
+    )
+    .leftJoin('node_versions as r', (join) =>
+      join
+        .on('r.organization_id', '=', tenant.organizationId)
+        .on('r.project_id', '=', tenant.projectId)
+        .on('r.idempotency_key', '=', draft.idempotencyKey),
+    )
+    .select([
+      'h.seq as head_seq',
+      't.current_schema_version as schema_version',
+      'r.id as replay_id',
+      'r.seq as replay_seq',
+      'r.node_id as replay_node_id',
+      'r.parent_version_id as replay_parent_version_id',
+      'r.origin as replay_origin',
+      'r.actor as replay_actor',
+      'r.content_sha256 as replay_content_sha256',
+    ])
+    .where('t.organization_id', '=', tenant.organizationId)
+    .where('t.project_id', '=', tenant.projectId)
+    .where('t.id', '=', node.typeId)
+    .executeTakeFirstOrThrow();
+  const replay =
+    row.replay_id === null
+      ? null
+      : ({
+          id: row.replay_id,
+          seq: row.replay_seq,
+          node_id: row.replay_node_id,
+          parent_version_id: row.replay_parent_version_id,
+          origin: row.replay_origin,
+          actor: row.replay_actor,
+          content_sha256: row.replay_content_sha256,
+        } as StoredVersion);
+  return { replay, headSeq: row.head_seq ?? 0, schemaVersion: row.schema_version };
+}
+
+// Another node's save can take the same key between that read and the insert.
+async function raceWinner(
+  tx: EngineTx,
+  tenant: TenantRef,
+  node: LockedNode,
+  draft: NewVersion,
+): Promise<VersionRef> {
+  const row = await tx
+    .selectFrom('node_versions')
+    .select(['id', 'seq', 'node_id', 'parent_version_id', 'origin', 'actor', 'content_sha256'])
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
-    .where('id', '=', typeId)
-    .executeTakeFirstOrThrow();
-  return row.current_schema_version;
+    .where('idempotency_key', '=', draft.idempotencyKey)
+    .executeTakeFirst();
+  if (row === undefined) throw new Refusal('engine.idempotency_conflict');
+  return replayed(node, draft, row);
 }
 
 // In the version's transaction, so no version commits without its chunks. Embeddings stay out:
@@ -139,24 +190,24 @@ async function writeChunks(
   chunks: readonly Chunk[],
 ): Promise<void> {
   if (chunks.length === 0) return;
-  for (let from = 0; from < chunks.length; from += CHUNK_ROWS_PER_INSERT) {
-    await tx
-      .insertInto('chunks')
-      .values(
-        chunks.slice(from, from + CHUNK_ROWS_PER_INSERT).map((chunk) => ({
-          ...tenantOf(tenant),
-          node_id: nodeId,
-          version_id: versionId,
-          ord: chunk.ord,
-          block_path: chunk.blockPath,
-          heading_path: [...chunk.headingPath],
-          body: chunk.body,
-          body_sha256: createHash('sha256').update(chunk.body).digest(),
-        })),
-      )
-      .execute();
+  const rowsAt = (from: number) =>
+    chunks.slice(from, from + CHUNK_ROWS_PER_INSERT).map((chunk) => ({
+      ...tenantOf(tenant),
+      node_id: nodeId,
+      version_id: versionId,
+      ord: chunk.ord,
+      block_path: chunk.blockPath,
+      heading_path: [...chunk.headingPath],
+      body: chunk.body,
+      body_sha256: createHash('sha256').update(chunk.body).digest(),
+    }));
+  const last = Math.floor((chunks.length - 1) / CHUNK_ROWS_PER_INSERT) * CHUNK_ROWS_PER_INSERT;
+  for (let from = 0; from < last; from += CHUNK_ROWS_PER_INSERT) {
+    await tx.insertInto('chunks').values(rowsAt(from)).execute();
   }
+  // With the last rows, so an ordinary page writes all of this in one round trip.
   await tx
+    .with('written', (db) => db.insertInto('chunks').values(rowsAt(last)))
     .insertInto('engine_outbox')
     .values({
       ...tenantOf(tenant),
@@ -176,13 +227,13 @@ export async function appendVersion(
   node: LockedNode,
   draft: NewVersion,
 ): Promise<VersionRef> {
-  const earlier = await replay(tx, tenant, node, draft);
-  if (earlier !== null) return earlier;
+  const known = await readForWrite(tx, tenant, node, draft);
+  if (known.replay !== null) return replayed(node, draft, known.replay);
   if (node.headVersionId !== draft.expectedHeadVersionId) {
     throw new Refusal('engine.version_conflict');
   }
   await assertWritable(tx, tenant, node.family);
-  const seq = (await headSeq(tx, tenant, node.headVersionId)) + 1;
+  const seq = known.headSeq + 1;
   const inserted = await tx
     .insertInto('node_versions')
     .values({
@@ -190,7 +241,7 @@ export async function appendVersion(
       node_id: node.id,
       seq,
       parent_version_id: node.headVersionId,
-      schema_version: draft.schemaVersion ?? (await schemaVersionOf(tx, tenant, node.typeId)),
+      schema_version: draft.schemaVersion ?? known.schemaVersion,
       ast_version: draft.astVersion,
       origin: draft.origin,
       actor: JSON.stringify(draft.actor),
@@ -208,11 +259,7 @@ export async function appendVersion(
     )
     .returning(['id', 'seq', 'content_sha256'])
     .executeTakeFirst();
-  if (inserted === undefined) {
-    const winner = await replay(tx, tenant, node, draft);
-    if (winner === null) throw new Refusal('engine.idempotency_conflict');
-    return winner;
-  }
+  if (inserted === undefined) return raceWinner(tx, tenant, node, draft);
   await tx
     .updateTable('nodes')
     .set({
