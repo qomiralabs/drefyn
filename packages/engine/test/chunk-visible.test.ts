@@ -133,14 +133,6 @@ const FOOTNOTE_PAGES = [
 describe('a parsed page', () => {
   let running: RunningHost;
 
-  beforeAll(async () => {
-    running = await startHost();
-  }, HOST_START_MS);
-
-  afterAll(() => {
-    running.host.kill('SIGKILL');
-  });
-
   const chunksOf = async (source: string, dialect: Dialect) => {
     const client = createParseClient(parseClientConfig(running.url));
     const tenant = {
@@ -151,6 +143,17 @@ describe('a parsed page', () => {
     if (!answer.ok) throw new Error(answer.error.map(({ code }) => code).join(' '));
     return chunkNode(answer.value.ast, { ...options, components: policy.components });
   };
+
+  // The first page loads the parser into a new thread, which is the host's start and not the
+  // page's. Left to the first test, that cost lands on a test about something else.
+  beforeAll(async () => {
+    running = await startHost();
+    await chunksOf('Warm.\n', 'md');
+  }, HOST_START_MS);
+
+  afterAll(() => {
+    running.host.kill('SIGKILL');
+  });
 
   it.each([
     ['md', MD_PAGE],
