@@ -1,3 +1,4 @@
+export { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 export { astVersionOf, type NodeContent } from './content.ts';
 export { DEFAULT_ENGINE_CONFIG, parseEngineConfig, type EngineConfig } from './config.ts';
 export { createEngine, type Engine, type EngineDeps } from './engine.ts';
