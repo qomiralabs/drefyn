@@ -762,7 +762,7 @@ describe('merge3 paths the outcome alone does not show', () => {
 
   it('puts conflicts in page order, with the top first', () => {
     const blocks = ['Aaa aaa.', 'Bbb bbb.', 'Ccc ccc.', 'Ddd ddd.', 'Eee eee.', 'Fff fff.'];
-    const [a, b, c, d, e, f] = blocks as [string, string, string, string, string, string];
+    const [a, , c, d, e, f] = blocks as [string, string, string, string, string, string];
     const ours = page('Top OURS.', a, 'Bbb OURS.', c, e, f, d);
     const theirs = page('Top THEIRS.', a, 'Bbb THEIRS.', c, f);
     const list = conflicts(outcomeOf(page(...blocks), ours, theirs));
@@ -1022,7 +1022,7 @@ describe('merge3 gaps and tails', () => {
     };
     const inserted = {
       ...root,
-      children: [root.children[0] as MdxBlock, added, root.children[1] as MdxBlock],
+      children: [...root.children.slice(0, 1), added, ...root.children.slice(1)],
     };
     const result = merge3(root, inserted, parsed(base.replace('More', 'Other'), 'md'));
     if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
