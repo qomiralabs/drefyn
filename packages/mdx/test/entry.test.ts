@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as main from '../src/index.ts';
 import * as client from '../src/client.ts';
+import * as render from '../src/render.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspace = resolve(root, '../..');
@@ -49,10 +50,16 @@ describe('the way into the parser', () => {
       'validateTree',
     ]);
     expect(Object.keys(client)).toEqual(['createParseClient']);
+    expect(Object.keys(render).sort()).toEqual(['RenderRefused', 'checkCustomCss', 'renderSafe']);
   });
 
   it('is limited to these entries', () => {
-    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './client', './package.json']);
+    expect(Object.keys(manifest.exports).sort()).toEqual([
+      '.',
+      './client',
+      './package.json',
+      './render',
+    ]);
   });
 
   it('is out of the import graph of every exported entry', () => {
