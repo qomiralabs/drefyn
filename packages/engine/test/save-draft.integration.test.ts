@@ -3,7 +3,14 @@ import { closeDatabase, type Database } from '@drefyn/db';
 import type { ParseClient } from '@drefyn/mdx/client';
 import { idOf } from '@drefyn/tenancy';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import type { Engine, EngineLogger, EngineResult, NodeId, VersionId } from '../src/index.ts';
+import {
+  DEFAULT_ENGINE_CONFIG,
+  type Engine,
+  type EngineLogger,
+  type EngineResult,
+  type NodeId,
+  type VersionId,
+} from '../src/index.ts';
 import {
   ACTOR,
   admin,
@@ -352,7 +359,7 @@ describeWithStack('saveDraft against Postgres', () => {
 
   it('refuses a small page whose stored tree is past the cap', async () => {
     const tight = buildEngine(db, {
-      config: { maxNodeBytes: 1_048_576, maxTreeBytes: 4_096 },
+      config: { ...DEFAULT_ENGINE_CONFIG, maxTreeBytes: 4_096 },
     }).engine;
     const node = await newNode(tight, home);
     const page = 'a\n\n'.repeat(100);
@@ -383,7 +390,7 @@ describeWithStack('saveDraft against Postgres', () => {
 
   it('refuses source past the node cap', async () => {
     const tight = buildEngine(db, {
-      config: { maxNodeBytes: 8, maxTreeBytes: 1_048_576 },
+      config: { ...DEFAULT_ENGINE_CONFIG, maxNodeBytes: 8, maxTreeBytes: 1_048_576 },
     }).engine;
     const node = await newNode(tight, home);
     const done = await tight.saveDraft(await input(node, null, 'twelve bytes\n'));

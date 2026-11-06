@@ -709,3 +709,302 @@ describe('merging in the pool', () => {
     expect(JSON.stringify(logger)).not.toContain('CANARY');
   });
 });
+
+describe('a full queue', () => {
+  const FAIR = {
+    threads: 2,
+    orgThreads: 1,
+    maxQueued: 8,
+    maxQueuedPerOrg: 4,
+    maxQueuedPerProject: 2,
+  };
+  const holdThreads = (pool: ReturnType<typeof harness>['pool']) => {
+    void pool.parse(request(PROJECT_A, 'a', orgAt(100)));
+    void pool.parse(request(PROJECT_A, 'b', orgAt(101)));
+  };
+  const queueUp = (pool: ReturnType<typeof harness>['pool'], org: number, pages: number) =>
+    Array.from({ length: pages }, (_, index) =>
+      pool.parse(request(projectAt(index), `${org}:${index}`, orgAt(org))),
+    );
+
+  it('makes room for an organization holding nothing, from the one holding most', async () => {
+    const { pool } = harness(FAIR);
+    holdThreads(pool);
+    const first = queueUp(pool, 1, 4);
+    const second = queueUp(pool, 2, 4);
+    await flush();
+    expect(pool.stats().queued).toBe(8);
+
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+
+    expect(pool.stats().queued).toBe(8);
+    // One of the two gave up a page, and nothing else moved.
+    const lost = await Promise.race([
+      Promise.any([...first, ...second].map(codeOf)),
+      flush().then(() => 'none'),
+    ]);
+    expect(lost).toBe('mdx.queue_full');
+    expect(await Promise.race([honest.then(() => 'settled'), flush().then(() => 'waiting')])).toBe(
+      'waiting',
+    );
+  });
+
+  it('gives a colluding group no way to keep it full', async () => {
+    const { pool } = harness({
+      ...FAIR,
+      maxQueued: 64,
+      maxQueuedPerOrg: 8,
+      maxQueuedPerProject: 8,
+    });
+    holdThreads(pool);
+    for (let org = 0; org < 8; org += 1) void queueUp(pool, org, 8);
+    await flush();
+    expect(pool.stats().queued).toBe(64);
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    await expect(
+      Promise.race([honest.then(() => 'settled'), flush().then(() => 'waiting')]),
+    ).resolves.toBe('waiting');
+    // A member of the group gets nothing back by asking again.
+    await expect(codeOf(pool.parse(request(projectAt(7), 'again', orgAt(1))))).resolves.toBe(
+      'mdx.organization_limit',
+    );
+  });
+
+  it('refuses when the one asking already holds about as much as anyone', async () => {
+    const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
+    holdThreads(pool);
+    void queueUp(pool, 1, 2);
+    void queueUp(pool, 2, 2);
+    await flush();
+    const extra = pool.parse(request(projectAt(9), 'extra', orgAt(3)));
+    void extra;
+    await flush();
+    await expect(codeOf(pool.parse(request(projectAt(8), 'next', orgAt(3))))).resolves.toBe(
+      'mdx.queue_full',
+    );
+  });
+
+  it('refuses when every place is held by a different organization', async () => {
+    const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
+    holdThreads(pool);
+    for (let org = 0; org < 4; org += 1) void queueUp(pool, org, 1);
+    await flush();
+    await expect(codeOf(pool.parse(request(PROJECT_B, 'honest', ORG_B)))).resolves.toBe(
+      'mdx.queue_full',
+    );
+  });
+
+  it('logs the page it gave up, by hash and with both ids', async () => {
+    const { pool, logger } = harness(FAIR);
+    holdThreads(pool);
+    void queueUp(pool, 1, 4);
+    void queueUp(pool, 2, 4);
+    await flush();
+    void pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    const refusal = logger.entries.find(({ event }) => event === 'mdx.parse_refused');
+    expect(refusal?.fields).toMatchObject({ code: 'mdx.queue_full' });
+    expect(refusal?.fields['organizationId']).toBeDefined();
+    expect(refusal?.fields['projectId']).toBeDefined();
+    expect(refusal?.fields['sha256']).toHaveLength(64);
+  });
+
+  it('gets back what it gave up: the pool still settles every page', async () => {
+    const { pool, finish } = harness(FAIR);
+    holdThreads(pool);
+    const first = queueUp(pool, 1, 4);
+    void queueUp(pool, 2, 4);
+    await flush();
+    const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
+    await flush();
+    for (let turn = 0; turn < 10 && pool.stats().busy > 0; turn += 1) await finish();
+    await Promise.all([...first, honest]);
+    expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
+  });
+});
+
+describe('who gets the next thread', () => {
+  const SERVE = { threads: 2, orgThreads: 1, maxQueued: 32, maxQueuedPerOrg: 8 };
+  const KILL = spending(2_000);
+  type Harness = ReturnType<typeof harness>;
+  const page = (org: number, source: string, priority?: 'interactive' | 'bulk') => ({
+    ...request(PROJECT_A, source, orgAt(org)),
+    ...(priority && { priority }),
+  });
+  // Spends one kill for each organization, one after the other.
+  const spend = async ({ pool, finish }: Harness, orgs: readonly number[], kills = 1) => {
+    for (const org of orgs) {
+      for (let kill = 0; kill < kills; kill += 1) {
+        void pool.parse(page(org, `spend:${org}`));
+        await flush();
+        await finish(KILL);
+      }
+    }
+  };
+  const running = ({ threads }: Harness) =>
+    threads.flatMap((thread) => thread.sources.slice(thread.sources.length - thread.jobs.length));
+
+  it('goes to the organization that has spent least, not the next in turn', async () => {
+    const pool = harness(SERVE);
+    await spend(pool, [1], 3);
+    await spend(pool, [2], 1);
+    await spend(pool, [3], 2);
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(1, 'most'));
+    void pool.pool.parse(page(3, 'more'));
+    void pool.pool.parse(page(2, 'least'));
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('least');
+    await pool.finish();
+    expect(running(pool)).toContain('more');
+  });
+
+  it('puts an organization with nothing spent ahead of any number that have', async () => {
+    const pool = harness(SERVE);
+    const colluders = [1, 2, 3, 4, 5, 6, 7, 8];
+    await spend(pool, colluders);
+    for (const org of colluders) void pool.pool.parse(page(org, `bomb:${org}`));
+    await flush();
+    void pool.pool.parse(page(99, 'honest'));
+    await flush();
+    await pool.finish(KILL);
+    expect(running(pool)).toContain('honest');
+  });
+
+  it('puts a newly arrived organization ahead of others that have spent nothing yet', async () => {
+    const pool = harness({ ...SERVE, maxQueued: 64, maxQueuedPerOrg: 1, maxQueuedPerProject: 1 });
+    for (let org = 0; org < 40; org += 1) void pool.pool.parse(page(org, `fresh:${org}`));
+    await flush();
+    void pool.pool.parse(page(99, 'honest'));
+    await flush();
+    await pool.finish(KILL);
+    expect(running(pool)).toContain('honest');
+  });
+
+  it('treats a little spending as none, so a real save does not lose to a new bomb', async () => {
+    const pool = harness(SERVE);
+    void pool.pool.parse(page(99, 'first'));
+    await flush();
+    await pool.finish(spending(40));
+    for (let org = 0; org < 4; org += 1) void pool.pool.parse(page(org, `fresh:${org}`));
+    await flush();
+    void pool.pool.parse(page(99, 'honest'));
+    await flush();
+    await pool.finish(KILL);
+    expect(running(pool)).toContain('honest');
+  });
+
+  it('forgets what was spent with the window', async () => {
+    const pool = harness({
+      ...SERVE,
+      windowMs: 10_000,
+      orgBudgetMs: 9_000,
+      projectBudgetMs: 9_000,
+    });
+    await spend(pool, [1], 3);
+    pool.clock.now += 10_000;
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(1, 'old'));
+    void pool.pool.parse(page(2, 'new'));
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('new');
+    await pool.finish();
+    expect(running(pool)).toContain('old');
+  });
+
+  it('takes an interactive save before the same organization own sync', async () => {
+    const pool = harness(SERVE);
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(1, 'sync'));
+    void pool.pool.parse(page(1, 'save', 'interactive'));
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('save');
+  });
+
+  it('does not count a sync against a save', async () => {
+    const pool = harness(SERVE);
+    await spend(pool, [1], 3);
+    await spend(pool, [2], 1);
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(2, 'bomb'));
+    void pool.pool.parse(page(1, 'save', 'interactive'));
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('save');
+  });
+
+  it('does count interactive time against the next save, so marking bombs earns nothing', async () => {
+    const pool = harness(SERVE);
+    for (let kill = 0; kill < 2; kill += 1) {
+      void pool.pool.parse(page(1, 'bomb', 'interactive'));
+      await flush();
+      await pool.finish(KILL);
+    }
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(1, 'bomb again', 'interactive'));
+    void pool.pool.parse(page(2, 'quiet sync'));
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('quiet sync');
+  });
+
+  it('takes a print the same way', async () => {
+    const pool = harness(SERVE);
+    void pool.pool.parse(page(90, 'a'));
+    void pool.pool.parse(page(91, 'b'));
+    await flush();
+    void pool.pool.parse(page(1, 'sync'));
+    void pool.pool.print({ ...printing('tree'), priority: 'interactive' });
+    await flush();
+    await pool.finish();
+    expect(running(pool)).toContain('tree');
+  });
+
+  describe('when every organization holds one place', () => {
+    const FULL = { ...SERVE, maxQueued: 4, maxQueuedPerOrg: 2, maxQueuedPerProject: 2 };
+    const holdThreads = ({ pool }: Harness) => {
+      void pool.parse(page(90, 'a'));
+      void pool.parse(page(91, 'b'));
+    };
+
+    it('takes the place of the one that has spent most, for one that has spent less', async () => {
+      const pool = harness(FULL);
+      await spend(pool, [1, 2, 3, 4], 1);
+      await spend(pool, [3], 2);
+      holdThreads(pool);
+      const held = [1, 2, 3, 4].map((org) => pool.pool.parse(page(org, `held:${org}`)));
+      await flush();
+      expect(pool.pool.stats().queued).toBe(4);
+      void pool.pool.parse(page(99, 'honest'));
+      await flush();
+      expect(pool.pool.stats().queued).toBe(4);
+      const [, , third] = held;
+      if (third === undefined) throw new Error('no page');
+      await expect(codeOf(third)).resolves.toBe('mdx.queue_full');
+    });
+
+    it('leaves the queue alone for one that has spent as much', async () => {
+      const pool = harness(FULL);
+      await spend(pool, [1, 2, 3, 4, 5], 1);
+      holdThreads(pool);
+      for (const org of [1, 2, 3, 4]) void pool.pool.parse(page(org, `held:${org}`));
+      await flush();
+      await expect(codeOf(pool.pool.parse(page(5, 'next')))).resolves.toBe('mdx.queue_full');
+    });
+  });
+});

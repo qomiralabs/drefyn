@@ -93,9 +93,8 @@ An untouched block changes bytes in one more case here. A block written with lea
 ends up under a new neighbour reprints, since the indent would read as part of a list above it.
 
 `DREFYN_MDX_MERGE_MAX_BLOCKS` caps any one of the three trees, default 20000. Past that, or past
-the limits in the policy, a merge refuses with `mdx.merge_limit`. It is the one setting the host
-takes outside `DREFYN_PARSE_`. The three trees also count against held bytes, so
-`DREFYN_PARSE_MAX_HELD_BYTES` has a floor of four times the largest merge body.
+the limits in the policy, a merge refuses with `mdx.merge_limit`. The three trees also count
+against held bytes, so on a small self host the very largest merges get `mdx.queue_full`.
 
 `pnpm --filter @drefyn/mdx test:merge` runs the property test at 100,000 cases. The gate runs a
 slice of it on a fresh seed each time. `MERGE_PROPERTY_SEED` replays a failure.
@@ -155,7 +154,11 @@ a separate process, and prints and parses share its threads, queues, budgets and
 fallback: if the host is down, a save refuses and the last good version stays.
 
 ```ts
-const client = createParseClient({ url: process.env.DREFYN_PARSE_HOST_URL });
+const client = createParseClient({
+  url: process.env.DREFYN_PARSE_HOST_URL,
+  token: process.env.DREFYN_PARSE_HOST_TOKEN,
+  logger,
+});
 const result = await client.parse({ tenant, path, source, dialect, policy });
 ```
 
@@ -165,19 +168,42 @@ is stored on a refusal, and nothing retries: a second try of a bomb is a second 
 nothing about the page, so the caller can try later, with its own backoff. A sync should feed
 pages in as earlier ones finish.
 
+Every answer is checked, since it comes from where hostile pages run: the shape, the tree, and
+that the bytes in the tree add up to the page sent or the text printed. A bad answer is
+`mdx.parse_failed`, and `mdx.parse_bad_answer` logs its hash with both ids.
+
+`source` on a stored block comes only from the stored row. A client or an editor document never
+sets it. The printer refuses bytes that differ from their tree, and the only difference it allows
+is a reference that settled when a definition came or went. A tree whose text is written exactly
+like a reference still links once a definition for it exists, so the rule has to be held where a
+tree enters the app.
+
 ### The host
 
 ```sh
-node --permission --allow-fs-read=<code dir> --allow-worker packages/mdx/src/host-main.ts
+node --permission --allow-fs-read=<code dir> --allow-child-process packages/mdx/src/supervisor-main.ts
 ```
 
-The host is the boundary, not its threads. It refuses to start without `--permission`, or with
-any environment key outside `DREFYN_PARSE_*` and the few a container sets for itself, so it holds
-no credentials. Egress has to be closed by the platform: Node has no network permission, and a
-loopback connect works under `--permission`. **The compose service and security group that close
-it are separate work, and no customer content may reach this until they exist.** Set a hard OS
-memory limit of `DREFYN_PARSE_HOST_MEMORY_MB` on the service; the heap cap does not cover native
-memory.
+The supervisor starts the host with `--permission --allow-fs-read=<code dir> --allow-worker`, so
+the process that parses cannot start one. A host that dies comes back after a jittered backoff, and
+`mdx.parse_host_crashed` logs why. Past `DREFYN_PARSE_CRASH_LIMIT` crashes in the window the
+supervisor logs `mdx.parse_host_crash_loop` at error level and stays down for the cool off, so a
+page that keeps killing the host cannot turn into a tight loop of outages. Alert on that event.
+Callers see `mdx.parse_unavailable` throughout.
+
+The host is the boundary, not its threads. It refuses to start without `--permission`, with any
+flag that would allow more, or with any environment key outside a fixed list, so it holds no
+credentials. It binds the one address in `DREFYN_PARSE_BIND`, and every route but `/health` needs
+the bearer token from `DREFYN_PARSE_HOST_TOKEN` on the caller's side. The host keeps only its
+SHA-256 in `DREFYN_PARSE_TOKEN_SHA256`, so taking the host gives nothing a stranger could use.
+A token is at least 32 characters.
+
+Egress has to be closed by the platform: Node has no network permission, and a loopback connect
+works under `--permission`. The `parse-host` compose service sits on an `internal` network with no
+gateway and no published port, and `scripts/selfhost-parse-test.sh` proves that from real
+containers. **The hosted security group is separate work, tracked in drefyn-infra, and no customer
+content may reach a hosted host until it exists.** Set a hard OS memory limit of
+`DREFYN_PARSE_HOST_MEMORY_MB` on the service; the heap cap does not cover native memory.
 
 A thread runs one page and is reused for up to 256 pages, between tenants. A timeout, a heap
 overrun or a crash kills it, and the answer waits for the kill. If `terminate` has not finished
@@ -188,38 +214,57 @@ Inside a thread there is an empty environment, no arguments, no streams to ours,
 network, child process, worker and debugger entry points. The seal is a seatbelt: it stops no
 code that is determined to get out, and proves nothing about the network.
 
-| Key                              | Default   | Meaning                                                   |
-| -------------------------------- | --------- | --------------------------------------------------------- |
-| `DREFYN_PARSE_TIMEOUT_MS`        | 2000      | A thread is killed this long into a page                  |
-| `DREFYN_PARSE_PRINT_TIMEOUT_MS`  | 6000      | The same for a print, which holds a whole parse too       |
-| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512       | Heap cap per thread                                       |
-| `DREFYN_PARSE_THREADS`           | 2         | Threads per host, at least 2                              |
-| `DREFYN_PARSE_QUEUE_MAX`         | 64        | Pages waiting across all organizations                    |
-| `DREFYN_PARSE_ORG_THREADS`       | 1         | Threads one organization can hold, under total            |
-| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32        | Pages one organization can have waiting                   |
-| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000     | Thread time per window for an organization                |
-| `DREFYN_PARSE_PROJECT_THREADS`   | 1         | Threads one project can hold, inside its org              |
-| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16        | Pages one project can have waiting                        |
-| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000     | Thread time per window for a project                      |
-| `DREFYN_PARSE_WINDOW_MS`         | 60000     | Length of the budget window                               |
-| `DREFYN_PARSE_MAX_HELD_BYTES`    | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
-| `DREFYN_MDX_MERGE_MAX_BLOCKS`    | 20000     | Blocks in any one tree of a merge                         |
-| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000      | Wait after `terminate` before SIGKILL                     |
-| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536      | At least threads times the cap, held bytes, plus 256      |
-| `DREFYN_PARSE_PORT`              | 8787      | Port the host listens on                                  |
+| Key                               | Default   | Meaning                                                   |
+| --------------------------------- | --------- | --------------------------------------------------------- |
+| `DREFYN_PARSE_TIMEOUT_MS`         | 2000      | A thread is killed this long into a page                  |
+| `DREFYN_PARSE_PRINT_TIMEOUT_MS`   | 6000      | The same for a print, which holds a whole parse too       |
+| `DREFYN_PARSE_WORKER_MEMORY_MB`   | 512       | Heap cap per thread                                       |
+| `DREFYN_PARSE_THREADS`            | 2         | Threads per host, at least 2                              |
+| `DREFYN_PARSE_QUEUE_MAX`          | 64        | Pages waiting across all organizations                    |
+| `DREFYN_PARSE_ORG_THREADS`        | 1         | Threads one organization can hold, under total            |
+| `DREFYN_PARSE_ORG_QUEUE_MAX`      | 8         | Pages one organization can have waiting                   |
+| `DREFYN_PARSE_ORG_BUDGET_MS`      | 30000     | Thread time per window for an organization                |
+| `DREFYN_PARSE_PROJECT_THREADS`    | 1         | Threads one project can hold, inside its org              |
+| `DREFYN_PARSE_PROJECT_QUEUE_MAX`  | 4         | Pages one project can have waiting                        |
+| `DREFYN_PARSE_PROJECT_BUDGET_MS`  | 20000     | Thread time per window for a project                      |
+| `DREFYN_PARSE_WINDOW_MS`          | 60000     | Length of the budget window                               |
+| `DREFYN_PARSE_MAX_HELD_BYTES`     | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
+| `DREFYN_MDX_MERGE_MAX_BLOCKS`     | 20000     | Blocks in any one tree of a merge                         |
+| `DREFYN_PARSE_KILL_GRACE_MS`      | 2000      | Wait after `terminate` before SIGKILL                     |
+| `DREFYN_PARSE_HOST_MEMORY_MB`     | 2048      | At least threads times the cap, held bytes x 3, plus 256  |
+| `DREFYN_PARSE_PORT`               | 8787      | Port the host listens on                                  |
+| `DREFYN_PARSE_BIND`               | 127.0.0.1 | Address the host listens on                               |
+| `DREFYN_PARSE_TOKEN_SHA256`       | none      | SHA-256 of the app tier's token, required                 |
+| `DREFYN_PARSE_RESTART_BACKOFF_MS` | 250       | First wait after a crash, doubling                        |
+| `DREFYN_PARSE_RESTART_MAX_MS`     | 30000     | Longest wait between restarts                             |
+| `DREFYN_PARSE_CRASH_LIMIT`        | 5         | Crashes in the window that make a crash loop              |
+| `DREFYN_PARSE_CRASH_WINDOW_MS`    | 60000     | How long a crash counts                                   |
+| `DREFYN_PARSE_COOL_OFF_MS`        | 60000     | How long a crash loop stays down                          |
 
 ### What the limits hold against
 
-Organizations take turns for a free thread, and projects take turns inside one, so a tenant
-gets the same share however many projects it makes. One organization can never hold every
-thread or fill the queue, so one bad tenant leaves a thread and queue places free.
+The next free thread goes to the organization that has spent the fewest whole kills in the
+window, and projects take turns inside one, so a tenant gets the same share however many projects
+it makes. One organization can never hold every thread or fill the queue. Someone who has spent
+nothing waits for one running job, however many others are spending, and colluders only compete
+with each other. Among equals, an organization arriving from nothing goes first, then turns.
 
-Limits are per host. Several organizations acting together can still fill the threads and the
-queue; two can at these defaults, each at the cost of its own budget. With several hosts every
-budget is per replica, so a cluster wide bound needs a shared counter.
+Pass `priority: 'interactive'` for a save a person is waiting on. It goes ahead of that
+organization's own sync and is ranked on interactive time alone, so a sync never pushes a save
+back. Each bomb marked interactive is charged to the next, so marking them earns nothing.
+
+A full queue takes a page from whoever holds most for whoever holds less, and when holdings are
+level from whoever has spent most for whoever has spent less. The page given up gets
+`mdx.queue_full` and spends no budget. Held bytes work the same way: nobody holds more than stays
+free beside them, so the room left halves with each newcomer instead of running out.
+
+Limits are per host. With several hosts every budget is per replica, so a cluster wide bound needs
+a shared counter.
 
 The 512 MB cap refuses some plain 1 MiB pages with `mdx.out_of_memory`, so 1 MiB is an upper
 limit and not a size this pool accepts in general.
+
+`/health` answers without a token and says nothing, so a platform can probe it.
 
 Each page logs `mdx.parse_finished` or `mdx.parse_refused`, and a kill logs
 `mdx.parse_thread_killed` or `mdx.parse_thread_stuck`, with organization, project, path, byte

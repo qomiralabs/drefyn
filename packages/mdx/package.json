@@ -18,6 +18,7 @@
     "test:merge": "MERGE_PROPERTY_RUNS=100000 vitest run test/merge3.property.test.ts",
     "test:mutation": "stryker run",
     "bench": "node bench/roundtrip.ts",
+    "bench:host": "node bench/host.ts",
     "pin:ast": "node test/pin-ast.ts"
   },
   "dependencies": {

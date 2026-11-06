@@ -104,6 +104,11 @@ export const isolatedPolicy = (components: readonly string[] = []) => ({
   components: new Set(components),
 });
 
+// The host keeps only the hash, so a test checks the same split a deployment has.
+export const HOST_TOKEN = 'a-test-token-long-enough-to-be-accepted-here';
+export const HOST_TOKEN_SHA256 = createHash('sha256').update(HOST_TOKEN).digest('hex');
+export const CLIENT = { token: HOST_TOKEN, logger: { warn: () => undefined } };
+
 export const POOL_CONFIG: ParsePoolConfig = {
   timeoutMs: 1_000,
   printTimeoutMs: 1_000,

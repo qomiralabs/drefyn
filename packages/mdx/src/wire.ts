@@ -13,17 +13,33 @@ const policy = z.object({
   limits: z.object({ maxBytes: z.int(), maxDepth: z.int(), maxNodes: z.int() }),
 });
 
+// Bulk unless a caller says a person is waiting: a frame that says nothing earns nothing.
+const priority = z.enum(['interactive', 'bulk']).default('bulk');
+
 export const wireRequestSchema = z.object({
   tenant,
   path: z.string(),
   source: z.string(),
   dialect: z.enum(['mdx', 'md']),
   policy,
+  priority,
 });
 
-export const wirePrintSchema = z.object({ tenant, path: z.string(), tree: z.string(), policy });
+export const wirePrintSchema = z.object({
+  tenant,
+  path: z.string(),
+  tree: z.string(),
+  policy,
+  priority,
+});
 
-export const wireMergeSchema = z.object({ tenant, path: z.string(), trees: z.string(), policy });
+export const wireMergeSchema = z.object({
+  tenant,
+  path: z.string(),
+  trees: z.string(),
+  policy,
+  priority,
+});
 
 export type WireRequest = z.infer<typeof wireRequestSchema>;
 export type WirePrint = z.infer<typeof wirePrintSchema>;
