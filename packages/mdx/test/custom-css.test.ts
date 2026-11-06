@@ -104,7 +104,7 @@ describe('custom CSS', () => {
 
   it('reads quotes inside a comment as comment', () => {
     expect(codes('/* it\'s */ a { b: c; } /* " */')).toEqual([]);
-    expect(codes('a { b: c; } /* never closed "')).toEqual([]);
+    expect(codes('a { b: c; } /* never closed "')).toEqual(['css.parse_failed']);
   });
 
   it('keeps a string split with a backslash', () => {
