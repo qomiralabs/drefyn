@@ -182,7 +182,10 @@ describe('thread time under a colluding group', () => {
             stop: () => Promise.resolve(),
             run: (job) =>
               new Promise((resolve) => {
-                running.push({ source: 'source' in job ? job.source : job.tree, resolve });
+                running.push({
+                  source: 'source' in job ? job.source : 'tree' in job ? job.tree : job.trees,
+                  resolve,
+                });
               }),
           }),
         });

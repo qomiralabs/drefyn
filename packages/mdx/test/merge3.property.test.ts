@@ -100,6 +100,22 @@ function travelling(moved: ReadonlySet<string>, documents: readonly Leaves[]) {
   return words;
 }
 
+// Moving a block down past another is the same page as moving the other up, so which one moved is
+// not in the document and a merge may read it either way. Every word whose order flipped against
+// the base counts. With no move, nothing does, and placement stays as strict as it was.
+function flipped(moved: ReadonlySet<string>, base: Leaves, side: Leaves): ReadonlySet<string> {
+  if (moved.size === 0) return moved;
+  const words = new Set(moved);
+  const places = firstSeen(side.order);
+  const shared = [...firstSeen(base.order).keys()].filter((word) => places.has(word));
+  for (const [index, first] of shared.entries()) {
+    for (const second of shared.slice(index + 1)) {
+      if ((places.get(first) ?? 0) > (places.get(second) ?? 0)) words.add(first).add(second);
+    }
+  }
+  return words;
+}
+
 function checkPlacement(
   merged: Leaves,
   ours: Leaves,
@@ -253,8 +269,8 @@ function failureIn(input: MergeCase): string | undefined {
   if (outcome.kind === 'conflict') return undefined;
 
   const sides = [oursLeaves, theirsLeaves];
-  const movedOurs = travelling(sideOurs.moved, documents);
-  const movedTheirs = travelling(sideTheirs.moved, documents);
+  const movedOurs = travelling(flipped(sideOurs.moved, baseLeaves, oursLeaves), documents);
+  const movedTheirs = travelling(flipped(sideTheirs.moved, baseLeaves, theirsLeaves), documents);
   const failure =
     checkPlacement(mergedLeaves, oursLeaves, theirsLeaves, movedOurs, movedTheirs) ??
     checkMembership(mergedLeaves, sides) ??
