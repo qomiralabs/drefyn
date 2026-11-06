@@ -22,6 +22,9 @@ x-mailpit: &mailpit
 
 x-env: &env # Old messages are dropped past this, so a long run cannot fill memory.
   MP_MAX_MESSAGES: '500'
+  # It looks up each client before its banner, so a lost DNS reply holds up the mail and a
+  # test can time out on a resolver it never meant to depend on.
+  MP_SMTP_DISABLE_RDNS: 'true'
   # The API answers only to loopback names, which closes DNS rebinding.
   MP_ALLOWED_HOSTS: localhost,127.0.0.1
 
