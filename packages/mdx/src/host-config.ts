@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_MAX_HELD_BYTES } from './held-bytes.ts';
 import { envSchema, poolConfigSchema } from './pool-config.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
 
@@ -6,10 +7,14 @@ export interface ParseHostConfig {
   readonly pool: ParsePoolConfig;
   readonly port: number;
   readonly hostMemoryMb: number;
+  readonly maxHeldBytes: number;
 }
 
 // Room for the runtime and native memory on top of every thread at its cap.
 const HOST_OVERHEAD_MB = 256;
+const BYTES_PER_MB = 1_048_576;
+// An organization gets a quarter, and that has to hold the largest body that can be honest.
+const MIN_HELD_BYTES = 64 * BYTES_PER_MB;
 
 const hostSchema = z.object({
   DREFYN_PARSE_PORT: z
@@ -23,6 +28,12 @@ const hostSchema = z.object({
     .regex(/^[0-9]{1,6}$/)
     .default('1536')
     .transform(Number),
+  DREFYN_PARSE_MAX_HELD_BYTES: z
+    .string()
+    .regex(/^[0-9]{1,12}$/)
+    .default(String(DEFAULT_MAX_HELD_BYTES))
+    .transform(Number)
+    .pipe(z.int().min(MIN_HELD_BYTES)),
 });
 
 export function parseHostConfig(
@@ -30,7 +41,8 @@ export function parseHostConfig(
 ): ParseHostConfig {
   const host = hostSchema.parse(env);
   const pool = poolConfigSchema.parse(envSchema.parse(env));
-  const floor = pool.threads * pool.maxMemoryMb + HOST_OVERHEAD_MB;
+  const heldMb = Math.ceil(host.DREFYN_PARSE_MAX_HELD_BYTES / BYTES_PER_MB);
+  const floor = pool.threads * pool.maxMemoryMb + HOST_OVERHEAD_MB + heldMb;
   if (host.DREFYN_PARSE_HOST_MEMORY_MB < floor) {
     throw new Error(`DREFYN_PARSE_HOST_MEMORY_MB must be at least ${floor}`);
   }
@@ -38,6 +50,7 @@ export function parseHostConfig(
     pool,
     port: host.DREFYN_PARSE_PORT,
     hostMemoryMb: host.DREFYN_PARSE_HOST_MEMORY_MB,
+    maxHeldBytes: host.DREFYN_PARSE_MAX_HELD_BYTES,
   };
 }
 

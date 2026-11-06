@@ -42,7 +42,7 @@ function sources(dir: string): string[] {
 
 describe('the way into the parser', () => {
   it('is not exported to any caller', () => {
-    expect(Object.keys(main)).not.toContain('parseForStore');
+    expect(Object.keys(main).sort()).toEqual(['AST_VERSION', 'DEFAULT_LIMITS', 'rawOf']);
     expect(Object.keys(client)).toEqual(['createParseClient']);
   });
 
@@ -53,12 +53,14 @@ describe('the way into the parser', () => {
   it('is out of the import graph of every exported entry', () => {
     const parser = join(root, 'src/parse.ts');
     const pool = join(root, 'src/pool.ts');
+    const printer = join(root, 'src/print.ts');
     for (const target of Object.values(manifest.exports)) {
       if (!target.endsWith('.ts')) continue;
       const graph = reach(join(root, target));
       expect(graph.size).toBeGreaterThan(1);
       expect(graph).not.toContain(parser);
       expect(graph).not.toContain(pool);
+      expect(graph).not.toContain(printer);
     }
   });
 
@@ -66,7 +68,7 @@ describe('the way into the parser', () => {
     const files = [...sources(join(workspace, 'apps')), ...sources(join(workspace, 'packages'))];
     const callers = files
       .filter((file) => !file.startsWith(`${root}/`))
-      .filter((file) => /\bparseForStore\b/.test(readFileSync(file, 'utf8')))
+      .filter((file) => /\b(?:parseForStore|printCanonical)\b/.test(readFileSync(file, 'utf8')))
       .map((file) => relative(workspace, file));
     expect(callers).toEqual([]);
   });

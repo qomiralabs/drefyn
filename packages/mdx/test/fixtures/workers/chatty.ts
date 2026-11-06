@@ -1,7 +1,8 @@
 import { serveJobs } from '../../../src/worker-host.ts';
 
 serveJobs((job) => {
-  console.error(job.source);
-  process.stdout.write(job.source);
+  const text = 'source' in job ? job.source : job.tree;
+  console.error(text);
+  process.stdout.write(text);
   return { ok: false, error: [] };
 });

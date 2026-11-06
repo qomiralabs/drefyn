@@ -28,7 +28,7 @@ describe('serveJobs', () => {
   });
 
   it('says it is ready, then answers each job with its id', async () => {
-    serveJobs(({ source }) => source.toUpperCase());
+    serveJobs((served) => ('source' in served ? served.source : served.tree).toUpperCase());
     expect(postMessage.mock.calls).toEqual([[{ ready: true }]]);
     port.current?.emit('message', { id: 7, job });
     await tick();

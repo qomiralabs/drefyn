@@ -6,9 +6,11 @@ import { parseInputSchema } from './policy.ts';
 import { poolConfigSchema } from './pool-config.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
 import { refused } from './result.ts';
+import type { JobResult } from './result.ts';
 import { RECYCLE_AFTER_JOBS, startParseThread } from './thread.ts';
-import type { IsolatedPolicy, ParseThread, ThreadAnswer } from './thread.ts';
-import type { Dialect, MdxIssueCode, ParseResult } from './types.ts';
+import type { IsolatedPolicy, ParseThread, ThreadAnswer, ThreadJob } from './thread.ts';
+import type { Dialect, MdxIssueCode, ParseResult, PrintResult } from './types.ts';
+import { maxTreeBytes } from './wire.ts';
 
 export interface ParseRequest {
   readonly tenant: TenantRef;
@@ -16,6 +18,15 @@ export interface ParseRequest {
   readonly path: string;
   readonly source: string;
   readonly dialect: Dialect;
+  readonly policy: IsolatedPolicy;
+}
+
+export interface PrintRequest {
+  readonly tenant: TenantRef;
+  // Logged, so it never holds page text.
+  readonly path: string;
+  // A stored tree as JSON text.
+  readonly tree: string;
   readonly policy: IsolatedPolicy;
 }
 
@@ -49,6 +60,8 @@ export interface ParsePool {
   // malformed request, which is our bug and not bad content. A refused page is never retried
   // here: a second try of a bomb is a second bomb.
   parse(request: ParseRequest): Promise<ParseResult>;
+  // The same queues, budgets and kill, as a printer has no bound of its own either.
+  print(request: PrintRequest): Promise<PrintResult>;
   stats(): ParsePoolStats;
   close(): Promise<void>;
 }
@@ -64,10 +77,10 @@ const requestSchema = z.object({
 });
 
 interface Waiting {
-  readonly request: ParseRequest;
+  readonly job: ThreadJob;
   readonly fields: LogFields;
   readonly queuedAt: number;
-  readonly resolve: (result: ParseResult) => void;
+  readonly resolve: (result: JobResult) => void;
 }
 
 interface Budget {
@@ -118,7 +131,7 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     }
   };
 
-  const report = (fields: LogFields, result: ParseResult) => {
+  const report = (fields: LogFields, result: JobResult) => {
     if (result.ok) {
       log('info', 'mdx.parse_finished', { ...fields, issues: result.value.issues.length });
     } else {
@@ -202,12 +215,11 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
 
   const runJob = async (organization: Organization, project: Project, item: Waiting) => {
     const waitedMs = Math.round(now() - item.queuedAt);
-    const { source, dialect, policy } = item.request;
     let slot: Slot | undefined;
     let outcome: ThreadAnswer;
     try {
       slot = takeThread();
-      outcome = await slot.thread.run({ source, dialect, policy });
+      outcome = await slot.thread.run(item.job);
     } catch {
       // Whatever the failure said can quote the page, so only the fact crosses.
       outcome = { result: refused('mdx.parse_unavailable'), end: 'killed', workMs: 0 };
@@ -295,22 +307,19 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     return project;
   };
 
-  const parse = async (request: ParseRequest): Promise<ParseResult> => {
-    const { tenant } = requestSchema.parse(request);
-    parseInputSchema.parse(request);
-    const { source, path, policy } = request;
-    const { organizationId, projectId } = tenant;
-    const bytes = Buffer.byteLength(source, 'utf8');
-    const base = { organizationId, projectId, path, bytes };
-    const instant = (code: MdxIssueCode, fields: LogFields) => {
-      const result = refused(code);
-      report(fields, result);
-      return result;
-    };
+  const instant = (code: MdxIssueCode, fields: LogFields) => {
+    const result = refused(code);
+    report(fields, result);
+    return result;
+  };
 
-    // Before the queue, so its length also bounds the bytes it can hold.
-    if (bytes > policy.limits.maxBytes) return instant('mdx.too_large', base);
-    const fields = { ...base, sha256: createHash('sha256').update(source).digest('hex') };
+  const enqueue = (
+    job: ThreadJob,
+    text: string,
+    { organizationId, projectId }: TenantRef,
+    base: LogFields,
+  ): Promise<JobResult> | JobResult => {
+    const fields = { ...base, sha256: createHash('sha256').update(text).digest('hex') };
     if (closed) return instant('mdx.parse_unavailable', fields);
 
     sweep();
@@ -331,11 +340,35 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     if (queued >= settings.maxQueued) return instant('mdx.queue_full', fields);
 
     return new Promise((resolve) => {
-      project.waiting.push({ request, fields, queuedAt: now(), resolve });
+      project.waiting.push({ job, fields, queuedAt: now(), resolve });
       queued += 1;
       organization.queued += 1;
       pump();
     });
+  };
+
+  const parse = async (request: ParseRequest): Promise<ParseResult> => {
+    const { tenant } = requestSchema.parse(request);
+    parseInputSchema.parse(request);
+    const { source, dialect, path, policy } = request;
+    const { organizationId, projectId } = tenant;
+    const bytes = Buffer.byteLength(source, 'utf8');
+    const base = { organizationId, projectId, path, bytes };
+    // Before the queue, so its length also bounds the bytes it can hold.
+    if (bytes > policy.limits.maxBytes) return instant('mdx.too_large', base);
+    const job = { source, dialect, policy };
+    return await enqueue(job, source, tenant, base);
+  };
+
+  const print = async (request: PrintRequest): Promise<PrintResult> => {
+    const { tenant } = requestSchema.parse(request);
+    parseInputSchema.shape.policy.parse(request.policy);
+    const { tree, path, policy } = request;
+    const { organizationId, projectId } = tenant;
+    const bytes = Buffer.byteLength(tree, 'utf8');
+    const base = { organizationId, projectId, path, bytes };
+    if (bytes > maxTreeBytes(policy.limits.maxBytes)) return instant('mdx.too_large', base);
+    return (await enqueue({ tree, policy }, tree, tenant, base)) as PrintResult;
   };
 
   const allProjects = () =>
@@ -343,6 +376,7 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
 
   return {
     parse,
+    print,
     stats: () => ({
       threads: idle.length + busy,
       busy,

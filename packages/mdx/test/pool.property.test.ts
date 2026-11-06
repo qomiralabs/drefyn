@@ -43,7 +43,7 @@ describe('the scheduler', () => {
               run: (job) =>
                 new Promise((resolve) => {
                   running.push({
-                    key: job.source,
+                    key: 'source' in job ? job.source : job.tree,
                     resolve: (answer) => {
                       if (answer.end === 'killed') live.delete(thread);
                       resolve(answer);
