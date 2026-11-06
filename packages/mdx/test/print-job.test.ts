@@ -3,7 +3,7 @@ import { sourceOf } from '../src/canonical.ts';
 import { printPage } from '../src/print-job.ts';
 import type { MdxBlock, MdxIssueCode, MdxRoot, PrintResult } from '../src/index.ts';
 import { rawOf } from '../src/index.ts';
-import { isolatedPolicy, parsed } from './helpers.ts';
+import { isolatedPolicy, loadCorpus, parsed } from './helpers.ts';
 import { allNew, insert, without, withChild } from './print-helpers.ts';
 
 const policy = isolatedPolicy();
@@ -80,6 +80,28 @@ describe('a block printing its stored bytes', () => {
     expect(code(print(forged('[x][y]', 'Safe text\n\n[y]: https://evil.test\n')))).toBe(CHANGED);
   });
 
+  // Security's table on the last review of the printer: each of these used to print.
+  const DEFINED = 'Safe text\n\n[a]: https://evil.test\n';
+  it.each([
+    ['added words beside a reference', 'Safe text Wire money to Evil [click][a]'],
+    ['added words before a reference', 'Wire money. Safe text [c][a]'],
+    ['a remote image the tree does not show', 'Safe text ![x][a]'],
+    ['an image with no words at all', 'Safe text ![][a]'],
+    ['the words turned into a link', '[Safe text][a]'],
+    ['the words turned into a shortcut link', '[Safe text]'],
+  ])('refuses forged bytes that add %s', (_name, raw) => {
+    expect(code(print(forged(raw, DEFINED)))).toBe(CHANGED);
+  });
+
+  it.each([
+    ['Safe [text][a]\n\n[a]: https://evil.test\n', 'Safe text EVIL'],
+    ['Safe[^1]\n\n[^1]: note\n', 'Safe Evil[^1]'],
+    ['Safe ![pic][a]\n\n[a]: https://evil.test/t.png\n', 'Safe ![other][a]'],
+    ['Safe [text][a]\n\n[a]: b\n\n[c]: d\n', 'Safe [text][c]'],
+  ])('refuses bytes forged over a real reference: %j', (source, raw) => {
+    expect(code(print(forged(raw, source)))).toBe(CHANGED);
+  });
+
   it('holds an edit in the block beside it to the looser check', () => {
     const root = parsed('old\n\nkept\n', 'md');
     const edited = withChild(
@@ -101,9 +123,44 @@ describe('a block printing its stored bytes', () => {
     expect(text(print(insert(root, 1, definition)))).toContain('[a]: b');
   });
 
+  it.each([
+    ['a collapsed reference', '[a][]\n\n[a]: b\n', '[a][]\n'],
+    ['a full reference', 'x [one *two*][a] y\n\n[a]: b\n', 'x [one *two*][a] y\n'],
+    ['an image', '![a][a]\n\n[a]: b\n', '![a][a]\n'],
+    ['a footnote', 'x[^1]\n\n[^1]: y\n', 'x[^1]\n'],
+    ['a reference in a list', '- [a][b]\n\n[b]: c\n', '- [a][b]\n'],
+    ['a URL in a reference', '[www.example.com][b]\n\n[b]: c\n', '[www.example.com][b]\n'],
+  ])('lets a definition go from %s', (_name, source, text_) => {
+    const root = parsed(source, 'md');
+    expect(text(print(without(root, 1)))).toBe(text_);
+  });
+
   it('keeps an empty paragraph from shifting which block is compared', () => {
     const root = parsed('kept\n', 'md');
     expect(text(print(insert(root, 0, { type: 'paragraph', children: [] })))).toContain('kept');
+  });
+});
+
+describe('every real page in the corpus', () => {
+  const withDefinitions = loadCorpus().flatMap(({ file, text: source, dialect }) => {
+    const result = parsed(source, dialect);
+    return result.children.some(({ type }) => type === 'definition')
+      ? [{ file, root: result }]
+      : [];
+  });
+
+  it('has some with definitions to take away', () => {
+    expect(withDefinitions.length).toBeGreaterThan(0);
+  });
+
+  // The honest move the reference rule exists for, on pages nobody wrote for this test.
+  it('still prints with its definitions gone', () => {
+    const refused = withDefinitions.filter(({ root }) => {
+      const kept = root.children.filter(({ type }) => type !== 'definition');
+      const result = print({ ...root, children: kept });
+      return !result.ok && code(result) === 'mdx.print_changed_meaning';
+    });
+    expect(refused.map(({ file }) => file)).toEqual([]);
   });
 });
 
