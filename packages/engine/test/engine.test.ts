@@ -584,6 +584,7 @@ describe('observability', () => {
   it('runs a save inside the span engine.save', async () => {
     const spans: string[] = [];
     const tracer: EngineTracer = {
+      ...noopTracer,
       span: (name, fields, work) => {
         spans.push(`${name} ${String(fields['node_id'])}`);
         return noopTracer.span(name, fields, work);

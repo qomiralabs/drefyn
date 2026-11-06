@@ -11,6 +11,8 @@ export interface EngineLogger {
 
 export interface EngineTracer {
   span<T>(name: string, fields: LogFields, work: () => Promise<T>): Promise<T>;
+  // A step that ran in another process, so it can only be told after the fact.
+  record(name: string, fields: LogFields, durationMs: number): void;
 }
 
 export interface EngineFlagAnswer {
@@ -28,4 +30,7 @@ export interface EngineFlags {
 
 export const noopLogger: EngineLogger = { info: () => undefined, warn: () => undefined };
 
-export const noopTracer: EngineTracer = { span: (_name, _fields, work) => work() };
+export const noopTracer: EngineTracer = {
+  span: (_name, _fields, work) => work(),
+  record: () => undefined,
+};

@@ -84,6 +84,11 @@ does any node type added later until it joins that list. Heading text is capped 
 and heading paths share a budget of 262,144 characters a page. Past it a chunk has an empty path, so
 one save cannot grow by repeating a long path on every row.
 
+A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
+`engine.save.write`. The parse host reports its steps, and the engine records them through
+`tracer.record` as `engine.save.host.queue`, `.thread`, `.decode`, `.print`, `.reparse` and
+`.compare`. Those are times only, and the same fields appear on the host's `mdx.parse_finished` line.
+
 ## Configuration
 
 | Key                            | Default | Meaning                                               |

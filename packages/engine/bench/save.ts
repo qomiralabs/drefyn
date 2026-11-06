@@ -24,6 +24,7 @@ import setup from '../test/support/global-setup.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
 import { pageOf, percentile, rounded } from './support.ts';
 
+const HOST_STEPS = ['queue', 'thread', 'decode', 'print', 'reparse', 'compare'];
 const SAVE_BUDGET_MS = 150;
 const SMALL_PAGE_BUDGET_MS = 25;
 const FOREIGN_KEY_BUDGET_MS = 50;
@@ -178,6 +179,9 @@ const tracer: EngineTracer = {
       stages.set(spanName, performance.now() - started);
     }
   },
+  record: (spanName, _fields, ms) => {
+    stages.set(spanName, ms);
+  },
 };
 
 const engine = createEngine({
@@ -291,6 +295,9 @@ async function run(
     print: summary(staged.get('engine.save.verify') ?? []),
     chunk: summary(staged.get('engine.save.chunk') ?? []),
     database: summary(staged.get('engine.save.write') ?? []),
+    host: Object.fromEntries(
+      HOST_STEPS.map((step) => [step, summary(staged.get(`engine.save.host.${step}`) ?? [])]),
+    ),
     load: rounded(loadavg()[0] ?? 0),
     cores: cpus().length,
   };

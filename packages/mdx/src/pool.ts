@@ -106,6 +106,15 @@ interface Slot {
   jobs: number;
 }
 
+// Only a print has steps to report, and only the pool knows the wait ahead of them.
+const withHostTimes = (result: JobResult, waitedMs: number, threadMs: number): JobResult =>
+  result.ok && 'timing' in result.value && result.value.timing !== undefined
+    ? {
+        ...result,
+        value: { ...result.value, timing: { ...result.value.timing, waitedMs, threadMs } },
+      }
+    : result;
+
 export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): ParsePool {
   const settings = poolConfigSchema.parse(config);
   const now = deps.now ?? (() => performance.now());
@@ -231,8 +240,10 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
       budget.spentMs += outcome.workMs;
     }
     if (slot !== undefined) release(slot, outcome.end, item.fields);
-    report({ ...item.fields, waitedMs, tookMs: outcome.workMs }, outcome.result);
-    item.resolve(outcome.result);
+    const result = withHostTimes(outcome.result, waitedMs, outcome.workMs);
+    const timing = result.ok && 'timing' in result.value ? result.value.timing : undefined;
+    report({ ...item.fields, waitedMs, tookMs: outcome.workMs, ...timing }, result);
+    item.resolve(result);
     pump();
   };
 

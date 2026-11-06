@@ -54,7 +54,20 @@ const configSchema = z.object({
 
 const BUSY = 429;
 
-const printedSchema = z.object({ text: z.string(), ast: rootSchema });
+const time = z.number().min(0);
+const timingSchema = z.object({
+  decodeMs: time,
+  printMs: time,
+  reparseMs: time,
+  compareMs: time,
+  waitedMs: time.optional(),
+  threadMs: time.optional(),
+});
+const printedSchema = z.object({
+  text: z.string(),
+  ast: rootSchema,
+  timing: timingSchema.optional(),
+});
 
 // A caller stores what this hands back, so a malformed answer must not look like a success.
 function readPrinted(answer: JobResult): PrintResult {

@@ -127,7 +127,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const config = deps.config ?? DEFAULT_ENGINE_CONFIG;
   const logger = deps.logger ?? noopLogger;
   const tracer = deps.tracer ?? noopTracer;
-  const verifyDeps: VerifyDeps = { ...deps, config, logger };
+  const verifyDeps: VerifyDeps = { ...deps, config, logger, tracer };
   const chunkOptions: ChunkOptions = {
     targetChars: config.chunkTargetChars,
     maxChars: config.chunkMaxChars,
