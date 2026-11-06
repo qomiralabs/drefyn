@@ -86,13 +86,16 @@ describe('orderKeyBetween', () => {
   it('keeps a key short over a long run at either end, the common case', () => {
     let tail = 'a0';
     let head = 'a0';
+    let outOfOrder = 0;
+    // One expect at the end: 200,000 of them take longer than the keys do.
     for (let turn = 0; turn < 100_000; turn += 1) {
       const nextTail = placed(tail, null);
       const nextHead = placed(null, head);
-      expect(tail < nextTail && nextHead < head).toBe(true);
+      if (!(tail < nextTail && nextHead < head)) outOfOrder += 1;
       tail = nextTail;
       head = nextHead;
     }
+    expect(outOfOrder).toBe(0);
     expect(Math.max(tail.length, head.length)).toBeLessThanOrEqual(5);
   });
 
