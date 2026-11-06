@@ -53,6 +53,9 @@ export interface ContentSchema {
   readonly fields: readonly FieldDef[];
   // Still served by both APIs, marked deprecated, until a person confirms removal.
   readonly deprecated: readonly FieldId[];
+  // Every id ever removed. Kept in the definition because a diff only sees the version
+  // before it, and slots and stored content can still carry the old meaning of an id.
+  readonly retired: readonly FieldId[];
 }
 
 export const SCHEMA_ERROR_CODES = Object.freeze([
@@ -84,6 +87,8 @@ export type SchemaIssueReason =
   | 'required_dropped'
   | 'undeclared'
   | 'identity'
+  | 'reused'
+  | 'retired'
   | 'version';
 
 // Paths hold schema keys and positions and ids hold checked uuids. Issues reach logs and

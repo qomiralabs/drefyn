@@ -82,6 +82,7 @@ const contentSchema: z.ZodType<ContentSchema> = z.strictObject({
   version: positive,
   fields: z.array(fieldDef).min(1),
   deprecated: z.array(fieldId).refine(noRepeats),
+  retired: z.array(fieldId).refine(noRepeats),
 });
 
 export const failure = (issues: readonly SchemaIssue[]): { ok: false; error: SchemaError } => {

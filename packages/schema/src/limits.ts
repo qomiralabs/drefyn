@@ -3,6 +3,9 @@
 export const MAX_FIELD_DEPTH = 5;
 export const MAX_FIELDS = 200;
 
+// Refusing a removal past this keeps content; dropping old records would reopen id reuse.
+export const MAX_RETIRED_FIELDS = 2_000;
+
 export const MAX_LABEL_LENGTH = 200;
 export const MAX_TEXT_BYTES = 1_048_576;
 export const MAX_LIST_ITEMS = 1_000;

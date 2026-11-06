@@ -51,6 +51,11 @@ To retype a field, add a new one beside it and list the old id in `deprecated`. 
 field stays in `fields` and stays served. It leaves only when `confirmedRemovals` names
 it, which comes from a person's action and never from the submitted schema.
 
+A removed id goes into `retired`, and every later version carries that list unchanged, up
+to 2,000 ids. An id never comes back, as its slot and stored content may still hold the
+old meaning. A list element cannot be removed on its own, because it is the list's type:
+add a new list field instead.
+
 ## Numbers
 
 Number fields hold integer units with a `scale` from 0 to 6. `min`, `max` and filter

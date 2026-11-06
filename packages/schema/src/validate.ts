@@ -8,6 +8,7 @@ import {
   MAX_LABEL_LENGTH,
   MAX_LIST_ITEMS,
   MAX_REFERENCE_TARGETS,
+  MAX_RETIRED_FIELDS,
   MAX_TEXT_BYTES,
 } from './limits.ts';
 import { checkApiName } from './names.ts';
@@ -168,6 +169,9 @@ function checkStructure(schema: ContentSchema, known: ReadonlySet<TypeId>): Sche
       walk.issues.push({ path: `deprecated.${index}`, code: 'schema.reference_unknown' });
     }
   });
+  if (schema.retired.length > MAX_RETIRED_FIELDS) {
+    walk.issues.push({ path: 'retired', code: 'schema.too_large' });
+  }
   return walk.issues;
 }
 
@@ -185,6 +189,9 @@ export function validateSchema(
   if (issues.length > 0) return failure(issues);
   if (prior === null && schema.version !== 1) {
     return failure([{ path: 'version', code: 'schema.malformed' }]);
+  }
+  if (prior === null && schema.retired.length > 0) {
+    return failure([{ path: 'retired', code: 'schema.malformed' }]);
   }
   const diff = diffSchemas(schema, prior, options.confirmedRemovals ?? []);
   return diff.issues.length > 0 ? failure(diff.issues) : { ok: true, value: diff.value };

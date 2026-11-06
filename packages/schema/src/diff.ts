@@ -13,6 +13,7 @@ interface Placed {
   readonly field: FieldDef;
   readonly parent: FieldId | null;
   readonly path: string;
+  readonly element: boolean;
 }
 
 function visit(
@@ -20,9 +21,10 @@ function visit(
   path: string,
   parent: FieldId | null,
   into: Map<FieldId, Placed>,
+  element = false,
 ): void {
-  into.set(field.id, { field, parent, path });
-  if (field.kind === 'list') visit(field.of, `${path}.of`, field.id, into);
+  into.set(field.id, { field, parent, path, element });
+  if (field.kind === 'list') visit(field.of, `${path}.of`, field.id, into, true);
   if (field.kind === 'object') {
     field.fields.forEach((child, index) => {
       visit(child, `${path}.fields.${index}`, field.id, into);
@@ -158,6 +160,7 @@ export function diffSchemas(
   const nowDeprecated = new Set(next.deprecated);
   const wasDeprecated = new Set(prior.deprecated);
   const confirmed = new Set(confirmedRemovals);
+  const retired = new Set(prior.retired);
   const issues = identityIssues(next, prior);
   const removed = new Set<FieldId>();
   const changed = new Set<FieldId>();
@@ -169,6 +172,9 @@ export function diffSchemas(
     const now = after.get(id);
     if (now === undefined) {
       if (was.parent !== null && removed.has(was.parent)) removed.add(id);
+      // The element is the list's type, so losing it while the list lives is a retype,
+      // and no confirmation can make that safe.
+      else if (was.element) breaking(was.path, id, 'retyped');
       else if (!wasDeprecated.has(id)) breaking(was.path, id, 'removed');
       else if (confirmed.has(id)) removed.add(id);
       else breaking(was.path, id, 'removal_unconfirmed');
@@ -185,10 +191,17 @@ export function diffSchemas(
 
   const fresh = [...after].filter(([id]) => !before.has(id));
   for (const [id, { field, parent, path }] of fresh) {
+    if (retired.has(id)) breaking(path, id, 'reused');
     // Children of a new parent are new with it, so no writer has been sending them.
-    if (field.required && (parent === null || before.has(parent))) {
+    else if (field.required && (parent === null || before.has(parent))) {
       breaking(path, id, 'required_added');
     }
+  }
+
+  // Exact, so a client can neither forget a removal nor erase one to reuse an id.
+  const expected = new Set([...retired, ...removed]);
+  if (expected.size !== next.retired.length || !next.retired.every((id) => expected.has(id))) {
+    issues.push({ path: 'retired', code: 'schema.breaking_in_place', reason: 'retired' });
   }
 
   const deprecated = sorted(next.deprecated.filter((id) => !wasDeprecated.has(id)));

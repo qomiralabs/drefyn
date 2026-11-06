@@ -124,7 +124,6 @@ describe('schema diff', () => {
       fc.property(anySchema, fc.boolean(), (first, confirm) => {
         const target = first.fields.find((f) => f.kind === 'list');
         fc.pre(target !== undefined);
-        if (target?.kind !== 'list') return;
         const element = target.of;
         const prior = { ...first, deprecated: [element.id] };
         const swapped: FieldDef = { ...target, of: number(NEW_FIELD) };
