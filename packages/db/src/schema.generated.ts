@@ -104,6 +104,7 @@ export interface ContentTypesTable {
   filter_slots: Generated<JsonValue>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  content_schema: JsonValue | null;
 }
 
 // app.email_challenges
@@ -131,6 +132,21 @@ export interface EngineOutboxTable {
   node_id: string;
   version_id: string;
   kind: string;
+  done_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.filter_backfills
+export interface FilterBackfillsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  type_id: string;
+  field_id: string;
+  slot_column: string;
+  action: string;
+  after_node_id: string | null;
+  started_at: Date | null;
   done_at: Date | null;
   created_at: Generated<Date>;
 }
@@ -209,6 +225,11 @@ export interface NodeFilterRowsTable {
   i5: number | null;
   d1: Date | null;
   d2: Date | null;
+  l1: string[] | null;
+  l2: string[] | null;
+  l3: string[] | null;
+  l4: string[] | null;
+  l5: string[] | null;
 }
 
 // app.node_versions
@@ -227,6 +248,7 @@ export interface NodeVersionsTable {
   content_sha256: Buffer;
   idempotency_key: string | null;
   created_at: Generated<Date>;
+  fields: Generated<JsonValue>;
 }
 
 // app.nodes
@@ -246,6 +268,7 @@ export interface NodesTable {
   deleted_at: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  head_fields: Generated<JsonValue>;
 }
 
 // app.oauth_states
@@ -360,6 +383,7 @@ export interface Schema {
   content_types: ContentTypesTable;
   email_challenges: EmailChallengesTable;
   engine_outbox: EngineOutboxTable;
+  filter_backfills: FilterBackfillsTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;
