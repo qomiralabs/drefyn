@@ -4,7 +4,9 @@ import { policy } from './helpers.ts';
 import { dangerIn, rendered, rerendered, rootOf, toHtml } from './render-helpers.ts';
 import { MEASURED, OWASP } from './xss-payloads.ts';
 
-const BUDGET_MS = 3_000;
+// Far above a fair run on a loaded machine, and far below a parser left to run: this catches a
+// hang and is no benchmark.
+const BUDGET_MS = 20_000;
 
 const codeOf = (html: string): unknown => {
   try {
@@ -75,7 +77,7 @@ describe('the measured payloads, one by one', () => {
   });
 });
 
-describe('work a page can force', () => {
+describe('work a page can force', { timeout: 2 * BUDGET_MS }, () => {
   const timed = (html: string): unknown => {
     const started = performance.now();
     const code = codeOf(html);

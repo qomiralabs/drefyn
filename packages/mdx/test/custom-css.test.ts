@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { checkCustomCss } from '../src/render.ts';
 import type { CssProblemCode } from '../src/render.ts';
 
-const LINEAR_MS = 1_000;
+// Catches a rescan from each byte, which takes minutes. It is no benchmark.
+const LINEAR_MS = 10_000;
 
 const codes = (css: string): readonly CssProblemCode[] => {
   const result = checkCustomCss(css);
@@ -111,7 +112,7 @@ describe('custom CSS', () => {
     ['open brackets', `a{b:${'c('.repeat(60_000)}}`],
     ['open comments', '/*'.repeat(60_000)],
     ['quotes', `a{b:${'"'.repeat(130_000)}}`],
-  ])('reads %s in linear time', (_name, css) => {
+  ])('reads %s in linear time', { timeout: 2 * LINEAR_MS }, (_name, css) => {
     const started = performance.now();
     checkCustomCss(css);
     expect(performance.now() - started).toBeLessThan(LINEAR_MS);

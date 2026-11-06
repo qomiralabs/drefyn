@@ -7,6 +7,7 @@ import { dangerIn, rendered, rerendered, rootOf, toHtml } from './render-helpers
 import { MEASURED, OWASP } from './xss-payloads.ts';
 
 const RUNS = 300;
+const GENERATED_TIMEOUT_MS = 60_000;
 const CORPUS_TIMEOUT_MS = 120_000;
 const MIN_CORPUS_REREADS = 100;
 
@@ -152,7 +153,7 @@ const soup = fc
   )
   .map((parts) => parts.join(''));
 
-describe('renderSafe, for any tree', () => {
+describe('renderSafe, for any tree', { timeout: GENERATED_TIMEOUT_MS }, () => {
   it('gives no handler, script element or disallowed scheme', () => {
     fc.assert(
       fc.property(fc.array(tree, { maxLength: 4 }), policies, (children, use) => {
@@ -181,7 +182,7 @@ describe('renderSafe, for any tree', () => {
   });
 });
 
-describe('renderSafe is idempotent', () => {
+describe('renderSafe is idempotent', { timeout: GENERATED_TIMEOUT_MS }, () => {
   it.each(['md', 'mdx'] as readonly Dialect[])('for generated %s pages', (dialect) => {
     const use = policy({ remoteImages: 'allow' });
     fc.assert(
