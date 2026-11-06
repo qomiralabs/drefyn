@@ -13,6 +13,7 @@ import {
   createNodeSchema,
   declareSchemaInput,
   issuesOf,
+  moveNodeSchema,
   pageSchema,
   querySchema,
   readSchema,
@@ -32,11 +33,13 @@ import {
 } from './ports.ts';
 import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
+import { lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
   DeclareSchemaInput,
+  MoveNodeInput,
   NodeHead,
   NodeId,
   NodePage,
@@ -66,6 +69,7 @@ export interface Engine {
   createNode(input: CreateNodeInput): Promise<EngineResult<NodeRef>>;
   saveDraft(input: SaveDraftInput): Promise<EngineResult<VersionRef>>;
   rollback(input: RollbackInput): Promise<EngineResult<VersionRef>>;
+  moveNode(input: MoveNodeInput): Promise<EngineResult<void>>;
   getHead(tenant: TenantRef, nodeId: NodeId): Promise<EngineResult<NodeHead>>;
   listVersions(
     tenant: TenantRef,
@@ -212,6 +216,8 @@ export function createEngine(deps: EngineDeps): Engine {
           settled(() =>
             store.tenant(tenant, async (tx) => {
               await assertTypeFits(tx, input.value);
+              if (orderKey === undefined) await lockTree(tx, tenant);
+              const key = orderKey ?? (await tailKey(tx, tenant, parentId ?? null));
               await reserveNode(tx, tenant, family);
               const row = await tx
                 .insertInto('nodes')
@@ -222,7 +228,7 @@ export function createEngine(deps: EngineDeps): Engine {
                   type_id: typeId,
                   parent_id: parentId ?? null,
                   slug: slug ?? null,
-                  order_key: orderKey,
+                  order_key: key,
                   lifecycle: 'draft',
                 })
                 .returning('id')
@@ -349,6 +355,22 @@ export function createEngine(deps: EngineDeps): Engine {
             }),
           ),
         (value) => ({ ...versionFields(value), chunks: written }),
+      );
+    },
+
+    async moveNode(raw) {
+      const input = parsedOrRefused(moveNodeSchema, raw);
+      if (!input.ok) return input;
+      const { tenant, nodeId, parentId, afterId } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.move',
+        { ...tenantFields(tenant), node_id: nodeId, parent_id: parentId ?? 'root' },
+        () =>
+          settled(() =>
+            store.tenant(tenant, (tx) => moveWithinTree(tx, tenant, { nodeId, parentId, afterId })),
+          ),
+        () => ({}),
       );
     },
 
