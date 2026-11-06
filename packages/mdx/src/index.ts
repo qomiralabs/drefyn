@@ -1,6 +1,4 @@
 export { rawOf } from './canonical.ts';
-export { readerBlocks } from './reader-text.ts';
-export type { ReaderOptions } from './reader-text.ts';
 export { DEFAULT_LIMITS } from './policy.ts';
 export { validateTree } from './tree-check.ts';
 export type { TreeProblem, TreeProblemCode } from './tree-check.ts';

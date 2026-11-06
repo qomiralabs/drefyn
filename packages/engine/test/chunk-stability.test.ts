@@ -19,7 +19,7 @@ const options = { targetChars: 800, maxChars: 2000 };
 const HOST_START_MS = 60_000;
 const CORPUS_MS = 180_000;
 // Two word edits turn a page into one the parser refuses. A sentence does not.
-const EDITS_ON_THE_FIXTURE = { short: 496, long: 496, sentence: 498 };
+const EDITS_ON_THE_FIXTURE = { short: 498, long: 498, sentence: 500 };
 const LONG_PAGE_CHUNKS = 20;
 const MIN_LONG_PAGE_EDITS = 50;
 
@@ -76,14 +76,8 @@ interface Target {
 // The paragraph at this share of the page, found by adding up the source before it: searching
 // for its text can land on an earlier copy, in another section.
 function targetIn(root: MdxRoot, position: number): Target | null {
-  // Not one with raw HTML in it: the first word there can be a tag's name, and renaming that opens
-  // a tag, which is a change to the page's structure and not a word a reader sees.
-  const paragraphs = root.children.flatMap((block, index) =>
-    block.type === 'paragraph' &&
-    WORD.test(block.source?.raw ?? '') &&
-    !block.children.some(({ type }) => type === 'html')
-      ? [index]
-      : [],
+  const paragraphs = root.children.flatMap(({ type, source }, index) =>
+    type === 'paragraph' && WORD.test(source?.raw ?? '') ? [index] : [],
   );
   const index = paragraphs[Math.round((paragraphs.length - 1) * position)];
   const source = index === undefined ? undefined : root.children[index]?.source;

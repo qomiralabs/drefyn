@@ -22,8 +22,8 @@ public.
 - `createEngine(deps)`: the five calls below, over a store, a parse client, flags and a policy.
   `databaseStore(db)` makes the store from a `@drefyn/db` database.
 - `parseEngineConfig(env)`: reads the caps below.
-- `chunkNode(content, options)`: splits a tree into block aligned chunks of the text a reader sees.
-  Pure: the same content and options give the same chunks in the same order.
+- `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
+  and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -80,14 +80,13 @@ cannot move text in another. It closes before it passes the target. A block over
 at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
 on a save, and under the lock on a rollback, where a replay must not pay for it.
 
-A chunk holds only what a reader sees, because chunks feed search, the assistant and MCP. Its text
-comes from `readerBlocks` in `@drefyn/mdx`, the rule `renderSafe` applies: a closed list of node
-types, children of registered components only, and footnotes something shown refers to. All raw HTML
-content stays out, from an open tag to its close across blocks, to the end of the page if it never
-closes. So a page's chunks are always part of what renders, and a tag left open costs search the
-rest of that page. A chunk read later, on a rollback, uses the registry of that moment. Heading text
-is capped at 200 characters and heading paths share a budget of 262,144 characters a page. Past it a
-chunk has an empty path, so one save cannot grow by repeating a long path on every row.
+Chunk text is read off the tree through a closed list of node types, so frontmatter, comments,
+imports, expressions, link targets and component props stay out. This is a stopgap, and it is not
+yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
+footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
+the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
+characters a page. Past it a chunk has an empty path, so one save cannot grow by repeating a long
+path on every row.
 
 A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
 `engine.save.write`. The parse host reports its steps, and the engine records them through

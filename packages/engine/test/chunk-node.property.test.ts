@@ -117,21 +117,7 @@ const shown = fc.constantFrom(
   { type: 'inlineCode', value: 'shown' },
   { type: 'image', url: `https://${HIDDEN}.test`, title: HIDDEN, alt: 'shown' },
 );
-// Tags split around ordinary text, as Markdown leaves them. The closer is sometimes missing.
-const wrapped = fc
-  .record({
-    tag: fc.constantFrom('script', 'style', 'template', 'textarea', 'span hidden', 'SCRIPT'),
-    close: fc.boolean(),
-  })
-  .map(({ tag, close }) => ({
-    type: 'paragraph',
-    children: [
-      { type: 'html', value: `<${tag}>` },
-      { type: 'text', value: HIDDEN },
-      ...(close ? [{ type: 'html', value: `</${tag.split(' ')[0] ?? ''}>` }] : []),
-    ],
-  }));
-const leaf = fc.oneof(hiddenLeaf, shown, wrapped);
+const leaf = fc.oneof(hiddenLeaf, shown);
 const tree = fc.letrec<{ node: unknown }>((self) => ({
   node: fc.oneof(
     { depthSize: 'small', withCrossShrink: true },
@@ -148,6 +134,7 @@ const tree = fc.letrec<{ node: unknown }>((self) => ({
         'table',
         'tableRow',
         'tableCell',
+        'footnoteDefinition',
       ),
       children: fc.array(self('node'), { maxLength: 4 }),
     }),
@@ -188,28 +175,6 @@ describe('text no reader sees', () => {
             expect(body).not.toContain(HIDDEN);
             expect(headingPath.join(' ')).not.toContain(HIDDEN);
           }
-        }),
-        RUNS,
-      );
-    },
-    TIMEOUT_MS,
-  );
-});
-
-describe('an open tag', () => {
-  it(
-    'hides the blocks after it until its close',
-    () => {
-      fc.assert(
-        fc.property(fc.array(raw, { maxLength: 6 }), sizes, (texts, options) => {
-          const base = treeOf([]);
-          const hide = texts.map((value) => ({
-            type: 'paragraph',
-            children: [{ type: 'text', value }],
-          }));
-          const children = [{ type: 'html', value: '<template>' }, ...hide];
-          const root = { ...base, children } as unknown as typeof base;
-          expect(chunkNode(root, options)).toEqual([]);
         }),
         RUNS,
       );
