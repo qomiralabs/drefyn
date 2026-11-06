@@ -1,4 +1,5 @@
 import { idOf, type IdKind, type IdOf } from '@drefyn/tenancy';
+import { MAX_RETIRED_FIELDS } from '@drefyn/schema';
 import { z } from 'zod';
 import type { EngineIssue } from './errors.ts';
 import { NODE_FAMILIES, ORIGINS } from './vocabulary.ts';
@@ -77,6 +78,8 @@ export const saveDraftSchema = z.strictObject({
   origin: originSchema,
   actor,
   idempotencyKey,
+  // Absent keeps the head's values, so a client that only edits a body cannot wipe them.
+  fields: z.record(z.string().regex(CANONICAL_UUID), z.unknown()).optional(),
 });
 
 export const rollbackSchema = z.strictObject({
@@ -91,11 +94,39 @@ export const rollbackSchema = z.strictObject({
 export const readSchema = z.strictObject({ tenant, nodeId });
 
 const MAX_PAGE = 100;
+// 256 bytes of control characters grow six times in JSON and a third again in base64.
+const MAX_CURSOR_CHARS = 4096;
 
 export const pageSchema = z.strictObject({
   limit: z.int().min(1).max(MAX_PAGE).default(50),
   before: z.int().min(1).optional(),
 });
+
+export const querySchema = z.strictObject({
+  tenant,
+  query: z.strictObject({
+    typeId: z.string().regex(CANONICAL_UUID),
+    // Shape and field rules are checkFilter's, against the type's own definition.
+    filter: z.unknown().optional(),
+    sort: z
+      .strictObject({
+        field: z.string().regex(CANONICAL_UUID),
+        direction: z.enum(['asc', 'desc']).default('asc'),
+      })
+      .optional(),
+    limit: z.int().min(1).max(MAX_PAGE).default(50),
+    cursor: z.string().min(1).max(MAX_CURSOR_CHARS).optional(),
+  }),
+});
+
+export const declareSchemaInput = z.strictObject({
+  tenant,
+  typeId: z.string().regex(CANONICAL_UUID),
+  schema: z.unknown(),
+  confirmedRemovals: z.array(z.string().regex(CANONICAL_UUID)).max(MAX_RETIRED_FIELDS).optional(),
+});
+
+export const backfillInput = z.strictObject({ tenant });
 
 // Keeps the path and a stable code. A zod message can quote the value it refused.
 export const issuesOf = (error: z.ZodError): readonly EngineIssue[] =>

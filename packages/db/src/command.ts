@@ -2,3 +2,4 @@
 // import both db and auth; db cannot import auth.
 export { USAGE as MIGRATE_USAGE } from './args.ts';
 export { runMigrate } from './run.ts';
+export { MAINTAIN_USAGE, runMaintain } from './filter-maintenance.ts';

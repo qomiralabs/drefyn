@@ -19,24 +19,28 @@ public.
 - `astVersionOf(content)`: the value for `node_versions.ast_version`. It comes from the tree, so
   the column cannot say something the content does not.
 
-- `createEngine(deps)`: the five calls below, over a store, a parse client, flags and a policy.
+- `createEngine(deps)`: the calls below, over a store, a parse client, flags and a policy.
   `databaseStore(db)` makes the store from a `@drefyn/db` database.
 - `parseEngineConfig(env)`: reads the caps below.
+- `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
+  queued. A job calls this; the work resumes from the table.
 - `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
-  and options give the same chunks in the same order, and their bodies join back into the page.
+  and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
 
 ## Writing content
 
-| Call           | Does                                                                             |
-| -------------- | -------------------------------------------------------------------------------- |
-| `createNode`   | Adds a node with no version. Its id always comes from the database.              |
-| `saveDraft`    | Adds a version when `expectedHeadVersionId` is still the head.                   |
-| `rollback`     | Adds a version with an older version's content, and keeps that version's origin. |
-| `getHead`      | Reads the head, content included.                                                |
-| `listVersions` | Lists versions newest first, without content.                                    |
+| Call            | Does                                                                             |
+| --------------- | -------------------------------------------------------------------------------- |
+| `createNode`    | Adds a node with no version. Its id always comes from the database.              |
+| `saveDraft`     | Adds a version when `expectedHeadVersionId` is still the head.                   |
+| `rollback`      | Adds a version with an older version's content, and keeps that version's origin. |
+| `getHead`       | Reads the head, content included.                                                |
+| `listVersions`  | Lists versions newest first, without content.                                    |
+| `declareSchema` | Stores a type's definition and gives declared fields their slots.                |
+| `queryNodes`    | Lists a type's nodes, filtered and sorted.                                       |
 
 Every call returns a `Result`, and only a bug throws. `engine.not_found` covers another tenant's
 ids as well, so a caller cannot tell them apart. `engine.unavailable` is the one retryable code:
@@ -58,6 +62,9 @@ row lock, so saves to a node queue and sequence numbers have no gaps. A retry wi
 `idempotencyKey` and the same input gets the first version, even after the head moved or the
 organization went read only. The same key with anything else is `engine.idempotency_conflict`.
 
+A docs page keeps no second copy of its tree: `nodes.head_content` stays null, and `getHead` reads
+the head version by key. Studio items keep the copy, as their list scans read it.
+
 `node_versions` is append only: `drefyn_app` holds select and insert on it and nothing more. Limits
 come from `@drefyn/entitlements` and count per organization in `organization_node_counts`, updated
 in the transaction that creates the node. A read only organization or project, or one over its
@@ -69,20 +76,86 @@ With `engine.chunk_at_write` on, off in production, a save or rollback writes th
 and one `embed_chunks` row in `engine_outbox` in the version's own transaction, so a version never
 commits without them. Embedding runs later and never in this path. A replay writes nothing, and a
 page with no text gets no outbox row. Chunks belong to a version and are not replaced by the next.
+A failed read of that flag refuses the write with `engine.unavailable` and logs
+`engine.flag_read_failed`, as counting it as off would commit a version with no chunks.
 
 A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
 cannot move text in another. It closes before it passes the target. A block over the target splits
 at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
 on a save, and under the lock on a rollback, where a replay must not pay for it.
 
+Chunk text is read off the tree through a closed list of node types, so frontmatter, comments,
+imports, expressions, link targets and component props stay out. This is a stopgap, and it is not
+yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
+footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
+the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
+characters a page. Past it a chunk has an empty path, so one save cannot grow by repeating a long
+path on every row.
+
+A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
+`engine.save.write`. The parse host reports its steps, and the engine records them through
+`tracer.record` as `engine.save.host.queue`, `.thread`, `.decode`, `.print`, `.reparse` and
+`.compare`. Those are times only, and the same fields appear on the host's `mdx.parse_finished` line.
+
+## Fields and filter rows
+
+Field values travel beside the content: `saveDraft` takes `fields`, a map of field id to value in
+API form, with decimal strings for numbers, ISO strings for dates, booleans, and lists. Leave it
+out and the head's values carry over, so an edit to a body cannot wipe them. The values are held to
+the type's definition and stored in a canonical form on the version, with a copy in
+`nodes.head_fields`: numbers as integer units in a string, never a JSON number, and dates as UTC
+instants. Rich text, assets and objects live in content and are refused here.
+
+A field declared `filterable` or `sortable` takes one slot on `app.node_filter_rows`, up to 5 text,
+5 integer and 2 time, for life. A list takes the list column of a text slot. A definition whose row
+could pass the btree tuple limit is refused when declared, so a valid save can never hit it. The
+row is written in the save's transaction, and the statement itself compares, so a save that changes
+no slot writes nothing. A rollback brings the old slots back with the old content.
+
+Declaring a field on a type with items starts a backfill. Until it ends the field behaves as
+undeclared, `queryNodes` lists it in `backfilling` so a page can say why, and past the scan limit
+filters on it get `engine.filter_backfilling`. Batches are 250 rows with 200 ms between them, one
+backfill per organization at a time, and each batch locks its nodes first, in id order, so it cannot
+write over a racing save. A removed field's slot is cleared the same way before it can be reused.
+
+## Listing
+
+`queryNodes(tenant, { typeId, filter, sort, limit, cursor })` compiles a closed `FilterNode` from
+`@drefyn/schema` to one parameterized statement. Values and field ids are always bound, and the only
+identifiers come from a fixed column list, so nothing a caller sends reaches SQL text. Statements
+are unnamed: a named one gets a generic plan, which took 341,004 buffers against 18.
+
+| Filter                                        | What runs                              | Budget at 200,000 items in a type                            |
+| --------------------------------------------- | -------------------------------------- | ------------------------------------------------------------ |
+| Declared: `eq`, `in`, ranges, `neq`, `exists` | One scan of the covering key           | p95 under 100 ms per shape, p99 under 250 ms, writes running |
+| Declared text: `contains`                     | The same, with a substring test        | p95 under 200 ms                                             |
+| Undeclared, 20,000 items or fewer             | A scan of `head_fields`, never content | p95 under 50 ms                                              |
+| Undeclared, above that                        | `engine.filter_not_declared`, by field | Refused, never a slow query                                  |
+
+A value that is missing is false to every comparison except `neq`, and `not` flips that cleanly, so
+`not eq` and `neq` agree. `contains` has no pattern language and ignores case. Sorting needs a
+declared `sortable` field, nulls come last in both directions, and pages walk by an opaque cursor
+that holds only to the order it came from. With no sort, newest first. A list that passes
+`DREFYN_ENGINE_QUERY_TIMEOUT_MS` returns `engine.unavailable` and no partial page.
+
+`drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's
+owner. It rebuilds the key with `reindex concurrently` past 30 percent bloat, estimated from the
+key's size against the heap, one run at a time, and prints one JSON line of counts with any alerts:
+`engine.filter_rows.old_transaction` past 5 minutes and `engine.filter_rows.dead_tuples` past
+20,000. Add `--after-import` once a bulk import ends: it runs `vacuum (analyze)`, as `analyze` alone
+makes plans worse, and always rebuilds. The filter rows are shared by every tenant, so this is table
+work and never tenant work. The role sees other roles' transactions only with `pg_read_all_stats`.
+
 ## Configuration
 
-| Key                            | Default | Meaning                                               |
-| ------------------------------ | ------- | ----------------------------------------------------- |
-| `DREFYN_ENGINE_MAX_NODE_BYTES` | 1048576 | Source bytes of one node. Can only be lowered.        |
-| `DREFYN_ENGINE_MAX_TREE_BYTES` | 5242880 | Stored JSON of one version, at most 16777216.         |
-| `DREFYN_CHUNK_TARGET_CHARS`    | 800     | Close a chunk before it passes this. At most the cap. |
-| `DREFYN_CHUNK_MAX_CHARS`       | 2000    | Hard cap on a chunk, whatever the page holds.         |
+| Key                                       | Default | Meaning                                               |
+| ----------------------------------------- | ------- | ----------------------------------------------------- |
+| `DREFYN_ENGINE_MAX_NODE_BYTES`            | 1048576 | Source bytes of one node. Can only be lowered.        |
+| `DREFYN_ENGINE_MAX_TREE_BYTES`            | 5242880 | Stored JSON of one version, at most 16777216.         |
+| `DREFYN_CHUNK_TARGET_CHARS`               | 800     | Close a chunk before it passes this. At most the cap. |
+| `DREFYN_CHUNK_MAX_CHARS`                  | 2000    | Hard cap on a chunk, whatever the page holds.         |
+| `DREFYN_ENGINE_QUERY_TIMEOUT_MS`          | 2000    | `statement_timeout` for `queryNodes`, at most 60000.  |
+| `DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS` | 20000   | Largest type an undeclared filter may read.           |
 
 A tree is about 4 times its source at the corpus median and 7.5 times at worst, so a source cap
 alone allows far larger rows. Both limits answer `engine.too_large`.
@@ -102,6 +175,10 @@ on a machine without a stack, and fail in CI.
 `bench/chunk.ts` needs no stack: a 100 KB page, p99 under 30 ms. `bench/save.ts` times a whole
 `saveDraft` of a 100 KB page through the host, split into print, chunk and database stages, against
 p95 under 150 ms, on 200,000 nodes at both ends of two tenants, and foreign key checks on a 233
-chunk insert against 50 ms. Until `queryNodes` lands the bench writes the filter row itself, in the
-same transaction, with every slot changing. Only the pinned Postgres 18 image counts, so it exits 1
-on any other server. Set `DREFYN_BENCH_NODES` for a smaller table.
+chunk insert against 50 ms, with every slot changing on every save. `bench/query.ts` runs every
+list shape on a 200,000 item type with all 12 slots filled, first with no writes, then with 50 saves
+a second, 20 percent changing slots, and against the undeclared scan budget at 20,000 items. Its
+saves skip the parse host, which runs in another process and whose budget would stop one project
+near 12 saves a second. Both exit 1 on any server but the pinned Postgres 18 image, which is the
+only run that counts. Set `DREFYN_BENCH_NODES` for a smaller table, and `DREFYN_BENCH_SECONDS` for
+a shorter write run. A run above load 10 is void and fails.

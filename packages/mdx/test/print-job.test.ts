@@ -29,6 +29,21 @@ describe('printing a page in the host', () => {
     expect(result).toMatchObject({ ok: true, value: { issues: [] } });
   });
 
+  it('says how long each step took, beside the tree and never in it', () => {
+    const result = print(parsed('# a\n\n* b\n', 'md'));
+    if (!result.ok) throw new Error('refused');
+    const { timing, ast } = result.value;
+    expect(Object.keys(timing ?? {}).sort()).toEqual([
+      'compareMs',
+      'decodeMs',
+      'printMs',
+      'reparseMs',
+    ]);
+    for (const ms of Object.values(timing ?? {})) expect(ms).toBeGreaterThanOrEqual(0);
+    expect(timing?.reparseMs).toBeGreaterThan(0);
+    expect(JSON.stringify(ast)).not.toContain('Ms');
+  });
+
   it('prints an edit and hands back a tree whose source agrees with the bytes', () => {
     const root = parsed('old\n\n* b\n', 'md');
     const edited = withChild(root, 0, (block) => ({ ...block, ...paragraph('new') }) as MdxBlock);

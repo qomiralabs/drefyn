@@ -14,7 +14,6 @@ import { z } from 'zod';
 import {
   createEngine,
   databaseStore,
-  type EngineStore,
   type EngineTracer,
   type NodeId,
   type VersionId,
@@ -23,8 +22,17 @@ import { chunkForeignKeyCost } from '../test/support/foreign-keys.ts';
 import setup from '../test/support/global-setup.ts';
 import { parseClientConfig } from '../test/support/parse-host.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
-import { pageOf, percentile, rounded } from './support.ts';
+import {
+  benchFields,
+  benchSchema,
+  benchValues,
+  pageOf,
+  percentile,
+  rounded,
+  type BenchFields,
+} from './support.ts';
 
+const HOST_STEPS = ['queue', 'thread', 'decode', 'print', 'reparse', 'compare'];
 const SAVE_BUDGET_MS = 150;
 const SMALL_PAGE_BUDGET_MS = 25;
 const FOREIGN_KEY_BUDGET_MS = 50;
@@ -69,6 +77,7 @@ interface Seeded {
   readonly project: string;
   readonly typeId: string;
   readonly tenant: TenantRef;
+  readonly fields: BenchFields;
 }
 
 const tenantRow = (nodes: number): Seeded & { readonly nodes: number } => {
@@ -78,6 +87,7 @@ const tenantRow = (nodes: number): Seeded & { readonly nodes: number } => {
     organization,
     project,
     typeId: randomUUID(),
+    fields: benchFields(),
     nodes,
     tenant: { organizationId: organizationId(organization), projectId: projectId(project) },
   };
@@ -88,6 +98,13 @@ const second = tenantRow(SECOND_TENANT_NODES);
 
 // Shuffled in the heap, as saves from many tenants would leave it, and vacuumed, as autovacuum
 // would have done by the time a table is this size.
+const declared = (seeded: Seeded) => {
+  const { schema, slots } = benchSchema(seeded.typeId, seeded.fields);
+  return `update app.content_types
+    set content_schema = '${JSON.stringify(schema)}', filter_slots = '${JSON.stringify(slots)}'
+    where id = '${seeded.typeId}';`;
+};
+
 const seedAll = () =>
   superuser(
     `
@@ -105,6 +122,8 @@ insert into app.projects (id, organization_id, product, slug, name)
   select project, organization, 'docs', 'bench', 'Bench' from bench_tenants;
 insert into app.content_types (id, organization_id, project_id, family, key)
   select type, organization, project, 'docs_page', 'page' from bench_tenants;
+${declared(largest)}
+${declared(second)}
 insert into app.nodes (organization_id, project_id, family, type_id, order_key, lifecycle)
   select organization, project, 'docs_page', type, 'a', 'draft'
   from bench_tenants, generate_series(1, nodes)
@@ -140,33 +159,7 @@ const parsePolicy = {
   linkProtocols: ['https', 'http', 'mailto'],
 } as const;
 
-// The budget covers filter rows, and the save does not write them until queryNodes lands. So the
-// bench adds that write itself, in the same transaction, with every slot changing, which is the
-// costly case: a save that changes no slot will skip it.
-let saving: { readonly seeded: Seeded; readonly nodeId: NodeId; readonly round: number } | null =
-  null;
-const real = databaseStore(db);
-const store: EngineStore = {
-  tenant: (tenant, work) =>
-    real.tenant(tenant, async (tx) => {
-      const answer = await work(tx);
-      if (saving !== null) {
-        const { seeded, nodeId, round } = saving;
-        const text = String(round);
-        await tx
-          .updateTable('node_filter_rows')
-          .set({ t1: text, t2: text, t3: text, t4: text, t5: text })
-          .set({ i1: round, i2: round, i3: round, i4: round, i5: round })
-          .set({ d1: new Date(), d2: new Date() })
-          .where('organization_id', '=', seeded.tenant.organizationId)
-          .where('project_id', '=', seeded.tenant.projectId)
-          .where('type_id', '=', seeded.typeId)
-          .where('node_id', '=', nodeId)
-          .executeTakeFirstOrThrow();
-      }
-      return answer;
-    }),
-};
+const store = databaseStore(db);
 
 // One sample's time in each stage, read off the spans the engine opens in production.
 let stages = new Map<string, number>();
@@ -179,6 +172,9 @@ const tracer: EngineTracer = {
       stages.set(spanName, performance.now() - started);
     }
   },
+  record: (spanName, _fields, ms) => {
+    stages.set(spanName, ms);
+  },
 };
 
 const engine = createEngine({
@@ -186,7 +182,7 @@ const engine = createEngine({
   parse,
   parsePolicy,
   tracer,
-  flags: { isOn: () => Promise.resolve(true) },
+  flags: { evaluate: () => Promise.resolve({ value: true }) },
 });
 
 async function treeOf(tenant: TenantRef, source: string): Promise<MdxRoot> {
@@ -246,7 +242,6 @@ async function run(
   for (let round = 0; round < WARM_UP + SAMPLES; round += 1) {
     const target = targets[round % targets.length];
     if (target === undefined) throw new Error('no nodes');
-    saving = { seeded, nodeId: target.node, round };
     const input = {
       tenant: seeded.tenant,
       nodeId: target.node,
@@ -255,6 +250,8 @@ async function run(
       origin: 'human',
       actor: { kind: 'system', job: 'bench' },
       idempotencyKey: randomUUID(),
+      // The costly case: every slot changes, so no save skips the filter row write.
+      fields: benchValues(seeded.fields, round),
     } as const;
     let elapsed = 0;
     let saved = null;
@@ -268,7 +265,6 @@ async function run(
       if (saved.ok || saved.error.code !== 'engine.unavailable') break;
       await pause(PARSE_BUDGET_WAIT_MS);
     }
-    saving = null;
     if (!saved?.ok) throw new Error(saved?.error.code ?? 'no attempt ran');
     heads.set(target.node, saved.value.versionId);
     if (round >= WARM_UP) {
@@ -292,6 +288,9 @@ async function run(
     print: summary(staged.get('engine.save.verify') ?? []),
     chunk: summary(staged.get('engine.save.chunk') ?? []),
     database: summary(staged.get('engine.save.write') ?? []),
+    host: Object.fromEntries(
+      HOST_STEPS.map((step) => [step, summary(staged.get(`engine.save.host.${step}`) ?? [])]),
+    ),
     load: rounded(loadavg()[0] ?? 0),
     cores: cpus().length,
   };
@@ -332,7 +331,7 @@ try {
       postgres: version,
       pinned,
       largest_tenant_nodes: LARGEST_TENANT_NODES,
-      filter_rows: 'written by the bench',
+      filter_rows: 'written by the save, every slot changing',
     })}\n`,
   );
   await seedAll();

@@ -1,5 +1,5 @@
 import { AUTH_COMMAND_USAGE, runAuthCommand } from '@drefyn/auth/command';
-import { MIGRATE_USAGE, runMigrate } from '@drefyn/db/command';
+import { MAINTAIN_USAGE, MIGRATE_USAGE, runMigrate } from '@drefyn/db/command';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -28,6 +28,7 @@ function stubs() {
   return {
     migrate: vi.fn<Commands['migrate']>(() => Promise.resolve(3)),
     auth: vi.fn<Commands['auth']>(() => Promise.resolve(5)),
+    maintain: vi.fn<Commands['maintain']>(() => Promise.resolve(7)),
   };
 }
 
@@ -53,6 +54,15 @@ describe('runDrefyn', () => {
     expect(commands.migrate).not.toHaveBeenCalled();
   });
 
+  it('hands maintain the full argv and its exit code back', async () => {
+    const commands = stubs();
+    const stdout = sink();
+    const stderr = sink();
+    const argv = ['maintain', 'filter-rows'];
+    await expect(runDrefyn({ argv, env: {}, stdout, stderr, commands })).resolves.toBe(7);
+    expect(commands.maintain).toHaveBeenCalledWith({ argv, env: {}, stdout, stderr });
+  });
+
   it.each([[[]], [['nonsense']], [['--help']], [['Migrate', 'up']], [['authx']]])(
     'refuses %j with both usage lines and exit 2',
     async (argv) => {
@@ -61,7 +71,7 @@ describe('runDrefyn', () => {
       const stderr = sink();
       await expect(runDrefyn({ argv, env: {}, stdout, stderr, commands })).resolves.toBe(2);
       expect(stdout.text).toBe('');
-      expect(stderr.text).toBe(`${MIGRATE_USAGE}\n${AUTH_COMMAND_USAGE}\n`);
+      expect(stderr.text).toBe(`${MIGRATE_USAGE}\n${AUTH_COMMAND_USAGE}\n${MAINTAIN_USAGE}\n`);
       expect(commands.migrate).not.toHaveBeenCalled();
       expect(commands.auth).not.toHaveBeenCalled();
     },
@@ -142,7 +152,7 @@ describe('the drefyn binary', () => {
     await expect(exec(['nonsense'])).resolves.toEqual({
       code: 2,
       stdout: '',
-      stderr: `${MIGRATE_USAGE}\n${AUTH_COMMAND_USAGE}\n`,
+      stderr: `${MIGRATE_USAGE}\n${AUTH_COMMAND_USAGE}\n${MAINTAIN_USAGE}\n`,
     });
   });
 });

@@ -6,15 +6,21 @@ import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
 import type { NodeContent } from './content.ts';
 import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
+import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
 import {
+  backfillInput,
   createNodeSchema,
+  declareSchemaInput,
   issuesOf,
   pageSchema,
+  querySchema,
   readSchema,
   rollbackSchema,
   saveDraftSchema,
 } from './input.ts';
+import { backfillStep } from './backfill.ts';
+import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
 import {
   noopLogger,
@@ -24,11 +30,17 @@ import {
   type EngineTracer,
   type LogFields,
 } from './ports.ts';
+import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
 import type {
+  BackfillState,
   CreateNodeInput,
+  DeclaredSchema,
+  DeclareSchemaInput,
   NodeHead,
   NodeId,
+  NodePage,
+  NodeQuery,
   NodeRef,
   Page,
   PageArgs,
@@ -60,7 +72,13 @@ export interface Engine {
     nodeId: NodeId,
     page: PageArgs,
   ): Promise<EngineResult<Page<VersionSummary>>>;
+  queryNodes(tenant: TenantRef, query: NodeQuery): Promise<EngineResult<NodePage>>;
+  declareSchema(input: DeclareSchemaInput): Promise<EngineResult<DeclaredSchema>>;
+  // One batch. runFilterBackfill paces these.
+  backfillFilters(tenant: TenantRef): Promise<EngineResult<BackfillState>>;
 }
+
+const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
 
 const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE']);
 
@@ -125,16 +143,40 @@ export function createEngine(deps: EngineDeps): Engine {
   const config = deps.config ?? DEFAULT_ENGINE_CONFIG;
   const logger = deps.logger ?? noopLogger;
   const tracer = deps.tracer ?? noopTracer;
-  const verifyDeps: VerifyDeps = { ...deps, config, logger };
+  const verifyDeps: VerifyDeps = { ...deps, config, logger, tracer };
   const chunkOptions: ChunkOptions = {
     targetChars: config.chunkTargetChars,
     maxChars: config.chunkMaxChars,
   };
 
-  const isOn = (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) =>
-    flags.isOn(name, { organizationId: tenant.organizationId, projectId: tenant.projectId });
-  const writesOn = (tenant: TenantRef) => isOn('engine.writes', tenant);
-  const chunkingOn = (tenant: TenantRef) => isOn('engine.chunk_at_write', tenant);
+  const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
+    try {
+      return await flags.evaluate(name, {
+        organizationId: tenant.organizationId,
+        projectId: tenant.projectId,
+      });
+    } catch {
+      return { value: false, errorCode: 'FLAG_GENERAL' };
+    }
+  };
+  // A failed read gives false here too, and off refuses, so this one fails closed by itself.
+  const writesOn = async (tenant: TenantRef) => {
+    const { value, errorCode } = await read('engine.writes', tenant);
+    return value && errorCode === undefined;
+  };
+  // A failed read must not count as off: the version would commit with no chunks, and nothing
+  // would ever notice. Null refuses the write, and the caller can try again.
+  const chunkingOn = async (tenant: TenantRef): Promise<boolean | null> => {
+    const name = 'engine.chunk_at_write';
+    const { value, errorCode } = await read(name, tenant);
+    if (errorCode === undefined) return value;
+    logger.warn('engine.flag_read_failed', {
+      ...tenantFields(tenant),
+      flag: name,
+      code: errorCode,
+    });
+    return null;
+  };
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
   const logged = async <T>(
@@ -185,6 +227,16 @@ export function createEngine(deps: EngineDeps): Engine {
                 })
                 .returning('id')
                 .executeTakeFirstOrThrow();
+              // Lists read only this row, so a node without one would never be listed.
+              await tx
+                .insertInto('node_filter_rows')
+                .values({
+                  organization_id: tenant.organizationId,
+                  project_id: tenant.projectId,
+                  type_id: typeId,
+                  node_id: row.id,
+                })
+                .execute();
               return { nodeId: idOf('nod', row.id), family, typeId };
             }),
           ),
@@ -198,6 +250,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const { tenant, nodeId, content, origin, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
       const chunking = await chunkingOn(tenant);
+      if (chunking === null) return refuse('engine.unavailable', FLAG_UNREAD);
       const fields = { ...tenantFields(tenant), node_id: nodeId };
       // Counted when written, so a replay does not report rows it never made.
       let written = 0;
@@ -225,6 +278,8 @@ export function createEngine(deps: EngineDeps): Engine {
                   actor,
                   idempotencyKey: input.value.idempotencyKey,
                   expectedHeadVersionId: input.value.expectedHeadVersionId,
+                  rawFields: input.value.fields,
+                  maxFieldsBytes: config.maxNodeBytes,
                   chunksOf: () => {
                     written = chunks.length;
                     return chunks;
@@ -244,6 +299,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const { tenant, nodeId, toVersionId, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
       const chunking = await chunkingOn(tenant);
+      if (chunking === null) return refuse('engine.unavailable', FLAG_UNREAD);
       let written = 0;
       return logged(
         'engine.rollback',
@@ -260,6 +316,7 @@ export function createEngine(deps: EngineDeps): Engine {
                   'ast_version',
                   'schema_version',
                   'origin',
+                  'fields',
                 ])
                 .where('organization_id', '=', tenant.organizationId)
                 .where('project_id', '=', tenant.projectId)
@@ -278,6 +335,8 @@ export function createEngine(deps: EngineDeps): Engine {
                 actor,
                 idempotencyKey: input.value.idempotencyKey,
                 expectedHeadVersionId: input.value.expectedHeadVersionId,
+                storedFields: target.fields as StoredFields,
+                maxFieldsBytes: config.maxNodeBytes,
                 // Chunked again and not copied: the target may predate chunking, and its rows
                 // belong to its own version.
                 chunksOf: () => {
@@ -312,7 +371,8 @@ export function createEngine(deps: EngineDeps): Engine {
               'n.type_id',
               'n.lifecycle',
               'n.head_version_id',
-              'n.head_content',
+              'n.head_fields',
+              sql`coalesce(n.head_content, v.content)`.as('content'),
               'v.seq',
               'v.ast_version',
             ])
@@ -330,7 +390,8 @@ export function createEngine(deps: EngineDeps): Engine {
             versionId: row.head_version_id === null ? null : idOf('ver', row.head_version_id),
             seq: row.seq,
             astVersion: row.ast_version,
-            content: row.head_content as NodeContent | null,
+            content: row.content as NodeContent | null,
+            fields: row.head_fields as StoredFields,
           };
         }),
       );
@@ -385,6 +446,60 @@ export function createEngine(deps: EngineDeps): Engine {
           }));
           return { items, nextBefore: rows.length > limit ? (items.at(-1)?.seq ?? null) : null };
         }),
+      );
+    },
+
+    async queryNodes(rawTenant, rawQuery) {
+      const input = parsedOrRefused(querySchema, { tenant: rawTenant, query: rawQuery });
+      if (!input.ok) return input;
+      const { tenant, query } = input.value;
+      let route = 'slots';
+      return logged(
+        'engine.query',
+        { ...tenantFields(tenant), type_id: query.typeId },
+        () =>
+          settled(() =>
+            store.tenant(
+              tenant,
+              async (tx) => {
+                const outcome = await runQuery(tx, tenant, query, config);
+                ({ route } = outcome);
+                return outcome.page;
+              },
+              { timeoutMs: config.queryTimeoutMs },
+            ),
+          ),
+        (value) => ({
+          route,
+          items: value.items.length,
+          backfilling: value.backfilling.length > 0,
+        }),
+      );
+    },
+
+    async declareSchema(raw) {
+      const input = parsedOrRefused(declareSchemaInput, raw);
+      if (!input.ok) return input;
+      const { tenant, typeId } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.declare_schema',
+        { ...tenantFields(tenant), type_id: typeId },
+        () => settled(() => store.tenant(tenant, (tx) => declareSchema(tx, tenant, input.value))),
+        (value) => ({ version: value.version, backfills: value.backfills }),
+      );
+    },
+
+    async backfillFilters(rawTenant) {
+      const input = parsedOrRefused(backfillInput, { tenant: rawTenant });
+      if (!input.ok) return input;
+      const { tenant } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.filter_backfill',
+        tenantFields(tenant),
+        () => settled(() => backfillStep(store, tenant)),
+        (state) => ({ state }),
       );
     },
   };
