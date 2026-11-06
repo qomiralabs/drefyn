@@ -39,6 +39,7 @@ export interface Supervisor {
 export function createSupervisor(config: SupervisorConfig, deps: SupervisorDeps): Supervisor {
   const { backoffMs, maxBackoffMs, crashLimit, crashWindowMs, coolOffMs } = config;
   const stopping = new AbortController();
+  const stopped = () => stopping.signal.aborted;
   let running: SupervisedHost | undefined;
 
   const log = (level: 'info' | 'warn' | 'error', event: string, fields: Fields) => {
@@ -58,11 +59,11 @@ export function createSupervisor(config: SupervisorConfig, deps: SupervisorDeps)
 
   const run = async () => {
     let crashes: number[] = [];
-    while (!stopping.signal.aborted) {
+    while (!stopped()) {
       running = deps.start();
       const { code, signal } = await running.exited;
       running = undefined;
-      if (stopping.signal.aborted) return;
+      if (stopped()) return;
 
       const at = deps.now();
       crashes = [...crashes.filter((crash) => at - crash < crashWindowMs), at];

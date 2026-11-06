@@ -196,6 +196,76 @@ describe('the parse host', () => {
   );
 
   it(
+    'leaves the caller serving with a retryable refusal when a thread aborts the host',
+    async () => {
+      const { host, url } = start([fixtureHost, 'abort']);
+      const client = createParseClient({ ...CLIENT, url: await url });
+      await expect(client.parse(page('a'))).resolves.toMatchObject({
+        error: [{ code: 'mdx.parse_unavailable' }],
+      });
+      await expect(ended(host)).resolves.toBe('SIGABRT');
+      await expect(client.parse(page('a'))).resolves.toMatchObject({
+        error: [{ code: 'mdx.parse_unavailable' }],
+      });
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'refuses a save with a retryable code when the host is down, and the last good stays',
+    async () => {
+      const { host, url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
+      const client = createParseClient({ ...CLIENT, url: await url });
+      // The shape of every save: only a good parse replaces what is stored.
+      let stored = '# Last good\n';
+      const save = async (source: string) => {
+        const result = await client.parse(page(source));
+        if (result.ok) stored = source;
+        return result;
+      };
+      await expect(save('# First\n')).resolves.toMatchObject({ ok: true });
+      host.kill('SIGKILL');
+      await ended(host);
+      await expect(save('# Second\n')).resolves.toMatchObject({
+        ok: false,
+        error: [{ code: 'mdx.parse_unavailable' }],
+      });
+      expect(stored).toBe('# First\n');
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'logs both ids on every page and never the page, from the real process',
+    async () => {
+      const { host, url } = start([hostMain], {
+        DREFYN_PARSE_PORT: '0',
+        DREFYN_PARSE_TIMEOUT_MS: '500',
+      });
+      let lines = '';
+      host.stdout.on('data', (chunk: Buffer) => {
+        lines += chunk.toString();
+      });
+      const client = createParseClient({ ...CLIENT, url: await url });
+      const canary = 'CANARY-PAGE-TEXT';
+      await client.parse(page(`# ${canary}\n`));
+      await client.parse(page(`> ${canary}\n${'b\n'.repeat(30_000)}`));
+      await expect
+        .poll(() => lines.split('\n').filter((line) => line.includes('"mdx.parse_')).length)
+        .toBeGreaterThanOrEqual(2);
+      const pages = lines.split('\n').filter((line) => /parse_(finished|refused)/.test(line));
+      expect(pages.length).toBeGreaterThanOrEqual(2);
+      for (const line of pages) {
+        expect(line).toContain(ORG_A);
+        expect(line).toContain(PROJECT_A);
+      }
+      expect(lines).not.toContain(canary);
+      expect(lines).not.toContain(HOST_TOKEN);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
     'refuses to start with a secret in its environment',
     async () => {
       const { host, url } = start([hostMain], {
@@ -707,14 +777,18 @@ describe('the client', () => {
       },
     );
 
-    it('add up to every page in the corpus and its line ending variants', () => {
-      for (const { text, dialect } of loadCorpus()) {
-        for (const [, variant] of VARIANTS) {
-          const source = variant(text);
-          expect(bytesOfTree(parsed(source, dialect))).toBe(source);
+    it(
+      'add up to every page in the corpus and its line ending variants',
+      () => {
+        for (const { text, dialect } of loadCorpus()) {
+          for (const [, variant] of VARIANTS) {
+            const source = variant(text);
+            expect(bytesOfTree(parsed(source, dialect))).toBe(source);
+          }
         }
-      }
-    });
+      },
+      TIMEOUT_MS,
+    );
   });
 
   it('has a timeout on every call', async () => {

@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { randomInt } from 'node:crypto';
-import { once } from 'node:events';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
@@ -32,10 +31,11 @@ function startHost(): SupervisedHost {
     { env: process.env, stdio: ['ignore', 'inherit', 'inherit'] },
   );
   logger.info('mdx.parse_host_started', { pid: child.pid ?? 0 });
-  const exited = once(child, 'exit').then(([exitCode, signal]) => ({
-    code: exitCode,
-    signal,
-  })) as Promise<HostExit>;
+  const exited = new Promise<HostExit>((settle) => {
+    child.once('exit', (exitCode, signal) => {
+      settle({ code: exitCode, signal });
+    });
+  });
   return {
     exited,
     stop() {

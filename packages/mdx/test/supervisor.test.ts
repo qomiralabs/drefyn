@@ -41,10 +41,11 @@ function harness(overrides: Partial<SupervisorDeps> = {}) {
         });
       }),
     start: () => {
-      const entry = { end: (_exit: HostExit) => undefined as void, stopped: 0 };
+      let end: (exit: HostExit) => void = () => undefined;
       const exited = new Promise<HostExit>((resolve) => {
-        entry.end = resolve;
+        end = resolve;
       });
+      const entry = { end, stopped: 0 };
       hosts.push(entry);
       const host: SupervisedHost = {
         exited,
@@ -103,7 +104,7 @@ describe('the supervisor', () => {
 
   it('never waits past its ceiling', async () => {
     const waits: number[] = [];
-    let stop = () => undefined as void;
+    const stopper: { stop?: () => void } = {};
     const supervisor = createSupervisor(
       { ...CONFIG, crashLimit: 100 },
       {
@@ -112,13 +113,15 @@ describe('the supervisor', () => {
         random: () => 1,
         sleep: (ms) => {
           waits.push(ms);
-          if (waits.length === 20) stop();
+          if (waits.length === 20) stopper.stop?.();
           return Promise.resolve();
         },
         start: () => ({ exited: Promise.resolve(KILLED), stop: () => undefined }),
       },
     );
-    stop = supervisor.stop;
+    stopper.stop = () => {
+      supervisor.stop();
+    };
     await supervisor.run();
     expect(waits).toHaveLength(20);
     expect(Math.max(...waits)).toBe(1_000);

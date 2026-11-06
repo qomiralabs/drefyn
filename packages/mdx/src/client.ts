@@ -80,8 +80,9 @@ async function readCapped(response: Response, cap: number): Promise<Read> {
   const hash = createHash('sha256');
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
-  let text: string | undefined = reader === undefined ? undefined : '';
+  let text = '';
   let bytes = 0;
+  let whole = reader !== undefined;
   if (reader !== undefined) {
     for (let read = await reader.read(); !read.done; read = await reader.read()) {
       const chunk = read.value as Uint8Array;
@@ -89,14 +90,14 @@ async function readCapped(response: Response, cap: number): Promise<Read> {
       hash.update(chunk);
       if (bytes > cap) {
         await reader.cancel();
-        text = undefined;
+        whole = false;
         break;
       }
       text += decoder.decode(chunk, { stream: true });
     }
   }
   return {
-    text: text === undefined ? text : text + decoder.decode(),
+    text: whole ? text + decoder.decode() : undefined,
     bytes,
     sha256: hash.digest('hex'),
   };
@@ -175,7 +176,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       const frame: WireRequest = { tenant, path, source, dialect, policy: wireOf(policy) };
       const body = JSON.stringify(frame);
       const check = (answer: JobResult) => checkParsed(answer, source);
-      return (await post({ route: '/parse', body, tenant, path, check })) as ParseResult;
+      return await post({ route: '/parse', body, tenant, path, check });
     },
     async print(request) {
       const { tenant, path, root, policy } = request;

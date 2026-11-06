@@ -17,6 +17,7 @@
     "test:fuzz": "node fuzz/run.ts",
     "test:mutation": "stryker run",
     "bench": "node bench/roundtrip.ts",
+    "bench:host": "node bench/host.ts",
     "pin:ast": "node test/pin-ast.ts"
   },
   "dependencies": {

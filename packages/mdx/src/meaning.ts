@@ -99,9 +99,14 @@ const REFERENCES = new Set(['footnoteReference', 'imageReference', 'linkReferenc
 const hasReference = (node: Shaped): boolean =>
   REFERENCES.has(node.type) || (node.children ?? []).some(hasReference);
 
-const asWritten = ({ referenceType, label, identifier }: Shaped) => {
-  if (referenceType === 'full') return `[${String(label ?? identifier ?? '')}]`;
-  return referenceType === 'collapsed' ? '[]' : '';
+const labelOf = ({ label, identifier }: Shaped) => {
+  if (typeof label === 'string') return label;
+  return typeof identifier === 'string' ? identifier : '';
+};
+
+const asWritten = (node: Shaped) => {
+  if (node.referenceType === 'full') return `[${labelOf(node)}]`;
+  return node.referenceType === 'collapsed' ? '[]' : '';
 };
 
 // GFM links a bare URL only in text, so one inside a reference settles into a link once the
@@ -109,8 +114,9 @@ const asWritten = ({ referenceType, label, identifier }: Shaped) => {
 function settledUrl({ type, url, children }: Shaped): string | undefined {
   const [only] = children ?? [];
   if (type !== 'link' || children?.length !== 1 || only?.type !== 'text') return undefined;
-  const words = typeof only.value === 'string' ? only.value : '';
-  return [words, `http://${words}`, `mailto:${words}`].includes(String(url)) ? words : undefined;
+  if (typeof only.value !== 'string' || typeof url !== 'string') return undefined;
+  const words = only.value;
+  return [words, `http://${words}`, `mailto:${words}`].includes(url) ? words : undefined;
 }
 
 const fieldsOf = (node: Shaped) =>
@@ -133,7 +139,7 @@ function spelled(node: Shaped): string {
     case 'imageReference':
       return `![${typeof node.alt === 'string' ? node.alt : ''}]${asWritten(node)}`;
     case 'footnoteReference':
-      return `[^${String(node.label ?? node.identifier ?? '')}]`;
+      return `[^${labelOf(node)}]`;
     default:
       // Private use, so page text cannot spell its way into this seam.
       return settledUrl(node) ?? `${fieldsOf(node)}${inner}`;

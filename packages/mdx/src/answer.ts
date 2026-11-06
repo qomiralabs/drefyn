@@ -29,7 +29,7 @@ export function checkParsed(answer: JobResult, source: string): ParseResult {
   const parsed = parsedSchema.safeParse(answer.value);
   if (!parsed.success) return refused('mdx.parse_failed');
   const tree = parsed.data.ast as unknown as MdxRoot;
-  return bytesOfTree(tree) === source ? (answer as ParseResult) : refused('mdx.parse_failed');
+  return bytesOfTree(tree) === source ? answer : refused('mdx.parse_failed');
 }
 
 export function checkPrinted(answer: JobResult): PrintResult {

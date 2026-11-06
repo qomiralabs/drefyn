@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createSupervisor } from '../../../src/supervisor.ts';
 
@@ -23,10 +22,11 @@ const supervisor = createSupervisor(
         { env: process.env, stdio: ['ignore', 'inherit', 'inherit'] },
       );
       return {
-        exited: once(child, 'exit').then(([code, signal]) => ({
-          code: code as number | null,
-          signal: signal as string | null,
-        })),
+        exited: new Promise((settle) => {
+          child.once('exit', (code, signal) => {
+            settle({ code, signal });
+          });
+        }),
         stop: () => {
           child.kill('SIGKILL');
         },

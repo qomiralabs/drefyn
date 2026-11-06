@@ -216,14 +216,22 @@ describe('many hostile files', () => {
       const flood = Array.from({ length: 8 }, (_, tenant) =>
         Array.from({ length: 5 }, () => pool.parse(request(bomb, PROJECT_A, 'md', orgAt(tenant)))),
       ).flat();
-      // Eight projects hold 24 places, so this one takes the last and the next bomb finds none.
+      // Eight organizations hold 24 places, so this one takes the last. A newcomer after it takes
+      // places from them, until it holds as much as they do and has to wait with the rest.
       expect(pool.stats().queued).toBe(24);
       const honestPage = pool.parse(request(honest, PROJECT_A, 'md', orgAt(99)));
-      const late = pool.parse(request(bomb, PROJECT_A, 'md', orgAt(8)));
-      expect(codeOf(await late)).toBe('mdx.queue_full');
+      const late = [
+        pool.parse(request(bomb, projectAt(1), 'md', orgAt(8))),
+        pool.parse(request(bomb, projectAt(2), 'md', orgAt(8))),
+      ];
+      expect(pool.stats().queued).toBe(25);
+      const third = pool.parse(request(bomb, projectAt(3), 'md', orgAt(8)));
+      expect(codeOf(await third)).toBe('mdx.queue_full');
 
-      const codes = (await Promise.all(flood)).map(codeOf);
-      expect(new Set(codes)).toEqual(new Set(['mdx.parse_timeout', 'mdx.organization_limit']));
+      const codes = (await Promise.all([...flood, ...late])).map(codeOf);
+      expect(new Set(codes)).toEqual(
+        new Set(['mdx.parse_timeout', 'mdx.organization_limit', 'mdx.queue_full']),
+      );
       expect(codeOf(await honestPage)).toBe('ok');
       expect(pool.stats()).toMatchObject({ busy: 0, queued: 0 });
       expect(pool.stats().threads).toBeLessThanOrEqual(2);

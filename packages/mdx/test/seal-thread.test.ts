@@ -38,11 +38,12 @@ describe('the seal', () => {
     ['a signal to the host', () => process.kill(process.pid, 0)],
     [
       'the same signal by its private name',
-      () =>
+      () => {
         (process as unknown as { _kill: (pid: number, signal: number) => void })._kill(
           process.pid,
           0,
-        ),
+        );
+      },
     ],
     ['a report that prints the environment', () => process.report.getReport()],
     [

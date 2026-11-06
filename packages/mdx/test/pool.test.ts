@@ -680,7 +680,7 @@ describe('a full queue', () => {
       maxQueuedPerProject: 8,
     });
     holdThreads(pool);
-    for (let org = 0; org < 8; org += 1) queueUp(pool, org, 8);
+    for (let org = 0; org < 8; org += 1) void queueUp(pool, org, 8);
     await flush();
     expect(pool.stats().queued).toBe(64);
     const honest = pool.parse(request(PROJECT_B, 'honest', ORG_B));
@@ -697,8 +697,8 @@ describe('a full queue', () => {
   it('refuses when the one asking already holds about as much as anyone', async () => {
     const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
     holdThreads(pool);
-    queueUp(pool, 1, 2);
-    queueUp(pool, 2, 2);
+    void queueUp(pool, 1, 2);
+    void queueUp(pool, 2, 2);
     await flush();
     const extra = pool.parse(request(projectAt(9), 'extra', orgAt(3)));
     void extra;
@@ -711,7 +711,7 @@ describe('a full queue', () => {
   it('refuses when every place is held by a different organization', async () => {
     const { pool } = harness({ ...FAIR, maxQueued: 4, maxQueuedPerOrg: 2 });
     holdThreads(pool);
-    for (let org = 0; org < 4; org += 1) queueUp(pool, org, 1);
+    for (let org = 0; org < 4; org += 1) void queueUp(pool, org, 1);
     await flush();
     await expect(codeOf(pool.parse(request(PROJECT_B, 'honest', ORG_B)))).resolves.toBe(
       'mdx.queue_full',
@@ -721,8 +721,8 @@ describe('a full queue', () => {
   it('logs the page it gave up, by hash and with both ids', async () => {
     const { pool, logger } = harness(FAIR);
     holdThreads(pool);
-    queueUp(pool, 1, 4);
-    queueUp(pool, 2, 4);
+    void queueUp(pool, 1, 4);
+    void queueUp(pool, 2, 4);
     await flush();
     void pool.parse(request(PROJECT_B, 'honest', ORG_B));
     await flush();
