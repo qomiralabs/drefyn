@@ -49,6 +49,8 @@ jobs:
       # Sessions, revocation and step up against the same stack, on databases of their own.
       - name: Auth integration tests
         run: pnpm --filter @drefyn/auth test:integration
+      - name: Engine integration tests
+        run: pnpm --filter @drefyn/engine test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the
