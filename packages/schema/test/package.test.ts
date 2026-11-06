@@ -49,6 +49,7 @@ describe('package layout', () => {
       'MAX_LABEL_LENGTH',
       'MAX_LIST_ITEMS',
       'MAX_REFERENCE_TARGETS',
+      'MAX_RETIRED_FIELDS',
       'MAX_TEXT_BYTES',
       'SCHEMA_ERROR_CODES',
       'UNDECLARED_FILTER_MAX_ITEMS',

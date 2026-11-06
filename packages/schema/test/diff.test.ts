@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateSchema, type ContentSchema, type FieldDef } from '../src/index.ts';
+import { validateSchema, type ContentSchema, type FieldDef, type FieldId } from '../src/index.ts';
 import {
   asset,
   bool,
@@ -131,7 +131,7 @@ describe('removing', () => {
 
   it('removes a deprecated field once confirmed', () => {
     const prior = schema([text(1), text(2)], { deprecated: [fid(2)] });
-    const after = next(prior, [text(1)], []);
+    const after = next(prior, [text(1)], [], [fid(2)]);
     expect(diff(after, prior, { confirmedRemovals: [fid(2)] })).toMatchObject({
       removed: [fid(2)],
       additive: false,
@@ -148,7 +148,7 @@ describe('removing', () => {
 
   it('removes children with a confirmed parent', () => {
     const prior = schema([text(1), object(2, [text(3)])], { deprecated: [fid(2)] });
-    const after = next(prior, [text(1)], []);
+    const after = next(prior, [text(1)], [], [fid(2), fid(3)]);
     expect(diff(after, prior, { confirmedRemovals: [fid(2)] }).removed).toEqual([fid(2), fid(3)]);
   });
 
@@ -215,7 +215,7 @@ describe('changes in place', () => {
     ['required dropped', text(1, { required: true }), text(1), 'required_dropped'],
     ['filter dropped', text(1, { filterable: true }), text(1), 'undeclared'],
     ['sort dropped', number(1, { sortable: true }), number(1), 'undeclared'],
-    ['list item swapped', list(1, text(2)), list(1, text(3)), 'removed'],
+    ['list item swapped', list(1, text(2)), list(1, text(3)), 'retyped'],
   ])('refuses %s', (_name, a, b, reason) => {
     retyped(a, b, reason);
   });
@@ -298,6 +298,101 @@ describe('changes in place', () => {
     const prior = schema([{ ...number(1), min: 'junk' } as FieldDef]);
     const after = next(prior, [{ ...number(1), min: '1.00' } as FieldDef]);
     expect(refused(after, prior)).toMatchObject({ reason: 'narrowed' });
+  });
+});
+
+describe('list elements', () => {
+  const confirmed = { confirmedRemovals: [fid(2)] };
+
+  it('refuses swapping an element after a confirmed removal', () => {
+    const prior = schema([list(1, text(2))], { deprecated: [fid(2)] });
+    const after = next(prior, [list(1, number(3))], [], [fid(2)]);
+    expect(refused(after, prior, confirmed)).toEqual({
+      path: 'fields.0.of',
+      code: 'schema.breaking_in_place',
+      reason: 'retyped',
+      fieldId: fid(2),
+    });
+  });
+
+  it('refuses it inside a nested list and inside an object', () => {
+    const nestedList = schema([list(1, list(4, text(2)))], { deprecated: [fid(2)] });
+    const afterList = next(nestedList, [list(1, list(4, number(3)))], [], [fid(2)]);
+    expect(refused(afterList, nestedList, confirmed)).toMatchObject({ reason: 'retyped' });
+
+    const inObject = schema([object(4, [list(1, text(2))])], { deprecated: [fid(2)] });
+    const afterObject = next(inObject, [object(4, [list(1, number(3))])], [], [fid(2)]);
+    expect(refused(afterObject, inObject, confirmed)).toMatchObject({ reason: 'retyped' });
+  });
+
+  it('still removes a list with its element', () => {
+    const prior = schema([text(4), list(1, text(2))], { deprecated: [fid(1)] });
+    const after = next(prior, [text(4)], [], [fid(1), fid(2)]);
+    expect(diff(after, prior, { confirmedRemovals: [fid(1)] }).removed).toEqual([fid(1), fid(2)]);
+  });
+
+  it('still removes a confirmed field of an object element', () => {
+    const prior = schema([list(1, object(2, [text(3), text(4)]))], { deprecated: [fid(4)] });
+    const after = next(prior, [list(1, object(2, [text(3)]))], [], [fid(4)]);
+    expect(diff(after, prior, { confirmedRemovals: [fid(4)] }).removed).toEqual([fid(4)]);
+  });
+});
+
+describe('removed ids', () => {
+  const start = schema([text(1), text(2)], { deprecated: [fid(2)] });
+  const gone = next(start, [text(1)], [], [fid(2)]);
+
+  it('records a removal for good', () => {
+    const later = next(gone, [text(1), text(3)]);
+    expect(diff(later, gone).added).toEqual([fid(3)]);
+    expect(later.retired).toEqual([fid(2)]);
+  });
+
+  it.each<[string, FieldDef]>([
+    ['a new kind', number(2)],
+    ['the same kind', text(2)],
+    ['another name', text(2, { apiName: 'other' })],
+  ])('refuses the id coming back with %s', (_name, field) => {
+    expect(refused(next(gone, [text(1), field]), gone)).toMatchObject({
+      code: 'schema.breaking_in_place',
+      reason: 'reused',
+      fieldId: fid(2),
+    });
+  });
+
+  it('refuses it inside an object or as a list element', () => {
+    const inObject = next(gone, [text(1), object(3, [number(2)])]);
+    expect(refused(inObject, gone)).toMatchObject({ reason: 'reused', fieldId: fid(2) });
+    const asElement = next(gone, [text(1), list(3, number(2))]);
+    expect(refused(asElement, gone)).toMatchObject({ reason: 'reused', fieldId: fid(2) });
+  });
+
+  it('refuses it when the record is dropped to hide the reuse', () => {
+    const after = next(gone, [text(1), number(2)], [], []);
+    expect(refused(after, gone)).toMatchObject({ reason: 'reused', fieldId: fid(2) });
+  });
+
+  it.each<[string, readonly FieldId[]]>([
+    ['dropped', []],
+    ['invented', [fid(2), fid(9)]],
+  ])('refuses a record with an id %s', (_name, retired) => {
+    expect(refused(next(gone, gone.fields, [], retired), gone)).toEqual({
+      path: 'retired',
+      code: 'schema.breaking_in_place',
+      reason: 'retired',
+    });
+  });
+
+  it('refuses a confirmed removal left out of the record', () => {
+    const after = next(start, [text(1)], [], []);
+    expect(refused(after, start, { confirmedRemovals: [fid(2)] })).toMatchObject({
+      reason: 'retired',
+    });
+  });
+
+  it('takes the record in any order', () => {
+    const two = schema([text(1)], { version: 3, retired: [fid(2), fid(3)] });
+    expect(diff(next(two, two.fields, [], [fid(3), fid(2)]), two).added).toEqual([]);
   });
 });
 

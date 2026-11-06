@@ -110,6 +110,7 @@ export const schema = (
   version: 1,
   fields,
   deprecated: [],
+  retired: [],
   ...extra,
 });
 
@@ -117,7 +118,14 @@ export const next = (
   prior: ContentSchema,
   fields: readonly FieldDef[] = prior.fields,
   deprecated: readonly FieldId[] = prior.deprecated,
-): ContentSchema => ({ ...prior, version: prior.version + 1, fields, deprecated });
+  retired: readonly FieldId[] = prior.retired,
+): ContentSchema => ({ ...prior, version: prior.version + 1, fields, deprecated, retired });
+
+export const idsOf = (field: FieldDef): FieldId[] => {
+  if (field.kind === 'list') return [field.id, ...idsOf(field.of)];
+  if (field.kind === 'object') return [field.id, ...field.fields.flatMap(idsOf)];
+  return [field.id];
+};
 
 const scalar = (n: number): fc.Arbitrary<FieldDef> =>
   fc.oneof(

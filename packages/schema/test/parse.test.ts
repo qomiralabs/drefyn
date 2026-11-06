@@ -3,6 +3,7 @@ import {
   asFieldId,
   asTypeId,
   MAX_FIELDS,
+  MAX_RETIRED_FIELDS,
   parseContentSchema,
   validateSchema,
 } from '../src/index.ts';
@@ -54,6 +55,7 @@ describe('parseContentSchema', () => {
     ['an array', []],
     ['no fields', schema([])],
     ['an empty object field', schema([object(1, [])])],
+    ['no retired list', { ...schema([text(1)]), retired: undefined }],
     ['an empty label', schema([text(1, { label: '' })])],
     ['a free text id', schema([{ ...text(1), id: "x'; drop" } as never])],
     ['an unknown kind', schema([{ ...text(1), kind: 'money' } as never])],
@@ -69,7 +71,7 @@ describe('parseContentSchema', () => {
 
   it('refuses unknown keys, including an own __proto__ key from JSON', () => {
     const polluted = JSON.parse(
-      `{"typeId":"00000000-0000-7000-9000-000000000001","apiName":"A","version":1,"deprecated":[],
+      `{"typeId":"00000000-0000-7000-9000-000000000001","apiName":"A","version":1,"deprecated":[],"retired":[],
         "fields":[{"id":"${fid(1)}","apiName":"a","label":"a","required":false,"kind":"boolean",
         "__proto__":{"polluted":true}}]}`,
     ) as unknown;
@@ -103,7 +105,9 @@ describe('parseContentSchema', () => {
       ...asset(i + 1, { localized: true, unique: false, filterable: false, sortable: false }),
       accept: Array.from({ length: 32 }, (_x, j) => `image/x${j}`),
     }));
-    expect(code(json(schema(fields, { deprecated: fields.map((f) => f.id) })))).toBeNull();
+    const retired = Array.from({ length: MAX_RETIRED_FIELDS }, (_, i) => fid(i + 1_000));
+    const largest = schema(fields, { deprecated: fields.map((f) => f.id), retired });
+    expect(code(json(largest))).toBeNull();
   });
 
   it('never repeats input text in an error', () => {

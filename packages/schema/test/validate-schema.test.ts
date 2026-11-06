@@ -4,6 +4,7 @@ import {
   MAX_FIELDS,
   MAX_LABEL_LENGTH,
   MAX_REFERENCE_TARGETS,
+  MAX_RETIRED_FIELDS,
   MAX_TEXT_BYTES,
   SCHEMA_ERROR_CODES,
   validateSchema,
@@ -170,6 +171,31 @@ describe('references', () => {
     expect(codes(schema([text(1)], { deprecated: [fid(1), fid(1)] }))).toEqual([
       'schema.malformed',
     ]);
+  });
+});
+
+describe('the retired list', () => {
+  it('must start empty', () => {
+    expect(codes(schema([text(1)], { retired: [fid(2)] }))).toEqual(['schema.malformed']);
+  });
+
+  it('refuses a repeat', () => {
+    const prior = schema([text(1)], { version: 2, retired: [fid(2)] });
+    expect(codes(next(prior, prior.fields, [], [fid(2), fid(2)]), prior)).toEqual([
+      'schema.malformed',
+    ]);
+  });
+
+  it('refuses a deprecated id that was retired', () => {
+    const prior = schema([text(1)], { version: 2, retired: [fid(2)] });
+    expect(codes(next(prior, prior.fields, [fid(2)]), prior)).toEqual(['schema.reference_unknown']);
+  });
+
+  it('is capped, and a stored list at the cap still passes', () => {
+    const ids = Array.from({ length: MAX_RETIRED_FIELDS + 1 }, (_, i) => fid(i + 10));
+    const full = schema([text(1)], { version: 2, retired: ids.slice(1) });
+    expect(codes(next(full), full)).toEqual([]);
+    expect(codes(next(full, full.fields, [], ids), full)).toContain('schema.too_large');
   });
 });
 

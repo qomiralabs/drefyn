@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { validateSchema, type ContentSchema, type FieldDef } from '../src/index.ts';
-import { anySchema, bool, fid, next, text } from './support.ts';
+import { anySchema, bool, fid, idsOf, next, number, text } from './support.ts';
 
 const NEW_FIELD = 9_000;
 
@@ -87,12 +87,57 @@ describe('schema diff', () => {
 
         const without = deprecating.fields.filter((f) => f !== target);
         fc.pre(without.length > 0);
-        const dropped = next(deprecating, without, []);
+        const dropped = next(deprecating, without, [], idsOf(target));
         expect(validateSchema(dropped, deprecating).ok).toBe(false);
 
         const confirmed = validateSchema(dropped, deprecating, { confirmedRemovals: [target.id] });
         expect(confirmed.ok).toBe(true);
         if (confirmed.ok) expect(confirmed.value.removed).toContain(target.id);
+      }),
+    );
+  });
+
+  it('refuses any removed id coming back, at any later version', () => {
+    fc.assert(
+      fc.property(anySchema, fc.nat(), fc.nat({ max: 3 }), (first, index, gap) => {
+        const target = pick(first, index);
+        const kept = first.fields.filter((f) => f !== target);
+        fc.pre(kept.length > 0);
+        const deprecating = next(first, first.fields, [target.id]);
+        let stored = next(deprecating, kept, [], idsOf(target));
+        const step = validateSchema(stored, deprecating, { confirmedRemovals: [target.id] });
+        expect(step.ok).toBe(true);
+        for (let i = 0; i < gap; i += 1) stored = next(stored);
+
+        const back: FieldDef = { ...number(NEW_FIELD), id: target.id };
+        const result = validateSchema(next(stored, [...kept, back]), stored);
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: 'schema.breaking_in_place' },
+        });
+      }),
+    );
+  });
+
+  it('refuses swapping any list element, confirmed or not', () => {
+    fc.assert(
+      fc.property(anySchema, fc.boolean(), (first, confirm) => {
+        const target = first.fields.find((f) => f.kind === 'list');
+        fc.pre(target !== undefined);
+        if (target?.kind !== 'list') return;
+        const element = target.of;
+        const prior = { ...first, deprecated: [element.id] };
+        const swapped: FieldDef = { ...target, of: number(NEW_FIELD) };
+        const fields = prior.fields.map((f) => (f === target ? swapped : f));
+        const result = validateSchema(
+          next(prior, fields, [], idsOf(element)),
+          prior,
+          confirm ? { confirmedRemovals: [element.id] } : {},
+        );
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: 'schema.breaking_in_place' },
+        });
       }),
     );
   });
