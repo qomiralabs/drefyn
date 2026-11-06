@@ -126,7 +126,7 @@ interface Slot {
 
 // Only a print has steps to report, and only the pool knows the wait ahead of them.
 const withHostTimes = (result: JobResult, waitedMs: number, threadMs: number): JobResult =>
-  result.ok && 'timing' in result.value && result.value.timing !== undefined
+  result.ok && 'timing' in result.value
     ? {
         ...result,
         value: { ...result.value, timing: { ...result.value.timing, waitedMs, threadMs } },

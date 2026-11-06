@@ -340,7 +340,7 @@ export function createEngine(deps: EngineDeps): Engine {
               'n.type_id',
               'n.lifecycle',
               'n.head_version_id',
-              sql<unknown>`coalesce(n.head_content, v.content)`.as('content'),
+              sql`coalesce(n.head_content, v.content)`.as('content'),
               'v.seq',
               'v.ast_version',
             ])
