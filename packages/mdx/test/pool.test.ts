@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_LIMITS } from '../src/index.ts';
 import type { ParseResult } from '../src/index.ts';
 import { createParsePool } from '../src/pool.ts';
-import type { ParseRequest } from '../src/pool.ts';
+import type { ParseRequest, PrintRequest } from '../src/pool.ts';
 import type { ParsePoolConfig } from '../src/pool-config.ts';
 import { RECYCLE_AFTER_JOBS } from '../src/thread.ts';
-import type { ParseThread, ThreadAnswer } from '../src/thread.ts';
+import type { ParseThread, ThreadAnswer, ThreadJob } from '../src/thread.ts';
 import {
   isolatedPolicy,
   ORG_A,
@@ -42,8 +42,8 @@ class FakeThread implements ParseThread {
   isAlive = true;
   stopped = 0;
 
-  run(job: { source: string }) {
-    this.sources.push(job.source);
+  run(job: ThreadJob) {
+    this.sources.push('source' in job ? job.source : job.tree);
     return new Promise<ThreadAnswer>((resolve) => {
       this.jobs.push(resolve);
     });
@@ -82,6 +82,13 @@ function harness(config: Partial<ParsePoolConfig> = {}) {
   };
   return { pool, threads, logger, clock, finish, onStuck };
 }
+
+const printing = (tree = '{}', projectId = PROJECT_A): PrintRequest => ({
+  tenant: { organizationId: ORG_A, projectId },
+  path: 'docs/page.mdx',
+  tree,
+  policy: isolatedPolicy(),
+});
 
 const request = (projectId = PROJECT_A, source = 'page', organizationId = ORG_A): ParseRequest => ({
   tenant: { organizationId, projectId },
@@ -559,5 +566,68 @@ describe('input', () => {
     const { pool, threads } = harness();
     await expect(pool.parse({ ...request(), ...change } as ParseRequest)).rejects.toThrow();
     expect(threads).toEqual([]);
+  });
+});
+
+describe('printing in the pool', () => {
+  it('hands the tree to a thread and the answer back', async () => {
+    const { pool, threads } = harness();
+    const printed = pool.print(printing('{"tree":1}'));
+    await flush();
+    expect(threads[0]?.sources).toEqual(['{"tree":1}']);
+    threads[0]?.jobs[0]?.(done);
+    await expect(printed).resolves.toEqual(OK);
+  });
+
+  it('takes turns on the same queue and limit as a parse', async () => {
+    const { pool, threads } = harness({ maxQueuedPerProject: 1, projectThreads: 1 });
+    const first = pool.parse(request());
+    const second = pool.print(printing());
+    await flush();
+    expect(await codeOf(pool.print(printing()))).toBe('mdx.project_limit');
+    threads[0]?.jobs[0]?.(done);
+    await first;
+    await flush();
+    threads[0]?.jobs[1]?.(done);
+    await second;
+  });
+
+  it('refuses a tree too big for its limits before the queue', async () => {
+    const { pool, threads } = harness();
+    const small = {
+      ...printing('x'.repeat(33)),
+      policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
+    };
+    expect(await codeOf(pool.print(small))).toBe('mdx.too_large');
+    expect(threads).toEqual([]);
+  });
+
+  it('takes a tree at exactly that size', async () => {
+    const { pool, threads } = harness();
+    const fits = {
+      ...printing('x'.repeat(32)),
+      policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
+    };
+    const printed = pool.print(fits);
+    await flush();
+    threads[0]?.jobs[0]?.(done);
+    await expect(printed).resolves.toEqual(OK);
+  });
+
+  it('rejects a bad policy or a forged tenant, which is our bug', async () => {
+    const { pool } = harness();
+    const bad = { ...printing(), policy: { ...isolatedPolicy(), version: -1 } };
+    await expect(pool.print(bad)).rejects.toThrow();
+    const forged = { ...printing(), tenant: { organizationId: 'x', projectId: 'y' } };
+    await expect(pool.print(forged as PrintRequest)).rejects.toThrow();
+  });
+
+  it('logs the size and hash of a tree, and never the tree', async () => {
+    const { pool, threads, logger } = harness();
+    const printed = pool.print(printing('{"CANARY":1}'));
+    await flush();
+    threads[0]?.jobs[0]?.(done);
+    await printed;
+    expect(JSON.stringify(logger)).not.toContain('CANARY');
   });
 });

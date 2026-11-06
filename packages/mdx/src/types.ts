@@ -53,7 +53,9 @@ export type MdxIssueCode =
   | 'mdx.queue_full'
   | 'mdx.organization_limit'
   | 'mdx.project_limit'
-  | 'mdx.parse_unavailable';
+  | 'mdx.parse_unavailable'
+  | 'mdx.block_not_printable'
+  | 'mdx.print_changed_meaning';
 
 // Codes and places only: an issue can reach a log, and customer text must not.
 export interface MdxIssue {
@@ -83,6 +85,17 @@ export interface RenderPolicy {
   readonly linkProtocols: readonly ('https' | 'http' | 'mailto')[];
   readonly limits: MdxLimits;
 }
+
+// The bytes, and the tree they parse to. Store that tree and not the one sent: only this one is
+// known to agree with what git will hold.
+export type PrintResult = Result<
+  {
+    readonly text: string;
+    readonly ast: MdxRoot;
+    readonly issues: readonly MdxIssue[];
+  },
+  readonly MdxIssue[]
+>;
 
 export type ParseResult = Result<
   { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[] },

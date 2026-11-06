@@ -8,9 +8,14 @@ if (!process.execArgv.includes('--permission')) {
 }
 assertHostEnv(process.env);
 
-const { pool: config, port } = parseHostConfig(process.env);
+const { pool: config, port, maxHeldBytes } = parseHostConfig(process.env);
 const write = (level: string) => (event: string, fields: LogFields) => {
   process.stdout.write(`${JSON.stringify({ level, event, ...fields })}\n`);
 };
 
-await startParseHost({ config, port, logger: { info: write('info'), warn: write('warn') } });
+await startParseHost({
+  config,
+  port,
+  maxHeldBytes,
+  logger: { info: write('info'), warn: write('warn') },
+});

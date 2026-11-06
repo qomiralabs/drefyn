@@ -1,7 +1,7 @@
 import { createServer } from 'node:net';
 import type { Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { createParsePool } from '../src/pool.ts';
 import type { ParsePool } from '../src/pool.ts';
 import type { ParsePoolConfig } from '../src/pool-config.ts';

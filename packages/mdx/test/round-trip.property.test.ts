@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import type { Dialect } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
 import { documentArbitrary, dialectArbitrary } from '../fuzz/documents.ts';

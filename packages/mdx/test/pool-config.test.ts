@@ -1,11 +1,12 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { parsePoolConfig } from '../src/pool-config.ts';
+import { DEFAULT_PRINT_TIMEOUT_MS, parsePoolConfig } from '../src/pool-config.ts';
 
 describe('parsePoolConfig', () => {
   it('has defaults that keep a bomb from taking every thread', () => {
     const config = parsePoolConfig({});
     expect(config.timeoutMs).toBe(2_000);
+    expect(config.printTimeoutMs).toBe(DEFAULT_PRINT_TIMEOUT_MS);
     expect(config.orgThreads).toBeLessThan(config.threads);
     expect(config.maxQueuedPerOrg).toBeLessThan(config.maxQueued);
     expect(config.orgBudgetMs).toBeLessThan(config.windowMs);
@@ -17,6 +18,7 @@ describe('parsePoolConfig', () => {
     expect(
       parsePoolConfig({
         DREFYN_PARSE_TIMEOUT_MS: '750',
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: '900',
         DREFYN_PARSE_WORKER_MEMORY_MB: '128',
         DREFYN_PARSE_THREADS: '4',
         DREFYN_PARSE_QUEUE_MAX: '10',
@@ -31,6 +33,7 @@ describe('parsePoolConfig', () => {
       }),
     ).toEqual({
       timeoutMs: 750,
+      printTimeoutMs: 900,
       maxMemoryMb: 128,
       threads: 4,
       maxQueued: 10,
@@ -47,6 +50,8 @@ describe('parsePoolConfig', () => {
 
   it.each([
     ['a zero timeout', { DREFYN_PARSE_TIMEOUT_MS: '0' }],
+    ['a print limit under the parse limit', { DREFYN_PARSE_PRINT_TIMEOUT_MS: '1999' }],
+    ['a print limit past the project budget', { DREFYN_PARSE_PRINT_TIMEOUT_MS: '20001' }],
     ['an endless timeout', { DREFYN_PARSE_TIMEOUT_MS: '600001' }],
     ['a timeout in words', { DREFYN_PARSE_TIMEOUT_MS: 'soon' }],
     ['a fractional timeout', { DREFYN_PARSE_TIMEOUT_MS: '1.5' }],

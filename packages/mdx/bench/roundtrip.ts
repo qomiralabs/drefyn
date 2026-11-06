@@ -4,7 +4,7 @@
 // Plain Node, not vitest bench: its module runner adds to every call and it reports no p95.
 import { cpus, loadavg } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import type { Dialect } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
 import { loadCorpus, policy } from '../test/helpers.ts';
