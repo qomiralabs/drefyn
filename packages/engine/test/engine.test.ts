@@ -212,7 +212,7 @@ describe('content', () => {
   it('blames the page when it parses into more than the cap', async () => {
     const bytes = Buffer.byteLength(JSON.stringify(page));
     const { engine } = build(happy, {
-      config: { maxNodeBytes: 1_048_576, maxTreeBytes: bytes + 8 },
+      config: { ...DEFAULT_ENGINE_CONFIG, maxNodeBytes: 1_048_576, maxTreeBytes: bytes + 8 },
       parse: {
         print: () => Promise.resolve(printed({ ...page, tail: 'x'.repeat(bytes) })),
       },
@@ -656,16 +656,6 @@ describe('chunks at write', () => {
     expect(isOn).toHaveBeenCalledWith('engine.chunk_at_write', tenant);
   });
 
-  it('leaves no outbox row for a page with nothing to embed', async () => {
-    const empty = treeOf([]);
-    const { engine, statements } = build(happy, {
-      parse: { print: () => Promise.resolve(printed(empty)) },
-    });
-    expect(await engine.saveDraft(save({ content: empty }))).toMatchObject({ ok: true });
-    expect(chunkWrites(statements)).toEqual([]);
-    expect(outboxWrites(statements)).toEqual([]);
-  });
-
   it('writes nothing more for a replay', async () => {
     const replayed: Responder = (statement) =>
       has(statement, '"idempotency_key" = ')
@@ -716,23 +706,6 @@ describe('chunks at write', () => {
     const { engine, ends } = build(failing);
     await engine.saveDraft(save());
     expect(ends).toEqual(['rollback']);
-  });
-
-  // 65,535 is the wire limit on bind parameters, and a page of headings makes a row per heading.
-  it('stays under the parameter limit on a page of headings', async () => {
-    const specs = Array.from({ length: 25_000 }, (_, at) => ({
-      raw: `# ${String(at)}`,
-      heading: { depth: 1, text: String(at) } as const,
-    }));
-    const wide = treeOf(specs);
-    const { engine, statements } = build(happy, {
-      parse: { print: () => Promise.resolve(printed(wide)) },
-      config: { ...DEFAULT_ENGINE_CONFIG, maxTreeBytes: 16_000_000 },
-    });
-    expect(await engine.saveDraft(save({ content: wide }))).toMatchObject({ ok: true });
-    const writes = chunkWrites(statements);
-    expect(writes.length).toBeGreaterThan(1);
-    for (const { parameters } of writes) expect(parameters.length).toBeLessThan(65_535);
   });
 
   describe('on a rollback', () => {

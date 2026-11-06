@@ -130,9 +130,9 @@ describe('chunkNode boundaries', () => {
 
   it('skips a block that has no source yet, as printing would give it one', () => {
     const root = treeOf([{ raw: 'One.' }, { raw: 'Two.' }]);
-    const { source: _dropped, ...fresh } = root.children[1] ?? {};
-    const page = { ...root, children: [root.children[0], fresh] } as typeof root;
-    expect(chunkNode(page, options).map(({ body }) => body)).toEqual(['One.']);
+    const [first, second] = root.children;
+    const page = { ...root, children: [first, { ...second, source: undefined }] };
+    expect(chunkNode(page as typeof root, options).map(({ body }) => body)).toEqual(['One.']);
   });
 
   it.each([

@@ -14,7 +14,7 @@ export interface EngineTracer {
 }
 
 export interface EngineFlags {
-  isOn(name: 'engine.writes', context: FlagContext): Promise<boolean>;
+  isOn(name: 'engine.writes' | 'engine.chunk_at_write', context: FlagContext): Promise<boolean>;
 }
 
 export const noopLogger: EngineLogger = { info: () => undefined, warn: () => undefined };

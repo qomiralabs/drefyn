@@ -25,6 +25,7 @@ import {
   type Built,
   type Seeded,
 } from './support/fixture.ts';
+import { chunkForeignKeyCost } from './support/foreign-keys.ts';
 import { describeWithStack } from './support/presence.ts';
 import { sourceOf } from './support/tree.ts';
 
@@ -163,11 +164,20 @@ select organization_id || ' ' || project_id || ' ' || node_id || ' ' || kind || 
     expect(await count('engine_outbox', first.value.versionId)).toBe(1);
   });
 
-  it('stores a page wider than one insert can bind', async () => {
+  // 65,535 is the wire limit on bind parameters, and a page of headings makes a row per heading.
+  it('stores a page with more chunks than one statement can bind', async () => {
     const node = await newNode(built.engine, home);
-    const headings = Array.from({ length: 700 }, (_, at) => `# H${String(at)}\n`).join('\n');
+    const headings = Array.from({ length: 14_000 }, (_, at) => `# ${String(at)}\n`).join('\n');
     const saved = await save(built, home, node, null, headings);
-    expect(await count('chunks', saved.versionId)).toBe(700);
+    expect(await count('chunks', saved.versionId)).toBe(14_000);
+    expect(await count('engine_outbox', saved.versionId)).toBe(1);
+  });
+
+  it('leaves no outbox row for a page with nothing to embed', async () => {
+    const node = await newNode(built.engine, home);
+    const saved = await save(built, home, node, null, '');
+    expect(await countByNode('chunks', node)).toBe(0);
+    expect(await count('engine_outbox', saved.versionId)).toBe(0);
   });
 
   it('writes neither with the flag off, and both with it on', async () => {
@@ -270,7 +280,7 @@ describeWithStack('chunks across tenants', () => {
         select count(*) as total from app.engine_outbox where node_id = ${node}`.execute(tx);
       return [chunks.rows[0]?.total, outbox.rows[0]?.total];
     });
-    expect(seen).toEqual(['0', '0']);
+    expect(seen.map(Number)).toEqual([0, 0]);
   });
 
   it('keeps a project of the same organization out too', async () => {
@@ -343,17 +353,11 @@ select count(distinct organization_id) from app.chunks
   });
 });
 
-// A foreign key check takes a generic plan after a few rows. Without tenant statistics that plan
-// walks a tenant's rows for each chunk, which only shows on a large tenant.
 describeWithStack('foreign key checks on a chunk insert', () => {
   const NODES = 20_000;
+  const TAIL_TENANTS = 2000;
   const CHUNKS = 233;
   const BUDGET_MS = 50;
-
-  interface Trigger {
-    readonly 'Trigger Name': string;
-    readonly Time: number;
-  }
 
   const fill = async (seeded: Seeded, rows: number): Promise<void> => {
     await admin(`
@@ -381,24 +385,26 @@ select node_id || ' ' || id from (
       .split('\n')
       .map((line) => line.split(' ') as [string, string]);
 
-  const foreignKeyMs = async (seeded: Seeded, node: string, version: string): Promise<number> => {
-    const plan = await admin(`
-begin;
-explain (analyze, format json)
-insert into app.chunks (organization_id, project_id, node_id, version_id, ord, block_path,
-    heading_path, body, body_sha256)
-  select '${seeded.organization}', '${seeded.project}', '${node}', '${version}', ord, '0', '{}',
-         'body', sha256(ord::text::bytea)
-  from generate_series(0, ${String(CHUNKS - 1)}) ord;
-rollback;`);
-    const [{ Triggers }] = JSON.parse(plan.slice(plan.indexOf('['))) as [
-      { Triggers: readonly Trigger[] },
-    ];
-    return Triggers.filter((trigger) => trigger['Trigger Name'].startsWith('RI_')).reduce(
-      (total, { Time }) => total + Time,
-      0,
-    );
-  };
+  // The trap needs many tenants: with few, the two column estimate is close enough to be safe.
+  const fillTail = () =>
+    admin(`
+create temp table tail as
+  select gen_random_uuid() organization, gen_random_uuid() project, gen_random_uuid() type
+  from generate_series(1, ${String(TAIL_TENANTS)});
+insert into app.organizations (organization_id, name, plan_tier)
+  select organization, 'Tail', 'self_hosted' from tail;
+insert into app.projects (id, organization_id, product, slug, name)
+  select project, organization, 'docs', 'tail', 'Tail' from tail;
+insert into app.content_types (id, organization_id, project_id, family, key)
+  select type, organization, project, 'docs_page', 'page' from tail;
+insert into app.nodes (organization_id, project_id, family, type_id, order_key, lifecycle)
+  select organization, project, 'docs_page', type, 'a', 'draft'
+  from tail, generate_series(1, 2);
+insert into app.node_versions (organization_id, project_id, node_id, seq, schema_version,
+    ast_version, origin, actor, content, content_sha256)
+  select n.organization_id, n.project_id, n.id, 1, 1, 1, 'import',
+         '{"kind":"system","job":"seed"}', '{}', sha256(n.id::text::bytea)
+  from app.nodes n join tail on tail.project = n.project_id;`);
 
   let largest: Seeded;
   let second: Seeded;
@@ -408,6 +414,7 @@ rollback;`);
     second = await seed();
     await fill(largest, NODES);
     await fill(second, Math.floor(NODES / 4));
+    await fillTail();
     await admin('vacuum analyze app.nodes; vacuum analyze app.node_versions;');
   }, 120_000);
 
@@ -417,7 +424,14 @@ rollback;`);
   ])('stays under budget at both ends of %s', async (_name, tenantOf) => {
     const seeded = tenantOf();
     for (const [node, version] of await ends(seeded)) {
-      expect(await foreignKeyMs(seeded, node, version)).toBeLessThan(BUDGET_MS);
+      const { organization, project } = seeded;
+      const cost = await chunkForeignKeyCost(
+        admin,
+        { organization, project, node, version },
+        CHUNKS,
+      );
+      expect(cost.checks).toBe(2);
+      expect(cost.ms).toBeLessThan(BUDGET_MS);
     }
   });
 });
