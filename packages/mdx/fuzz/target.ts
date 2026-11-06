@@ -1,5 +1,6 @@
 import fc from 'fast-check';
-import { DEFAULT_LIMITS, serialize } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import type { RenderPolicy } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
 import { dialectArbitrary, documentArbitrary } from './documents.ts';

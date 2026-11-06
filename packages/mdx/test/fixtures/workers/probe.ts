@@ -28,8 +28,8 @@ const connected = (socket: net.Socket) =>
     socket.once('error', reject);
   });
 
-serveJobs(async ({ source }) => {
-  const port = Number(source);
+serveJobs(async (job) => {
+  const port = Number('source' in job ? job.source : '');
   const value = {
     issues: [],
     env: Object.keys(process.env),

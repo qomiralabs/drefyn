@@ -1,7 +1,14 @@
 import { z } from 'zod';
-import type { MdxIssue, MdxIssueCode, ParseResult } from './types.ts';
+import type { MdxIssue, MdxIssueCode, ParseResult, PrintResult } from './types.ts';
 
-export const refused = (code: MdxIssueCode): ParseResult => {
+export type JobResult = ParseResult | PrintResult;
+
+export interface Refused {
+  readonly ok: false;
+  readonly error: readonly MdxIssue[];
+}
+
+export const refused = (code: MdxIssueCode): Refused => {
   const issue: MdxIssue = { code, severity: 'error', line: 1, column: 1 };
   return { ok: false, error: [issue] };
 };
@@ -20,10 +27,10 @@ const shapeSchema = z.union([
   z.object({ ok: z.literal(false), error: z.array(z.unknown()) }),
 ]);
 
-export const resultSchema = z.custom<ParseResult>((value) => shapeSchema.safeParse(value).success);
+export const resultSchema = z.custom<JobResult>((value) => shapeSchema.safeParse(value).success);
 
 // For an answer that crossed the network, where issues are read by the caller too.
-export const wireResultSchema = z.custom<ParseResult>((value) => {
+export const wireResultSchema = z.custom<JobResult>((value) => {
   const shape = shapeSchema.safeParse(value);
   if (!shape.success) return false;
   const issues = shape.data.ok ? shape.data.value.issues : shape.data.error;

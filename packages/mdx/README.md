@@ -7,13 +7,9 @@ compiler out of every package.
 
 ## Public API
 
-Parsing lives in the parse host and nowhere else. `@drefyn/mdx/client` is the only way in; see
-"Parsing customer content".
+Parsing and printing live in the parse host and nowhere else. `@drefyn/mdx/client` is the only
+way in; see "Parsing customer content".
 
-- `serialize(root)` gives back the exact bytes. It throws `MdxPrintError` on a block that has
-  no source, whose tree no longer hashes to `rawOf`, whose bytes no longer hash to `sourceOf`,
-  or that carries `data`, and on text in a gap or the tail. The hashes have no key, so they
-  catch stale bytes and not a writer who recomputes them.
 - `rawOf(block)` is the SHA-256 of a block's canonical tree. Line endings, positions and
   parser data do not count, so a reformat is not a content change.
 - `validateTree(value, limits)` checks a tree that came from outside this process, a client or
@@ -29,26 +25,64 @@ since the previous block, so it ends at a line start and holds a BOM if the file
 root keeps `tail`, everything after the last block, `tailOf`, its hash, and `eol`, the majority
 line ending.
 
+## Changed blocks
+
+`client.print({ tenant, path, root, policy })` gives back the bytes of a tree. A block prints its
+stored bytes only while its tree still hashes to `rawOf`. A block with no source, or one that
+moved on, goes through the one canonical printer, whose options are fixed in code. Changing them
+is an `astVersion` bump, and stored blocks are never reprinted because of it.
+
+It refuses with `mdx.block_not_printable` on bytes that no longer hash to `sourceOf`, on `data`
+anywhere in a tree, on text in a gap or the tail, on a node the dialect cannot hold, on a JSX or
+attribute name outside the MDX syntax, on frontmatter anywhere but the first block, and on a tree
+past the limits in its policy. The hashes have no key, so they catch stale bytes and not a writer
+who recomputes them.
+
+`/parse` and `/print` both name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
+
+Every print is reparsed in the same thread, under the same policy. If any block or live node
+differs from the tree, it refuses with `mdx.print_changed_meaning`: that is how a new block hidden
+by an unclosed fence, or an expression that closes itself early, stops here. Text inside a block
+may settle differently, as a typed URL becomes a link. A block printed from stored bytes has to come back as exactly its tree, so forged bytes
+cannot change even its text, though a definition elsewhere can still turn `[a]` into a reference.
+**Store the `ast` the call hands back, never the tree you sent.** Only that one is known to agree with what git will hold, and render policy
+has to run on it. Everything that writes a tree, the editor save and `merge3` included, goes
+through this. **`source` comes only from the stored row, never from a client or an editor
+document.** Check that where a tree enters the app: the hashes have no key, and the reparse only
+sees bytes that change what a block says.
+
+Untouched blocks keep their bytes, so a file never gets reformatted behind its author's back. A
+changed block reprints whole, which means a one word edit is one line only if the block was
+already canonical. A list written with `*` rewrites every line of that list, and no other block.
+
+Reprinting a block moves what sits next to it, so `serialize` handles three cases the tree cannot
+see. A gap with no blank line stays only where both neighbours are safe with one line between
+them, and opens up otherwise. Two neighbouring lists with one marker are one list to a parser, so
+the second takes another marker, even if it was untouched. A file cannot open with a printed `---`,
+which would start frontmatter, so that rule prints as `***`.
+
 ## Issue codes
 
-| Code                      | Severity | Meaning                                                |
-| ------------------------- | -------- | ------------------------------------------------------ |
-| `mdx.parse_failed`        | error    | Not valid in this dialect                              |
-| `mdx.too_large`           | error    | Over `maxBytes`, counted in UTF-8 bytes                |
-| `mdx.too_deep`            | error    | Over `maxDepth`, or nesting that overflowed the parser |
-| `mdx.too_many_nodes`      | error    | Over `maxNodes`, or past a scan or acorn budget        |
-| `mdx.prop_not_literal`    | error    | A registry component with a prop that is not a literal |
-| `mdx.esm_inert`           | warning  | ESM kept as text, never run                            |
-| `mdx.expression_inert`    | warning  | Expression kept as text, never run                     |
-| `mdx.unknown_component`   | warning  | Not in the registry, so it stays inert                 |
-| `mdx.frontmatter_invalid` | warning  | Not core schema YAML; the bytes are still kept         |
-| `mdx.dialect_mismatch`    | warning  | Looks like the other dialect                           |
-| `mdx.parse_timeout`       | error    | Killed at the timeout                                  |
-| `mdx.out_of_memory`       | error    | Ended by the heap cap                                  |
-| `mdx.organization_limit`  | error    | Organization queue full or budget spent, try later     |
-| `mdx.project_limit`       | error    | Project queue full or budget spent, try later          |
-| `mdx.queue_full`          | error    | Pool queue full, try later                             |
-| `mdx.parse_unavailable`   | error    | No thread could run it, says nothing about the page    |
+| Code                        | Severity | Meaning                                                |
+| --------------------------- | -------- | ------------------------------------------------------ |
+| `mdx.parse_failed`          | error    | Not valid in this dialect                              |
+| `mdx.too_large`             | error    | Over `maxBytes`, counted in UTF-8 bytes                |
+| `mdx.too_deep`              | error    | Over `maxDepth`, or nesting that overflowed the parser |
+| `mdx.too_many_nodes`        | error    | Over `maxNodes`, or past a scan or acorn budget        |
+| `mdx.prop_not_literal`      | error    | A registry component with a prop that is not a literal |
+| `mdx.esm_inert`             | warning  | ESM kept as text, never run                            |
+| `mdx.expression_inert`      | warning  | Expression kept as text, never run                     |
+| `mdx.unknown_component`     | warning  | Not in the registry, so it stays inert                 |
+| `mdx.frontmatter_invalid`   | warning  | Not core schema YAML; the bytes are still kept         |
+| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect                           |
+| `mdx.parse_timeout`         | error    | Killed at the timeout                                  |
+| `mdx.out_of_memory`         | error    | Ended by the heap cap                                  |
+| `mdx.organization_limit`    | error    | Organization queue full or budget spent, try later     |
+| `mdx.project_limit`         | error    | Project queue full or budget spent, try later          |
+| `mdx.queue_full`            | error    | Pool queue full, try later                             |
+| `mdx.block_not_printable`   | error    | A tree that cannot be printed; see "Changed blocks"    |
+| `mdx.print_changed_meaning` | error    | Its print would parse as something else                |
+| `mdx.parse_unavailable`     | error    | No thread could run it, says nothing about the page    |
 
 Issues carry a code, severity, line and column, and never customer text.
 
@@ -73,8 +107,11 @@ A page refused by the scan or the budget gets `mdx.too_many_nodes` at line 1.
 
 ## Parsing customer content
 
-`parseForStore` is not exported, and nothing a caller can import reaches it. Every path that
-takes customer content calls the parse host, a separate process. There is no in process
+`parseForStore` and the printer are not exported, and nothing a caller can import reaches them.
+The printer has the same problem as the parser: a third party attention solver retries a render
+per mistake and never yields, so a 9 KB page that parses in 75 ms held it for 11 s. Limits on a
+tree only make most refusals cheap. Every path that takes customer content calls the parse host,
+a separate process, and prints and parses share its threads, queues, budgets and kill. There is no in process
 fallback: if the host is down, a save refuses and the last good version stays.
 
 ```ts
@@ -111,22 +148,24 @@ Inside a thread there is an empty environment, no arguments, no streams to ours,
 network, child process, worker and debugger entry points. The seal is a seatbelt: it stops no
 code that is determined to get out, and proves nothing about the network.
 
-| Key                              | Default | Meaning                                        |
-| -------------------------------- | ------- | ---------------------------------------------- |
-| `DREFYN_PARSE_TIMEOUT_MS`        | 2000    | A thread is killed this long into a page       |
-| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512     | Heap cap per thread                            |
-| `DREFYN_PARSE_THREADS`           | 2       | Threads per host, at least 2                   |
-| `DREFYN_PARSE_QUEUE_MAX`         | 64      | Pages waiting across all organizations         |
-| `DREFYN_PARSE_ORG_THREADS`       | 1       | Threads one organization can hold, under total |
-| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32      | Pages one organization can have waiting        |
-| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000   | Thread time per window for an organization     |
-| `DREFYN_PARSE_PROJECT_THREADS`   | 1       | Threads one project can hold, inside its org   |
-| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16      | Pages one project can have waiting             |
-| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000   | Thread time per window for a project           |
-| `DREFYN_PARSE_WINDOW_MS`         | 60000   | Length of the budget window                    |
-| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000    | Wait after `terminate` before SIGKILL          |
-| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536    | At least threads times the cap, plus 256       |
-| `DREFYN_PARSE_PORT`              | 8787    | Port the host listens on                       |
+| Key                              | Default   | Meaning                                                   |
+| -------------------------------- | --------- | --------------------------------------------------------- |
+| `DREFYN_PARSE_TIMEOUT_MS`        | 2000      | A thread is killed this long into a page                  |
+| `DREFYN_PARSE_PRINT_TIMEOUT_MS`  | 6000      | The same for a print, which holds a whole parse too       |
+| `DREFYN_PARSE_WORKER_MEMORY_MB`  | 512       | Heap cap per thread                                       |
+| `DREFYN_PARSE_THREADS`           | 2         | Threads per host, at least 2                              |
+| `DREFYN_PARSE_QUEUE_MAX`         | 64        | Pages waiting across all organizations                    |
+| `DREFYN_PARSE_ORG_THREADS`       | 1         | Threads one organization can hold, under total            |
+| `DREFYN_PARSE_ORG_QUEUE_MAX`     | 32        | Pages one organization can have waiting                   |
+| `DREFYN_PARSE_ORG_BUDGET_MS`     | 30000     | Thread time per window for an organization                |
+| `DREFYN_PARSE_PROJECT_THREADS`   | 1         | Threads one project can hold, inside its org              |
+| `DREFYN_PARSE_PROJECT_QUEUE_MAX` | 16        | Pages one project can have waiting                        |
+| `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000     | Thread time per window for a project                      |
+| `DREFYN_PARSE_WINDOW_MS`         | 60000     | Length of the budget window                               |
+| `DREFYN_PARSE_MAX_HELD_BYTES`    | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
+| `DREFYN_PARSE_KILL_GRACE_MS`     | 2000      | Wait after `terminate` before SIGKILL                     |
+| `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536      | At least threads times the cap, held bytes, plus 256      |
+| `DREFYN_PARSE_PORT`              | 8787      | Port the host listens on                                  |
 
 ### What the limits hold against
 
@@ -163,5 +202,8 @@ If it fails and the change is meant:
 
 - `pnpm --filter @drefyn/mdx test`
 - `pnpm --filter @drefyn/mdx test:fuzz` runs 60 s; `-- --seconds 5 --seed 1` narrows it.
+- `pnpm --filter @drefyn/mdx test:mutation` runs Stryker over the printer, `serialize`, the print
+  job, its checks and the hashes, and fails at 10 percent of mutants surviving. It uses the exact byte tests only, as
+  the corpus and generated suites take minutes a mutant.
 - `pnpm --filter @drefyn/mdx bench` measures parse plus print against the budgets. Run it on
   an idle machine; it prints the load and exits 1 over budget.

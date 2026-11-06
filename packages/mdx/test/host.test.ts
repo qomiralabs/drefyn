@@ -1,3 +1,5 @@
+import type { MdxRoot } from '../src/index.ts';
+import { honestPage } from './honest-page.ts';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
@@ -6,10 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createParseClient } from '../src/client.ts';
 import type { ParseClientRequest } from '../src/client.ts';
 import { assertHostEnv, parseHostConfig } from '../src/host-config.ts';
-import { DEFAULT_LIMITS, serialize } from '../src/index.ts';
+import { DEFAULT_LIMITS } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { isolatedPolicy, ORG_A, PROJECT_A } from './helpers.ts';
 
 const TIMEOUT_MS = 60_000;
+// A parse and a print of the largest page, each several seconds on a busy CI runner.
+const FULL_PAGE_TIMEOUT_MS = 180_000;
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = resolve(here, '../../..');
 const hostMain = resolve(here, '../src/host-main.ts');
@@ -72,6 +77,52 @@ describe('the parse host', () => {
       expect(serialize(result.value.ast)).toBe(source);
     },
     TIMEOUT_MS,
+  );
+
+  it(
+    'prints for a client across the wire, and hands back the parser tree',
+    async () => {
+      const { url } = start([hostMain], { DREFYN_PARSE_PORT: '0' });
+      const client = createParseClient({ url: await url });
+      const parsed = await client.parse(page('old\n'));
+      if (!parsed.ok) throw new Error('refused');
+      const { ast } = parsed.value;
+      const edited = {
+        ...ast,
+        children: ast.children.map((block) => ({
+          ...block,
+          children: [{ type: 'text', value: 'new' }],
+        })),
+      } as unknown as MdxRoot;
+      const { tenant, path, policy } = page('');
+      const result = await client.print({ tenant, path, policy, root: edited });
+      expect(result).toMatchObject({ ok: true, value: { text: 'new\n' } });
+      if (!result.ok) throw new Error('refused');
+      expect(result.value.ast.children[0]?.source?.raw).toBe('new');
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'carries an honest page at the size limit across the wire',
+    async () => {
+      // A long kill: this is about the caps and held bytes. Time is proved on the thread.
+      const { url } = start([hostMain], {
+        DREFYN_PARSE_PORT: '0',
+        DREFYN_PARSE_TIMEOUT_MS: '20000',
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: '20000',
+      });
+      const client = createParseClient({ url: await url });
+      const source = honestPage('md');
+      const first = await client.parse(page(source));
+      if (!first.ok) throw new Error('refused');
+      const { tenant, path, policy } = page('');
+      const result = await client.print({ tenant, path, policy, root: first.value.ast });
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error('refused');
+      expect(result.value.text).toBe(source);
+    },
+    FULL_PAGE_TIMEOUT_MS,
   );
 
   it(
@@ -155,6 +206,27 @@ describe('the parse host', () => {
   );
 });
 
+describe('the bytes a host may hold', () => {
+  const env = (held: string, memory = '1536') => ({
+    DREFYN_PARSE_MAX_HELD_BYTES: held,
+    DREFYN_PARSE_HOST_MEMORY_MB: memory,
+  });
+
+  it('defaults to 256 MiB, which the default memory limit has room for', () => {
+    expect(parseHostConfig({}).maxHeldBytes).toBe(268_435_456);
+  });
+
+  it('counts them in the memory check at start', () => {
+    expect(() => parseHostConfig(env('536870912'))).toThrow('DREFYN_PARSE_HOST_MEMORY_MB');
+    expect(parseHostConfig(env('536870912', '1792')).maxHeldBytes).toBe(536_870_912);
+  });
+
+  it('refuses a cap too small to hold one page', () => {
+    expect(() => parseHostConfig(env('1'))).toThrow();
+    expect(() => parseHostConfig(env('not a number'))).toThrow();
+  });
+});
+
 describe('the host environment', () => {
   it('allows the keys a container brings and our own', () => {
     expect(() => {
@@ -176,8 +248,7 @@ describe('the host environment', () => {
 
   it('checks the memory floor at start', () => {
     expect(parseHostConfig({}).hostMemoryMb).toBe(1_536);
-    expect(() => parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1279' })).toThrow();
-    expect(parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1280' }).hostMemoryMb).toBe(1_280);
+    expect(() => parseHostConfig({ DREFYN_PARSE_HOST_MEMORY_MB: '1535' })).toThrow();
     expect(() => parseHostConfig({ DREFYN_PARSE_PORT: '70000' })).toThrow();
   });
 });
@@ -196,6 +267,112 @@ describe('the client', () => {
       policy: { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 4 } },
     };
     await expect(client.parse(over)).resolves.toMatchObject({ error: [{ code: 'mdx.too_large' }] });
+  });
+
+  const root = { type: 'root', children: [] } as unknown as MdxRoot;
+  const printRequest = (overrides = {}) => ({
+    tenant: page('').tenant,
+    path: 'docs/page.mdx',
+    root,
+    policy: isolatedPolicy(),
+    ...overrides,
+  });
+
+  it('refuses an oversized tree without a call', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    const policy = { ...isolatedPolicy(), limits: { ...DEFAULT_LIMITS, maxBytes: 1 } };
+    await expect(client.print(printRequest({ policy }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_large' }],
+    });
+  });
+
+  it('refuses a tree too deep to send, without a call', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: () => Promise.reject(new Error('must not be called')),
+    });
+    let deep: unknown = {};
+    for (let depth = 0; depth < 200_000; depth += 1) deep = { deep };
+    await expect(client.print(printRequest({ root: deep }))).resolves.toMatchObject({
+      error: [{ code: 'mdx.too_deep' }],
+    });
+  });
+
+  it('refuses an answer to a print that holds no bytes', async () => {
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, '{"ok":true,"value":{"issues":[]}}'),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('passes a refusal from the host through', async () => {
+    const answer =
+      '{"ok":false,"error":[{"code":"mdx.print_changed_meaning","severity":"error","line":1,"column":1}]}';
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.print_changed_meaning' }],
+    });
+  });
+
+  const GOOD_ROOT = {
+    type: 'root',
+    astVersion: 1,
+    dialect: 'md',
+    eol: 'lf',
+    children: [{ type: 'paragraph' }],
+    tail: '',
+    tailOf: 'x',
+  };
+
+  it.each([
+    ['no tree', { text: 'a', issues: [] }],
+    ['a tree that is not one', { text: 'a', ast: { type: 'root' }, issues: [] }],
+    ['a list for a tree', { text: 'a', ast: [], issues: [] }],
+    ['the wrong version', { text: 'a', ast: { ...GOOD_ROOT, astVersion: 2 }, issues: [] }],
+    ['a child with no kind', { text: 'a', ast: { ...GOOD_ROOT, children: [{}] }, issues: [] }],
+    ['text that is not text', { text: 1, ast: GOOD_ROOT, issues: [] }],
+  ])('refuses an answer with %s, which a caller would store', async (_name, value) => {
+    const answer = JSON.stringify({ ok: true, value });
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({
+      error: [{ code: 'mdx.parse_failed' }],
+    });
+  });
+
+  it('names the organization in a header on both routes, so the host can refuse early', async () => {
+    const seen: (string | null)[] = [];
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: (_url, init) => {
+        seen.push(new Headers(init?.headers).get('x-drefyn-organization'));
+        return Promise.resolve(new Response('{"ok":false,"error":[]}'));
+      },
+    });
+    await client.parse(page('a'));
+    await client.print(printRequest());
+    const { organizationId } = page('').tenant;
+    expect(seen).toEqual([organizationId, organizationId]);
+  });
+
+  it('reads a print answer with bytes in it', async () => {
+    const answer = JSON.stringify({ ok: true, value: { text: 'a', ast: GOOD_ROOT, issues: [] } });
+    const client = createParseClient({
+      url: 'http://parse.internal',
+      fetch: answering(200, answer),
+    });
+    await expect(client.print(printRequest())).resolves.toMatchObject({ ok: true });
   });
 
   it.each([

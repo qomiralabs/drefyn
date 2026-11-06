@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { serialize } from '../src/index.ts';
+import { serialize } from '../src/serialize.ts';
 import { codes, issuesOf, parsed } from './helpers.ts';
 
 const CANARY = 'canary-3f9a1c';
