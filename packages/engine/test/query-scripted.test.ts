@@ -240,6 +240,28 @@ describe('queryNodes without a server', () => {
     }
   });
 
+  it('takes a cursor for the longest sort value, however it escapes', async () => {
+    const value = '\u0001'.repeat(256);
+    const rows = [
+      { id: NODE, sort_value: value },
+      { id: id(6), sort_value: value },
+    ];
+    const first = deps(answering({ page: rows }));
+    const page = await first.engine.queryNodes(tenant, {
+      typeId: TYPE,
+      sort: { field: NAME },
+      limit: 1,
+    });
+    if (!page.ok || page.value.nextCursor === null) throw new Error('no cursor');
+    const next = deps(answering({}));
+    const after = await next.engine.queryNodes(tenant, {
+      typeId: TYPE,
+      sort: { field: NAME },
+      cursor: page.value.nextCursor,
+    });
+    expect(after.ok).toBe(true);
+  });
+
   it('continues past a null sort value inside the nulls', async () => {
     const rows = [
       { id: NODE, sort_value: null },
@@ -468,6 +490,14 @@ describe('the filter backfill without a server', () => {
       return backfilling()({ sql, parameters: [] });
     });
     expect(await engine.backfillFilters(tenant)).toEqual({ ok: true, value: 'waiting' });
+  });
+
+  it('waits rather than queue behind a declare that holds the type', async () => {
+    const { engine, statements } = deps(({ sql }) =>
+      sql.includes('from "filter_backfills"') ? [job] : [],
+    );
+    expect(await engine.backfillFilters(tenant)).toEqual({ ok: true, value: 'waiting' });
+    expect(statements.some(({ sql }) => sql.startsWith('update'))).toBe(false);
   });
 
   it('lets any other failure through as a retryable refusal or a throw', async () => {

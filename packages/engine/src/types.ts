@@ -1,5 +1,6 @@
 import type { IdOf, TenantRef, UserId } from '@drefyn/tenancy';
 import type { NodeContent } from './content.ts';
+import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
 
 export type NodeId = IdOf<'nod'>;
@@ -35,6 +36,9 @@ export interface SaveDraftInput {
   readonly origin: Origin;
   readonly actor: Actor;
   readonly idempotencyKey: IdempotencyKey;
+  // Field id to value, as an API sends them: decimal strings, ISO dates, booleans and lists.
+  // Absent keeps the head's values, so a body edit cannot wipe them.
+  readonly fields?: Readonly<Record<string, unknown>>;
 }
 
 export interface RollbackInput {
@@ -68,6 +72,7 @@ export interface NodeHead {
   readonly seq: number | null;
   readonly astVersion: number | null;
   readonly content: NodeContent | null;
+  readonly fields: StoredFields;
 }
 
 export interface VersionSummary {
@@ -85,6 +90,57 @@ export interface PageArgs {
   // Versions below this seq.
   readonly before?: number;
 }
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface NodeQuery {
+  readonly typeId: string;
+  // Checked against the type's definition, so it stays unknown until then.
+  readonly filter?: unknown;
+  // A declared sortable field. Absent means newest first.
+  readonly sort?: { readonly field: string; readonly direction?: SortDirection };
+  readonly limit?: number;
+  // Opaque, from the previous page.
+  readonly cursor?: string;
+}
+
+export interface NodeSummary {
+  readonly nodeId: NodeId;
+  readonly family: NodeFamily;
+  readonly typeId: string;
+  readonly lifecycle: NodeLifecycle;
+  readonly slug: string | null;
+  readonly versionId: VersionId | null;
+  readonly updatedAt: Date;
+}
+
+export interface NodePage {
+  readonly items: readonly NodeSummary[];
+  readonly nextCursor: string | null;
+  // Declared fields of this type still filling, so the page can say why a list may be slower.
+  readonly backfilling: readonly string[];
+}
+
+export interface DeclareSchemaInput {
+  readonly tenant: TenantRef;
+  readonly typeId: string;
+  // Parsed and validated here, so it stays unknown until then.
+  readonly schema: unknown;
+  // A person's confirmed choice. The caller checks who may give it.
+  readonly confirmedRemovals?: readonly string[];
+}
+
+export interface DeclaredSchema {
+  readonly typeId: string;
+  readonly version: number;
+  readonly backfills: number;
+}
+
+export type BackfillState =
+  | 'idle' // nothing queued in this project
+  | 'waiting' // another project of this organization holds the one turn
+  | 'running' // a batch went in, more remain
+  | 'finished'; // a slot finished, others may be queued
 
 export interface Page<T> {
   readonly items: readonly T[];
