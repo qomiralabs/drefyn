@@ -21,7 +21,9 @@ public.
 
 - `createEngine(deps)`: the five calls below, over a store, a parse client, flags and a policy.
   `databaseStore(db)` makes the store from a `@drefyn/db` database.
-- `parseEngineConfig(env)`: reads the two size caps below.
+- `parseEngineConfig(env)`: reads the caps below.
+- `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
+  and options give the same chunks in the same order, and their bodies join back into the page.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -61,12 +63,26 @@ come from `@drefyn/entitlements` and count per organization in `organization_nod
 in the transaction that creates the node. A read only organization or project, or one over its
 limit after a downgrade, gets `engine.read_only` on writes, and reads go on working.
 
+## Chunks
+
+With `engine.chunk_at_write` on, off in production, a save or rollback writes the version's chunks
+and one `embed_chunks` row in `engine_outbox` in the version's own transaction, so a version never
+commits without them. Embedding runs later and never in this path. A replay writes nothing, and a
+page with no text gets no outbox row. Chunks belong to a version and are not replaced by the next.
+
+A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
+cannot move text in another. It closes before it passes the target. A block over the target splits
+at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
+on a save, and under the lock on a rollback, where a replay must not pay for it.
+
 ## Configuration
 
-| Key                            | Default | Meaning                                        |
-| ------------------------------ | ------- | ---------------------------------------------- |
-| `DREFYN_ENGINE_MAX_NODE_BYTES` | 1048576 | Source bytes of one node. Can only be lowered. |
-| `DREFYN_ENGINE_MAX_TREE_BYTES` | 5242880 | Stored JSON of one version, at most 16777216.  |
+| Key                            | Default | Meaning                                               |
+| ------------------------------ | ------- | ----------------------------------------------------- |
+| `DREFYN_ENGINE_MAX_NODE_BYTES` | 1048576 | Source bytes of one node. Can only be lowered.        |
+| `DREFYN_ENGINE_MAX_TREE_BYTES` | 5242880 | Stored JSON of one version, at most 16777216.         |
+| `DREFYN_CHUNK_TARGET_CHARS`    | 800     | Close a chunk before it passes this. At most the cap. |
+| `DREFYN_CHUNK_MAX_CHARS`       | 2000    | Hard cap on a chunk, whatever the page holds.         |
 
 A tree is about 4 times its source at the corpus median and 7.5 times at worst, so a source cap
 alone allows far larger rows. Both limits answer `engine.too_large`.
@@ -81,5 +97,11 @@ COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench
 
 Integration files end in `.integration.test.ts` and need a stack from `scripts/selfhost.sh up`.
 `test/versions.property.test.ts` is one too. They start a real parse host, skip with the reason
-on a machine without a stack, and fail in CI. The bench times a whole `saveDraft` of a 100 KB page
-through the host against its budget, p95 under 150 ms.
+on a machine without a stack, and fail in CI.
+
+`bench/chunk.ts` needs no stack: a 100 KB page, p99 under 30 ms. `bench/save.ts` times a whole
+`saveDraft` of a 100 KB page through the host, split into print, chunk and database stages, against
+p95 under 150 ms, on 200,000 nodes at both ends of two tenants, and foreign key checks on a 233
+chunk insert against 50 ms. Until `queryNodes` lands the bench writes the filter row itself, in the
+same transaction, with every slot changing. Only the pinned Postgres 18 image counts, so it exits 1
+on any other server. Set `DREFYN_BENCH_NODES` for a smaller table.

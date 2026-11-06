@@ -28,6 +28,7 @@ export interface VerifyDeps {
 }
 
 export interface VerifiedContent {
+  readonly tree: MdxRoot;
   readonly json: string;
   readonly sha256: Buffer;
   readonly astVersion: number;
@@ -142,6 +143,7 @@ export async function verifyContent(
   return {
     ok: true,
     value: {
+      tree: parsed.value,
       json,
       sha256: createHash('sha256').update(json).digest(),
       astVersion: astVersionOf(parsed.value),

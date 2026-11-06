@@ -37,6 +37,14 @@
         "off": false
       },
       "defaultVariant": "on"
+    },
+    "engine.chunk_at_write": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "on"
     }
   }
 }

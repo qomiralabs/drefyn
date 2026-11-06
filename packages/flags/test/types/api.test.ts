@@ -40,6 +40,7 @@ describe('flag names', () => {
       | 'dashboard.shell'
       | 'email.smtp_delivery'
       | 'engine.writes'
+      | 'engine.chunk_at_write'
     >();
   });
 
