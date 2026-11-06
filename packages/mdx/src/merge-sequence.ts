@@ -63,17 +63,22 @@ function touches({ slots, after }: Alignment, low: number, high: number): boolea
   return false;
 }
 
-// Blocks a side rewrote, each with the slot it now sits at.
-const rewritesOf = ({ slots, after }: Alignment): readonly (readonly [Entry, number])[] => [
-  ...slots.flatMap((slot, index) =>
-    slot.state === 'changed' ? [[slot.entry, index] as const] : [],
-  ),
-  ...after.flatMap((list, spot) =>
-    list
-      .filter(({ movedFrom }) => movedFrom === undefined)
-      .map((entry) => [entry, Math.max(0, spot - 1)] as const),
-  ),
-];
+// Blocks a side rewrote, each with the slot it now sits at. A move that kept its words is no
+// rewrite, but a block moved and edited can have taken in anything.
+const rewritesOf = ({ slots, after }: Alignment): readonly (readonly [Entry, number])[] => {
+  const rewritten = ({ movedFrom }: Inserted) => {
+    const from = movedFrom === undefined ? undefined : at(slots, movedFrom);
+    return from === undefined || (from.state === 'moved' && from.edited);
+  };
+  return [
+    ...slots.flatMap((slot, index) =>
+      slot.state === 'changed' ? [[slot.entry, index] as const] : [],
+    ),
+    ...after.flatMap((list, spot) =>
+      list.filter(rewritten).map((entry) => [entry, Math.max(0, spot - 1)] as const),
+    ),
+  ];
+};
 
 // Slots a side's content came from, when it now sits under a different block: items that moved
 // between lists, and whole blocks a list took in when the one between them went.

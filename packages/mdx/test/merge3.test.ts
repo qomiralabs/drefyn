@@ -803,6 +803,22 @@ describe('merge3 paths the outcome alone does not show', () => {
     expect(clean(outcomeOf(base, ours, theirs))).toBe(ours);
   });
 
+  it('reads a block moved and edited as having taken in what both deleted', () => {
+    const list = '+ word one more text\n+ word two more text\n+ word three more text';
+    const base = page(list, 'word four more text', '    indented five', 'word six more text');
+    const ours = page(list, 'word four more text', 'word six more text');
+    const theirs = page(
+      'word four more text extra',
+      `${list}\n\n    indented five`,
+      'word six more text',
+    );
+    const held = conflicts(outcomeOf(base, ours, theirs)).find(
+      ({ reason }) => reason === 'delete_vs_edit',
+    );
+    expect(held?.baseIndex).toBe(2);
+    expect(held?.theirs?.source?.raw).toContain('indented five');
+  });
+
   it('does not read a moved block as having taken in what both deleted', () => {
     const big = 'alpha beta gamma delta';
     const base = page(big, 'alpha beta', 'Keep one.', 'Also two.', 'Last three.');
