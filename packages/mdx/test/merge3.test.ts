@@ -44,6 +44,11 @@ function conflicts(outcome: MergeOutcome): readonly BlockConflict[] {
   return outcome.conflicts;
 }
 
+const withoutMiddle = (root: MdxRoot): MdxRoot => ({
+  ...root,
+  children: root.children.filter((_, index) => index !== 1),
+});
+
 const textOf = (block: MdxBlock | null) => (block === null ? null : block.source?.raw);
 const brief = (list: readonly BlockConflict[]) =>
   list.map(({ baseIndex, reason, ours, theirs }) => ({
@@ -181,6 +186,25 @@ describe('merge3 scenarios', () => {
     const list = conflicts(outcomeOf(base, ours, theirs));
     expect(list.map(({ reason }) => reason)).toEqual(['delete_vs_edit']);
     expect(list[0]?.ours?.source?.raw).toContain('zeta');
+  });
+
+  it('a block fused into another still answers the other side deleting it', () => {
+    const base = '    first code\n\n```\nmiddle\n```\n\n    second code\n\nWords.\n';
+    const ours = '    second code\n\n    first code\n\n```\nmiddle\n```\n\nWords.\n';
+    const theirs = '    first code\n\n```\nmiddle\n```\n\nWords.\n';
+    const list = conflicts(outcomeOf(base, ours, theirs));
+    const deleted = list.find(({ reason }) => reason === 'delete_vs_edit');
+    expect(deleted?.baseIndex).toBe(2);
+    expect(deleted?.ours?.source?.raw).toContain('second code');
+  });
+
+  it('a block a list took in cannot be placed against an insert beside that list', () => {
+    const base = '- item one\n\n> quote\n\n    code words\n\nEnd.\n';
+    const ours = '- item one\n\nNew OURS.\n\n> quote\n\n    code words\n\nEnd.\n';
+    const theirs = '- item one\n\n    code words\n\nEnd.\n';
+    expect(parsed(theirs, 'md').children).toHaveLength(2);
+    const list = conflicts(outcomeOf(base, ours, theirs));
+    expect(list.map(({ baseIndex, reason }) => [baseIndex, reason])).toEqual([[0, 'both_changed']]);
   });
 
   it('move vs edit: the edit follows the block to where it moved', () => {
@@ -338,7 +362,7 @@ describe('merge3 inside blocks', () => {
     const ours = table.replace('one', 'ONE');
     const theirs = table.replace('six', 'SIX');
     expect(clean(outcomeOf(table, ours, theirs))).toContain(
-      '| ONE   | two  |\n| three | four |\n| five  | SIX  |',
+      '| ONE | two |\n| three | four |\n| five | SIX |',
     );
   });
 
@@ -469,6 +493,61 @@ describe('merge3 output', () => {
     const ours = 'First words.\n\nTight words.\n';
     const theirs = base.replace('First words.', 'First THEIRS.');
     expect(clean(outcomeOf(base, ours, theirs))).toBe('First THEIRS.\n\nTight words.\n');
+  });
+
+  it('reprints an indented block that a change left under a list', () => {
+    const base = '- item one\n\n# Title\n\n    indented code\n';
+    const ours = '- item one\n\n    indented code\n'.replace(
+      '- item one\n\n',
+      '- item one\n\n# Other\n\n',
+    );
+    const theirs = base.replace('item one', 'item THEIRS');
+    expect(clean(outcomeOf(base, ours, theirs))).toContain('indented code');
+    const gone = '- item one\n\nWords.\n\n    indented code\n';
+    const deleted = gone.replace('Words.\n\n', '');
+    expect(parsed(deleted, 'md').children).toHaveLength(1);
+    const edited = gone.replace('item one', 'item THEIRS');
+    const left = merge3(
+      parsed(gone, 'md'),
+      withoutMiddle(parsed(gone, 'md')),
+      parsed(edited, 'md'),
+    );
+    if (!left.ok || left.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(left.value.merged)).toBe('- item THEIRS\n\n```\nindented code\n```\n');
+  });
+
+  it('keeps the BOM when the first block opens up beside a new neighbour', () => {
+    const bom = String.fromCharCode(0xfeff);
+    const base = `${bom}# Title\nTight words.\n`;
+    const ours = parsed(base, 'md');
+    const added = {
+      type: 'paragraph' as const,
+      children: [{ type: 'text' as const, value: 'New.' }],
+    };
+    const inserted = { ...ours, children: [added, ...ours.children] };
+    const theirs = parsed(base.replace('Tight', 'Tight THEIRS'), 'md');
+    const result = merge3(parsed(base, 'md'), inserted, theirs);
+    if (!result.ok || result.value.kind !== 'clean') throw new Error('expected clean');
+    expect(printed(result.value.merged)).toBe(`${bom}New.\n\n# Title\nTight THEIRS words.\n`);
+  });
+
+  it('opens no blank lines at the top when the first block goes', () => {
+    const base = '# Title\n\nWords here.\n\nMore words.\n';
+    const ours = 'Words here.\n\nMore words.\n';
+    const theirs = base.replace('More', 'THEIRS');
+    expect(clean(outcomeOf(base, ours, theirs))).toBe('Words here.\n\nTHEIRS words.\n');
+  });
+
+  it('keeps the gap above a rule that comes to the top, or it would open frontmatter', () => {
+    const base = 'Words here.\n\n---\n\nMore words.\n\n---\n';
+    const ours = '\n\n---\n\nMore words.\n\n---\n';
+    const theirs = base.replace('More', 'THEIRS');
+    const text = clean(outcomeOf(base, ours, theirs));
+    expect(parsed(text, 'md').children.map(({ type }) => type)).toEqual([
+      'thematicBreak',
+      'paragraph',
+      'thematicBreak',
+    ]);
   });
 
   it('changes the file ending when one side did', () => {

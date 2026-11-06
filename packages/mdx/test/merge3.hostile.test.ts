@@ -10,6 +10,12 @@ const base = parsed(BASE, 'md');
 const NOT_PRINTABLE = { code: 'mdx.block_not_printable', severity: 'error', line: 1, column: 1 };
 const refused = { ok: false, error: [NOT_PRINTABLE] };
 
+function firstOf({ children }: MdxRoot): MdxBlock {
+  const [block] = children;
+  if (block === undefined) throw new Error('no blocks');
+  return block;
+}
+
 const withBlock = (root: MdxRoot, block: unknown): MdxRoot => ({
   ...root,
   children: [...root.children, block as MdxBlock],
@@ -41,7 +47,7 @@ describe('merge3 on trees nobody should trust', () => {
   });
 
   it('refuses a tree holding data, which the hash cannot see and a renderer would honour', () => {
-    const paragraph = base.children[0] as MdxBlock;
+    const paragraph = firstOf(base);
     const smuggled = { ...paragraph, data: { hProperties: { onclick: 'x()' } } };
     const ours = { ...base, children: [smuggled, ...base.children.slice(1)] };
     expect(merge3(base, ours, base)).toEqual(refused);
@@ -71,7 +77,7 @@ describe('merge3 on trees nobody should trust', () => {
 
   it('is not fooled by a forged source hash: the tree decides', () => {
     const edited = parsed('One FORGED here.\n\nTwo lines here.\n', 'md');
-    const first = edited.children[0] as MdxBlock;
+    const first = firstOf(edited);
     const claim = base.children[0]?.source;
     if (claim === undefined) throw new Error('no source');
     const forged = { ...first, source: claim };
@@ -120,6 +126,37 @@ describe('the merge job', () => {
     if (!result.ok) throw new Error('refused');
     expect(result.value.issues).toEqual([]);
     expect(result.value.outcome.kind).toBe('clean');
+  });
+
+  it('records a conflict when a clean merge cannot be stored, not a stuck page', () => {
+    const open = 'One line here.\n\n```\nnever closed';
+    const start = parsed(open, 'md');
+    const moved = parsed('```\nnever closed\n```\n\nOne line here.\n', 'md');
+    const fence = firstOf(moved);
+    const trees = JSON.stringify({
+      base: start,
+      ours: {
+        ...moved,
+        children: [{ ...fence, source: start.children[1]?.source }, moved.children[1]],
+      },
+      theirs: start,
+    });
+    const result = mergePage(job(trees));
+    if (!result.ok) throw new Error('refused');
+    expect(result.value.outcome).toMatchObject({
+      kind: 'conflict',
+      conflicts: [{ baseIndex: null, ours: null, theirs: null, reason: 'both_changed' }],
+    });
+  });
+
+  it('records a conflict when each side adds one import of a name', () => {
+    const start = parsed('Words.\n', 'mdx');
+    const ours = parsed('import a from "a"\n\nWords.\n', 'mdx');
+    const theirs = parsed('Words.\n\nimport a from "b"\n', 'mdx');
+    const trees = JSON.stringify({ base: start, ours, theirs });
+    const result = mergePage(job(trees));
+    if (!result.ok) throw new Error('refused');
+    expect(result.value.outcome.kind).toBe('conflict');
   });
 
   it('applies its block limit', () => {

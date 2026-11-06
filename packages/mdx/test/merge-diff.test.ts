@@ -4,17 +4,15 @@ import { commonPairs, mergeSequences } from '../src/merge-diff.ts';
 
 const lengthOfLongest = (a: readonly number[], b: readonly number[]) => {
   const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  const read = (i: number, j: number) => table[i]?.[j] ?? 0;
   for (let i = a.length - 1; i >= 0; i -= 1) {
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      const row = table[i] as number[];
-      const below = table[i + 1] as number[];
-      row[j] =
-        a[i] === b[j]
-          ? (below[j + 1] as number) + 1
-          : Math.max(below[j] as number, row[j + 1] as number);
+      const best =
+        a[i] === b[j] ? read(i + 1, j + 1) + 1 : Math.max(read(i + 1, j), read(i, j + 1));
+      table[i]?.splice(j, 1, best);
     }
   }
-  return table[0]?.[0] ?? 0;
+  return read(0, 0);
 };
 
 const sequence = fc.array(fc.nat(5), { maxLength: 40 });
@@ -37,16 +35,20 @@ describe('commonPairs', () => {
     );
   });
 
-  it('gives up past its budget, counted after the shared ends', () => {
-    const middle = (from: number) => Array.from({ length: 10 }, (_, at) => from + at);
-    expect(commonPairs(middle(100), middle(200), 99)).toBeUndefined();
-    expect(commonPairs(middle(100), middle(200), 100)).toEqual([]);
-    const wrapped = (from: number) => [1, 2, ...middle(from), 3];
-    expect(commonPairs(wrapped(100), wrapped(200), 100)).toEqual([
-      [0, 0],
-      [1, 1],
-      [12, 12],
-    ]);
+  it('gives up past its budget, counted on what the two lists share', () => {
+    const items = Array.from({ length: 10 }, (_, at) => 100 + at);
+    const reversed = [...items].reverse();
+    expect(commonPairs(items, reversed, 99)).toBeUndefined();
+    expect(commonPairs(items, reversed, 100)).toHaveLength(1);
+    const wrapped = (middle: readonly number[]) => [1, 2, ...middle, 3];
+    expect(commonPairs(wrapped(items), wrapped(reversed), 100)).toHaveLength(4);
+    expect(commonPairs(wrapped(items), wrapped(reversed), 99)).toBeUndefined();
+  });
+
+  it('spends nothing on items only one list holds', () => {
+    const long = (from: number) => Array.from({ length: 1_000 }, (_, at) => from + at);
+    expect(commonPairs(long(0), long(10_000), 0)).toEqual([]);
+    expect(commonPairs([...long(0), 7], [...long(10_000), 7], 0)).toEqual([[1_000, 1_000]]);
   });
 
   it('handles the empty cases', () => {
@@ -86,8 +88,9 @@ describe('mergeSequences', () => {
   });
 
   it('refuses inputs past its budget', () => {
-    const long = (letter: string) => Array.from({ length: 3_000 }, (_, at) => `${letter}${at}`);
-    expect(mergeSequences(long('a'), long('b'), long('c'))).toBeUndefined();
+    const long = Array.from({ length: 3_000 }, (_, at) => `${at}`);
+    expect(mergeSequences(long, [...long].reverse(), long)).toBeUndefined();
+    expect(mergeSequences(long, long, [...long].reverse())).toBeUndefined();
   });
 
   it('keeps every item of a side the other did not touch', () => {

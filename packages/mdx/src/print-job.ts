@@ -6,7 +6,7 @@ import { serialize } from './serialize.ts';
 import type { PrintJob } from './thread.ts';
 import type { MdxRoot, PrintResult } from './types.ts';
 
-function printAndReparse(root: MdxRoot, policy: PrintJob['policy']): PrintResult {
+export function printAndReparse(root: MdxRoot, policy: PrintJob['policy']): PrintResult {
   const text = serialize(root, policy.limits);
   const reparsed = parseForStore(text, root.dialect, policy);
   if (!reparsed.ok) return reparsed;

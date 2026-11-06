@@ -32,7 +32,7 @@ attribute name outside the MDX syntax, on frontmatter anywhere but the first blo
 past the limits in its policy. The hashes have no key, so they catch stale bytes and not a writer
 who recomputes them.
 
-`/parse` and `/print` both name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
+`/parse`, `/print` and `/merge` all name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
 
 Every print is reparsed in the same thread, under the same policy. If any block or live node
 differs from the tree, it refuses with `mdx.print_changed_meaning`: that is how a new block hidden
@@ -55,6 +55,40 @@ them, and opens up otherwise. Two neighbouring lists with one marker are one lis
 the second takes another marker, even if it was untouched. A file cannot open with a printed `---`,
 which would start frontmatter, so that rule prints as `***`.
 
+## Merging
+
+`client.merge({ tenant, path, base, ours, theirs, policy })` runs a three way merge in the host,
+under the same queues, budgets and kill as a print. It answers `{ outcome, issues }`, where
+`outcome` is `{ kind: 'clean', merged }` or `{ kind: 'conflict', partial, conflicts }`.
+
+- Nothing is ever dropped to resolve an overlap. Each side lines up against the base one slot at a
+  time, so an edit, an insert or a delete either lands or becomes a `BlockConflict` with both
+  versions in it. Below the top level a conflict takes the whole block to a person.
+- `reason` is `both_changed`, `delete_vs_edit`, `both_inserted` or `move_vs_edit`. A record with
+  `baseIndex`, `ours` and `theirs` all null means every block merged but the page cannot be stored
+  as a whole, as when a fence left open at the end of a file swallows what a move put after it.
+- Lists, tables and quotes recurse, and a paragraph, heading or table cell edited on both sides
+  merges word by word. Code, HTML, JSX and frontmatter do not: two edits to one of those conflict.
+- Blocks compare on a hash of their own tree, never on the hash they carry, so a reformat raises
+  no conflict and keeps its bytes.
+- A moved block takes the other side's edit with it. A move next to the other side's insert, or
+  against its delete, is a conflict.
+- `partial` is for showing a person. It can hold both sides of a conflict and is never a version.
+- **A clean result is not yet a version: send `merged` through `client.print` and store the `ast`
+  that comes back.** `source` on all three trees comes from stored rows and fresh parses, as it
+  does for a print.
+
+An untouched block changes bytes in one more case here. A block written with leading indent that
+ends up under a new neighbour reprints, since the indent would read as part of a list above it.
+
+`DREFYN_MDX_MERGE_MAX_BLOCKS` caps any one of the three trees, default 20000. Past that, or past
+the limits in the policy, a merge refuses with `mdx.merge_limit`. It is the one setting the host
+takes outside `DREFYN_PARSE_`. The three trees also count against held bytes, so
+`DREFYN_PARSE_MAX_HELD_BYTES` has a floor of four times the largest merge body.
+
+`pnpm --filter @drefyn/mdx test:merge` runs the property test at 100,000 cases. The gate runs a
+slice of it on a fresh seed each time. `MERGE_PROPERTY_SEED` replays a failure.
+
 ## Issue codes
 
 | Code                        | Severity | Meaning                                                |
@@ -68,7 +102,7 @@ which would start frontmatter, so that rule prints as `***`.
 | `mdx.expression_inert`      | warning  | Expression kept as text, never run                     |
 | `mdx.unknown_component`     | warning  | Not in the registry, so it stays inert                 |
 | `mdx.frontmatter_invalid`   | warning  | Not core schema YAML; the bytes are still kept         |
-| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect                           |
+| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect; an error in a merge      |
 | `mdx.parse_timeout`         | error    | Killed at the timeout                                  |
 | `mdx.out_of_memory`         | error    | Ended by the heap cap                                  |
 | `mdx.organization_limit`    | error    | Organization queue full or budget spent, try later     |
@@ -76,6 +110,7 @@ which would start frontmatter, so that rule prints as `***`.
 | `mdx.queue_full`            | error    | Pool queue full, try later                             |
 | `mdx.block_not_printable`   | error    | A tree that cannot be printed; see "Changed blocks"    |
 | `mdx.print_changed_meaning` | error    | Its print would parse as something else                |
+| `mdx.merge_limit`           | error    | A merge past its block or tree limits                  |
 | `mdx.parse_unavailable`     | error    | No thread could run it, says nothing about the page    |
 
 Issues carry a code, severity, line and column, and never customer text.
@@ -157,6 +192,7 @@ code that is determined to get out, and proves nothing about the network.
 | `DREFYN_PARSE_PROJECT_BUDGET_MS` | 20000     | Thread time per window for a project                      |
 | `DREFYN_PARSE_WINDOW_MS`         | 60000     | Length of the budget window                               |
 | `DREFYN_PARSE_MAX_HELD_BYTES`    | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
+| `DREFYN_MDX_MERGE_MAX_BLOCKS`    | 20000     | Blocks in any one tree of a merge                         |
 | `DREFYN_PARSE_KILL_GRACE_MS`     | 2000      | Wait after `terminate` before SIGKILL                     |
 | `DREFYN_PARSE_HOST_MEMORY_MB`    | 1536      | At least threads times the cap, held bytes, plus 256      |
 | `DREFYN_PARSE_PORT`              | 8787      | Port the host listens on                                  |

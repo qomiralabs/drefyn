@@ -24,6 +24,10 @@ interface Leaves {
   readonly order: readonly string[];
 }
 
+// Source bytes can hold words a tree moved on from, so only the tree counts.
+const wordsIn = (node: object): readonly string[] =>
+  JSON.stringify({ ...node, source: undefined }).match(TOKEN) ?? [];
+
 function leavesOf(root: MdxRoot): Leaves {
   const leaf = new Map<string, number>();
   const top = new Map<string, number>();
@@ -32,8 +36,7 @@ function leavesOf(root: MdxRoot): Leaves {
   const walk = (node: Tree, block: number) => {
     if (LEAF.has(node.type)) {
       leaves += 1;
-      const { source: _source, ...rest } = node;
-      for (const word of JSON.stringify(rest).match(TOKEN) ?? []) {
+      for (const word of wordsIn(node)) {
         order.push(word);
         top.set(word, block);
         if (!leaf.has(word)) leaf.set(word, leaves);
@@ -70,8 +73,7 @@ const recordedWords = (conflicts: readonly BlockConflict[]) => {
   for (const { ours, theirs } of conflicts) {
     for (const block of [ours, theirs]) {
       if (block === null) continue;
-      const { source: _source, ...rest } = block;
-      for (const word of JSON.stringify(rest).match(TOKEN) ?? []) words.add(word);
+      for (const word of wordsIn(block)) words.add(word);
     }
   }
   return words;
@@ -118,13 +120,24 @@ function checkPlacement(
   return undefined;
 }
 
+// Words a side keeps in one leaf stay in one leaf, unless the other side itself pulled them apart.
 function checkMembership(merged: Leaves, sides: readonly Leaves[]): string | undefined {
   for (const { leaf } of sides) {
     const groups = new Map<number, string[]>();
     for (const [word, place] of leaf) groups.set(place, [...(groups.get(place) ?? []), word]);
     for (const words of groups.values()) {
-      const places = new Set(words.flatMap((word) => merged.leaf.get(word) ?? []));
-      if (places.size > 1) return `${words.join(' ')} split across leaves`;
+      const [first, ...rest] = words.filter((word) => merged.leaf.has(word));
+      if (first === undefined) continue;
+      for (const word of rest) {
+        if (merged.leaf.get(word) === merged.leaf.get(first)) continue;
+        const apart = sides.some(
+          (side) =>
+            side.leaf.has(word) &&
+            side.leaf.has(first) &&
+            side.leaf.get(word) !== side.leaf.get(first),
+        );
+        if (!apart) return `${first} and ${word} split across leaves`;
+      }
     }
   }
   return undefined;
@@ -225,7 +238,8 @@ function failureIn(input: MergeCase): string | undefined {
 
   const here = keyOf(conflictsOf(outcome));
   const there = keyOf(conflictsOf(swapped.value));
-  if (JSON.stringify(here) !== JSON.stringify(there)) return `not symmetric: ${here} / ${there}`;
+  if (JSON.stringify(here) !== JSON.stringify(there))
+    return `not symmetric: ${here.join()} / ${there.join()}`;
 
   const lost = checkPresence(outcome, baseLeaves, oursLeaves, theirsLeaves, mergedLeaves);
   if (lost !== undefined) return lost;

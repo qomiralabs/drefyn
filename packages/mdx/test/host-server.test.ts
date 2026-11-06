@@ -152,7 +152,7 @@ describe('the host server', () => {
       body: new Uint8Array(1),
       headers: { ...headers, 'content-length': String(declared) },
       duplex: 'half',
-    } as RequestInit).catch(() => undefined);
+    }).catch(() => undefined);
     expect(big === undefined || big.status === 413).toBe(true);
   });
 

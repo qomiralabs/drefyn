@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { DEFAULT_MAX_HELD_BYTES } from './held-bytes.ts';
 import { envSchema, poolConfigSchema } from './pool-config.ts';
 import type { ParsePoolConfig } from './pool-config.ts';
+import { DEFAULT_LIMITS } from './policy.ts';
+import { maxMergeBodyBytes } from './wire.ts';
 
 export interface ParseHostConfig {
   readonly pool: ParsePoolConfig;
@@ -14,7 +16,7 @@ export interface ParseHostConfig {
 const HOST_OVERHEAD_MB = 256;
 const BYTES_PER_MB = 1_048_576;
 // An organization gets a quarter, and that has to hold the largest body that can be honest.
-const MIN_HELD_BYTES = 64 * BYTES_PER_MB;
+const MIN_HELD_BYTES = 4 * maxMergeBodyBytes(DEFAULT_LIMITS.maxBytes);
 
 const hostSchema = z.object({
   DREFYN_PARSE_PORT: z
@@ -56,6 +58,8 @@ export function parseHostConfig(
 
 // A list of what may be here, not of what may not: a new secret must fail closed. These are
 // what a container or a Node image sets for itself.
+const OWN_KEYS = new Set(['DREFYN_MDX_MERGE_MAX_BLOCKS']);
+
 const PLATFORM_KEYS = new Set([
   'HOME',
   'HOSTNAME',
@@ -74,7 +78,7 @@ const PLATFORM_KEYS = new Set([
 
 export function assertHostEnv(env: Readonly<Record<string, string | undefined>>): void {
   const extra = Object.keys(env).filter(
-    (key) => !PLATFORM_KEYS.has(key) && !key.startsWith('DREFYN_PARSE_'),
+    (key) => !PLATFORM_KEYS.has(key) && !OWN_KEYS.has(key) && !key.startsWith('DREFYN_PARSE_'),
   );
   // Names only: a value here could be the very secret that should not have come.
   if (extra.length > 0) {

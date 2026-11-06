@@ -15,6 +15,7 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:fuzz": "node fuzz/run.ts",
+    "test:merge": "MERGE_PROPERTY_RUNS=100000 vitest run test/merge3.property.test.ts",
     "test:mutation": "stryker run",
     "bench": "node bench/roundtrip.ts",
     "pin:ast": "node test/pin-ast.ts"

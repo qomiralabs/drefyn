@@ -165,7 +165,7 @@ export function generatedPage(seed: number): string {
     .map((block, index) => {
       const previous = blocks[index - 1];
       if (previous === undefined) return block;
-      return /^#/.test(previous) && !block.startsWith('    ') && pick(2) === 0
+      return previous.startsWith('#') && !block.startsWith('    ') && pick(2) === 0
         ? `\n${block}`
         : `\n\n${block}`;
     })

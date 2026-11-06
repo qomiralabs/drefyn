@@ -12,7 +12,13 @@
     "src/print-job.ts",
     "src/meaning.ts",
     "src/tree-limits.ts",
-    "src/held-bytes.ts"
+    "src/held-bytes.ts",
+    "src/merge3.ts",
+    "src/merge-align.ts",
+    "src/merge-diff.ts",
+    "src/merge-job.ts",
+    "src/merge-nodes.ts",
+    "src/merge-sequence.ts"
   ],
   "coverageAnalysis": "perTest",
   "concurrency": 2,

@@ -13,9 +13,11 @@ import type { JobResult } from './result.ts';
 import type { MdxIssueCode } from './types.ts';
 import {
   maxBodyBytes,
+  maxMergeBodyBytes,
   maxPrintBodyBytes,
   maxTreeBytes,
   ORGANIZATION_HEADER,
+  wireMergeSchema,
   wirePrintSchema,
   wireRequestSchema,
 } from './wire.ts';
@@ -35,7 +37,9 @@ export interface ParseHost {
 
 const MAX_PARSE_BODY = maxBodyBytes(DEFAULT_LIMITS.maxBytes);
 const MAX_PRINT_BODY = maxPrintBodyBytes(maxTreeBytes(DEFAULT_LIMITS.maxBytes));
+const MAX_MERGE_BODY = maxMergeBodyBytes(DEFAULT_LIMITS.maxBytes);
 const BUSY_BODY = Symbol('busy');
+const ROUTES = new Set(['/parse', '/print', '/merge']);
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_CONNECTIONS = 256;
 
@@ -101,6 +105,14 @@ function jobFor(
     if (frame.tenant.organizationId !== organization) throw new Error('not the same organization');
     return frame;
   };
+  if (url === '/merge') {
+    const frame = checked(wireMergeSchema.parse(json));
+    return pool.merge({
+      ...frame,
+      tenant: frame.tenant as TenantRef,
+      policy: { ...frame.policy, components: new Set(frame.policy.components) },
+    });
+  }
   if (url === '/print') {
     const frame = checked(wirePrintSchema.parse(json));
     return pool.print({
@@ -117,6 +129,11 @@ function jobFor(
   });
 }
 
+const capOf = (url: string) => {
+  if (url === '/merge') return MAX_MERGE_BODY;
+  return url === '/print' ? MAX_PRINT_BODY : MAX_PARSE_BODY;
+};
+
 async function serveClaimed(
   pool: ParsePool,
   request: IncomingMessage,
@@ -125,7 +142,7 @@ async function serveClaimed(
   claim: HeldClaim,
 ) {
   const url = request.url ?? '';
-  const cap = url === '/print' ? MAX_PRINT_BODY : MAX_PARSE_BODY;
+  const cap = capOf(url);
   const declared = Number(request.headers['content-length'] ?? 0);
   if (declared > cap) {
     empty(response, 413);
@@ -167,7 +184,7 @@ async function serve(
     empty(response, 200);
     return;
   }
-  if (method !== 'POST' || (url !== '/parse' && url !== '/print')) {
+  if (method !== 'POST' || !ROUTES.has(url)) {
     empty(response, 404);
     return;
   }

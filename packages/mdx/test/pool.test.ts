@@ -4,6 +4,7 @@ import type { ParseResult } from '../src/index.ts';
 import { createParsePool } from '../src/pool.ts';
 import type { MergeRequest, ParseRequest, PrintRequest } from '../src/pool.ts';
 import type { ParsePoolConfig } from '../src/pool-config.ts';
+import type { JobResult } from '../src/result.ts';
 import { RECYCLE_AFTER_JOBS } from '../src/thread.ts';
 import type { ParseThread, ThreadAnswer, ThreadJob } from '../src/thread.ts';
 import {
@@ -110,7 +111,7 @@ const limitsPolicy = () => ({
   limits: { ...DEFAULT_LIMITS, maxBytes: 3 },
 });
 
-const codeOf = async (result: Promise<ParseResult>) => {
+const codeOf = async (result: Promise<JobResult>) => {
   const settled = await result;
   return settled.ok ? 'ok' : settled.error[0]?.code;
 };

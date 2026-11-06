@@ -2,6 +2,8 @@ export { rawOf } from './canonical.ts';
 export { DEFAULT_LIMITS } from './policy.ts';
 export { AST_VERSION } from './types.ts';
 export type {
+  BlockConflict,
+  BlockConflictReason,
   BlockSource,
   ComponentRegistry,
   Dialect,
@@ -11,6 +13,9 @@ export type {
   MdxIssueCode,
   MdxLimits,
   MdxRoot,
+  MergeAnswer,
+  MergeOutcome,
+  MergeResult,
   ParseResult,
   PrintResult,
   RenderPolicy,

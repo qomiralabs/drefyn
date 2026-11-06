@@ -5,9 +5,9 @@ import { refused, wireResultSchema } from './result.ts';
 import { rootSchema } from './root-schema.ts';
 import type { JobResult } from './result.ts';
 import type { IsolatedPolicy } from './thread.ts';
-import type { Dialect, MdxRoot, ParseResult, PrintResult } from './types.ts';
-import { maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
-import type { WirePrint, WireRequest } from './wire.ts';
+import type { Dialect, MdxRoot, MergeAnswer, ParseResult, PrintResult } from './types.ts';
+import { maxMergeTreesBytes, maxTreeBytes, ORGANIZATION_HEADER } from './wire.ts';
+import type { WireMerge, WirePrint, WireRequest } from './wire.ts';
 
 export interface ParseClientRequest {
   readonly tenant: TenantRef;
@@ -26,6 +26,16 @@ export interface PrintClientRequest {
   readonly policy: IsolatedPolicy;
 }
 
+export interface MergeClientRequest {
+  readonly tenant: TenantRef;
+  // Logged by the host, so it never holds page text.
+  readonly path: string;
+  readonly base: MdxRoot;
+  readonly ours: MdxRoot;
+  readonly theirs: MdxRoot;
+  readonly policy: IsolatedPolicy;
+}
+
 export interface ParseClient {
   // Never parses here, and has no fallback that does. Resolves with a refusal for anything
   // about the page, the load or the host, so a save keeps its last good version.
@@ -33,6 +43,9 @@ export interface ParseClient {
   // Prints in the host and reparses what it printed, so nothing reaches git that means
   // something other than the tree. Store the tree this hands back, not the one sent.
   print(request: PrintClientRequest): Promise<PrintResult>;
+  // Merges in the host. A clean outcome is not yet a version: print it and store what that hands
+  // back. A conflict stops the write until a person decides.
+  merge(request: MergeClientRequest): Promise<MergeAnswer>;
 }
 
 export interface ParseClientConfig {
@@ -61,6 +74,34 @@ function readPrinted(answer: JobResult): PrintResult {
   if (!answer.ok) return answer;
   return printedSchema.safeParse(answer.value).success
     ? (answer as PrintResult)
+    : refused('mdx.parse_failed');
+}
+
+const blockSchema = z.looseObject({ type: z.string() });
+
+const conflictSchema = z.object({
+  baseIndex: z.int().nullable(),
+  ours: blockSchema.nullable(),
+  theirs: blockSchema.nullable(),
+  reason: z.enum(['both_changed', 'delete_vs_edit', 'both_inserted', 'move_vs_edit']),
+});
+
+const mergedSchema = z.object({
+  outcome: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('clean'), merged: rootSchema }),
+    z.object({
+      kind: z.literal('conflict'),
+      partial: rootSchema,
+      conflicts: z.array(conflictSchema).min(1),
+    }),
+  ]),
+});
+
+// A conflict read as clean would be a silent overwrite, so the answer has to prove its shape.
+function readMerged(answer: JobResult): MergeAnswer {
+  if (!answer.ok) return answer;
+  return mergedSchema.safeParse(answer.value).success
+    ? (answer as MergeAnswer)
     : refused('mdx.parse_failed');
 }
 
@@ -130,7 +171,7 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
         return refused('mdx.too_large');
       }
       const frame: WireRequest = { tenant, path, source, dialect, policy: wireOf(policy) };
-      return await post('/parse', JSON.stringify(frame), tenant);
+      return (await post('/parse', JSON.stringify(frame), tenant)) as ParseResult;
     },
     async print(request) {
       const { tenant, path, root, policy } = request;
@@ -146,6 +187,21 @@ export function createParseClient(config: ParseClientConfig): ParseClient {
       }
       const frame: WirePrint = { tenant, path, tree, policy: wireOf(policy) };
       return readPrinted(await post('/print', JSON.stringify(frame), tenant));
+    },
+    async merge(request) {
+      const { tenant, path, base, ours, theirs, policy } = request;
+      let trees: string;
+      try {
+        trees = JSON.stringify({ base, ours, theirs });
+      } catch {
+        // Only a tree far past any depth limit can overflow this.
+        return refused('mdx.too_deep');
+      }
+      if (Buffer.byteLength(trees, 'utf8') > maxMergeTreesBytes(policy.limits.maxBytes)) {
+        return refused('mdx.too_large');
+      }
+      const frame: WireMerge = { tenant, path, trees, policy: wireOf(policy) };
+      return readMerged(await post('/merge', JSON.stringify(frame), tenant));
     },
   };
 }
