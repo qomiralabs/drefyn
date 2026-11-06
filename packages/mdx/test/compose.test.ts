@@ -86,6 +86,28 @@ describe('the parse host service', () => {
     ).toBe(2_048);
   });
 
+  // The floor is threads times this, plus held bytes three times, so a small machine has to be
+  // able to lower these to lower the limit at all.
+  it('passes on what the memory floor is made of', () => {
+    expect(service.environment?.['DREFYN_PARSE_WORKER_MEMORY_MB']).toBe(
+      '${DREFYN_PARSE_WORKER_MEMORY_MB:-512}',
+    );
+    expect(service.environment?.['DREFYN_PARSE_MAX_HELD_BYTES']).toBe(
+      '${DREFYN_PARSE_MAX_HELD_BYTES:-268435456}',
+    );
+  });
+
+  it('lets a small self host start, once all three come down together', () => {
+    expect(
+      parseHostConfig({
+        DREFYN_PARSE_TOKEN_SHA256: 'a'.repeat(64),
+        DREFYN_PARSE_HOST_MEMORY_MB: '1024',
+        DREFYN_PARSE_WORKER_MEMORY_MB: '128',
+        DREFYN_PARSE_MAX_HELD_BYTES: '134217728',
+      }).hostMemoryMb,
+    ).toBe(1_024);
+  });
+
   it('drops what a parser never needs', () => {
     expect(service['cap_drop']).toEqual(['ALL']);
     expect(service['security_opt']).toEqual(['no-new-privileges:true']);

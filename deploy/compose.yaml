@@ -123,6 +123,10 @@ services:
       DREFYN_PARSE_BIND: 0.0.0.0
       DREFYN_PARSE_PORT: '8787'
       DREFYN_PARSE_HOST_MEMORY_MB: ${DREFYN_PARSE_HOST_MEMORY_MB:-2048}
+      # What the limit above has to fit, so a small machine lowers these first. The host refuses
+      # to start if they do not fit: threads times the first, three times the second, plus 256.
+      DREFYN_PARSE_WORKER_MEMORY_MB: ${DREFYN_PARSE_WORKER_MEMORY_MB:-512}
+      DREFYN_PARSE_MAX_HELD_BYTES: ${DREFYN_PARSE_MAX_HELD_BYTES:-268435456}
       # The hash of the token the app tier sends. Empty stops the host: there is no default.
       DREFYN_PARSE_TOKEN_SHA256: ${DREFYN_PARSE_TOKEN_SHA256:-}
     networks: [parse]
