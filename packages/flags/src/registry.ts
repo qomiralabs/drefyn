@@ -46,6 +46,15 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'engine.writes',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'The content engine accepts writes: creating nodes, saves and rollbacks.',
+    created: '2026-11-06',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

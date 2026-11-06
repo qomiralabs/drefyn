@@ -16,6 +16,12 @@ Parsing lives in the parse host and nowhere else. `@drefyn/mdx/client` is the on
   catch stale bytes and not a writer who recomputes them.
 - `rawOf(block)` is the SHA-256 of a block's canonical tree. Line endings, positions and
   parser data do not count, so a reformat is not a content change.
+- `validateTree(value, limits)` checks a tree that came from outside this process, a client or
+  the parse host, at run time: closed key sets per node type, a known `astVersion`, no
+  `__proto__`, `constructor`, `prototype`, `data` or `position` keys, no NUL or lone surrogate,
+  and depth, node and byte limits. It keeps its own stack and spends those limits before anything
+  recursive touches the tree. Problems are field paths and codes, never text. A tree that passes
+  has the right shape; only a reparse says its bytes mean what its nodes say.
 - `DEFAULT_LIMITS` and `AST_VERSION`.
 
 Each top level block keeps `source: { raw, gapBefore, rawOf, sourceOf }`. `gapBefore` holds everything

@@ -262,6 +262,13 @@ export interface OauthStatesTable {
   created_at: Generated<Date>;
 }
 
+// app.organization_node_counts
+export interface OrganizationNodeCountsTable {
+  organization_id: string;
+  family: string;
+  nodes: Generated<number>;
+}
+
 // app.organization_slugs
 export interface OrganizationSlugsTable {
   slug: string;
@@ -362,6 +369,7 @@ export interface Schema {
   node_versions: NodeVersionsTable;
   nodes: NodesTable;
   oauth_states: OauthStatesTable;
+  organization_node_counts: OrganizationNodeCountsTable;
   organization_slugs: OrganizationSlugsTable;
   organizations: OrganizationsTable;
   password_credentials: PasswordCredentialsTable;

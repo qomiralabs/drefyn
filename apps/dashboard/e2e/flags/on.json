@@ -29,6 +29,14 @@
         "off": false
       },
       "defaultVariant": "on"
+    },
+    "engine.writes": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "on"
     }
   }
 }
