@@ -648,6 +648,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     const CROWD = 40;
     const inner = databaseStore(db);
     const { promise: open, resolve: release } = Promise.withResolvers<undefined>();
+    const { promise: full, resolve: filled } = Promise.withResolvers<undefined>();
     let holding = 0;
     const store: EngineStore = {
       tenant: (tenant, work, options) =>
@@ -656,6 +657,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
           async (tx) => {
             if (tenant.organizationId === crowded.tenant.organizationId) {
               holding += 1;
+              if (holding === CAP) filled(undefined);
               await open;
             }
             return work(tx);
@@ -670,15 +672,14 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     const crowd = Array.from({ length: CROWD }, () =>
       held.engine.queryNodes(crowded.tenant, { typeId: crowded.typeId }),
     );
-    await vi.waitFor(() => {
-      expect(holding).toBe(CAP);
-    });
+    await full;
 
     const answer = await held.engine.queryNodes(quiet.tenant, { typeId: quiet.typeId });
     expect(answer.ok).toBe(true);
 
     release(undefined);
     const results = await Promise.all(crowd);
+    expect(holding).toBe(CAP);
     const served = results.filter((result) => result.ok);
     const busy = results.filter((result) => !result.ok);
     expect(served).toHaveLength(CAP);
