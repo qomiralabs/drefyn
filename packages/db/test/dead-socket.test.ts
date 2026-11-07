@@ -84,7 +84,11 @@ async function listening(): Promise<number> {
 }
 
 // The real pool settings with one slot and a short limit, so a held slot is plain to see.
-async function oneSlot(): Promise<{ readonly pool: pg.Pool; readonly db: Database }> {
+async function oneSlot(): Promise<{
+  readonly pool: pg.Pool;
+  readonly db: Database;
+  readonly sent: readonly string[];
+}> {
   const port = await listening();
   const config = parseDatabaseConfig({
     DREFYN_DATABASE_URL: `postgres://drefyn_app:x@127.0.0.1:${String(port)}/drefyn`,
@@ -95,23 +99,35 @@ async function oneSlot(): Promise<{ readonly pool: pg.Pool; readonly db: Databas
   const pool = new pg.Pool({ ...poolConfig(config, 'app'), query_timeout: LIMIT_MS });
   pool.on('error', () => undefined);
   closers.push(() => pool.end());
+  // What the client asked for, as a queued statement never reaches the silent server.
+  const sent: string[] = [];
+  pool.on('connect', (client) => {
+    const query = client.query.bind(client) as (...args: unknown[]) => unknown;
+    Object.assign(client, {
+      query: (...args: unknown[]) => {
+        sent.push(String(args[0]));
+        return query(...args);
+      },
+    });
+  });
   const db = databaseOverPool(pool, 'app', { statementTimeoutMs: 1000 }) as Database;
-  return { pool, db };
+  return { pool, db, sent };
 }
 
 describe('a connection that stops answering', () => {
-  it('fails the work with a mapped error and gives up the slot within two limits', async () => {
-    const { pool, db } = await oneSlot();
+  it('fails the work with a mapped error and gives up the slot', async () => {
+    const { pool, db, sent } = await oneSlot();
     const started = performance.now();
     const failed = await rejected(withTenant(db, TENANT, (tx) => sql.raw(HANGS).execute(tx)));
     const elapsed = performance.now() - started;
 
     expect(failed).toBeInstanceOf(DbError);
     expect((failed as DbError).code).toBe('DB_UNAVAILABLE');
-    // The statement, then the rollback queued behind it. Slower than that means a third wait.
-    expect(elapsed).toBeGreaterThanOrEqual(2 * LIMIT_MS - 5);
-    expect(elapsed).toBeLessThan(3 * LIMIT_MS);
     expect(pool.totalCount).toBe(0);
+    // Each statement gets one limit, so this pair is what makes the bound two limits. The clock
+    // only shows that both were waited for: its upper end would be a flake under load.
+    expect(sent.slice(sent.indexOf(HANGS) + 1)).toEqual(['rollback']);
+    expect(elapsed).toBeGreaterThanOrEqual(2 * LIMIT_MS - 5);
   });
 
   it('never returns the connection to the next tenant, who gets a fresh one', async () => {
