@@ -8,7 +8,7 @@ import {
   runFilterBackfill,
   type NodeId,
 } from '../src/index.ts';
-import { admin, openDatabase, type Built, type Seeded } from './support/fixture.ts';
+import { ACTOR, admin, key, openDatabase, type Built, type Seeded } from './support/fixture.ts';
 import { describeWithStack } from './support/presence.ts';
 import {
   addItem,
@@ -278,6 +278,38 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${SEEN}}', '"0000-06
         filter: { field: SEEN, op: 'exists' },
       });
       expect(page.ok && page.value.items.map((item) => item.nodeId)).toEqual([healthy]);
+    });
+
+    // A rollback is the one write that puts stored fields back, so it is what meets a time column.
+    it('survives a rollback to a version that holds one, which leaves the slot empty', async () => {
+      const seeded = await seedItems();
+      await declare(built, seeded, [...BASE, SEEN_DECLARED]);
+      await runFilterBackfill(built.engine, seeded.tenant, noWait);
+      const node = await addItem(built, seeded, { [SEEN]: '2026-01-01T00:00:00Z' });
+      const old = await built.engine.getHead(seeded.tenant, node);
+      if (!old.ok || old.value.versionId === null) throw new Error('no head');
+      const toVersionId = old.value.versionId;
+      const next = await saveItem(built, seeded, node, toVersionId, {
+        [SEEN]: '2026-02-01T00:00:00Z',
+      });
+      await admin(`
+set session_replication_role = replica;
+update app.node_versions set fields = jsonb_set(fields, '{${SEEN}}', '"0000-06-01T00:00:00.000Z"')
+  where id = '${toVersionId}';`);
+      const done = await built.engine.rollback({
+        tenant: seeded.tenant,
+        nodeId: node,
+        toVersionId,
+        expectedHeadVersionId: next.versionId,
+        actor: ACTOR,
+        idempotencyKey: key(),
+      });
+      expect(done.ok).toBe(true);
+      const page = await built.engine.queryNodes(seeded.tenant, {
+        typeId: seeded.typeId,
+        filter: { field: SEEN, op: 'exists' },
+      });
+      expect(page).toMatchObject({ ok: true, value: { items: [] } });
     });
 
     it('cannot hold up the next job in the project', async () => {
