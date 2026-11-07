@@ -141,7 +141,7 @@ describeWithStack('the process wide ceiling against Postgres', () => {
     await closeDatabase(holderDb);
   });
 
-  it('holds tree writes below the pool across 30 projects, and a neighbour is answered', async () => {
+  it('holds tree writes below the pool across 30 projects, and answers a neighbour', async () => {
     const crowd = await seedMany(30);
     const nodes = new Map<Seeded, NodeId>();
     for (const seeded of crowd) nodes.set(seeded, await newNode(built.engine, seeded));
@@ -167,8 +167,10 @@ describeWithStack('the process wide ceiling against Postgres', () => {
           () => stalled('advisory'),
           async () => {
             while ((await stalled('advisory')) === 0) await pause(10);
-            for (let turn = 0; turn < 40; turn += 1) {
+            for (let turn = 0; turn < 20; turn += 1) {
               seen.push(codeOf(await built.engine.getHead(neighbour.tenant, page)));
+              const { tenant, typeId } = neighbour;
+              seen.push(codeOf(await built.engine.queryNodes(tenant, { typeId })));
               await pause(25);
             }
           },

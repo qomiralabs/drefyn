@@ -198,19 +198,38 @@ describe('the process wide ceiling', () => {
 
   const LIMITS: PoolGateLimits = { ...WIDE, ceiling: 8, queued: 64 };
 
-  it('holds tree writes to the ceiling, however many projects are busy', async () => {
+  it('holds tree writes below the ceiling, however many projects are busy', async () => {
     const pass = createPoolGate(LIMITS);
     const writes = Array.from({ length: 30 }, (_, at) => {
       const work = held();
       return { ...work, done: pass.treeWrite(inOrganization(at, at), work.work) };
     });
     await flush();
-    expect(writes.filter(({ started }) => started())).toHaveLength(8);
-    expect(pass.load()).toEqual({ running: 8, waiting: 22 });
+    expect(writes.filter(({ started }) => started())).toHaveLength(6);
+    expect(pass.load()).toEqual({ running: 6, waiting: 24 });
     for (const { finish } of writes) finish();
     await vi.advanceTimersByTimeAsync(10);
     await Promise.all(writes.map(({ done }) => done));
     expect(pass.load()).toEqual({ running: 0, waiting: 0 });
+  });
+
+  it('keeps a quarter of the ceiling for lists, so stalled writes cannot shut them out', async () => {
+    const pass = createPoolGate(LIMITS);
+    const writes = Array.from({ length: 30 }, (_, at) => busy(pass, inOrganization(at, at)));
+    await flush();
+    expect(pass.load().running).toBe(6);
+
+    const first = pass.enterList(inOrganization(40, 40));
+    const second = pass.enterList(inOrganization(41, 41));
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(pass.enterList(inOrganization(42, 42))).toBeNull();
+
+    first?.();
+    second?.();
+    for (const { finish } of writes) finish();
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.allSettled(writes.map(({ done }) => done));
   });
 
   it('counts lists and writes against one ceiling', async () => {
@@ -232,7 +251,7 @@ describe('the process wide ceiling', () => {
     const pass = createPoolGate(LIMITS);
     const writes = Array.from({ length: 30 }, (_, at) => busy(pass, inOrganization(1, at)));
     await flush();
-    expect(pass.load().running).toBe(4);
+    expect(pass.load().running).toBe(3);
 
     const quiet = busy(pass, inOrganization(2, 99));
     await flush();
