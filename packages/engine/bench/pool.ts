@@ -261,7 +261,14 @@ async function stalledTree(projects: number, sameOrganization: boolean, holder: 
   let stopped = false;
   const clients = crowd.flatMap(({ seeded, node }) =>
     crowdLoop(
-      () => engine.moveNode({ tenant: seeded.tenant, nodeId: node, parentId: null, afterId: null }),
+      () =>
+        engine.moveNode({
+          tenant: seeded.tenant,
+          nodeId: node,
+          parentId: null,
+          afterId: null,
+          actor,
+        }),
       () => stopped,
     ),
   );

@@ -128,6 +128,34 @@ describe('orderKeyBetween', () => {
     expect(isOrderKey(lower)).toBe(true);
   });
 
+  it('never hands out the reserved smallest key, one step above it included', () => {
+    const smallestInteger = `A${'0'.repeat(26)}`;
+    const oneAbove = `A${'0'.repeat(25)}1`;
+    expect(isOrderKey(oneAbove)).toBe(true);
+    const key = placed(null, oneAbove);
+    expect(isOrderKey(key)).toBe(true);
+    expect(key < oneAbove).toBe(true);
+    expect(key).not.toBe(smallestInteger);
+  });
+
+  it('keeps giving valid keys at the front of a list that starts at the bottom', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('1', '2', 'A', 'z'),
+        fc.integer({ min: 1, max: 30 }),
+        (digit, runs) => {
+          let high = `A${'0'.repeat(25)}${digit}`;
+          for (let run = 0; run < runs; run += 1) {
+            const key = placed(null, high);
+            expect(isOrderKey(key)).toBe(true);
+            expect(key < high).toBe(true);
+            high = key;
+          }
+        },
+      ),
+    );
+  });
+
   it('has nothing to give for a tie or a reversed pair', () => {
     expect(orderKeyBetween('a0', 'a0')).toBeNull();
     expect(orderKeyBetween('a2', 'a1')).toBeNull();

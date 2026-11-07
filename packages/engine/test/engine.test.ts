@@ -1023,7 +1023,14 @@ describe('the pool gate', () => {
     ],
     [
       'moveNode',
-      (engine) => engine.moveNode({ tenant, nodeId: NODE, parentId: null, afterId: null }),
+      (engine) =>
+        engine.moveNode({
+          tenant,
+          nodeId: NODE,
+          parentId: null,
+          afterId: null,
+          actor: { kind: 'system', job: 'test' },
+        }),
     ],
     ['declareSchema', (engine) => engine.declareSchema({ tenant, typeId: TYPE, schema: {} })],
   ];
@@ -1201,7 +1208,13 @@ describe('the pool gate', () => {
       config: { ...DEFAULT_ENGINE_CONFIG, slotHoldMs: 12_345 },
     });
     await engine.saveDraft(save());
-    await engine.moveNode({ tenant, nodeId: NODE, parentId: null, afterId: null });
+    await engine.moveNode({
+      tenant,
+      nodeId: NODE,
+      parentId: null,
+      afterId: null,
+      actor: { kind: 'system', job: 'test' },
+    });
     expect(seen).toHaveLength(2);
     for (const options of seen) expect(options).toMatchObject({ deadlineMs: 12_345 });
   });
