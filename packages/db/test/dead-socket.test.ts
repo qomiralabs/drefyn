@@ -1,5 +1,4 @@
-import { createServer, type Server, type Socket } from 'node:net';
-import type { AddressInfo } from 'node:net';
+import { Duplex } from 'node:stream';
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import pg from 'pg';
@@ -27,33 +26,57 @@ const AUTH_OK = message('R', Buffer.alloc(4));
 const SIMPLE_ANSWER = Buffer.concat([DONE, READY]);
 const EXTENDED_ANSWER = Buffer.concat([message('1'), message('2'), message('n'), DONE, READY]);
 
-// Speaks just enough of the protocol to run a transaction. The statement marked to hang gets no
-// answer, and neither does anything after it, and the socket stays open: what a peer that
-// vanished without a FIN looks like from here.
-function answer(socket: Socket): void {
-  let started = false;
-  let dead = false;
-  let pending = Buffer.alloc(0);
-  socket.on('error', () => undefined);
-  socket.on('data', (data) => {
-    pending = Buffer.concat([pending, data]);
-    if (!started) {
-      if (pending.length < 4 || pending.length < pending.readInt32BE(0)) return;
-      pending = pending.subarray(pending.readInt32BE(0));
-      started = true;
-      socket.write(Buffer.concat([AUTH_OK, READY]));
+// Speaks just enough of the protocol to run a transaction, in memory, so the real pool and driver
+// run with no port. The statement marked to hang gets no answer, and neither does anything after
+// it, and the stream stays open: what a peer that vanished without a FIN looks like from here.
+class SilentPeer extends Duplex {
+  #started = false;
+  #dead = false;
+  #pending = Buffer.alloc(0);
+
+  connect(): this {
+    setImmediate(() => this.emit('connect'));
+    return this;
+  }
+
+  setNoDelay(): this {
+    return this;
+  }
+
+  setKeepAlive(): this {
+    return this;
+  }
+
+  override _read(): void {
+    // Answers are pushed as frames arrive.
+  }
+
+  override _write(chunk: Buffer, _encoding: string, done: () => void): void {
+    this.#pending = Buffer.concat([this.#pending, chunk]);
+    this.#answer();
+    done();
+  }
+
+  #answer(): void {
+    if (!this.#started) {
+      const size = this.#pending.length < 4 ? Infinity : this.#pending.readInt32BE(0);
+      if (this.#pending.length < size) return;
+      this.#pending = this.#pending.subarray(size);
+      this.#started = true;
+      this.push(Buffer.concat([AUTH_OK, READY]));
     }
-    while (pending.length >= 5 && pending.length >= pending.readInt32BE(1) + 1) {
-      const size = pending.readInt32BE(1) + 1;
-      const frame = pending.subarray(0, size);
-      pending = pending.subarray(size);
-      if (frame.includes(HANGS)) dead = true;
-      if (dead) continue;
+    while (this.#pending.length >= 5) {
+      const size = this.#pending.readInt32BE(1) + 1;
+      if (this.#pending.length < size) return;
+      const frame = this.#pending.subarray(0, size);
+      this.#pending = this.#pending.subarray(size);
+      if (frame.includes(HANGS)) this.#dead = true;
+      if (this.#dead) continue;
       const type = String.fromCharCode(frame.readUInt8(0));
-      if (type === 'Q') socket.write(SIMPLE_ANSWER);
-      if (type === 'S') socket.write(EXTENDED_ANSWER);
+      if (type === 'Q') this.push(SIMPLE_ANSWER);
+      if (type === 'S') this.push(EXTENDED_ANSWER);
     }
-  });
+  }
 }
 
 const closers: (() => Promise<void>)[] = [];
@@ -62,41 +85,23 @@ afterEach(async () => {
   await Promise.all(closers.splice(0).map((close) => close()));
 });
 
-async function listening(): Promise<number> {
-  const sockets = new Set<Socket>();
-  const server: Server = createServer((socket) => {
-    sockets.add(socket);
-    answer(socket);
-  });
-  await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  closers.push(
-    () =>
-      new Promise<void>((resolve) => {
-        for (const socket of sockets) socket.destroy();
-        server.close(() => {
-          resolve();
-        });
-      }),
-  );
-  return (server.address() as AddressInfo).port;
-}
-
 // The real pool settings with one slot and a short limit, so a held slot is plain to see.
-async function oneSlot(): Promise<{
+function oneSlot(): {
   readonly pool: pg.Pool;
   readonly db: Database;
   readonly sent: readonly string[];
-}> {
-  const port = await listening();
+} {
   const config = parseDatabaseConfig({
-    DREFYN_DATABASE_URL: `postgres://drefyn_app:x@127.0.0.1:${String(port)}/drefyn`,
+    DREFYN_DATABASE_URL: 'postgres://drefyn_app:x@127.0.0.1:1/drefyn',
     DREFYN_DATABASE_SSL: 'disable',
     DREFYN_DATABASE_POOL_MAX: '1',
     DREFYN_DATABASE_POOL_WAIT_MS: '5000',
   });
-  const pool = new pg.Pool({ ...poolConfig(config, 'app'), query_timeout: LIMIT_MS });
+  const pool = new pg.Pool({
+    ...poolConfig(config, 'app'),
+    query_timeout: LIMIT_MS,
+    stream: () => new SilentPeer(),
+  });
   pool.on('error', () => undefined);
   closers.push(() => pool.end());
   // What the client asked for, as a queued statement never reaches the silent server.
@@ -116,7 +121,7 @@ async function oneSlot(): Promise<{
 
 describe('a connection that stops answering', () => {
   it('fails the work with a mapped error and gives up the slot', async () => {
-    const { pool, db, sent } = await oneSlot();
+    const { pool, db, sent } = oneSlot();
     const started = performance.now();
     const failed = await rejected(withTenant(db, TENANT, (tx) => sql.raw(HANGS).execute(tx)));
     const elapsed = performance.now() - started;
@@ -131,7 +136,7 @@ describe('a connection that stops answering', () => {
   });
 
   it('never returns the connection to the next tenant, who gets a fresh one', async () => {
-    const { pool, db } = await oneSlot();
+    const { pool, db } = oneSlot();
     const stuck = rejected(withTenant(db, TENANT, (tx) => sql.raw(HANGS).execute(tx)));
     const next = withTenant(db, TENANT, (tx) => sql.raw('select 1').execute(tx));
 
