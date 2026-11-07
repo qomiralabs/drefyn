@@ -115,7 +115,11 @@ describe('canonicalFields', () => {
 });
 
 describe('filterValue', () => {
-  const field = (n: number) => FIELDS.find(({ id: fieldId }) => fieldId === id(n)) as FieldDef;
+  const field = (n: number) => {
+    const found = FIELDS.find(({ id: fieldId }) => fieldId === id(n));
+    if (found === undefined) throw new Error('no such field');
+    return found;
+  };
 
   it('takes text past what the field may store, which only matches nothing', () => {
     expect(filterValue(field(1), 'longer than eight')).toBe('longer than eight');

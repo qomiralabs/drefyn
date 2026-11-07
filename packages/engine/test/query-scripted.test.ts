@@ -775,7 +775,7 @@ describe('queryNodes under load', () => {
   });
 
   it('takes queries again once the crowd has gone', async () => {
-    const { engine, entered, release, arrived } = held();
+    const { engine, release, arrived } = held();
     const running = crowd(engine, 20);
     await arrived(CAP);
     release();
