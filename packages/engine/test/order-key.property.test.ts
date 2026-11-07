@@ -66,10 +66,12 @@ describe('orderKeyBetween', () => {
     );
   });
 
+  // Nothing here reads a clock, so this limit only stops a busy runner failing the test: a full
+  // run under coverage has taken this file from 0.4 s to 10 s.
   it.each([
     ['right after the same node', (low: string, high: string) => [low, placed(low, high)]],
     ['right before the same node', (low: string, high: string) => [placed(low, high), high]],
-  ])('stays sorted over a long run %s', (_name, step) => {
+  ])('stays sorted over a long run %s', { timeout: 30_000 }, (_name, step) => {
     let [low, high] = ['a0', 'a1'];
     const seen = new Set<string>();
     const RUN = 5000;
