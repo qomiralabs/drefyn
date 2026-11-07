@@ -33,7 +33,7 @@ import {
 } from './ports.ts';
 import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
-import { PoolBusy } from './pool-gate.ts';
+import { busyIssue, PoolBusy } from './pool-gate.ts';
 import { assertRoomUnder, lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
   BackfillState,
@@ -84,7 +84,6 @@ export interface Engine {
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
-const QUERY_BUSY = [{ path: 'query', code: 'engine.query_busy' }];
 
 const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE']);
 
@@ -162,7 +161,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return await pass();
     } catch (error) {
       if (error instanceof PoolBusy) {
-        logger.warn('engine.pool_busy', { ...tenantFields(tenant), ...gate.load() });
+        logger.warn(error.issue.code, { ...tenantFields(tenant), ...gate.load() });
       }
       throw error;
     }
@@ -504,13 +503,14 @@ export function createEngine(deps: EngineDeps): Engine {
         { ...tenantFields(tenant), type_id: query.typeId },
         async () => {
           const leave = gate.enterList(tenant);
-          if (leave === null) {
-            logger.warn('engine.query_busy', {
+          if (typeof leave === 'string') {
+            const issue = busyIssue(leave, 'query');
+            logger.warn(issue.code, {
               ...tenantFields(tenant),
               max_in_flight: config.queryMaxInFlight,
               ...gate.load(),
             });
-            return refuse('engine.unavailable', QUERY_BUSY);
+            return refuse('engine.unavailable', [issue]);
           }
           try {
             return await settled(() =>

@@ -18,9 +18,9 @@ export interface EngineConfig {
   // share. Protects the pool and is not something a plan sells, so it is not an entitlement.
   readonly queryMaxInFlight: number;
   // Lists and writes that may hold a connection at once in this process. Protects the pool, so
-  // this is config too. Stays below DREFYN_DATABASE_POOL_MAX, or a stall can take every
-  // connection and reads with it.
-  readonly poolCeiling: number;
+  // this is config too. Unset, it comes from the pool. Set, it must stay below
+  // DREFYN_DATABASE_POOL_MAX, or a stall can take every connection and reads with it.
+  readonly poolCeiling: number | undefined;
   // Writes that may wait for a place in this process.
   readonly poolQueue: number;
   // How long a gated transaction may keep its connection and its place, hung socket or not.
@@ -47,9 +47,6 @@ const QUERY_TIMEOUT_CEILING_MS = 60_000;
 // Several busy ones can still fill the pool: this is fairness, not a process ceiling.
 const QUERY_MAX_IN_FLIGHT = 4;
 const QUERY_IN_FLIGHT_CEILING = 256;
-// Leaves two connections of the default pool for reads, and takes more than three organizations
-// to fill, so a fourth still gets in. Writes stop at three quarters of it.
-const POOL_CEILING = 8;
 const POOL_CEILING_MAX = 1024;
 // One organization alone reaches half of this: the 32 a project could queue before.
 const POOL_QUEUE = 64;
@@ -85,7 +82,12 @@ const envSchema = z
     DREFYN_CHUNK_MAX_CHARS: chars(CHUNK_MAX_CHARS),
     DREFYN_ENGINE_QUERY_TIMEOUT_MS: whole(QUERY_TIMEOUT_MS, QUERY_TIMEOUT_CEILING_MS),
     DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT: whole(QUERY_MAX_IN_FLIGHT, QUERY_IN_FLIGHT_CEILING),
-    DREFYN_ENGINE_POOL_CEILING: whole(POOL_CEILING, POOL_CEILING_MAX),
+    DREFYN_ENGINE_POOL_CEILING: z
+      .string()
+      .regex(/^[0-9]{1,9}$/)
+      .transform(Number)
+      .pipe(z.int().min(1).max(POOL_CEILING_MAX))
+      .optional(),
     DREFYN_ENGINE_POOL_QUEUE: whole(POOL_QUEUE, POOL_QUEUE_MAX),
     DREFYN_ENGINE_SLOT_HOLD_MS: whole(SLOT_HOLD_MS, SLOT_HOLD_MAX_MS),
     DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS: whole(UNDECLARED_FILTER_MAX_ITEMS, SCAN_ITEMS_CEILING),

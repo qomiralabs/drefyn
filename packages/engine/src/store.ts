@@ -18,7 +18,10 @@ export interface EngineStore {
 }
 
 // Call at startup: this is where the ceiling meets the pool, and a bad pair stops the process.
-export const databaseStore = (db: Database, config: EngineConfig): EngineStore => ({
-  gate: gateFor(db, gateLimits(config), poolSizeOf(db)),
-  tenant: (tenant, work, options) => withTenant(db, tenant, work, options),
-});
+export const databaseStore = (db: Database, config: EngineConfig): EngineStore => {
+  const poolMax = poolSizeOf(db);
+  return {
+    gate: gateFor(db, gateLimits(config, poolMax), poolMax),
+    tenant: (tenant, work, options) => withTenant(db, tenant, work, options),
+  };
+};

@@ -21,8 +21,8 @@ public.
 
 - `createEngine(deps)`: the calls below, over a store, a parse client, flags and a policy.
   `databaseStore(db, config)` makes the store from a `@drefyn/db` database and its config. Call it
-  at startup: it refuses a ceiling at or above the pool, and any number of calls on one database
-  share one gate.
+  at startup: it refuses a set ceiling at or above the pool, and any number of calls on one database
+  share one gate. Pass the same config to both.
 - `parseEngineConfig(env)`: reads the caps below.
 - `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
   queued. A job calls this; the work resumes from the table.
@@ -47,8 +47,12 @@ compares each list with the migration, so the two cannot drift.
 
 Every call returns a `Result`, and only a bug throws. `engine.not_found` covers another tenant's
 ids as well, so a caller cannot tell them apart. `engine.unavailable` is the one retryable code:
-the database or parse host is down or full, and nothing was stored. Writes need the `engine.writes`
-flag, off in production, and are `engine.forbidden` without it. Reads never need it.
+the database or parse host is down or full. Refused before a transaction, nothing was stored. Lost
+while a commit was on its way, the outcome is unknown: it may have landed with the answer late.
+`saveDraft` and `rollback` are safe to retry with their `idempotencyKey`. `createNode`, `moveNode`
+and `declareSchema` have no key and are not safe to retry blindly until #447: a retried `createNode`
+can leave a second node. Writes need the `engine.writes` flag, off in production, and are
+`engine.forbidden` without it. Reads never need it.
 
 `moveNode` takes a parent and the sibling to land after, and writes one row, however large the
 subtree. Keys come from the server. Moves in a project queue on one advisory lock, so two moves
@@ -78,24 +82,39 @@ many projects are busy. The rest of the pool is for what the gate does not cover
 
 The ceiling is shared, not split. An organization may take one more place while it holds less than
 what is still free, so one alone reaches half the ceiling, several share what they leave, and one
-with nothing running gets in while any place is free. At the default of 8, three organizations
-taking all they can stop at 7, and a fourth is answered. Writes stop at three quarters of the
-ceiling, as a stalled write holds its place for seconds, so stalls cannot shut lists out. That is
-6 writes and an organization's 3 at the default, and lists can use the rest.
+with nothing running gets in while any place is free. At a ceiling of 8, three organizations
+taking all they can hold at most 7, and a fourth is answered. Writes stop at three quarters of the
+ceiling, rounded down, as a stalled write holds its place for seconds, so stalls cannot shut lists
+out. That is 6 writes and an organization's 3 at a ceiling of 8, and lists can use the rest. A
+ceiling of 1 has one place and no reservation: a list and a write take turns.
 
 A write with no place waits off the pool, for at most 1 s, in a queue of `DREFYN_ENGINE_POOL_QUEUE`
-for the process, shared the same way. Then it gets `engine.unavailable` with nothing written, and
-logs `engine.pool_busy` with the ids and the load. A list never waits.
+for the process, shared the same way. Past that it is refused with nothing written. A list never
+waits. Every refusal is `engine.unavailable`, and its issue says whose load it was, read at that
+moment. The log event equals the issue, with the ids and the load, and neither reaches a response.
 
-`databaseStore` throws at startup when the ceiling is at or above `DREFYN_DATABASE_POOL_MAX`, naming
-both keys, so a pool of 8 or less needs a lower ceiling and a pool of 1 cannot run the engine. Raise
-the two together on a large machine: this is a limit on the machine and no plan sells it, so it is
-config and not an entitlement. Each process has its own pool and its own gate.
+| Issue               | Path             | When                                       | Route answer |
+| ------------------- | ---------------- | ------------------------------------------ | ------------ |
+| `engine.query_busy` | `query`          | A list refused, the organization has work  | 429          |
+| `engine.write_busy` | `write`          | A write refused, the organization has work | 429          |
+| `engine.pool_busy`  | `query`, `write` | Either refused, the organization has none  | 503          |
+
+Both answers carry `Retry-After: 1`. `engine.pool_busy` means the process is full, so it counts
+against availability and is the capacity alert. It does not touch `/readyz`: taking a loaded process
+out of rotation pushes its load on to the others.
+
+Unset, `DREFYN_ENGINE_POOL_CEILING` is the pool minus 2 or a fifth of the pool, whichever is more,
+at least 1: 8 of 10, 3 of 5, 16 of 20. `databaseStore` throws at startup on a set value at or above
+`DREFYN_DATABASE_POOL_MAX`, naming both keys, and on a pool of 1, where nothing is left over. This is
+a limit on the machine and no plan sells it, so it is config and not an entitlement. Each process
+has its own pool and its own gate. `DREFYN_DATABASE_POOL_MAX` also sizes the reader pool, so raising
+it for the engine raises that too.
 
 A gated transaction keeps its connection for at most `DREFYN_ENGINE_SLOT_HOLD_MS`, 15 s by default.
 Past that the connection is closed from this side, the caller gets `engine.unavailable`, and the pool
 replaces it. Timeouts in Postgres cannot do this: a socket that stopped answering never hears them.
-A write cut off at the commit may have landed, so retry with the same `idempotencyKey`.
+A gated place is held for at most the pool wait plus the hold, 17 s at the defaults. The backend may
+run on until its statement timeout, so the server can briefly see more connections than the pool.
 
 A save re-reads its input before it trusts it:
 
@@ -197,10 +216,10 @@ cannot see answers `engine.cursor_invalid`. Editing the sort field of the last i
 two pages moves the place with it, so that walk can skip or repeat items near the edit.
 
 An organization runs at most `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT` lists at once in each process. The
-next one gets `engine.unavailable`, issue code `engine.query_busy`, and logs `engine.query_busy`.
-Nothing queues. The count lives in the gate, so engines over one pool share it. A list that finds
-the ceiling full gets the same answer. A date of year 0000 is refused on a save and in a filter, and
-one stored before that reads as missing.
+next one gets `engine.unavailable` with an issue from the table above.
+Nothing queues. The count lives in the gate, so engines over one pool share it. The share of the ceiling
+also applies, so this key has no effect past half the ceiling, 4 at a ceiling of 8. A date of year
+0000 is refused on a save and in a filter, and one stored before that reads as missing.
 
 `drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's
 owner. It rebuilds the key with `reindex concurrently` past 30 percent bloat, estimated from the
@@ -220,7 +239,7 @@ work and never tenant work. The role sees other roles' transactions only with `p
 | `DREFYN_CHUNK_MAX_CHARS`                  | 2000    | Hard cap on a chunk, whatever the page holds.         |
 | `DREFYN_ENGINE_QUERY_TIMEOUT_MS`          | 2000    | `statement_timeout` for `queryNodes`, at most 60000.  |
 | `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT`       | 4       | Lists at once, per organization, per process.         |
-| `DREFYN_ENGINE_POOL_CEILING`              | 8       | Lists and writes on the pool, at most 1024.           |
+| `DREFYN_ENGINE_POOL_CEILING`              | derived | Lists and writes on the pool, at most 1024.           |
 | `DREFYN_ENGINE_POOL_QUEUE`                | 64      | Writes waiting off the pool, at most 4096.            |
 | `DREFYN_ENGINE_SLOT_HOLD_MS`              | 15000   | Longest hold of a connection, at least 5 lists.       |
 | `DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS` | 20000   | Largest type an undeclared filter may read.           |

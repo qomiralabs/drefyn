@@ -57,7 +57,11 @@ export interface AuthDatabase {
 
 export interface TransactionOptions {
   readonly timeoutMs?: number;
-  // withTenant only. Past this the connection is closed from this side, whatever it was doing.
+}
+
+// Apart from TransactionOptions so nothing else can be handed a limit it would quietly ignore.
+export interface TenantTransactionOptions extends TransactionOptions {
+  // Past this the connection is closed from this side, whatever it was doing.
   readonly deadlineMs?: number;
 }
 
@@ -534,7 +538,8 @@ async function runTransaction<DB, T>(
     return result;
   } catch (error) {
     if (events.expired) {
-      throw new DbError('DB_TIMEOUT', 'the transaction ran past its deadline');
+      // Not DB_TIMEOUT, which says the server rolled back. A commit may have landed here.
+      throw new DbError('DB_UNAVAILABLE', 'the transaction ran past its deadline');
     }
     throw toDbError(error, URL_KEYS[state.kind]);
   } finally {
@@ -589,7 +594,7 @@ export async function withTenant<T>(
   db: Database,
   tenant: TenantRef & { readonly userId?: never },
   work: (tx: Transaction<TenantSchema>) => Promise<T>,
-  options?: TransactionOptions,
+  options?: TenantTransactionOptions,
 ): Promise<T> {
   const state = stateOf('app', db, 'withTenant');
   const settings = projectSettings(tenant);

@@ -1,6 +1,6 @@
 import type { TenantRef } from '@drefyn/tenancy';
 import type { EngineConfig } from './config.ts';
-import { Refusal } from './errors.ts';
+import { Refusal, type EngineIssue } from './errors.ts';
 import { inFlightLimit } from './in-flight.ts';
 
 // Two, so one writer holds a project's tree lock and the next is ready as it lets go.
@@ -11,6 +11,19 @@ const QUEUE_WAIT_MS = 1000;
 // A stalled write holds its place for seconds and a list for milliseconds, so without this a few
 // stalls would refuse every list in the process. One part in this many is for lists alone.
 const LIST_ONLY_PARTS = 4;
+// What an unset ceiling leaves over for reads and everything else outside the gate.
+const SPARE_MIN = 2;
+const SPARE_PARTS = 5;
+
+export type GateBusy = 'organization' | 'process';
+export type GatePath = 'query' | 'write';
+
+// Who the load is. A tenant with nothing running cannot be bursting, so a refusal then is ours:
+// routes answer it as an outage, and its log line is the capacity alert.
+export function busyIssue(by: GateBusy, path: GatePath): EngineIssue {
+  if (by === 'process') return { path, code: 'engine.pool_busy' };
+  return { path, code: path === 'query' ? 'engine.query_busy' : 'engine.write_busy' };
+}
 
 export interface PoolGateLimits {
   readonly ceiling: number;
@@ -30,8 +43,9 @@ export interface PoolGate {
   write<T>(tenant: TenantRef, work: () => Promise<T>): Promise<T>;
   // The same, within the slots of one project.
   treeWrite<T>(tenant: TenantRef, work: () => Promise<T>): Promise<T>;
-  // A place now or null. Lists never wait: a list is cheap to retry and stale once it has.
-  enterList(tenant: TenantRef): (() => void) | null;
+  // A place now, or who the load is. Lists never wait: a list is cheap to retry and stale once it
+  // has.
+  enterList(tenant: TenantRef): (() => void) | GateBusy;
   load(): PoolGateLoad;
   // Tenants the gate is holding anything for.
   open(): number;
@@ -40,8 +54,12 @@ export interface PoolGate {
 // Ceiling or queue full. A class of its own so the engine can log it apart from a refusal the
 // work raised.
 export class PoolBusy extends Refusal {
-  constructor() {
-    super('engine.unavailable');
+  readonly issue: EngineIssue;
+
+  constructor(by: GateBusy, path: GatePath) {
+    const issue = busyIssue(by, path);
+    super('engine.unavailable', [issue]);
+    this.issue = issue;
   }
 }
 
@@ -77,6 +95,9 @@ function tally(): Tally {
 // A tenant may take one more only while it holds less than what is still free. Alone that is half
 // the capacity, a few tenants share what they leave, and whoever has nothing gets in while
 // anything is free, so room for a newcomer needs no fixed share and an idle gate wastes none.
+export const writePlaces = (ceiling: number): number =>
+  Math.max(1, ceiling - Math.ceil(ceiling / LIST_ONLY_PARTS));
+
 const hasShare = (counted: Tally, key: string, capacity: number) =>
   counted.of(key) < capacity - counted.total();
 
@@ -101,7 +122,11 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
   const queued = tally();
   const lanes = tally();
   const lists = inFlightLimit(limits.listsPerOrganization);
-  const writeCeiling = limits.ceiling - Math.floor(limits.ceiling / LIST_ONLY_PARTS);
+  const writeCeiling = writePlaces(limits.ceiling);
+  // Read at the refusal and not on arrival: a waiter's own work may have ended since.
+  const busyFor = (organization: string): GateBusy =>
+    running.of(organization) > 0 ? 'organization' : 'process';
+  const refused = (organization: string) => new PoolBusy(busyFor(organization), 'write');
   // A set keeps arrival order and lets a waiter that gave up leave from the middle.
   const waiting = new Set<Waiter>();
 
@@ -147,7 +172,7 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
       };
       const timer = setTimeout(() => {
         unqueue(waiter);
-        refuse(new PoolBusy());
+        refuse(refused(seat.organization));
       }, limits.waitMs);
       waiting.add(waiter);
       queued.add(seat.organization);
@@ -156,7 +181,7 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
   const through = async <T>(seat: Seat, work: () => Promise<T>): Promise<T> => {
     if (hasRoom(seat)) sit(seat);
     else if (hasShare(queued, seat.organization, limits.queued)) await wait(seat);
-    else throw new PoolBusy();
+    else throw refused(seat.organization);
     try {
       return await work();
     } finally {
@@ -176,9 +201,9 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
       ),
     enterList(tenant) {
       const seat = { organization: tenant.organizationId, lane: null };
-      if (!hasShare(running, seat.organization, limits.ceiling)) return null;
+      if (!hasShare(running, seat.organization, limits.ceiling)) return busyFor(seat.organization);
       const leave = lists.enter(seat.organization);
-      if (leave === null) return null;
+      if (leave === null) return busyFor(seat.organization);
       sit(seat);
       let left = false;
       return () => {
@@ -193,8 +218,13 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
   };
 }
 
-export const gateLimits = (config: EngineConfig): PoolGateLimits => ({
-  ceiling: config.poolCeiling,
+// A pool of 10 gives 8, and raising the pool raises this, so a small install never has to learn
+// the key. A pool of 1 gives 1, which meets the pool and is refused: there is nothing to leave over.
+export const derivedCeiling = (poolMax: number): number =>
+  Math.max(1, poolMax - Math.max(SPARE_MIN, Math.ceil(poolMax / SPARE_PARTS)));
+
+export const gateLimits = (config: EngineConfig, poolMax: number): PoolGateLimits => ({
+  ceiling: config.poolCeiling ?? derivedCeiling(poolMax),
   queued: config.poolQueue,
   waitMs: QUEUE_WAIT_MS,
   treeSlots: TREE_SLOTS,
