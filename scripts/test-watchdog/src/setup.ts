@@ -1,5 +1,5 @@
+import { join } from 'node:path';
 import { setInterval } from 'node:timers';
-import { URL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { limitFrom, ticksFor } from './watch.ts';
 
@@ -17,8 +17,8 @@ if (holder[started] !== true) {
   const cell = new Int32Array(new SharedArrayBuffer(8));
   // From node:timers, so fake timers in a test cannot read as a stall.
   setInterval(() => Atomics.add(cell, 0, 1), tickMs).unref();
-  // URL from node:url: a browser test environment replaces the global one with its own.
-  new Worker(new URL('./thread.ts', import.meta.url), {
+  // A path, not a URL: under a DOM test environment import.meta.url is not a file URL.
+  new Worker(join(import.meta.dirname, 'thread.ts'), {
     workerData: { cell, parent: process.ppid, limitMs },
   }).unref();
 }
