@@ -146,10 +146,15 @@ export function assignSlots(schema: ContentSchema, prior: SlotMap, hasItems: boo
   return { ok: true, value: { slots, fills, clears } };
 }
 
-function slotValue(value: StoredValue | undefined): string | readonly string[] | null {
+function slotValue(
+  column: SlotColumn,
+  value: StoredValue | undefined,
+): string | readonly string[] | null {
   if (value === undefined) return null;
   if (typeof value === 'boolean') return value ? '1' : '0';
-  return typeof value === 'string' ? value : value.map(String);
+  if (typeof value !== 'string') return value.map(String);
+  // Year 0000 was once saved, and a rollback can bring it back. A scan reads it as missing too.
+  return column.startsWith('d') && value.startsWith('0000-') ? null : value;
 }
 
 // Every column, so a value removed from a node cannot stay behind in its slot.
@@ -159,7 +164,7 @@ export function slotRowOf(slots: SlotMap, fields: StoredFields): SlotRow {
     string | readonly string[] | null
   >;
   for (const [id, entry] of Object.entries(slots)) {
-    if (entry.state !== 'clearing') row[entry.column] = slotValue(fields[id]);
+    if (entry.state !== 'clearing') row[entry.column] = slotValue(entry.column, fields[id]);
   }
   return row;
 }

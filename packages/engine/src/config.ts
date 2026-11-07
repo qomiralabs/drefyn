@@ -14,6 +14,9 @@ export interface EngineConfig {
   readonly chunkMaxChars: number;
   // statement_timeout for a list. The app pool's own ceiling is 60 s.
   readonly queryTimeoutMs: number;
+  // Lists one organization may run at once in this process, as this process's pool is what they
+  // share. Protects the pool and is not something a plan sells, so it is not an entitlement.
+  readonly queryMaxInFlight: number;
   // The largest type an undeclared filter may read in full.
   readonly undeclaredScanMaxItems: number;
 }
@@ -32,6 +35,10 @@ const CHUNK_CHARS_CEILING = 200_000;
 
 const QUERY_TIMEOUT_MS = 2000;
 const QUERY_TIMEOUT_CEILING_MS = 60_000;
+// Under half of the default pool of 10, so one organization alone leaves room for the rest.
+// Several busy ones can still fill the pool: this is fairness, not a process ceiling.
+const QUERY_MAX_IN_FLIGHT = 4;
+const QUERY_IN_FLIGHT_CEILING = 256;
 // Above the default the guarantee no longer holds, so a larger value is a choice and has a roof.
 const SCAN_ITEMS_CEILING = 1_000_000;
 
@@ -58,6 +65,7 @@ const envSchema = z
     DREFYN_CHUNK_TARGET_CHARS: chars(CHUNK_TARGET_CHARS),
     DREFYN_CHUNK_MAX_CHARS: chars(CHUNK_MAX_CHARS),
     DREFYN_ENGINE_QUERY_TIMEOUT_MS: whole(QUERY_TIMEOUT_MS, QUERY_TIMEOUT_CEILING_MS),
+    DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT: whole(QUERY_MAX_IN_FLIGHT, QUERY_IN_FLIGHT_CEILING),
     DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS: whole(UNDECLARED_FILTER_MAX_ITEMS, SCAN_ITEMS_CEILING),
   })
   .refine((env) => env.DREFYN_CHUNK_TARGET_CHARS <= env.DREFYN_CHUNK_MAX_CHARS, {
@@ -73,6 +81,7 @@ export function parseEngineConfig(env: Readonly<Record<string, string | undefine
     chunkTargetChars: parsed.DREFYN_CHUNK_TARGET_CHARS,
     chunkMaxChars: parsed.DREFYN_CHUNK_MAX_CHARS,
     queryTimeoutMs: parsed.DREFYN_ENGINE_QUERY_TIMEOUT_MS,
+    queryMaxInFlight: parsed.DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT,
     undeclaredScanMaxItems: parsed.DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS,
   };
 }

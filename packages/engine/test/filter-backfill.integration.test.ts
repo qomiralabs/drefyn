@@ -1,6 +1,6 @@
 import { closeDatabase, type Database } from '@drefyn/db';
 import type { FieldId } from '@drefyn/schema';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   BACKFILL_BATCH,
   BACKFILL_PAUSE_MS,
@@ -8,10 +8,11 @@ import {
   runFilterBackfill,
   type NodeId,
 } from '../src/index.ts';
-import { admin, openDatabase, type Built, type Seeded } from './support/fixture.ts';
+import { ACTOR, admin, key, openDatabase, type Built, type Seeded } from './support/fixture.ts';
 import { describeWithStack } from './support/presence.ts';
 import {
   addItem,
+  dateField,
   declare,
   fieldId,
   itemEngine,
@@ -248,6 +249,77 @@ insert into app.node_filter_rows (organization_id, project_id, type_id, node_id)
     const before = await column();
     await declare(built, seeded, [NEW, BASE[0] as never], 2);
     expect(await column()).toBe(before);
+  });
+
+  describe('a year 0000 value stored before it was refused', () => {
+    const SEEN = fieldId();
+    const SEEN_PLAIN = dateField(SEEN, 'seen');
+    const SEEN_DECLARED = dateField(SEEN, 'seen', { filterable: true });
+
+    const poisoned = async () => {
+      const seeded = await seedItems();
+      await declare(built, seeded, [...BASE, SEEN_PLAIN]);
+      const poison = await addItem(built, seeded, { [SEEN]: '2026-01-01T00:00:00Z' });
+      const healthy = await addItem(built, seeded, { [SEEN]: '2026-02-01T00:00:00Z' });
+      await admin(`
+update app.nodes set head_fields = jsonb_set(head_fields, '{${SEEN}}', '"0000-06-01T00:00:00.000Z"')
+  where id = '${poison}';`);
+      return { seeded, poison, healthy };
+    };
+
+    it('cannot stop a fill, which leaves that item empty', async () => {
+      const { seeded, healthy } = await poisoned();
+      await declare(built, seeded, [...BASE, SEEN_DECLARED], 2);
+      const done = await runFilterBackfill(built.engine, seeded.tenant, noWait);
+      expect(done).toEqual({ ok: true, value: 'idle' });
+      expect(await stateOf(seeded, SEEN)).toBe('ready');
+      const page = await built.engine.queryNodes(seeded.tenant, {
+        typeId: seeded.typeId,
+        filter: { field: SEEN, op: 'exists' },
+      });
+      expect(page.ok && page.value.items.map((item) => item.nodeId)).toEqual([healthy]);
+    });
+
+    // A rollback is the one write that puts stored fields back, so it is what meets a time column.
+    it('survives a rollback to a version that holds one, which leaves the slot empty', async () => {
+      const seeded = await seedItems();
+      await declare(built, seeded, [...BASE, SEEN_DECLARED]);
+      await runFilterBackfill(built.engine, seeded.tenant, noWait);
+      const node = await addItem(built, seeded, { [SEEN]: '2026-01-01T00:00:00Z' });
+      const old = await built.engine.getHead(seeded.tenant, node);
+      if (!old.ok || old.value.versionId === null) throw new Error('no head');
+      const toVersionId = old.value.versionId;
+      const next = await saveItem(built, seeded, node, toVersionId, {
+        [SEEN]: '2026-02-01T00:00:00Z',
+      });
+      await admin(`
+set session_replication_role = replica;
+update app.node_versions set fields = jsonb_set(fields, '{${SEEN}}', '"0000-06-01T00:00:00.000Z"')
+  where id = '${toVersionId}';`);
+      const done = await built.engine.rollback({
+        tenant: seeded.tenant,
+        nodeId: node,
+        toVersionId,
+        expectedHeadVersionId: next.versionId,
+        actor: ACTOR,
+        idempotencyKey: key(),
+      });
+      expect(done.ok).toBe(true);
+      const page = await built.engine.queryNodes(seeded.tenant, {
+        typeId: seeded.typeId,
+        filter: { field: SEEN, op: 'exists' },
+      });
+      expect(page).toMatchObject({ ok: true, value: { items: [] } });
+    });
+
+    it('cannot hold up the next job in the project', async () => {
+      const { seeded } = await poisoned();
+      await declare(built, seeded, [...PLAIN, SEEN_DECLARED], 2);
+      await declare(built, seeded, [BASE[0] as never, NEW, SEEN_DECLARED], 3);
+      await runFilterBackfill(built.engine, seeded.tenant, noWait);
+      expect(await stateOf(seeded, SEEN)).toBe('ready');
+      expect(await stateOf(seeded, NOTE)).toBe('ready');
+    });
   });
 
   it('stops with no work when nothing is queued', async () => {

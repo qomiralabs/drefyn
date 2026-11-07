@@ -282,6 +282,15 @@ describe('operators and values', () => {
     ['date range', { field: when, op: 'gt', value: '2026-11-06T10:00:00Z' }],
     ['date with offset', { field: when, op: 'gt', value: '2026-11-06T10:00:00+01:00' }],
     ['plain date', { field: day, op: 'eq', value: '2024-02-29' }],
+    [
+      'the first instant Postgres can read here',
+      { field: when, op: 'eq', value: '0001-01-01T00:00:00Z' },
+    ],
+    ['the last instant', { field: when, op: 'eq', value: '9999-12-31T23:59:59Z' }],
+    [
+      'an offset that stays inside the years',
+      { field: when, op: 'eq', value: '0001-01-01T00:00:00-02:00' },
+    ],
     ['reference', { field: author, op: 'eq', value: fid(1) }],
     ['list item', { field: tags, op: 'eq', value: 'a' }],
   ])('accepts %s', (_name, filter) => {
@@ -314,6 +323,10 @@ describe('operators and values', () => {
     ['a string for boolean', { field: live, op: 'eq', value: 'true' }],
     ['an empty contains', { field: title, op: 'contains', value: '' }],
     ['a NUL byte, which Postgres text refuses', { field: title, op: 'eq', value: 'a\u0000' }],
+    ['a lone high surrogate', { field: title, op: 'eq', value: '\ud800' }],
+    ['a lone low surrogate', { field: title, op: 'contains', value: 'a\udc00b' }],
+    ['a lone surrogate in a list', { field: tags, op: 'eq', value: '\ud800' }],
+    ['a lone surrogate among in values', { field: title, op: 'in', value: ['a', '\ud800'] }],
     [
       'text past the slot',
       { field: title, op: 'eq', value: 'x'.repeat(MAX_FILTER_TEXT_BYTES + 1) },
@@ -327,6 +340,11 @@ describe('operators and values', () => {
     ['a plain date on a time field', { field: when, op: 'eq', value: '2026-11-06' }],
     ['a time on a plain date', { field: day, op: 'eq', value: '2026-11-06T10:00:00Z' }],
     ['a date that does not exist', { field: day, op: 'eq', value: '2025-02-29' }],
+    ['a plain date in year 0000', { field: day, op: 'eq', value: '0000-06-01' }],
+    ['a time in year 0000', { field: when, op: 'eq', value: '0000-06-01T00:00:00Z' }],
+    ['a shift into year 0000', { field: when, op: 'eq', value: '0001-01-01T00:00:00+02:00' }],
+    ['a shift past year 9999', { field: when, op: 'eq', value: '9999-12-31T23:59:59-01:00' }],
+    ['one in value in year 0000', { field: day, op: 'in', value: ['2026-01-01', '0000-06-01'] }],
     ['a reference that is not an id', { field: author, op: 'eq', value: 'x' }],
     ['a list item of the wrong type', { field: tags, op: 'eq', value: true }],
   ])('refuses %s', (_name, filter) => {

@@ -167,6 +167,21 @@ describe('parseSlotMap', () => {
 });
 
 describe('slotRowOf', () => {
+  it('leaves out a year 0000 instant, which a time column cannot hold', () => {
+    const when = id(40);
+    const slots: SlotMap = { [when]: { column: 'd1', state: 'ready' } };
+    expect(slotRowOf(slots, { [when]: '0000-06-01T00:00:00.000Z' }).d1).toBeNull();
+    expect(slotRowOf(slots, { [when]: '0001-06-01T00:00:00.000Z' }).d1).toBe(
+      '0001-06-01T00:00:00.000Z',
+    );
+  });
+
+  it('keeps text that happens to look like a year 0000 instant', () => {
+    const name = id(41);
+    const slots: SlotMap = { [name]: { column: 't1', state: 'ready' } };
+    expect(slotRowOf(slots, { [name]: '0000-06-01' }).t1).toBe('0000-06-01');
+  });
+
   const slots = assigned(schemaOf([text(1), count(2), flag(3), when(4), tags(5, 4, 8)])).slots;
 
   it('fills every column, so a removed value cannot linger', () => {
