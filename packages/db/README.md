@@ -100,7 +100,9 @@ Rules for the work:
 - After every transaction the connection runs `DISCARD ALL` before it goes back to the pool,
   so cursors held past commit, session settings, `LISTEN` and advisory locks never reach the
   next tenant. It also drops prepared statements, so queries are never named.
-- Streaming is not supported inside a transaction.
+- Streaming and abort signals are not supported inside a transaction. An aborted statement keeps
+  running on the server and could commit, so both are refused, and the transaction rolls back
+  even if the work catches the refusal.
 - No insert path accepts a client chosen `id`. Ids come from `uuidv7()` or `newId(kind)`, so a
   primary key conflict can never tell a caller that an id exists in another tenant. This is
   why unique keys other than `(id)` must include `organization_id`.
