@@ -156,8 +156,9 @@ are unnamed: a named one gets a generic plan, which took 341,004 buffers against
 A value that is missing is false to every comparison except `neq`, and `not` flips that cleanly, so
 `not eq` and `neq` agree. `contains` has no pattern language and ignores case. Sorting needs a
 declared `sortable` field, nulls come last in both directions, and pages walk by an opaque cursor
-that holds only to the order it came from. With no sort, newest first. A list that passes
-`DREFYN_ENGINE_QUERY_TIMEOUT_MS` returns `engine.unavailable` and no partial page.
+that holds only to the order it came from. With no sort, newest first. Each statement of a list has its own
+`DREFYN_ENGINE_QUERY_TIMEOUT_MS`, and one that passes it returns `engine.unavailable` and no partial
+page.
 
 A cursor names a node, the order and nothing else, so no field value is in a URL or an access log.
 The sort value is read back from that node on the next page. A cursor naming a node the tenant
@@ -166,7 +167,9 @@ two pages moves the place with it, so that walk can skip or repeat items near th
 
 An organization runs at most `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT` lists at once in each process. The
 next one gets `engine.unavailable`, issue code `engine.query_busy`, and logs `engine.query_busy`.
-Nothing queues. Build one engine per process: the count lives in it. A date of year 0000 is refused
+Nothing queues. Build one engine per process: the count lives in it. Keep the cap under half of
+`DREFYN_DATABASE_POOL_MAX`. This is fairness between organizations: several busy ones can still fill
+the pool together. A date of year 0000 is refused
 on a save and in a filter, and one stored before that reads as missing.
 
 `drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's

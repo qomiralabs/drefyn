@@ -35,7 +35,8 @@ const CHUNK_CHARS_CEILING = 200_000;
 
 const QUERY_TIMEOUT_MS = 2000;
 const QUERY_TIMEOUT_CEILING_MS = 60_000;
-// Under half of the default pool of 10, so one organization always leaves room for the rest.
+// Under half of the default pool of 10, so one organization alone leaves room for the rest.
+// Several busy ones can still fill the pool: this is fairness, not a process ceiling.
 const QUERY_MAX_IN_FLIGHT = 4;
 const QUERY_IN_FLIGHT_CEILING = 256;
 // Above the default the guarantee no longer holds, so a larger value is a choice and has a roof.
