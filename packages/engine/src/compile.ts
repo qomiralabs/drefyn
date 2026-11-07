@@ -119,7 +119,9 @@ export function operandOf(field: FieldDef, context: CompileContext): Operand {
   return slotOperand(field, entry.column);
 }
 
-// checkFilter has seen the value. A compile that skipped it still must not reach Postgres.
+// checkFilter has seen the value. A scalar or json list compile that skipped it still must not
+// reach Postgres. slotListLeaf comes through neither path: it binds its values as text, and
+// counts on that check alone.
 function parameterOf(field: FieldDef, value: unknown): string | boolean {
   const scalar = filterValue(field, value);
   if (scalar !== null) return scalar;

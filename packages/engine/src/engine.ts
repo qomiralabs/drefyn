@@ -150,6 +150,8 @@ async function assertTypeFits(tx: EngineTx, input: z.output<typeof createNodeSch
 const TREE_SLOTS = 2;
 const TREE_QUEUE = 32;
 
+// Build one per process and share it: the list cap and the tree gate count inside this object, so
+// an engine per request has neither and nothing says so.
 export function createEngine(deps: EngineDeps): Engine {
   const { store, flags } = deps;
   const treeGate = createTreeGate({

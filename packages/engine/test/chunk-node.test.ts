@@ -159,6 +159,31 @@ describe('chunkNode boundaries', () => {
     expect(stored).toBeLessThanOrEqual(1024 * 1024);
   });
 
+  it('spends a section share to its last unit and not one past it', () => {
+    // 262,144 over 7 headings is 37,449 and a fraction, so rounding up would give every section
+    // one unit more. Each row of a section costs its heading plus one.
+    const section = (cost: number, rows: number) => [
+      { raw: '#', heading: { depth: 1, text: 'h'.repeat(cost - 1) } as const },
+      ...Array.from({ length: rows - 1 }, () => ({ raw: 'body' })),
+    ];
+    const fills = section(73, 513);
+    const passes = section(50, 749);
+    const rest = Array.from({ length: 5 }, () => section(2, 1)).flat();
+    expect(73 * fills.length).toBe(37_449);
+    expect(50 * passes.length).toBe(37_450);
+
+    const chunks = chunkNode(treeOf([...fills, ...passes, ...rest]), {
+      targetChars: 4,
+      maxChars: 2000,
+    });
+    const pathless = (from: number, to: number) =>
+      chunks.slice(from, to).filter(({ headingPath }) => headingPath.length === 0).length;
+
+    expect(pathless(0, fills.length)).toBe(0);
+    expect(pathless(fills.length, fills.length + passes.length - 1)).toBe(0);
+    expect(chunks[fills.length + passes.length - 1]?.headingPath).toEqual([]);
+  });
+
   it('counts empty headings against the budget too', () => {
     // The most a tree may hold. Six elements on each row would pass the budget.
     const deep = Array.from({ length: 50_000 }, () => ({

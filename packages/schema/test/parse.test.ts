@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   asFieldId,
@@ -8,6 +9,8 @@ import {
   validateSchema,
 } from '../src/index.ts';
 import { asset, fid, number, object, schema, text } from './support.ts';
+
+const LABEL_UNIT = fc.constantFrom('a', '\u00e9', '\u4e2d', '\u{1f600}', '\0', '\ud83d', '\ude00');
 
 const code = (input: unknown) => {
   const result = parseContentSchema(input);
@@ -67,6 +70,33 @@ describe('parseContentSchema', () => {
     ['an unknown text format', schema([{ ...text(1), format: 'html' } as never])],
   ])('refuses %s', (_name, input) => {
     expect(code(input)).toBe('schema.malformed');
+  });
+
+  // jsonb refuses both, so one that got this far would come back as a raw database error.
+  it.each([
+    ['a NUL', 'a\0b'],
+    ['a lone high surrogate', '\ud800'],
+    ['a lone low surrogate', 'a\udc00b'],
+  ])('refuses a label holding %s, at any depth', (_name, label) => {
+    const hostile = { ...text(2), label };
+    const list = { ...text(1), kind: 'list', of: hostile, maxItems: 4 };
+    expect(code(schema([hostile]))).toBe('schema.malformed');
+    expect(code(schema([object(1, [hostile])]))).toBe('schema.malformed');
+    expect(code(schema([list as never]))).toBe('schema.malformed');
+    expect(parseContentSchema(schema([hostile]))).toMatchObject({
+      ok: false,
+      error: { issues: [{ path: 'fields.0.label', code: 'schema.malformed' }] },
+    });
+  });
+
+  it('keeps a label jsonb can hold, whatever else it contains', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: LABEL_UNIT, minLength: 1 }), (label) => {
+        // A lone surrogate does not survive UTF-8, and two units can still pair up as one.
+        const held = !label.includes('\0') && Buffer.from(label).toString() === label;
+        expect(code(schema([{ ...text(1), label }]))).toBe(held ? null : 'schema.malformed');
+      }),
+    );
   });
 
   it('refuses unknown keys, including an own __proto__ key from JSON', () => {

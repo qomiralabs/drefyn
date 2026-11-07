@@ -16,9 +16,11 @@ const SOCKET = new Set([
   'EAI_AGAIN',
   'EPIPE',
 ]);
-// What pg and pg-pool say when the pool wait runs out or a connection drops.
+// What pg and pg-pool say when the pool wait runs out, a connection drops or a query goes
+// unanswered past the pool's query_timeout.
 const DRIVER_UNAVAILABLE = [
   /^timeout exceeded when trying to connect$/,
+  /^Query read timeout$/,
   /^Connection terminated/,
   /^Client has encountered a connection error and is not queryable$/,
 ];

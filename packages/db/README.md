@@ -261,6 +261,11 @@ with `is_local` false) in any tracked file.
   password or the URL. Zero for the wait or the timeout is refused, because pg and Postgres
   read zero as "forever". Query parameters on the URL are refused: TLS is set only by
   `DREFYN_DATABASE_SSL`.
+  Each pool also gives up on an unanswered statement in the driver, 5 s past the longest timeout
+  it allows: 65 s on the app pool, 15 s on the reader and auth pools. That covers a peer that
+  vanished, which no `statement_timeout` can reach. The connection is thrown away within two of
+  those limits, the statement and its rollback, and the caller gets `DB_UNAVAILABLE`. A limit that
+  fires on a `commit` leaves the outcome unknown, as any dropped connection does.
 - `parseMigrationConfig(env)`: reads `DREFYN_MIGRATION_DATABASE_URL` and `DREFYN_DATABASE_SSL`.
   It never falls back to the application URL.
 - `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same
