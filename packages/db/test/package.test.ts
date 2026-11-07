@@ -89,6 +89,7 @@ describe('package shape', () => {
         'parseDatabaseConfig',
         'parseMigrationConfig',
         'parsePublishedReaderConfig',
+        'poolSizeOf',
         'toSafeInteger',
         'withAuth',
         'withOrganization',

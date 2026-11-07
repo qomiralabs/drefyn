@@ -11,12 +11,15 @@ import {
   createEngine,
   DEFAULT_ENGINE_CONFIG,
   noopTracer,
+  type Engine,
   type EngineDeps,
   type EngineLogger,
+  type EngineResult,
   type EngineTracer,
   type LogFields,
   type SaveDraftInput,
 } from '../src/index.ts';
+import { createPoolGate, type PoolGate } from '../src/pool-gate.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
 import { treeOf } from './support/tree.ts';
 
@@ -94,8 +97,8 @@ const happy: Responder = (statement) => {
   return [];
 };
 
-const build = (respond: Responder, over: Partial<EngineDeps> = {}) => {
-  const scripted = scriptedStore(respond);
+const build = (respond: Responder, over: Partial<EngineDeps> = {}, gate?: PoolGate) => {
+  const scripted = scriptedStore(respond, gate);
   const engine = createEngine({
     store: scripted.store,
     parse: parseOk,
@@ -991,5 +994,163 @@ describe('chunks at write', () => {
     for (const { body } of chunkNode(page, DEFAULT_CHUNKS)) {
       expect(logged).not.toContain(JSON.stringify(body).slice(1, -1));
     }
+  });
+});
+
+describe('the pool gate', () => {
+  const OTHER: TenantRef = {
+    organizationId: organizationId('01890a5d-ac96-774b-bcce-b302099a8101'),
+    projectId: projectId('01890a5d-ac96-774b-bcce-b302099a8102'),
+  };
+  const CALLS: readonly [string, (engine: Engine) => Promise<EngineResult<unknown>>][] = [
+    ['saveDraft', (engine) => engine.saveDraft(save())],
+    [
+      'rollback',
+      (engine) =>
+        engine.rollback({
+          tenant,
+          nodeId: NODE,
+          toVersionId: idOf('ver', VERSION),
+          expectedHeadVersionId: idOf('ver', VERSION),
+          actor: { kind: 'system', job: 'test' },
+          idempotencyKey: 'key-1',
+        }),
+    ],
+    ['createNode', (engine) => engine.createNode({ tenant, family: 'docs_page', typeId: TYPE })],
+    [
+      'createNode with a key',
+      (engine) => engine.createNode({ tenant, family: 'docs_page', typeId: TYPE, orderKey: 'a0' }),
+    ],
+    [
+      'moveNode',
+      (engine) => engine.moveNode({ tenant, nodeId: NODE, parentId: null, afterId: null }),
+    ],
+    ['declareSchema', (engine) => engine.declareSchema({ tenant, typeId: TYPE, schema: {} })],
+  ];
+
+  const full = () =>
+    createPoolGate({ ceiling: 1, queued: 2, waitMs: 5, treeSlots: 2, listsPerOrganization: 4 });
+
+  it.each(CALLS)('holds %s out of the pool when the gate is full', async (_name, call) => {
+    const gate = full();
+    const warn = vi.fn<EngineLogger['warn']>();
+    const { engine, statements } = build(happy, { logger: { info: () => undefined, warn } }, gate);
+    const leave = gate.enterList(OTHER);
+    const answer = await call(engine);
+    leave?.();
+    expect(answer).toMatchObject({ ok: false, error: { code: 'engine.unavailable' } });
+    expect(statements).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('engine.pool_busy', {
+      organization_id: tenant.organizationId,
+      project_id: tenant.projectId,
+      running: 1,
+      waiting: 0,
+    });
+  });
+
+  it('leaves reads out of it, as the room below the ceiling is theirs', async () => {
+    const gate = full();
+    const { engine } = build(
+      (statement) =>
+        has(statement, 'coalesce(n.head_content') ? [{ ...NODE_ROW, content: null }] : [],
+      {},
+      gate,
+    );
+    const leave = gate.enterList(OTHER);
+    expect((await engine.getHead(tenant, NODE)).ok).toBe(true);
+    leave?.();
+  });
+
+  it('refuses a list once the gate is full, as busy and not as an outage', async () => {
+    const gate = full();
+    const { engine } = build(happy, {}, gate);
+    const leave = gate.enterList(OTHER);
+    expect(await engine.queryNodes(tenant, { typeId: TYPE })).toEqual({
+      ok: false,
+      error: {
+        code: 'engine.unavailable',
+        retryable: true,
+        issues: [{ path: 'query', code: 'engine.query_busy' }],
+      },
+    });
+    leave?.();
+  });
+
+  it('counts across engines over one store, so a second engine adds no room', async () => {
+    const gate = createPoolGate({
+      ceiling: 8,
+      queued: 2,
+      waitMs: 5,
+      treeSlots: 2,
+      listsPerOrganization: 1,
+    });
+    const scripted = scriptedStore(happy, gate);
+    const deps = {
+      parse: parseOk,
+      parsePolicy: {
+        version: 1,
+        components: [],
+        rawHtml: 'sanitize',
+        remoteImages: 'proxy',
+        linkProtocols: ['https'],
+      },
+      flags: { evaluate: () => Promise.resolve({ value: true }) },
+    } as const;
+    const second = createEngine({ ...deps, store: scripted.store });
+    const leave = gate.enterList(tenant);
+    expect((await second.queryNodes(tenant, { typeId: TYPE })).ok).toBe(false);
+    leave?.();
+  });
+
+  it('gets its place back when a hung transaction is cut off', async () => {
+    const gate = createPoolGate({
+      ceiling: 2,
+      queued: 2,
+      waitMs: 5,
+      treeSlots: 2,
+      listsPerOrganization: 4,
+    });
+    const scripted = scriptedStore(happy, gate);
+    // What the database does at the deadline, down to the error.
+    const { engine } = build(happy, {
+      store: {
+        ...scripted.store,
+        tenant: (_ref, _work, options) =>
+          new Promise((_done, fail) => {
+            setTimeout(() => {
+              fail(new DbError('DB_TIMEOUT', 'the transaction ran past its deadline'));
+            }, options?.deadlineMs);
+          }),
+      },
+      config: { ...DEFAULT_ENGINE_CONFIG, slotHoldMs: 1 },
+    });
+    expect(await engine.queryNodes(tenant, { typeId: TYPE })).toMatchObject({
+      ok: false,
+      error: { code: 'engine.unavailable' },
+    });
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: false,
+      error: { code: 'engine.unavailable' },
+    });
+    expect(gate.load()).toEqual({ running: 0, waiting: 0 });
+  });
+
+  it('asks the store to end a gated transaction by the hold', async () => {
+    const seen: unknown[] = [];
+    const scripted = scriptedStore(happy);
+    const { engine } = build(happy, {
+      store: {
+        ...scripted.store,
+        tenant: (ref, work, options) => {
+          seen.push(options);
+          return scripted.store.tenant(ref, work);
+        },
+      },
+      config: { ...DEFAULT_ENGINE_CONFIG, slotHoldMs: 12_345 },
+    });
+    await engine.saveDraft(save());
+    await engine.moveNode({ tenant, nodeId: NODE, parentId: null, afterId: null });
+    expect(seen).toHaveLength(2);
+    for (const options of seen) expect(options).toMatchObject({ deadlineMs: 12_345 });
   });
 });

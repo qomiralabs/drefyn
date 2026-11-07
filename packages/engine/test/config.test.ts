@@ -67,3 +67,49 @@ describe('the engine config', () => {
     expect(() => parseEngineConfig({ [key]: value })).toThrow();
   });
 });
+
+describe('the pool protection limits', () => {
+  it('defaults to a ceiling of 8, a queue of 64 and a 15 s hold', () => {
+    expect(DEFAULT_ENGINE_CONFIG).toMatchObject({
+      poolCeiling: 8,
+      poolQueue: 64,
+      slotHoldMs: 15_000,
+    });
+  });
+
+  it('reads each from the environment', () => {
+    expect(
+      parseEngineConfig({
+        DREFYN_ENGINE_POOL_CEILING: '5',
+        DREFYN_ENGINE_POOL_QUEUE: '10',
+        DREFYN_ENGINE_SLOT_HOLD_MS: '20000',
+      }),
+    ).toMatchObject({ poolCeiling: 5, poolQueue: 10, slotHoldMs: 20_000 });
+  });
+
+  it.each([
+    ['DREFYN_ENGINE_POOL_CEILING', '0'],
+    ['DREFYN_ENGINE_POOL_CEILING', '1025'],
+    ['DREFYN_ENGINE_POOL_QUEUE', '0'],
+    ['DREFYN_ENGINE_POOL_QUEUE', '4097'],
+    ['DREFYN_ENGINE_SLOT_HOLD_MS', '0'],
+    ['DREFYN_ENGINE_SLOT_HOLD_MS', '300001'],
+  ])('refuses %s=%s', (key, value) => {
+    expect(() => parseEngineConfig({ [key]: value })).toThrow();
+  });
+
+  it('refuses a hold that an honest list of five statements could run past', () => {
+    expect(() =>
+      parseEngineConfig({
+        DREFYN_ENGINE_QUERY_TIMEOUT_MS: '4000',
+        DREFYN_ENGINE_SLOT_HOLD_MS: '19999',
+      }),
+    ).toThrow(/DREFYN_ENGINE_SLOT_HOLD_MS|must cover/);
+    expect(
+      parseEngineConfig({
+        DREFYN_ENGINE_QUERY_TIMEOUT_MS: '4000',
+        DREFYN_ENGINE_SLOT_HOLD_MS: '20000',
+      }).slotHoldMs,
+    ).toBe(20_000);
+  });
+});

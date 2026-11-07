@@ -10,6 +10,7 @@ import {
   type QueryResult,
 } from 'kysely';
 import type { EngineStore } from '../../src/index.ts';
+import { createPoolGate, type PoolGate } from '../../src/pool-gate.ts';
 
 export interface Statement {
   readonly sql: string;
@@ -18,9 +19,18 @@ export interface Statement {
 
 export type Responder = (statement: Statement) => readonly Record<string, unknown>[];
 
+export const roomyGate = (): PoolGate =>
+  createPoolGate({
+    ceiling: 1000,
+    queued: 1000,
+    waitMs: 1000,
+    treeSlots: 2,
+    listsPerOrganization: 4,
+  });
+
 // A Kysely with no database behind it, so a test can say exactly what reached the wire and how
 // a transaction ended without a server.
-export function scriptedStore(respond: Responder) {
+export function scriptedStore(respond: Responder, gate: PoolGate = roomyGate()) {
   const statements: Statement[] = [];
   const ends: ('commit' | 'rollback')[] = [];
 
@@ -65,6 +75,7 @@ export function scriptedStore(respond: Responder) {
   });
 
   const store: EngineStore = {
+    gate,
     tenant: (_tenant, work) => kysely.transaction().execute(work),
   };
 

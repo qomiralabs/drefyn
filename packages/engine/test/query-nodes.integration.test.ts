@@ -12,6 +12,7 @@ import {
   type EngineStore,
   type NodeId,
 } from '../src/index.ts';
+import { createPoolGate, gateLimits } from '../src/pool-gate.ts';
 import {
   admin,
   ACTOR,
@@ -646,11 +647,13 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     await addItem(built, quiet, {});
     const CAP = 3;
     const CROWD = 40;
-    const inner = databaseStore(db);
+    const inner = databaseStore(db, DEFAULT_ENGINE_CONFIG);
+    const config = { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: CAP };
     const { promise: open, resolve: release } = Promise.withResolvers<undefined>();
     const { promise: full, resolve: filled } = Promise.withResolvers<undefined>();
     let holding = 0;
     const store: EngineStore = {
+      gate: createPoolGate(gateLimits(config)),
       tenant: (tenant, work, options) =>
         inner.tenant(
           tenant,
@@ -667,7 +670,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     };
     const held = itemEngine(db, {
       store,
-      config: { ...DEFAULT_ENGINE_CONFIG, queryMaxInFlight: CAP },
+      config,
     });
     const crowd = Array.from({ length: CROWD }, () =>
       held.engine.queryNodes(crowded.tenant, { typeId: crowded.typeId }),
@@ -877,6 +880,7 @@ describeWithStack('filter rows in a save', () => {
     const real = itemEngine(db).engine;
     const crashing = createEngine({
       store: {
+        ...databaseStore(db, DEFAULT_ENGINE_CONFIG),
         tenant: (tenant, work) =>
           withTenant(db, tenant, async (tx) => {
             await work(tx);

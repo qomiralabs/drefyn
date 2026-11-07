@@ -7,6 +7,7 @@ import { inject } from 'vitest';
 import {
   createEngine,
   databaseStore,
+  DEFAULT_ENGINE_CONFIG,
   type Actor,
   type Engine,
   type EngineDeps,
@@ -93,7 +94,7 @@ export interface Built {
 export function buildEngine(db: Database, over: Partial<EngineDeps> = {}): Built {
   const parse = parseClient();
   const engine = createEngine({
-    store: databaseStore(db),
+    store: databaseStore(db, DEFAULT_ENGINE_CONFIG),
     parse,
     parsePolicy: PARSE_POLICY,
     flags: { evaluate: () => Promise.resolve({ value: true }) },
