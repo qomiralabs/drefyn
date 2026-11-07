@@ -3,6 +3,8 @@ import { randomInt } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+// Before the slow imports below, so it reads the parent while that parent is still alive.
+import { watchParent } from './parent-watch.ts';
 import { assertHostEnv, parseHostConfig } from './host-config.ts';
 import { parseSupervisorConfig } from './supervisor-config.ts';
 import { createSupervisor } from './supervisor.ts';
@@ -60,6 +62,13 @@ const supervisor = createSupervisor(parseSupervisorConfig(process.env), {
 
 process.once('SIGTERM', () => {
   supervisor.stop();
+});
+
+// As PID 1 in a container the parent reads 0 for good, so this only ever fires outside one.
+// The stop goes first: a log line to a closed pipe can end this process.
+watchParent(() => {
+  supervisor.stop();
+  logger.warn('mdx.parse_host_parent_gone', {});
 });
 
 await supervisor.run();

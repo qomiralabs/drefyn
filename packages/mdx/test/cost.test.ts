@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { MAX_GROWTH, SIZE_RATIO, growthOf } from './cost.ts';
 
 const SMALL = 3_000;
+// The answer is read from CPU time and does not depend on load, but the wall clock vitest holds
+// this to does. A sync test on a busy gate has taken 65 s, and this adds no check.
+const QUADRATIC_TIMEOUT_MS = 180_000;
 
 // Work the JIT cannot remove, as the result reaches the outside.
 let sink = 0;
@@ -27,7 +30,7 @@ describe('the growth check', () => {
     expect(growth).toBeLessThan(MAX_GROWTH);
   });
 
-  it('catches quadratic work', { timeout: 60_000 }, () => {
+  it('catches quadratic work', { timeout: QUADRATIC_TIMEOUT_MS }, () => {
     const growth = growthOf(
       () => {
         quadratic(SMALL);

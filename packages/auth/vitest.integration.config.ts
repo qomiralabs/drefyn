@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { watchdogGlobalSetup, watchdogSetup } from '../../vitest.shared.ts';
 
 // Each file clones its own database from a template built once per run, so files run in
 // parallel against real commits.
@@ -7,8 +8,9 @@ export default defineConfig({
     include: ['test/integration/**/*.test.ts'],
     // Timing runs alone afterwards, in vitest.integration.serial.config.ts.
     exclude: ['test/integration/serial/**', '**/node_modules/**'],
-    globalSetup: ['test/integration/support/global-setup.ts'],
+    globalSetup: [watchdogGlobalSetup, 'test/integration/support/global-setup.ts'],
     restoreMocks: true,
+    setupFiles: [watchdogSetup],
     testTimeout: 60_000,
     hookTimeout: 120_000,
   },

@@ -76,3 +76,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec turbo run test
+      # After the step above and never beside it: these start whole test runs and real hosts,
+      # and the CPU that takes would land on the time window tests.
+      - run: pnpm test:process
