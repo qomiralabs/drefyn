@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { watchParent } from '../../../src/parent-watch.ts';
 import { createSupervisor } from '../../../src/supervisor.ts';
 
 // The real supervisor over a host running a test script on its threads, so a stall in native
@@ -35,6 +36,9 @@ const supervisor = createSupervisor(
   },
 );
 process.once('SIGTERM', () => {
+  supervisor.stop();
+});
+watchParent(() => {
   supervisor.stop();
 });
 await supervisor.run();

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { watchdogSetup } from '../../vitest.shared.ts';
 
 // Files here change cluster wide role settings and attributes, so they run one at a time and
 // only after the parallel files have finished.
@@ -8,6 +9,7 @@ export default defineConfig({
     globalSetup: ['test/integration/support/global-setup.ts'],
     fileParallelism: false,
     restoreMocks: true,
+    setupFiles: [watchdogSetup],
     testTimeout: 60_000,
     hookTimeout: 120_000,
   },

@@ -13,5 +13,6 @@ export default defineConfig({
       'test/serialize.test.ts',
     ],
     restoreMocks: true,
+    setupFiles: ['@drefyn/test-watchdog/setup'],
   },
 });

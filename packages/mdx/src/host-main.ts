@@ -1,3 +1,5 @@
+// First, so it reads the parent before the slow imports below give that parent time to die.
+import { stopThenKill, watchParent } from './parent-watch.ts';
 import { assertHostEnv, assertHostFlags, parseHostConfig } from './host-config.ts';
 import { startParseHost } from './host.ts';
 import type { LogFields } from './pool.ts';
@@ -27,4 +29,18 @@ process.once('SIGTERM', () => {
     .then(() => {
       process.exit(0);
     });
+});
+
+// Same stop as SIGTERM. Under a live parent this never runs, and with none left nothing else
+// would stop this process or enforce the stop.
+watchParent(() => {
+  stopThenKill(
+    () => {
+      process.kill(process.pid, 'SIGTERM');
+    },
+    () => {
+      process.kill(process.pid, 'SIGKILL');
+    },
+  );
+  write('warn')('mdx.parse_host_parent_gone', {});
 });
