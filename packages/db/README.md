@@ -18,10 +18,14 @@ without one of those.
   stored for all roles, when the database has any setting other than the bootstrap's
   `search_path=app, extensions`, or when the pool is on the wrong role. The optional logger
   gets `warn(event, fields)` with ids and the pool kind, never SQL text or values.
-- `withTenant(db, tenant, work, { timeoutMs })` takes a `TenantRef`: the project is required.
-  It runs `work(tx)` in one transaction with `drefyn.organization_id` and `drefyn.project_id`
-  set for that transaction only. The default timeout is
-  `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms.
+- `withTenant(db, tenant, work, { timeoutMs, deadlineMs })` takes a `TenantRef`: the project is
+  required. It runs `work(tx)` in one transaction with `drefyn.organization_id` and
+  `drefyn.project_id` set for that transaction only. The default timeout is
+  `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms. `timeoutMs` is per
+  statement and enforced by the server. `deadlineMs`, up to 300000 ms and off by default, is for the
+  whole transaction and enforced here: past it the client is closed, even on a socket that stopped
+  answering, and the call fails with `DB_TIMEOUT`. A commit in flight may have landed.
+- `poolSizeOf(db)` reads the pool size, for limits that must stay below it.
 - `withOrganization(db, org, work, { timeoutMs })` takes an `OrganizationRef` with no
   `projectId` key at all, for organization work such as members, plans and the credit
   ledger. Its transaction type holds only tables without `project_id`, and project tables
@@ -106,7 +110,7 @@ secrets.
 | `DB_RLS_VIOLATION`          | a row level security policy refused a write                                                    |
 | `DB_UNIQUE_VIOLATION`       | a unique constraint refused a write                                                            |
 | `DB_IDEMPOTENCY_CONFLICT`   | an idempotency key reused with a different request                                             |
-| `DB_TIMEOUT`                | a statement, lock or idle transaction timed out                                                |
+| `DB_TIMEOUT`                | a statement, lock or idle transaction timed out, or a transaction passed its `deadlineMs`      |
 | `DB_UNAVAILABLE`            | the server is unreachable or the pool stayed busy past its wait                                |
 | `INTEGER_INVALID`           | a value is not a safe integer, including a `bigint` read past 2^53 - 1                         |
 

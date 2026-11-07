@@ -11,6 +11,7 @@ import type { TenantRef } from '@drefyn/tenancy';
 import {
   createEngine,
   databaseStore,
+  DEFAULT_ENGINE_CONFIG,
   type EngineDeps,
   type NodeId,
   type VersionId,
@@ -67,7 +68,7 @@ function sourceLength(root: MdxRoot): number {
 }
 
 const engine = createEngine({
-  store: databaseStore(db),
+  store: databaseStore(db, DEFAULT_ENGINE_CONFIG),
   parse,
   parsePolicy: {
     version: 1,

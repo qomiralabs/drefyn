@@ -13,6 +13,7 @@ export {
   createAuthDatabase,
   createDatabase,
   createPublishedDatabase,
+  poolSizeOf,
   withApiKeyLimiter,
   withAuth,
   withOrganization,

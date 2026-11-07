@@ -12,6 +12,7 @@ export {
   type EngineTracer,
   type LogFields,
 } from './ports.ts';
+export type { PoolGate } from './pool-gate.ts';
 export { databaseStore, type EngineStore } from './store.ts';
 export type {
   Actor,

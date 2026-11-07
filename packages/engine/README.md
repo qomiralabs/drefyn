@@ -20,7 +20,9 @@ public.
   the column cannot say something the content does not.
 
 - `createEngine(deps)`: the calls below, over a store, a parse client, flags and a policy.
-  `databaseStore(db)` makes the store from a `@drefyn/db` database.
+  `databaseStore(db, config)` makes the store from a `@drefyn/db` database and its config. Call it
+  at startup: it refuses a ceiling at or above the pool, and any number of calls on one database
+  share one gate.
 - `parseEngineConfig(env)`: reads the caps below.
 - `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
   queued. A job calls this; the work resumes from the table.
@@ -65,8 +67,33 @@ than 50,000 rows of its subtree is `engine.too_large` on `nodeId`.
 
 Writers that pick a place in a tree wait at most 1 s for the project's lock, then answer
 `engine.unavailable` with nothing written. Each process lets 2 such writes per project reach the
-pool and keeps up to 32 more waiting, for at most 1 s, off the pool, so a busy project cannot take
-connections from another tenant. A root created with its own `orderKey` skips the queue.
+pool. A root created with its own `orderKey` skips that lane, not the ceiling below.
+
+## Protecting the pool
+
+One gate per pool holds `createNode`, `saveDraft`, `rollback`, `moveNode`, `declareSchema` and
+`queryNodes` to `DREFYN_ENGINE_POOL_CEILING` connections between them, whichever tenants and however
+many projects are busy. The rest of the pool is for what the gate does not cover: `getHead`,
+`listVersions`, filter backfill batches, and anything else the app runs on that database.
+
+The ceiling is shared, not split. An organization may take one more place while it holds less than
+what is still free, so one alone reaches half the ceiling, several share what they leave, and one
+with nothing running gets in while any place is free. At the default of 8, three organizations
+taking all they can stop at 7, and a fourth is answered.
+
+A write with no place waits off the pool, for at most 1 s, in a queue of `DREFYN_ENGINE_POOL_QUEUE`
+for the process, shared the same way. Then it gets `engine.unavailable` with nothing written, and
+logs `engine.pool_busy` with the ids and the load. A list never waits.
+
+`databaseStore` throws at startup when the ceiling is at or above `DREFYN_DATABASE_POOL_MAX`, naming
+both keys, so a pool of 8 or less needs a lower ceiling and a pool of 1 cannot run the engine. Raise
+the two together on a large machine: this is a limit on the machine and no plan sells it, so it is
+config and not an entitlement. Each process has its own pool and its own gate.
+
+A gated transaction keeps its connection for at most `DREFYN_ENGINE_SLOT_HOLD_MS`, 15 s by default.
+Past that the connection is closed from this side, the caller gets `engine.unavailable`, and the pool
+replaces it. Timeouts in Postgres cannot do this: a socket that stopped answering never hears them.
+A write cut off at the commit may have landed, so retry with the same `idempotencyKey`.
 
 A save re-reads its input before it trusts it:
 
@@ -168,10 +195,9 @@ two pages moves the place with it, so that walk can skip or repeat items near th
 
 An organization runs at most `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT` lists at once in each process. The
 next one gets `engine.unavailable`, issue code `engine.query_busy`, and logs `engine.query_busy`.
-Nothing queues. Build one engine per process: the count lives in it. Keep the cap under half of
-`DREFYN_DATABASE_POOL_MAX`. This is fairness between organizations: several busy ones can still fill
-the pool together. A date of year 0000 is refused
-on a save and in a filter, and one stored before that reads as missing.
+Nothing queues. The count lives in the gate, so engines over one pool share it. A list that finds
+the ceiling full gets the same answer. A date of year 0000 is refused on a save and in a filter, and
+one stored before that reads as missing.
 
 `drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's
 owner. It rebuilds the key with `reindex concurrently` past 30 percent bloat, estimated from the
@@ -191,6 +217,9 @@ work and never tenant work. The role sees other roles' transactions only with `p
 | `DREFYN_CHUNK_MAX_CHARS`                  | 2000    | Hard cap on a chunk, whatever the page holds.         |
 | `DREFYN_ENGINE_QUERY_TIMEOUT_MS`          | 2000    | `statement_timeout` for `queryNodes`, at most 60000.  |
 | `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT`       | 4       | Lists at once, per organization, per process.         |
+| `DREFYN_ENGINE_POOL_CEILING`              | 8       | Lists and writes on the pool, at most 1024.           |
+| `DREFYN_ENGINE_POOL_QUEUE`                | 64      | Writes waiting off the pool, at most 4096.            |
+| `DREFYN_ENGINE_SLOT_HOLD_MS`              | 15000   | Longest hold of a connection, at least 5 lists.       |
 | `DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS` | 20000   | Largest type an undeclared filter may read.           |
 
 A tree is about 4 times its source at the corpus median and 7.5 times at worst, so a source cap
@@ -217,4 +246,6 @@ a second, 20 percent changing slots, and against the undeclared scan budget at 2
 saves skip the parse host, which runs in another process and whose budget would stop one project
 near 12 saves a second. Both exit 1 on any server but the pinned Postgres 18 image, which is the
 only run that counts. Set `DREFYN_BENCH_NODES` for a smaller table, and `DREFYN_BENCH_SECONDS` for
-a shorter write run. A run above load 10 is void and fails.
+a shorter write run. A run above load 10 is void and fails. `bench/pool.ts` stalls a crowd of tree
+writes, lists and saves, and times what that costs a tenant that did nothing. It compares two
+builds and has no budget, so any server will do; it exits 1 if the quiet tenant saw a failure.

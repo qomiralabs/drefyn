@@ -14,7 +14,13 @@ import { createParseClient } from '@drefyn/mdx/client';
 import type { FilterNode } from '@drefyn/schema';
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { z } from 'zod';
-import { createEngine, databaseStore, type EngineDeps, type NodeQuery } from '../src/index.ts';
+import {
+  createEngine,
+  databaseStore,
+  DEFAULT_ENGINE_CONFIG,
+  type EngineDeps,
+  type NodeQuery,
+} from '../src/index.ts';
 import setup from '../test/support/global-setup.ts';
 import { parseClientConfig } from '../test/support/parse-host.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
@@ -179,7 +185,7 @@ const parsePolicy: EngineDeps['parsePolicy'] = {
   linkProtocols: ['https', 'http', 'mailto'],
 };
 const engine = createEngine({
-  store: databaseStore(db),
+  store: databaseStore(db, DEFAULT_ENGINE_CONFIG),
   parse,
   parsePolicy,
   flags: { evaluate: () => Promise.resolve({ value: true }) },

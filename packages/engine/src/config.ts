@@ -17,6 +17,14 @@ export interface EngineConfig {
   // Lists one organization may run at once in this process, as this process's pool is what they
   // share. Protects the pool and is not something a plan sells, so it is not an entitlement.
   readonly queryMaxInFlight: number;
+  // Lists and writes that may hold a connection at once in this process. Protects the pool, so
+  // this is config too. Stays below DREFYN_DATABASE_POOL_MAX, or a stall can take every
+  // connection and reads with it.
+  readonly poolCeiling: number;
+  // Writes that may wait for a place in this process.
+  readonly poolQueue: number;
+  // How long a gated transaction may keep its connection and its place, hung socket or not.
+  readonly slotHoldMs: number;
   // The largest type an undeclared filter may read in full.
   readonly undeclaredScanMaxItems: number;
 }
@@ -39,6 +47,17 @@ const QUERY_TIMEOUT_CEILING_MS = 60_000;
 // Several busy ones can still fill the pool: this is fairness, not a process ceiling.
 const QUERY_MAX_IN_FLIGHT = 4;
 const QUERY_IN_FLIGHT_CEILING = 256;
+// Leaves two connections of the default pool for reads, and takes more than three organizations
+// to fill, so a fourth still gets in.
+const POOL_CEILING = 8;
+const POOL_CEILING_MAX = 1024;
+// One organization alone reaches half of this: the 32 a project could queue before.
+const POOL_QUEUE = 64;
+const POOL_QUEUE_MAX = 4096;
+// Past the 10 s an honest list of five statements can take at the default timeout.
+const SLOT_HOLD_MS = 15_000;
+const SLOT_HOLD_MAX_MS = 300_000;
+const LIST_STATEMENTS = 5;
 // Above the default the guarantee no longer holds, so a larger value is a choice and has a roof.
 const SCAN_ITEMS_CEILING = 1_000_000;
 
@@ -66,12 +85,22 @@ const envSchema = z
     DREFYN_CHUNK_MAX_CHARS: chars(CHUNK_MAX_CHARS),
     DREFYN_ENGINE_QUERY_TIMEOUT_MS: whole(QUERY_TIMEOUT_MS, QUERY_TIMEOUT_CEILING_MS),
     DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT: whole(QUERY_MAX_IN_FLIGHT, QUERY_IN_FLIGHT_CEILING),
+    DREFYN_ENGINE_POOL_CEILING: whole(POOL_CEILING, POOL_CEILING_MAX),
+    DREFYN_ENGINE_POOL_QUEUE: whole(POOL_QUEUE, POOL_QUEUE_MAX),
+    DREFYN_ENGINE_SLOT_HOLD_MS: whole(SLOT_HOLD_MS, SLOT_HOLD_MAX_MS),
     DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS: whole(UNDECLARED_FILTER_MAX_ITEMS, SCAN_ITEMS_CEILING),
   })
   .refine((env) => env.DREFYN_CHUNK_TARGET_CHARS <= env.DREFYN_CHUNK_MAX_CHARS, {
     path: ['DREFYN_CHUNK_TARGET_CHARS'],
     message: 'must not pass DREFYN_CHUNK_MAX_CHARS',
-  });
+  })
+  .refine(
+    (env) => env.DREFYN_ENGINE_SLOT_HOLD_MS >= LIST_STATEMENTS * env.DREFYN_ENGINE_QUERY_TIMEOUT_MS,
+    {
+      path: ['DREFYN_ENGINE_SLOT_HOLD_MS'],
+      message: 'must cover five statements at DREFYN_ENGINE_QUERY_TIMEOUT_MS',
+    },
+  );
 
 export function parseEngineConfig(env: Readonly<Record<string, string | undefined>>): EngineConfig {
   const parsed = envSchema.parse(env);
@@ -82,6 +111,9 @@ export function parseEngineConfig(env: Readonly<Record<string, string | undefine
     chunkMaxChars: parsed.DREFYN_CHUNK_MAX_CHARS,
     queryTimeoutMs: parsed.DREFYN_ENGINE_QUERY_TIMEOUT_MS,
     queryMaxInFlight: parsed.DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT,
+    poolCeiling: parsed.DREFYN_ENGINE_POOL_CEILING,
+    poolQueue: parsed.DREFYN_ENGINE_POOL_QUEUE,
+    slotHoldMs: parsed.DREFYN_ENGINE_SLOT_HOLD_MS,
     undeclaredScanMaxItems: parsed.DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS,
   };
 }

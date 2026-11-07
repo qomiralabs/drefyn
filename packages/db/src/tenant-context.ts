@@ -131,6 +131,26 @@ export const APP_TIMEOUT_MAX_MS = 60_000;
 export const READER_TIMEOUT_MAX_MS = 10_000;
 export const AUTH_TIMEOUT_MAX_MS = 10_000;
 
+export const DEADLINE_MAX_MS = 300_000;
+
+// How long one transaction may hold its connection, if it asked for a limit. Throws DbError
+// DB_CONFIG_INVALID.
+export function transactionDeadline(deadlineMs: unknown): number | undefined {
+  if (deadlineMs === undefined) return undefined;
+  if (
+    typeof deadlineMs !== 'number' ||
+    !Number.isSafeInteger(deadlineMs) ||
+    deadlineMs < 1 ||
+    deadlineMs > DEADLINE_MAX_MS
+  ) {
+    throw new DbError(
+      'DB_CONFIG_INVALID',
+      `deadlineMs must be a whole number of milliseconds from 1 to ${String(DEADLINE_MAX_MS)}`,
+    );
+  }
+  return deadlineMs;
+}
+
 // The statement timeout for one transaction. Throws DbError DB_CONFIG_INVALID.
 export function transactionTimeout(timeoutMs: unknown, fallbackMs: number, maxMs: number): number {
   const value = timeoutMs === undefined ? fallbackMs : timeoutMs;
