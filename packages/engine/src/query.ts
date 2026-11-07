@@ -1,7 +1,6 @@
 import {
   checkFilter,
   parseContentSchema,
-  parseUnits,
   type ContentSchema,
   type FieldDef,
   type FieldId,
@@ -94,10 +93,11 @@ function sortOf(
   return { field, direction: sort.direction };
 }
 
+// The node alone marks the place. A sort value here would put customer content in a token that
+// ends up in query strings, and would give a forged one a way to reach a cast.
 const cursorSchema = z.strictObject({
   s: z.string().nullable(),
   d: z.enum(['asc', 'desc']),
-  v: z.string().nullable(),
   n: z.uuid(),
 });
 type Cursor = z.output<typeof cursorSchema>;
@@ -107,22 +107,6 @@ const encodeCursor = (cursor: Cursor) =>
 
 const badCursor = () =>
   new Refusal('engine.validation_failed', [{ path: 'cursor', code: 'engine.cursor_invalid' }]);
-
-const instant = z.iso.datetime({ offset: true });
-
-// A cursor comes back from a client, so its value is held to what the sort column can parse.
-function valueFits(field: FieldDef | undefined, value: string): boolean {
-  if (value.includes('\0') || !value.isWellFormed()) return false;
-  switch (field?.kind) {
-    case 'number':
-    case 'boolean':
-      return parseUnits(value, 0) !== null;
-    case 'date':
-      return instant.safeParse(value).success;
-    default:
-      return true;
-  }
-}
 
 function decodeCursor(text: string | undefined, sort: Sort | null, direction: SortDirection) {
   if (text === undefined) return null;
@@ -134,10 +118,9 @@ function decodeCursor(text: string | undefined, sort: Sort | null, direction: So
   }
   const parsed = cursorSchema.safeParse(raw);
   if (!parsed.success) throw badCursor();
-  const { s, d, v } = parsed.data;
+  const { s, d } = parsed.data;
   // A page of one order cannot continue another.
   if (s !== (sort?.field.id ?? null) || d !== direction) throw badCursor();
-  if (v !== null && (sort === null || !valueFits(sort.field, v))) throw badCursor();
   return parsed.data;
 }
 
@@ -156,20 +139,25 @@ function sortValue(sort: Sort, value: string): Raw {
   }
 }
 
+interface Position {
+  readonly node: string;
+  readonly value: string | null;
+}
+
 // Nulls come last in both directions, which a row comparison cannot say.
 function keyset(
   sort: Sort | null,
   x: Raw | null,
   id: Raw,
-  cursor: Cursor | null,
+  place: Position | null,
   d: SortDirection,
 ) {
-  if (cursor === null) return sql`true`;
-  const position = sql`${cursor.n}::uuid`;
-  if (sort === null || x === null) return after(id, position, d);
-  if (cursor.v === null) return sql`(${x} is null and ${after(id, position, d)})`;
-  const value = sortValue(sort, cursor.v);
-  return sql`(${after(x, value, d)} or (${x} = ${value} and ${after(id, position, d)}) or ${x} is null)`;
+  if (place === null) return sql`true`;
+  const node = sql`${place.node}::uuid`;
+  if (sort === null || x === null) return after(id, node, d);
+  if (place.value === null) return sql`(${x} is null and ${after(id, node, d)})`;
+  const value = sortValue(sort, place.value);
+  return sql`(${after(x, value, d)} or (${x} = ${value} and ${after(id, node, d)}) or ${x} is null)`;
 }
 
 const ordering = (sort: Raw | null, id: Raw, d: SortDirection): Raw => {
@@ -180,7 +168,6 @@ const ordering = (sort: Raw | null, id: Raw, d: SortDirection): Raw => {
 
 interface PageRow {
   readonly id: string;
-  readonly sort_value: string | null;
 }
 
 // Filter rows carry no deleted flag. Nodes are only removed by taking their filter row with
@@ -199,11 +186,47 @@ function fromClause(route: Route, tenant: TenantRef, typeId: string): Raw {
             and n.deleted_at is null`;
 }
 
+// Finds a deleted node too: it still marks where the page before it ended.
+function anchorClause(route: Route, tenant: TenantRef, typeId: string, node: string): Raw {
+  const { organizationId, projectId } = tenant;
+  return route === 'slots'
+    ? sql`app.node_filter_rows f
+          where f.organization_id = ${organizationId}::uuid
+            and f.project_id = ${projectId}::uuid
+            and f.type_id = ${typeId}::uuid
+            and f.node_id = ${node}::uuid`
+    : sql`app.nodes n
+          where n.organization_id = ${organizationId}::uuid
+            and n.project_id = ${projectId}::uuid
+            and n.type_id = ${typeId}::uuid
+            and n.id = ${node}::uuid`;
+}
+
+// A node this tenant cannot see, one that never existed and one since removed all refuse the same
+// way, so a cursor tells a caller nothing about ids that are not theirs. The value is read now, so
+// an edit to this node between pages moves the place with it: a walk may skip or repeat there.
+async function readPosition(
+  tx: EngineTx,
+  tenant: TenantRef,
+  typeId: string,
+  route: Route,
+  x: Raw | null,
+  node: string,
+): Promise<Position> {
+  const { rows } = await sql<{ anchor_value: string | null }>`
+    select ${x === null ? sql`null::text` : sql`to_jsonb(${x}) #>> '{}'`} as anchor_value
+    from ${anchorClause(route, tenant, typeId, node)}`.execute(tx);
+  const row = rows[0];
+  if (row === undefined) throw badCursor();
+  return { node, value: row.anchor_value };
+}
+
 interface Plan {
   readonly filter: FilterNode | null;
   readonly sort: Sort | null;
+  readonly x: Raw | null;
   readonly direction: SortDirection;
-  readonly cursor: Cursor | null;
+  readonly place: Position | null;
   readonly limit: number;
   readonly context: CompileContext;
 }
@@ -214,16 +237,14 @@ async function readPage(
   typeId: string,
   plan: Plan,
 ): Promise<readonly PageRow[]> {
-  const { filter, sort, direction, cursor, limit, context } = plan;
-  const operand = sort === null ? null : operandOf(sort.field, context);
-  const x = operand?.expression ?? null;
+  const { filter, sort, x, direction, place, limit, context } = plan;
   const id = context.route === 'slots' ? sql.ref('f.node_id') : sql.ref('n.id');
   const predicate = filter === null ? sql`true` : compileFilter(filter, context);
   const { rows } = await sql<PageRow>`
-    select ${id} as id, ${x === null ? sql`null::text` : sql`to_jsonb(${x}) #>> '{}'`} as sort_value
+    select ${id} as id
     from ${fromClause(context.route, tenant, typeId)}
       and ${predicate}
-      and ${keyset(sort, x, id, cursor, direction)}
+      and ${keyset(sort, x, id, place, direction)}
     order by ${ordering(x, id, direction)}
     limit ${limit + 1}`.execute(tx);
   return rows;
@@ -350,12 +371,15 @@ export async function runQuery(
   }
 
   const context: CompileContext = { fields, slots, route };
+  const x = sort === null ? null : operandOf(sort.field, context).expression;
   const cursor = decodeCursor(args.cursor, sort, direction);
+  const place = cursor === null ? null : await readPosition(tx, tenant, typeId, route, x, cursor.n);
   const rows = await readPage(tx, tenant, typeId, {
     filter,
     sort,
+    x,
     direction,
-    cursor,
+    place,
     limit,
     context,
   });
@@ -370,7 +394,6 @@ export async function runQuery(
           ? encodeCursor({
               s: sort?.field.id ?? null,
               d: direction,
-              v: last.sort_value,
               n: last.id,
             })
           : null,

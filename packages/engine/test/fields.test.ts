@@ -1,6 +1,6 @@
 import type { ContentSchema, FieldDef, FieldId, TypeId } from '@drefyn/schema';
 import { describe, expect, it } from 'vitest';
-import { canonicalFields, canonicalValue } from '../src/fields.ts';
+import { canonicalFields, canonicalValue, filterValue } from '../src/fields.ts';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}` as FieldId;
 const base = (n: number) => ({ id: id(n), apiName: `f${String(n)}`, label: 'F', required: false });
@@ -95,6 +95,9 @@ describe('canonicalFields', () => {
     ['a date with no offset', 4, '2026-01-01T00:00:00'],
     ['a date out of calendar', 5, '2026-02-31'],
     ['a year past the instant range', 4, '9999-12-31T23:59:59-01:00'],
+    ['a time in year 0000', 4, '0000-06-01T00:00:00Z'],
+    ['a shift into year 0000', 4, '0001-01-01T00:00:00+02:00'],
+    ['a plain date in year 0000', 5, '0000-06-01'],
     ['not a uuid', 6, 'x'],
     ['a list for a single value', 1, ['a']],
     ['a single value for a list', 8, 'a'],
@@ -108,6 +111,27 @@ describe('canonicalFields', () => {
     const result = canonicalFields(schema, { [id(9)]: 'aaaaaaaaaaaaaaaa' }, 10);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('engine.too_large');
+  });
+});
+
+describe('filterValue', () => {
+  const field = (n: number) => {
+    const found = FIELDS.find(({ id: fieldId }) => fieldId === id(n));
+    if (found === undefined) throw new Error('no such field');
+    return found;
+  };
+
+  it('takes text past what the field may store, which only matches nothing', () => {
+    expect(filterValue(field(1), 'longer than eight')).toBe('longer than eight');
+  });
+
+  it.each([
+    ['a lone surrogate in text', 1, '\ud800'],
+    ['a lone surrogate in markdown', 9, 'a\udc00b'],
+    ['a lone surrogate in a list of text', 8, '\ud800'],
+    ['a NUL in text', 1, 'a\u0000'],
+  ])('holds back %s, which Postgres would refuse', (_name, n, value) => {
+    expect(filterValue(field(n), value)).toBeNull();
   });
 });
 

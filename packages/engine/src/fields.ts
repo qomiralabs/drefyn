@@ -1,5 +1,4 @@
-import { parseUnits, type ContentSchema, type FieldDef } from '@drefyn/schema';
-import { z } from 'zod';
+import { canonicalInstant, parseUnits, type ContentSchema, type FieldDef } from '@drefyn/schema';
 import { engineError, type EngineError, type EngineIssue, type EngineResult } from './errors.ts';
 
 export type StoredScalar = string | boolean;
@@ -7,11 +6,7 @@ export type StoredValue = StoredScalar | readonly StoredScalar[];
 export type StoredFields = Readonly<Record<string, StoredValue>>;
 
 const encoder = new TextEncoder();
-const dateOnly = z.iso.date();
-const dateTime = z.iso.datetime({ offset: true });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-// A shift by offset can leave four digit years, and Postgres would not read the result back.
-const FOUR_DIGIT_YEAR = /^[0-9]{4}-/;
 
 const storable = (value: string) => !value.includes('\0') && value.isWellFormed();
 
@@ -36,14 +31,6 @@ function numberValue(field: FieldDef & { kind: 'number' }, value: unknown): stri
   return text;
 }
 
-function dateValue(field: FieldDef & { kind: 'date' }, value: unknown): string | null {
-  if (field.withTime ? !dateTime.safeParse(value).success : !dateOnly.safeParse(value).success) {
-    return null;
-  }
-  const instant = new Date(value as string).toISOString();
-  return FOUR_DIGIT_YEAR.test(instant) ? instant : null;
-}
-
 // One form for a save and a filter, so a slot, a scan and the value compared with them agree.
 // Numbers are integer units in a string: JSON numbers would pass through a float.
 export function canonicalValue(field: FieldDef, value: unknown): StoredScalar | null {
@@ -56,7 +43,7 @@ export function canonicalValue(field: FieldDef, value: unknown): StoredScalar | 
     case 'boolean':
       return typeof value === 'boolean' ? value : null;
     case 'date':
-      return dateValue(field, value);
+      return canonicalInstant(value, field.withTime);
     case 'reference':
       return typeof value === 'string' && UUID.test(value) ? value : null;
     default:
@@ -72,7 +59,7 @@ export function filterValue(field: FieldDef, value: unknown): StoredScalar | nul
       return filterValue(field.of, value);
     case 'text':
     case 'markdown':
-      return typeof value === 'string' ? value : null;
+      return typeof value === 'string' && storable(value) ? value : null;
     case 'number':
       return unitsOf(field, value);
     default:

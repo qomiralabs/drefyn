@@ -35,6 +35,23 @@ const mentions = (node: FilterNode, field: string): boolean => {
   return node.field === field;
 };
 
+describe('text values', () => {
+  // Raw UTF-16 units, as every other string arbitrary keeps surrogates in pairs.
+  const units = fc.string({
+    unit: fc.integer({ min: 0, max: 0xffff }).map((unit) => String.fromCharCode(unit)),
+    maxLength: 32,
+  });
+
+  it('takes a value exactly when Postgres can hold it', () => {
+    fc.assert(
+      fc.property(units, (value) => {
+        const result = checkFilter(type, { field: declared, op: 'eq', value }, { itemCount: 1 });
+        expect(result.ok).toBe(value.isWellFormed() && !value.includes('\u0000'));
+      }),
+    );
+  });
+});
+
 describe('filters', () => {
   it('runs a tree of declared fields at any size', () => {
     fc.assert(

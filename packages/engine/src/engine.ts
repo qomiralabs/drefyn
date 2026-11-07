@@ -22,6 +22,7 @@ import {
 } from './input.ts';
 import { backfillStep } from './backfill.ts';
 import { declareSchema } from './declare.ts';
+import { inFlightLimit } from './in-flight.ts';
 import { reserveNode } from './limits.ts';
 import {
   noopLogger,
@@ -84,6 +85,7 @@ export interface Engine {
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
+const QUERY_BUSY = [{ path: 'query', code: 'engine.query_busy' }];
 
 const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE']);
 
@@ -163,6 +165,7 @@ export function createEngine(deps: EngineDeps): Engine {
     targetChars: config.chunkTargetChars,
     maxChars: config.chunkMaxChars,
   };
+  const queriesInFlight = inFlightLimit(config.queryMaxInFlight);
 
   const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
     try {
@@ -497,18 +500,31 @@ export function createEngine(deps: EngineDeps): Engine {
       return logged(
         'engine.query',
         { ...tenantFields(tenant), type_id: query.typeId },
-        () =>
-          settled(() =>
-            store.tenant(
-              tenant,
-              async (tx) => {
-                const outcome = await runQuery(tx, tenant, query, config);
-                ({ route } = outcome);
-                return outcome.page;
-              },
-              { timeoutMs: config.queryTimeoutMs },
-            ),
-          ),
+        async () => {
+          const leave = queriesInFlight.enter(tenant.organizationId);
+          if (leave === null) {
+            logger.warn('engine.query_busy', {
+              ...tenantFields(tenant),
+              max_in_flight: config.queryMaxInFlight,
+            });
+            return refuse('engine.unavailable', QUERY_BUSY);
+          }
+          try {
+            return await settled(() =>
+              store.tenant(
+                tenant,
+                async (tx) => {
+                  const outcome = await runQuery(tx, tenant, query, config);
+                  ({ route } = outcome);
+                  return outcome.page;
+                },
+                { timeoutMs: config.queryTimeoutMs },
+              ),
+            );
+          } finally {
+            leave();
+          }
+        },
         (value) => ({
           route,
           items: value.items.length,
