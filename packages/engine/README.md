@@ -110,8 +110,9 @@ imports, expressions, link targets and component props stay out. This is a stopg
 yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
 footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
 the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
-characters a page. Past it a chunk has an empty path, so one save cannot grow by repeating a long
-path on every row.
+characters a page, split evenly across its headings. Past its share a chunk has an empty path, so
+one save cannot grow by repeating a long path on every row, and an edit in one section cannot
+change the paths of another.
 
 A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
 `engine.save.write`. The parse host reports its steps, and the engine records them through
