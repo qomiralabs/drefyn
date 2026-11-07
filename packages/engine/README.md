@@ -37,6 +37,7 @@ compares each list with the migration, so the two cannot drift.
 | `createNode`    | Adds a node with no version. Its id always comes from the database.              |
 | `saveDraft`     | Adds a version when `expectedHeadVersionId` is still the head.                   |
 | `rollback`      | Adds a version with an older version's content, and keeps that version's origin. |
+| `moveNode`      | Puts a node under a parent, after a sibling. Writes that one row.                |
 | `getHead`       | Reads the head, content included.                                                |
 | `listVersions`  | Lists versions newest first, without content.                                    |
 | `declareSchema` | Stores a type's definition and gives declared fields their slots.                |
@@ -46,6 +47,26 @@ Every call returns a `Result`, and only a bug throws. `engine.not_found` covers 
 ids as well, so a caller cannot tell them apart. `engine.unavailable` is the one retryable code:
 the database or parse host is down or full, and nothing was stored. Writes need the `engine.writes`
 flag, off in production, and are `engine.forbidden` without it. Reads never need it.
+
+`moveNode` takes a parent and the sibling to land after, and writes one row, however large the
+subtree. Keys come from the server. Moves in a project queue on one advisory lock, so two moves
+that would close a cycle cannot both pass: the second sees the first and gets
+`engine.validation_failed` with `engine.cycle` on `parentId`. A parent or sibling that is another
+tenant's, deleted, or not a child of that parent is `engine.not_found`, with nothing naming which.
+`createNode` lands after the last sibling unless the caller sends `orderKey`. A key the caller sent
+can tie with a sibling, and nothing fits between a tie, so a move there gets
+`engine.order_key_no_room`. One gap takes about 6,000 inserts in a row before `engine.too_large`.
+
+A tree is at most 64 levels, a root being level 1. `createNode` under a parent and `moveNode`
+refuse anything past that with `engine.validation_failed` and `engine.tree_too_deep` on `parentId`,
+and a move counts the height of the subtree it carries. Rows already deeper stay readable and
+saveable, and can always move up, along or to the root. A move down that would have to read more
+than 50,000 rows of its subtree is `engine.too_large` on `nodeId`.
+
+Writers that pick a place in a tree wait at most 1 s for the project's lock, then answer
+`engine.unavailable` with nothing written. Each process lets 2 such writes per project reach the
+pool and keeps up to 32 more waiting, for at most 1 s, off the pool, so a busy project cannot take
+connections from another tenant. A root created with its own `orderKey` skips the queue.
 
 A save re-reads its input before it trusts it:
 
