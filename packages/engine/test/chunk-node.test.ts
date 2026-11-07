@@ -186,6 +186,21 @@ describe('chunkNode boundaries', () => {
     expect(chunks.at(-1)?.headingPath).toEqual(['Section 499']);
   });
 
+  it('gives a section the same heading paths however much an earlier section spends', () => {
+    const heading = (text: string) => ({ raw: '#', heading: { depth: 1, text } as const });
+    const later = 's'.repeat(200);
+    const page = (first: string) =>
+      treeOf([heading('o'.repeat(200)), { raw: first }, heading(later), { raw: 'ab\ncd\n' }]);
+    const second = (first: string) =>
+      chunkNode(page(first), { targetChars: 3, maxChars: 3 }).filter(
+        ({ blockPath }) => Number.parseInt(blockPath, 10) >= 2,
+      );
+    // Long enough that rows under the 200 character heading pass the whole page budget.
+    const spends = second('ab\n'.repeat(2_000)).map(({ headingPath }) => headingPath);
+    expect(spends).toEqual(second('ab\n').map(({ headingPath }) => headingPath));
+    expect(spends[0]).toEqual([later]);
+  });
+
   it('does not change its input', () => {
     const root = treeOf([{ raw: words(3000) }]);
     const before = JSON.stringify(root);

@@ -13,6 +13,7 @@ import {
   createNodeSchema,
   declareSchemaInput,
   issuesOf,
+  moveNodeSchema,
   pageSchema,
   querySchema,
   readSchema,
@@ -32,11 +33,14 @@ import {
 } from './ports.ts';
 import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
+import { assertRoomUnder, lockTree, moveWithinTree, tailKey, TREE_LOCK_WAIT_MS } from './tree.ts';
+import { createTreeGate } from './tree-gate.ts';
 import type {
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
   DeclareSchemaInput,
+  MoveNodeInput,
   NodeHead,
   NodeId,
   NodePage,
@@ -66,6 +70,7 @@ export interface Engine {
   createNode(input: CreateNodeInput): Promise<EngineResult<NodeRef>>;
   saveDraft(input: SaveDraftInput): Promise<EngineResult<VersionRef>>;
   rollback(input: RollbackInput): Promise<EngineResult<VersionRef>>;
+  moveNode(input: MoveNodeInput): Promise<EngineResult<void>>;
   getHead(tenant: TenantRef, nodeId: NodeId): Promise<EngineResult<NodeHead>>;
   listVersions(
     tenant: TenantRef,
@@ -138,8 +143,18 @@ async function assertTypeFits(tx: EngineTx, input: z.output<typeof createNodeSch
   if (parent === undefined) throw new Refusal('engine.not_found');
 }
 
+// Two, so one writer holds the lock and the next is ready as it lets go. The queue covers an
+// import running writes in parallel, and a full one answers engine.unavailable.
+const TREE_SLOTS = 2;
+const TREE_QUEUE = 32;
+
 export function createEngine(deps: EngineDeps): Engine {
   const { store, flags } = deps;
+  const treeGate = createTreeGate({
+    slots: TREE_SLOTS,
+    queued: TREE_QUEUE,
+    waitMs: TREE_LOCK_WAIT_MS,
+  });
   const config = deps.config ?? DEFAULT_ENGINE_CONFIG;
   const logger = deps.logger ?? noopLogger;
   const tracer = deps.tracer ?? noopTracer;
@@ -205,41 +220,46 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return input;
       const { tenant, family, typeId, parentId, slug, orderKey } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      const under = parentId ?? null;
+      // A keyed root picks no place and has no depth, so it alone skips the queue.
+      const placed = orderKey === undefined || under !== null;
+      const write = () =>
+        store.tenant(tenant, async (tx) => {
+          await assertTypeFits(tx, input.value);
+          if (placed) await lockTree(tx, tenant);
+          if (under !== null) await assertRoomUnder(tx, tenant, under);
+          const key = orderKey ?? (await tailKey(tx, tenant, under));
+          await reserveNode(tx, tenant, family);
+          const row = await tx
+            .insertInto('nodes')
+            .values({
+              organization_id: tenant.organizationId,
+              project_id: tenant.projectId,
+              family,
+              type_id: typeId,
+              parent_id: parentId ?? null,
+              slug: slug ?? null,
+              order_key: key,
+              lifecycle: 'draft',
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          // Lists read only this row, so a node without one would never be listed.
+          await tx
+            .insertInto('node_filter_rows')
+            .values({
+              organization_id: tenant.organizationId,
+              project_id: tenant.projectId,
+              type_id: typeId,
+              node_id: row.id,
+            })
+            .execute();
+          return { nodeId: idOf('nod', row.id), family, typeId };
+        });
       return logged(
         'engine.create',
         { ...tenantFields(tenant), family },
-        () =>
-          settled(() =>
-            store.tenant(tenant, async (tx) => {
-              await assertTypeFits(tx, input.value);
-              await reserveNode(tx, tenant, family);
-              const row = await tx
-                .insertInto('nodes')
-                .values({
-                  organization_id: tenant.organizationId,
-                  project_id: tenant.projectId,
-                  family,
-                  type_id: typeId,
-                  parent_id: parentId ?? null,
-                  slug: slug ?? null,
-                  order_key: orderKey,
-                  lifecycle: 'draft',
-                })
-                .returning('id')
-                .executeTakeFirstOrThrow();
-              // Lists read only this row, so a node without one would never be listed.
-              await tx
-                .insertInto('node_filter_rows')
-                .values({
-                  organization_id: tenant.organizationId,
-                  project_id: tenant.projectId,
-                  type_id: typeId,
-                  node_id: row.id,
-                })
-                .execute();
-              return { nodeId: idOf('nod', row.id), family, typeId };
-            }),
-          ),
+        () => settled(() => (placed ? treeGate.through(tenant, write) : write())),
         (value) => ({ node_id: value.nodeId }),
       );
     },
@@ -349,6 +369,26 @@ export function createEngine(deps: EngineDeps): Engine {
             }),
           ),
         (value) => ({ ...versionFields(value), chunks: written }),
+      );
+    },
+
+    async moveNode(raw) {
+      const input = parsedOrRefused(moveNodeSchema, raw);
+      if (!input.ok) return input;
+      const { tenant, nodeId, parentId, afterId } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.move',
+        { ...tenantFields(tenant), node_id: nodeId, parent_id: parentId ?? 'root' },
+        () =>
+          settled(() =>
+            treeGate.through(tenant, () =>
+              store.tenant(tenant, (tx) =>
+                moveWithinTree(tx, tenant, { nodeId, parentId, afterId }),
+              ),
+            ),
+          ),
+        () => ({}),
       );
     },
 
