@@ -291,6 +291,34 @@ describeWithStack('tree bounds against Postgres', () => {
     });
   });
 
+  describe('a deleted branch', () => {
+    const rowsOf = (seeded: Seeded) =>
+      admin(`select (select count(*) from app.nodes where project_id = '${seeded.project}') || ':' ||
+                    (select count(*) from app.node_filter_rows where project_id = '${seeded.project}');`);
+
+    it('refuses a create under a node inside it, keyed or not, with nothing written', async () => {
+      const home = await seed();
+      const top = await created(home);
+      const inside = await created(home, await created(home, top));
+      await admin(`update app.nodes set deleted_at = now() where id = '${top}';`);
+      const [before, rows] = [await fingerprint(home), await rowsOf(home)];
+      expect(codeOf(await create(home, inside))).toBe('engine.not_found');
+      expect(codeOf(await create(home, inside, 'a5'))).toBe('engine.not_found');
+      expect(await fingerprint(home)).toBe(before);
+      expect(await rowsOf(home)).toBe(rows);
+    });
+
+    it('still takes a create under a live node beside it', async () => {
+      const home = await seed();
+      const top = await created(home);
+      await created(home, top);
+      const beside = await created(home);
+      await admin(`update app.nodes set deleted_at = now() where id = '${top}';`);
+      const child = await created(home, beside);
+      expect(await admin(`select parent_id from app.nodes where id = '${child}';`)).toBe(beside);
+    });
+  });
+
   describe('a held lock', () => {
     it('answers engine.unavailable with nothing written, and the lock is free after', async () => {
       const home = await seed();

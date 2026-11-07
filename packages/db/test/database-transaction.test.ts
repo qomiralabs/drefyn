@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
-import type pg from 'pg';
+import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   databaseOverPool,
@@ -11,7 +11,7 @@ import {
   type Database,
   type DbLogger,
 } from '../src/database.ts';
-import type { DbError } from '../src/errors.ts';
+import { DbError } from '../src/errors.ts';
 import { rejected } from './support.ts';
 
 const ORG = organizationId('01a14984-4476-77ce-9335-2c3c3a59aa8b');
@@ -63,6 +63,19 @@ function scripted(answer: Answer = () => undefined, logger?: DbLogger) {
 }
 
 const serverError = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+// What pg itself builds from an ErrorResponse, so the only kind of failure Postgres heard of.
+const raisedByServer = (code: string, message: string) =>
+  Object.assign(new pg.DatabaseError(message, message.length, 'error'), { code });
+
+// Resolves once the client has been sent a statement containing text.
+function sentSignal() {
+  let mark: () => void = () => undefined;
+  const reached = new Promise<void>((resolve) => {
+    mark = resolve;
+  });
+  return { reached, mark };
+}
 
 describe('context refusals happen before any SQL', () => {
   it.each<[string, unknown, string]>([
@@ -215,7 +228,7 @@ describe('the end of every transaction', () => {
 describe('a work that catches a statement error', () => {
   it('still commits after a server error, as Postgres decides what the commit does', async () => {
     const { db, clients } = scripted((text) => {
-      if (text.includes('select fails')) throw serverError('23505', 'duplicate key');
+      if (text.includes('select fails')) throw raisedByServer('23505', 'duplicate key');
       return undefined;
     });
     await expect(
@@ -236,6 +249,82 @@ describe('a work that catches a statement error', () => {
     );
     expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
     expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it.each<[string, () => Error, string]>([
+    [
+      'a driver error with a code of its own',
+      () => serverError('ECONNRESET', 'read ECONNRESET'),
+      'DB_UNAVAILABLE',
+    ],
+    [
+      'a value the driver could not read',
+      () => new DbError('INTEGER_INVALID', 'a bigint value is outside the safe integer range'),
+      'INTEGER_INVALID',
+    ],
+    [
+      'a driver error that only looks like a server one',
+      () => serverError('23505', 'x'),
+      'DB_UNIQUE_VIOLATION',
+    ],
+  ])('does not commit after %s, which Postgres never raised', async (_label, failure, code) => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select odd')) throw failure();
+      return undefined;
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select odd`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toMatchObject({ code });
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('waits for a statement left running with its own catch, and does not commit after it timed out', async () => {
+    const sent = sentSignal();
+    const { db, clients } = scripted((text) => {
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((_done, fail) => {
+        setTimeout(() => {
+          fail(new Error('Query read timeout'));
+        }, 20);
+      });
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        await sent.reached;
+        return 'returned early';
+      }),
+    );
+    expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+  });
+
+  it('commits only after a floating statement that succeeds has settled', async () => {
+    const sent = sentSignal();
+    let answered = false;
+    let answeredAtCommit: boolean | undefined;
+    const { db } = scripted((text) => {
+      if (text.endsWith('; commit')) answeredAtCommit = answered;
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((done) => {
+        setTimeout(() => {
+          answered = true;
+          done({ command: 'SELECT', rows: [], rowCount: 0 });
+        }, 20);
+      });
+    });
+    await expect(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        await sent.reached;
+        return 'ok';
+      }),
+    ).resolves.toBe('ok');
+    expect(answeredAtCommit).toBe(true);
   });
 });
 
