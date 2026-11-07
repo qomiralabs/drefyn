@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
+    "test:process": "vitest run --config vitest.process.config.ts",
     "test:fuzz": "node fuzz/run.ts",
     "test:mutation": "stryker run",
     "bench": "node bench/roundtrip.ts",

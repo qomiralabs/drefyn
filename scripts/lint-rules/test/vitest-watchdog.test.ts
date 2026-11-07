@@ -32,3 +32,26 @@ describe('every vitest config', () => {
     expect(text).toMatch(/sharedConfig|watchdogGlobalSetup|@drefyn\/test-watchdog\/global-setup/);
   });
 });
+
+// These sit outside `test` so they cannot take CPU from the time window tests. Nothing but this
+// step runs them, so losing it would drop them without a failure.
+describe('the process tests', () => {
+  it('run on their own, after the tests, in the required jobs', () => {
+    const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+    const job = workflow.slice(workflow.indexOf('  release-flags:'));
+    const tests = job.indexOf('- run: pnpm exec turbo run test\n');
+    expect(tests).toBeGreaterThan(-1);
+    expect(job.indexOf('- run: pnpm test:process\n')).toBeGreaterThan(tests);
+  });
+
+  it('are named so a package test run never picks them up', () => {
+    const files = execFileSync('git', ['ls-files', '-z', '*.process.ts'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\0')
+      .filter((file) => file !== '');
+    expect(files.length).toBeGreaterThanOrEqual(3);
+    for (const file of files) expect(file).not.toMatch(/\.test\.ts$/);
+  });
+});

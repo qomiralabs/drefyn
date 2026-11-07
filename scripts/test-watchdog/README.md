@@ -21,4 +21,9 @@ FIXTURE_FILE=spin.fixture.ts FIXTURE_READY=/dev/null FIXTURE_CACHE="$(mktemp -d)
   DREFYN_TEST_STALL_LIMIT_MS=2000 pnpm exec vitest run --root .
 ```
 
+The tests that start real runs and real hosts are `*.process.ts`, here and in `packages/mdx`. They
+stay out of `pnpm test`, because their CPU would land on time window tests. Run them with
+`pnpm test:process`, one file at a time. CI runs them after the tests, in both
+`tests (release flags ...)` jobs.
+
 `./tree` lists a process and everything under it, for tests that prove nothing was left behind.
