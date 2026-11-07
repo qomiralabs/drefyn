@@ -55,7 +55,8 @@ export type MdxIssueCode =
   | 'mdx.project_limit'
   | 'mdx.parse_unavailable'
   | 'mdx.block_not_printable'
-  | 'mdx.print_changed_meaning';
+  | 'mdx.print_changed_meaning'
+  | 'mdx.merge_limit';
 
 // Codes and places only: an issue can reach a log, and customer text must not.
 export interface MdxIssue {
@@ -112,5 +113,35 @@ export type PrintResult = Result<
 
 export type ParseResult = Result<
   { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[] },
+  readonly MdxIssue[]
+>;
+
+export type BlockConflictReason =
+  'both_changed' | 'delete_vs_edit' | 'both_inserted' | 'move_vs_edit' | 'unexplained_change';
+
+// One place a person has to decide. A side that holds no block here deleted it.
+export interface BlockConflict {
+  // The slot in the base, or null for what sits above its first block.
+  readonly baseIndex: number | null;
+  readonly ours: MdxBlock | null;
+  readonly theirs: MdxBlock | null;
+  readonly reason: BlockConflictReason;
+}
+
+// partial is for showing a person and is never a version: it can hold both sides of a conflict.
+export type MergeOutcome =
+  | { readonly kind: 'clean'; readonly merged: MdxRoot }
+  | {
+      readonly kind: 'conflict';
+      readonly partial: MdxRoot;
+      readonly conflicts: readonly BlockConflict[];
+      // Tokens the whole page count could not account for. A number, as a token may be a secret.
+      readonly unexplained?: number;
+    };
+
+export type MergeResult = Result<MergeOutcome, readonly MdxIssue[]>;
+
+export type MergeAnswer = Result<
+  { readonly outcome: MergeOutcome; readonly issues: readonly MdxIssue[] },
   readonly MdxIssue[]
 >;

@@ -4,6 +4,7 @@
 // Plain Node, not vitest bench: its module runner adds to every call and it reports no p95.
 import { cpus, loadavg } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
+import { merge3 } from '../src/merge3.ts';
 import { serialize } from '../src/serialize.ts';
 import type { Dialect } from '../src/index.ts';
 import { parseForStore } from '../src/parse.ts';
@@ -18,6 +19,8 @@ const SAMPLES = 120;
 const CORPUS_ROUNDS = 7;
 // Lets the garbage collector and the JIT threads settle, as a server between requests would.
 const PAUSE_MS = 20;
+const MERGE_BLOCKS = 61;
+const MERGE_BUDGET_MS = 10;
 
 const use = policy();
 
@@ -98,6 +101,62 @@ const corpusP95 = percentile(corpusSamples, 0.95);
 overBudget ||= corpusP95 >= CORPUS_BUDGET_MS;
 console.log(
   `corpus (${corpus.length} files): p50 ${percentile(corpusSamples, 0.5).toFixed(1)} ms, p95 ${corpusP95.toFixed(1)} ms, budget ${CORPUS_BUDGET_MS}`,
+);
+// A real page of the size the budget names, with both sides at work: one paragraph edited at both
+// ends, which prints and parses, plus an edit and an insert elsewhere.
+function mergePage() {
+  const pages = corpus.flatMap(({ text, dialect }) => {
+    const parsed = dialect === 'mdx' ? parseForStore(text, dialect, use) : undefined;
+    return parsed?.ok === true ? [{ text, blocks: parsed.value.ast.children.length }] : [];
+  });
+  const nearest = pages
+    .filter(({ blocks }) => blocks <= MERGE_BLOCKS)
+    .sort((a, b) => b.blocks - a.blocks)[0];
+  if (nearest === undefined) throw new Error('the corpus has no page to merge');
+  // The nearest real page, topped up to the size the budget names.
+  const filler = 'Another plain paragraph of words.\n\n'.repeat(MERGE_BLOCKS - nearest.blocks);
+  const text = `${nearest.text.trimEnd()}\n\n${filler}`;
+  const parsed = parseForStore(text, 'mdx', use);
+  if (!parsed.ok) throw new Error('the merge page did not parse');
+  const page = { text, blocks: parsed.value.ast.children };
+  const words = page.blocks.flatMap((block, index) =>
+    block.type === 'paragraph' && (block.source?.raw ?? '').includes(' ') ? [index] : [],
+  );
+  const raw = (at: number | undefined) => page.blocks[at ?? 0]?.source?.raw ?? '';
+  const first = raw(words[0]);
+  const last = raw(words.at(-1));
+  const edit = (from: string, to: string) => page.text.replace(from, to);
+  const parse = (text: string) => {
+    const result = parseForStore(text, 'mdx', use);
+    if (!result.ok) throw new Error('an edited page did not parse');
+    return result.value.ast;
+  };
+  const ours = edit(first, `Ours ${first}`).replace(last, `${last}\n\nA new block from ours.`);
+  const theirs = edit(first, `${first} theirs`).replace(last, `${last} theirs`);
+  return {
+    blocks: page.blocks.length,
+    base: parse(page.text),
+    ours: parse(ours),
+    theirs: parse(theirs),
+  };
+}
+
+const { blocks, base, ours, theirs } = mergePage();
+const mergeOnce = () => {
+  const started = performance.now();
+  if (!merge3(base, ours, theirs).ok) throw new Error('refused a merge');
+  return performance.now() - started;
+};
+for (let run = 0; run < WARM_UP; run += 1) mergeOnce();
+const mergeSamples: number[] = [];
+for (let run = 0; run < SAMPLES * 4; run += 1) {
+  mergeSamples.push(mergeOnce());
+  if (run % 20 === 0) await pause(PAUSE_MS);
+}
+const mergeP99 = percentile(mergeSamples, 0.99);
+overBudget ||= mergeP99 >= MERGE_BUDGET_MS;
+console.log(
+  `merge3 (${blocks} blocks): p50 ${percentile(mergeSamples, 0.5).toFixed(2)} ms, p99 ${mergeP99.toFixed(2)} ms, budget ${MERGE_BUDGET_MS}`,
 );
 console.log(`load after ${loadavg()[0]?.toFixed(1) ?? 'unknown'}`);
 if (overBudget) {

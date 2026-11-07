@@ -3,6 +3,8 @@ import type { ComponentRegistry, MdxLimits } from './types.ts';
 
 export const DEFAULT_LIMITS: MdxLimits = { maxBytes: 1_048_576, maxDepth: 64, maxNodes: 50_000 };
 
+export const DEFAULT_MERGE_MAX_BLOCKS = 20_000;
+
 // The tree walks recurse once the depth check has passed, so depth needs a ceiling a
 // misconfigured policy cannot lift. The other two keep one parse within a worker's memory.
 export const CEILING: MdxLimits = { maxBytes: 16_777_216, maxDepth: 512, maxNodes: 1_000_000 };

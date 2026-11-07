@@ -40,7 +40,7 @@ attribute name outside the MDX syntax, on frontmatter anywhere but the first blo
 past the limits in its policy. The hashes have no key, so they catch stale bytes and not a writer
 who recomputes them.
 
-`/parse` and `/print` both name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
+`/parse`, `/print` and `/merge` all name the organization in `x-drefyn-organization`, checked against the frame, so a body can be refused before it is read. Bodies and jobs count against `DREFYN_PARSE_MAX_HELD_BYTES`, with a quarter for any one organization, and a refusal is `mdx.queue_full` with a 429.
 
 Every print is reparsed in the same thread, under the same policy. If any block or live node
 differs from the tree, it refuses with `mdx.print_changed_meaning`: that is how a new block hidden
@@ -62,6 +62,53 @@ see. A gap with no blank line stays only where both neighbours are safe with one
 them, and opens up otherwise. Two neighbouring lists with one marker are one list to a parser, so
 the second takes another marker, even if it was untouched. A file cannot open with a printed `---`,
 which would start frontmatter, so that rule prints as `***`.
+
+## Merging
+
+`client.merge({ tenant, path, base, ours, theirs, policy })` runs a three way merge in the host,
+under the same queues, budgets and kill as a print. It answers `{ outcome, issues }`, where
+`outcome` is `{ kind: 'clean', merged }` or `{ kind: 'conflict', partial, conflicts }`.
+
+- Nothing is ever dropped to resolve an overlap. Each side lines up against the base one slot at a
+  time, so an edit, an insert or a delete either lands or becomes a `BlockConflict` with both
+  versions in it. Below the top level a conflict takes the whole block to a person.
+- `reason` is `both_changed`, `delete_vs_edit`, `both_inserted`, `move_vs_edit` or
+  `unexplained_change`. A record with `baseIndex`, `ours` and `theirs` all null is about the page
+  and not a block: either it cannot be stored as a whole, as when a fence left open at the end of
+  a file swallows what a move put after it, or the count below failed.
+- **Clean has a definition that does not trust the merge.** Slot rules find where two sides clash,
+  and a separate whole page count decides whether a result may be clean. With `b`, `o`, `t` and `m`
+  a token's count in base, ours, theirs and the merged tree, and `three = o + t - b`, it needs
+  `max(0, min(three, max(o, t))) <= m <= max(three, min(o, t))`. Tokens are non space runs of the
+  text, `alt`, `url`, `title`, `lang`, `meta`, `name` and attribute values at any depth, plus one for
+  a node with nothing to read. A breach is `unexplained_change`, it logs a number and never a token,
+  and the client repeats the count on the trees it sent. It sees no order and no formatting, and
+  a false conflict is the worst it can do.
+- Lists, tables and quotes recurse, and a paragraph, heading or table cell edited on both sides
+  merges word by word. Code, HTML, JSX and frontmatter do not: two edits to one of those conflict.
+- Blocks compare on a hash of their own tree, never on the hash they carry, so a reformat raises
+  no conflict and keeps its bytes.
+- A delete only stands if the block is gone from the other side too. A block that changed kind
+  never pairs with its slot, so a slot both sides seem to have deleted is checked by words, across
+  kinds and in alt text, URLs, titles and attributes: any word in a rewrite beside it, or half its
+  words in a rewrite anywhere, is a `delete_vs_edit`. A false conflict costs a person a look, and
+  a false clean costs the delete. If the search runs out of budget, that is a conflict as well.
+- A moved block takes the other side's edit with it. A move next to the other side's insert, or
+  against its delete, is a conflict.
+- `partial` is for showing a person. It can hold both sides of a conflict and is never a version.
+- **A clean result is not yet a version: send `merged` through `client.print` and store the `ast`
+  that comes back.** `source` on all three trees comes from stored rows and fresh parses, as it
+  does for a print.
+
+An untouched block changes bytes in one more case here. A block written with leading indent that
+ends up under a new neighbour reprints, since the indent would read as part of a list above it.
+
+`DREFYN_MDX_MERGE_MAX_BLOCKS` caps any one of the three trees, default 20000. Past that, or past
+the limits in the policy, a merge refuses with `mdx.merge_limit`. The three trees also count
+against held bytes, so on a small self host the very largest merges get `mdx.queue_full`.
+
+`pnpm --filter @drefyn/mdx test:merge` runs the property test at 100,000 cases. The gate runs a
+slice of it on a fresh seed each time. `MERGE_PROPERTY_SEED` replays a failure.
 
 ## Rendering
 
@@ -156,7 +203,7 @@ and be live in the browser.
 | `mdx.expression_inert`      | warning  | Expression kept as text, never run                     |
 | `mdx.unknown_component`     | warning  | Not in the registry, so it stays inert                 |
 | `mdx.frontmatter_invalid`   | warning  | Not core schema YAML; the bytes are still kept         |
-| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect                           |
+| `mdx.dialect_mismatch`      | warning  | Looks like the other dialect; an error in a merge      |
 | `mdx.parse_timeout`         | error    | Killed at the timeout                                  |
 | `mdx.out_of_memory`         | error    | Ended by the heap cap                                  |
 | `mdx.organization_limit`    | error    | Organization queue full or budget spent, try later     |
@@ -164,6 +211,7 @@ and be live in the browser.
 | `mdx.queue_full`            | error    | Pool queue full, try later                             |
 | `mdx.block_not_printable`   | error    | A tree that cannot be printed; see "Changed blocks"    |
 | `mdx.print_changed_meaning` | error    | Its print would parse as something else                |
+| `mdx.merge_limit`           | error    | A merge past its block or tree limits                  |
 | `mdx.parse_unavailable`     | error    | No thread could run it, says nothing about the page    |
 
 Issues carry a code, severity, line and column, and never customer text.
@@ -272,6 +320,7 @@ code that is determined to get out, and proves nothing about the network.
 | `DREFYN_PARSE_PROJECT_BUDGET_MS`  | 20000     | Thread time per window for a project                      |
 | `DREFYN_PARSE_WINDOW_MS`          | 60000     | Length of the budget window                               |
 | `DREFYN_PARSE_MAX_HELD_BYTES`     | 268435456 | Bytes of bodies and jobs held, a quarter per organization |
+| `DREFYN_MDX_MERGE_MAX_BLOCKS`     | 20000     | Blocks in any one tree of a merge                         |
 | `DREFYN_PARSE_KILL_GRACE_MS`      | 2000      | Wait after `terminate` before SIGKILL                     |
 | `DREFYN_PARSE_HOST_MEMORY_MB`     | 2048      | At least threads times the cap, held bytes x 3, plus 256  |
 | `DREFYN_PARSE_PORT`               | 8787      | Port the host listens on                                  |
