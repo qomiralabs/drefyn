@@ -259,7 +259,7 @@ describe('a deadline on a transaction', () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(client.ended).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await failure).toMatchObject({ code: 'DB_TIMEOUT' });
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
     expect(client.ended).toBeGreaterThan(0);
     expect(client.released).toBe(true);
     expect(client.sent.join()).not.toContain('discard all');
@@ -296,7 +296,7 @@ describe('a deadline on a transaction', () => {
     });
     const failure = rejected(hanging(db, 10));
     await vi.advanceTimersByTimeAsync(10);
-    expect(await failure).toMatchObject({ code: 'DB_TIMEOUT' });
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
     expect(client.released).toBe(true);
   });
 

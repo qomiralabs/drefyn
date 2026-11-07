@@ -145,3 +145,46 @@ describe('a connection that stops answering', () => {
     expect(pool.waitingCount).toBe(0);
   });
 });
+
+describe('a deadline on a connection that stops answering', () => {
+  const DEADLINE_MS = 30;
+  const hanging = (db: Database) =>
+    withTenant(db, TENANT, (tx) => sql.raw(HANGS).execute(tx), { deadlineMs: DEADLINE_MS });
+
+  it('fails the work and gives the connection up, ahead of the client limit', async () => {
+    const { pool, db, sent } = oneSlot();
+    const started = performance.now();
+    const failed = await rejected(hanging(db));
+    const elapsed = performance.now() - started;
+
+    expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect((failed as DbError).message).toContain('deadline');
+    expect(pool.totalCount).toBe(0);
+    expect(sent).not.toContain('discard all');
+    expect(elapsed / DEADLINE_MS).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('leaves the pool able to open the next one, so a dead socket costs no capacity', async () => {
+    const { db } = oneSlot();
+    await rejected(hanging(db));
+    await expect(
+      withTenant(db, TENANT, () => Promise.resolve('next'), { deadlineMs: DEADLINE_MS }),
+    ).resolves.toBe('next');
+  });
+
+  it('reports the deadline, however much work was left', async () => {
+    const { db } = oneSlot();
+    const failure = await rejected(
+      withTenant(
+        db,
+        TENANT,
+        async (tx) => {
+          await sql.raw(HANGS).execute(tx);
+          await sql`select after_it`.execute(tx);
+        },
+        { deadlineMs: DEADLINE_MS },
+      ),
+    );
+    expect((failure as DbError).message).toContain('deadline');
+  });
+});

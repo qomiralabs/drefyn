@@ -1,12 +1,18 @@
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_ENGINE_CONFIG } from '../src/config.ts';
 import { Refusal } from '../src/errors.ts';
 import {
   assertCeilingBelowPool,
+  busyIssue,
   createPoolGate,
+  derivedCeiling,
   gateFor,
+  gateLimits,
   PoolBusy,
+  writePlaces,
+  type GateBusy,
   type PoolGate,
   type PoolGateLimits,
 } from '../src/pool-gate.ts';
@@ -19,7 +25,15 @@ const tenant = (project: number): TenantRef => inOrganization(1, project);
 const HOME = tenant(1);
 const OTHER = tenant(2);
 
-const unavailable = { error: { code: 'engine.unavailable', retryable: true, issues: [] } };
+const refused = (code: string) => ({
+  error: {
+    code: 'engine.unavailable',
+    retryable: true,
+    issues: [{ path: 'write', code }],
+  },
+});
+const OWN_LOAD = refused('engine.write_busy');
+const OTHERS_LOAD = refused('engine.pool_busy');
 
 // Work that runs until the test says so.
 const held = () => {
@@ -82,7 +96,7 @@ describe('tree writes in a project', () => {
     const first = [held(), held(), held(), held()];
     const all = first.map(({ work }) => pass.treeWrite(HOME, work));
     const late = held();
-    await expect(pass.treeWrite(HOME, late.work)).rejects.toMatchObject(unavailable);
+    await expect(pass.treeWrite(HOME, late.work)).rejects.toMatchObject(OWN_LOAD);
     expect(late.started()).toBe(false);
     for (const { finish } of first) finish();
     await flush();
@@ -183,6 +197,10 @@ describe('tree writes in a project', () => {
   });
 });
 
+const leaveAll = (...places: readonly ((() => void) | GateBusy)[]) => {
+  for (const place of places) if (typeof place === 'function') place();
+};
+
 const busy = (gate: PoolGate, at: TenantRef) => {
   const work = held();
   return { ...work, done: gate.write(at, work.work) };
@@ -223,10 +241,9 @@ describe('the process wide ceiling', () => {
     const second = pass.enterList(inOrganization(41, 41));
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
-    expect(pass.enterList(inOrganization(42, 42))).toBeNull();
+    expect(pass.enterList(inOrganization(42, 42))).toBe('process');
 
-    first?.();
-    second?.();
+    leaveAll(first, second);
     for (const { finish } of writes) finish();
     await vi.advanceTimersByTimeAsync(1000);
     await Promise.allSettled(writes.map(({ done }) => done));
@@ -239,11 +256,10 @@ describe('the process wide ceiling', () => {
     const leaveC = pass.enterList(inOrganization(3, 3));
     await flush();
     expect(pass.load().running).toBe(3);
-    expect(pass.enterList(inOrganization(4, 4))).toBeNull();
+    expect(pass.enterList(inOrganization(4, 4))).toBe('process');
     a.finish();
     await a.done;
-    leaveB?.();
-    leaveC?.();
+    leaveAll(leaveB, leaveC);
     expect(pass.load().running).toBe(0);
   });
 
@@ -270,9 +286,8 @@ describe('the process wide ceiling', () => {
     );
     expect(pass.load().running).toBeLessThan(8);
     const quiet = pass.enterList(inOrganization(4, 4));
-    expect(quiet).not.toBeNull();
-    quiet?.();
-    for (const leave of taken) leave?.();
+    expect(typeof quiet).toBe('function');
+    leaveAll(quiet, ...taken);
     expect(pass.load().running).toBe(0);
   });
 
@@ -286,7 +301,7 @@ describe('the process wide ceiling', () => {
     await a.done;
     await flush();
     expect([b.started(), c.started()]).toEqual([true, false]);
-    expect(pass.enterList(inOrganization(4, 4))).toBeNull();
+    expect(pass.enterList(inOrganization(4, 4))).toBe('process');
     b.finish();
     await b.done;
     await flush();
@@ -320,12 +335,12 @@ describe('the process wide ceiling', () => {
     const pass = createPoolGate({ ...LIMITS, ceiling: 1 });
     const a = busy(pass, inOrganization(1, 1));
     const late = held();
-    const refused = expect(pass.write(inOrganization(2, 2), late.work)).rejects.toMatchObject(
-      unavailable,
+    const outcome = expect(pass.write(inOrganization(2, 2), late.work)).rejects.toMatchObject(
+      OTHERS_LOAD,
     );
     expect(pass.load()).toEqual({ running: 1, waiting: 1 });
     await vi.advanceTimersByTimeAsync(1000);
-    await refused;
+    await outcome;
     expect(late.started()).toBe(false);
     expect(pass.load()).toEqual({ running: 1, waiting: 0 });
     a.finish();
@@ -358,24 +373,22 @@ describe('the process wide ceiling', () => {
     const pass = createPoolGate({ ...LIMITS, listsPerOrganization: 2 });
     const first = pass.enterList(HOME);
     const second = pass.enterList(HOME);
-    expect(pass.enterList(HOME)).toBeNull();
-    first?.();
-    second?.();
+    expect(pass.enterList(HOME)).toBe('organization');
+    leaveAll(first, second);
   });
 
   it('never queues a list', () => {
     const pass = createPoolGate({ ...LIMITS, ceiling: 1 });
     const first = pass.enterList(inOrganization(1, 1));
-    expect(pass.enterList(inOrganization(2, 2))).toBeNull();
+    expect(pass.enterList(inOrganization(2, 2))).toBe('process');
     expect(pass.load()).toEqual({ running: 1, waiting: 0 });
-    first?.();
+    leaveAll(first);
   });
 
   it('gives a list place back once, however often leave is called', () => {
     const pass = createPoolGate({ ...LIMITS, ceiling: 1 });
     const first = pass.enterList(HOME);
-    first?.();
-    first?.();
+    leaveAll(first, first);
     expect(pass.load().running).toBe(0);
   });
 
@@ -385,7 +398,7 @@ describe('the process wide ceiling', () => {
     const a = busy(pass, inOrganization(2, 2));
     await flush();
     expect(a.started()).toBe(false);
-    leave?.();
+    leaveAll(leave);
     await flush();
     expect(a.started()).toBe(true);
     a.finish();
@@ -396,7 +409,7 @@ describe('the process wide ceiling', () => {
     const pass = createPoolGate(LIMITS);
     for (let at = 0; at < 100; at += 1) {
       await pass.treeWrite(inOrganization(at, at), () => Promise.resolve());
-      pass.enterList(inOrganization(at, at))?.();
+      leaveAll(pass.enterList(inOrganization(at, at)));
     }
     expect(pass.open()).toBe(0);
   });
@@ -437,7 +450,7 @@ describe('the process wide ceiling', () => {
               else if (kind === 'write') await pass.write(at, () => spend(organization, cost));
               else {
                 const leave = pass.enterList(at);
-                if (leave === null) return;
+                if (typeof leave === 'string') return;
                 await spend(organization, cost);
                 leave();
               }
@@ -464,11 +477,205 @@ describe('the process wide ceiling', () => {
           pass.enterList(inOrganization(organization, organization)),
         );
         const quiet = pass.enterList(inOrganization(3, 3));
-        expect(quiet).not.toBeNull();
-        quiet?.();
-        for (const leave of leaves) leave?.();
+        expect(typeof quiet).toBe('function');
+        leaveAll(quiet, ...leaves);
       }),
     );
+  });
+});
+
+describe('who a refusal is about', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const OWN = inOrganization(1, 1);
+  const QUIET = inOrganization(2, 2);
+  const LIMITS: PoolGateLimits = { ...WIDE, ceiling: 1, queued: 2 };
+
+  it('calls a list at a full ceiling the process, for a tenant with nothing running', () => {
+    const pass = createPoolGate(LIMITS);
+    const leave = pass.enterList(OWN);
+    expect(pass.enterList(QUIET)).toBe('process');
+    leaveAll(leave);
+  });
+
+  it('calls a list past its share the organization, for a tenant with work running', () => {
+    const pass = createPoolGate({ ...LIMITS, ceiling: 2 });
+    const leave = pass.enterList(OWN);
+    expect(pass.enterList(OWN)).toBe('organization');
+    leaveAll(leave);
+  });
+
+  it('calls a list past the organization cap the organization', () => {
+    const pass = createPoolGate({ ...WIDE, listsPerOrganization: 1 });
+    const leave = pass.enterList(OWN);
+    expect(pass.enterList(OWN)).toBe('organization');
+    leaveAll(leave);
+  });
+
+  it('refuses a quiet write on a full queue as the process', async () => {
+    const pass = createPoolGate({ ...LIMITS, queued: 1 });
+    const a = busy(pass, OWN);
+    const waiter = busy(pass, inOrganization(3, 3));
+    await expect(pass.write(QUIET, held().work)).rejects.toMatchObject(OTHERS_LOAD);
+    a.finish();
+    await a.done;
+    await flush();
+    waiter.finish();
+    await waiter.done;
+  });
+
+  it('refuses a write on a full queue as the organization, if it has work running', async () => {
+    const pass = createPoolGate({ ...LIMITS, queued: 1 });
+    const a = busy(pass, OWN);
+    const waiter = busy(pass, inOrganization(3, 3));
+    await expect(pass.write(OWN, held().work)).rejects.toMatchObject(OWN_LOAD);
+    a.finish();
+    await a.done;
+    await flush();
+    waiter.finish();
+    await waiter.done;
+  });
+
+  it('reads the tenant at the timeout, not on arrival', async () => {
+    const pass = createPoolGate({ ...LIMITS, ceiling: 2, treeSlots: 1 });
+    const a = held();
+    const first = pass.treeWrite(OWN, a.work);
+    const waiting = expect(pass.treeWrite(OWN, held().work)).rejects.toMatchObject(OWN_LOAD);
+    await vi.advanceTimersByTimeAsync(1000);
+    await waiting;
+    a.finish();
+    await first;
+  });
+
+  it('calls a timed out write the process when its own work ended while it waited', async () => {
+    const pass = createPoolGate({ ...LIMITS, ceiling: 3, treeSlots: 1 });
+    const mine = pass.enterList(OWN);
+    const crowd = busy(pass, inOrganization(3, 3));
+    const other = busy(pass, inOrganization(4, 4));
+    const waiting = expect(pass.write(OWN, held().work)).rejects.toMatchObject(OTHERS_LOAD);
+    await flush();
+    leaveAll(mine);
+    expect(pass.load().waiting).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    await waiting;
+    crowd.finish();
+    other.finish();
+    await Promise.all([crowd.done, other.done]);
+  });
+
+  it('gives lists the query path, and a busy issue each', () => {
+    expect(busyIssue('organization', 'query')).toEqual({
+      path: 'query',
+      code: 'engine.query_busy',
+    });
+    expect(busyIssue('organization', 'write')).toEqual({
+      path: 'write',
+      code: 'engine.write_busy',
+    });
+    expect(busyIssue('process', 'query')).toEqual({ path: 'query', code: 'engine.pool_busy' });
+    expect(busyIssue('process', 'write')).toEqual({ path: 'write', code: 'engine.pool_busy' });
+  });
+});
+
+describe('write places', () => {
+  it.each([
+    [1, 1],
+    [2, 1],
+    [3, 2],
+    [4, 3],
+    [8, 6],
+  ])('at a ceiling of %i are %i', async (ceiling, places) => {
+    const pass = createPoolGate({ ...WIDE, ceiling, queued: 100, waitMs: 1 });
+    const writes = Array.from({ length: 12 }, (_, at) => {
+      const work = held();
+      return { ...work, done: pass.write(inOrganization(at, at), work.work) };
+    });
+    await Promise.resolve();
+    expect(pass.load().running).toBe(places);
+    for (const { finish } of writes) finish();
+    await Promise.allSettled(writes.map(({ done }) => done));
+  });
+
+  it.each([
+    [2, 1],
+    [3, 1],
+    [4, 1],
+    [8, 2],
+  ])('at a ceiling of %i leave lists at least %i of their own', (ceiling, kept) => {
+    expect(ceiling - writePlaces(ceiling)).toBeGreaterThanOrEqual(kept);
+  });
+
+  it('keeps nothing for lists at a ceiling of 1, as nothing can be kept', () => {
+    expect(writePlaces(1)).toBe(1);
+  });
+});
+
+describe('derivedCeiling', () => {
+  it.each([
+    [1, 1],
+    [2, 1],
+    [3, 1],
+    [5, 3],
+    [8, 6],
+    [10, 8],
+    [20, 16],
+  ])('for a pool of %i is %i', (pool, ceiling) => {
+    expect(derivedCeiling(pool)).toBe(ceiling);
+  });
+
+  it('stays below any pool of 2 or more, and leaves at least 2 from 3 up', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 2, max: 100_000 }), (pool) => {
+        const ceiling = derivedCeiling(pool);
+        expect(ceiling).toBeGreaterThanOrEqual(1);
+        expect(ceiling).toBeLessThan(pool);
+        if (pool >= 3) expect(pool - ceiling).toBeGreaterThanOrEqual(2);
+      }),
+    );
+  });
+});
+
+describe('gateLimits', () => {
+  const pool = (poolMax: number, poolCeiling?: number) =>
+    gateLimits({ ...DEFAULT_ENGINE_CONFIG, poolCeiling }, poolMax).ceiling;
+
+  it.each([
+    [2, 1],
+    [3, 1],
+    [5, 3],
+    [8, 6],
+    [10, 8],
+    [20, 16],
+  ])('derives an unset ceiling on a pool of %i, and it passes', (poolMax, ceiling) => {
+    expect(pool(poolMax)).toBe(ceiling);
+    expect(() => gateFor({}, gateLimits(DEFAULT_ENGINE_CONFIG, poolMax), poolMax)).not.toThrow();
+  });
+
+  it('refuses a pool of 1, unset, as nothing is left over for what the gate leaves out', () => {
+    expect(() => gateFor({}, gateLimits(DEFAULT_ENGINE_CONFIG, 1), 1)).toThrow(
+      /DREFYN_DATABASE_POOL_MAX/,
+    );
+  });
+
+  it('keeps a value someone set', () => {
+    expect(pool(10, 5)).toBe(5);
+  });
+
+  it('refuses a set value equal to the pool', () => {
+    const limits = gateLimits({ ...DEFAULT_ENGINE_CONFIG, poolCeiling: 10 }, 10);
+    expect(() => gateFor({}, limits, 10)).toThrow(/DREFYN_ENGINE_POOL_CEILING/);
+  });
+
+  it('treats an unset ceiling and the same value set as the same limits', () => {
+    const handle = {};
+    const unset = gateFor(handle, gateLimits(DEFAULT_ENGINE_CONFIG, 10), 10);
+    const set = gateLimits({ ...DEFAULT_ENGINE_CONFIG, poolCeiling: 8 }, 10);
+    expect(gateFor(handle, set, 10)).toBe(unset);
   });
 });
 

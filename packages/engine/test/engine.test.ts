@@ -19,7 +19,7 @@ import {
   type LogFields,
   type SaveDraftInput,
 } from '../src/index.ts';
-import { createPoolGate, type PoolGate } from '../src/pool-gate.ts';
+import { createPoolGate, type GateBusy, type PoolGate } from '../src/pool-gate.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
 import { treeOf } from './support/tree.ts';
 
@@ -1028,6 +1028,10 @@ describe('the pool gate', () => {
     ['declareSchema', (engine) => engine.declareSchema({ tenant, typeId: TYPE, schema: {} })],
   ];
 
+  const leaveAll = (...places: readonly ((() => void) | GateBusy)[]) => {
+    for (const place of places) if (typeof place === 'function') place();
+  };
+
   const full = () =>
     createPoolGate({ ceiling: 1, queued: 2, waitMs: 5, treeSlots: 2, listsPerOrganization: 4 });
 
@@ -1037,8 +1041,15 @@ describe('the pool gate', () => {
     const { engine, statements } = build(happy, { logger: { info: () => undefined, warn } }, gate);
     const leave = gate.enterList(OTHER);
     const answer = await call(engine);
-    leave?.();
-    expect(answer).toMatchObject({ ok: false, error: { code: 'engine.unavailable' } });
+    leaveAll(leave);
+    expect(answer).toEqual({
+      ok: false,
+      error: {
+        code: 'engine.unavailable',
+        retryable: true,
+        issues: [{ path: 'write', code: 'engine.pool_busy' }],
+      },
+    });
     expect(statements).toEqual([]);
     expect(warn).toHaveBeenCalledWith('engine.pool_busy', {
       organization_id: tenant.organizationId,
@@ -1058,22 +1069,63 @@ describe('the pool gate', () => {
     );
     const leave = gate.enterList(OTHER);
     expect((await engine.getHead(tenant, NODE)).ok).toBe(true);
-    leave?.();
+    leaveAll(leave);
   });
 
-  it('refuses a list once the gate is full, as busy and not as an outage', async () => {
+  it('tells a quiet list the process is full, and logs that', async () => {
     const gate = full();
-    const { engine } = build(happy, {}, gate);
+    const warn = vi.fn<EngineLogger['warn']>();
+    const { engine } = build(happy, { logger: { info: () => undefined, warn } }, gate);
     const leave = gate.enterList(OTHER);
     expect(await engine.queryNodes(tenant, { typeId: TYPE })).toEqual({
       ok: false,
       error: {
         code: 'engine.unavailable',
         retryable: true,
-        issues: [{ path: 'query', code: 'engine.query_busy' }],
+        issues: [{ path: 'query', code: 'engine.pool_busy' }],
       },
     });
-    leave?.();
+    expect(warn).toHaveBeenCalledWith(
+      'engine.pool_busy',
+      expect.objectContaining({ organization_id: tenant.organizationId, running: 1 }),
+    );
+    leaveAll(leave);
+  });
+
+  it('tells a list past its share that the load is its own', async () => {
+    const gate = createPoolGate({
+      ceiling: 2,
+      queued: 2,
+      waitMs: 5,
+      treeSlots: 2,
+      listsPerOrganization: 4,
+    });
+    const warn = vi.fn<EngineLogger['warn']>();
+    const { engine } = build(happy, { logger: { info: () => undefined, warn } }, gate);
+    const leave = gate.enterList(tenant);
+    expect(await engine.queryNodes(tenant, { typeId: TYPE })).toMatchObject({
+      error: { issues: [{ path: 'query', code: 'engine.query_busy' }] },
+    });
+    expect(warn).toHaveBeenCalledWith('engine.query_busy', expect.anything());
+    leaveAll(leave);
+  });
+
+  it('tells a write past its share that the load is its own, and logs that', async () => {
+    const gate = createPoolGate({
+      ceiling: 2,
+      queued: 1,
+      waitMs: 5,
+      treeSlots: 2,
+      listsPerOrganization: 4,
+    });
+    const warn = vi.fn<EngineLogger['warn']>();
+    const { engine } = build(happy, { logger: { info: () => undefined, warn } }, gate);
+    const leave = gate.enterList(tenant);
+    expect(await engine.saveDraft(save())).toMatchObject({
+      error: { issues: [{ path: 'write', code: 'engine.write_busy' }] },
+    });
+    expect(warn).toHaveBeenCalledWith('engine.write_busy', expect.anything());
+    leaveAll(leave);
   });
 
   it('counts across engines over one store, so a second engine adds no room', async () => {
@@ -1099,7 +1151,7 @@ describe('the pool gate', () => {
     const second = createEngine({ ...deps, store: scripted.store });
     const leave = gate.enterList(tenant);
     expect((await second.queryNodes(tenant, { typeId: TYPE })).ok).toBe(false);
-    leave?.();
+    leaveAll(leave);
   });
 
   it('gets its place back when a hung transaction is cut off', async () => {
@@ -1118,7 +1170,7 @@ describe('the pool gate', () => {
         tenant: (_ref, _work, options) =>
           new Promise((_done, fail) => {
             setTimeout(() => {
-              fail(new DbError('DB_TIMEOUT', 'the transaction ran past its deadline'));
+              fail(new DbError('DB_UNAVAILABLE', 'the transaction ran past its deadline'));
             }, options?.deadlineMs);
           }),
       },

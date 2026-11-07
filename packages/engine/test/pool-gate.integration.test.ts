@@ -28,7 +28,7 @@ import { describeWithStack } from './support/presence.ts';
 import { urlFor } from './support/stack.ts';
 
 const POOL = 10;
-const CEILING = DEFAULT_ENGINE_CONFIG.poolCeiling;
+const CEILING = 8;
 const HOLDERS = 40;
 
 const openPool = (poolMax: number, url = urlFor('app', database())) =>
@@ -289,18 +289,13 @@ describeWithStack('the process wide ceiling against Postgres', () => {
   });
 
   describe('at startup', () => {
-    it('refuses a ceiling at the size of the pool it would guard', async () => {
-      const small = await openPool(DEFAULT_ENGINE_CONFIG.poolCeiling);
+    it('refuses a set ceiling at the size of the pool, and derives an unset one', async () => {
+      const small = await openPool(5);
       try {
-        expect(() => databaseStore(small, DEFAULT_ENGINE_CONFIG)).toThrow(
+        expect(() => databaseStore(small, { ...DEFAULT_ENGINE_CONFIG, poolCeiling: 5 })).toThrow(
           /DREFYN_ENGINE_POOL_CEILING.*DREFYN_DATABASE_POOL_MAX/,
         );
-        expect(() =>
-          databaseStore(small, {
-            ...DEFAULT_ENGINE_CONFIG,
-            poolCeiling: DEFAULT_ENGINE_CONFIG.poolCeiling - 1,
-          }),
-        ).not.toThrow();
+        expect(() => databaseStore(small, DEFAULT_ENGINE_CONFIG)).not.toThrow();
       } finally {
         await closeDatabase(small);
       }

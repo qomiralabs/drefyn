@@ -214,3 +214,16 @@ describe('tenant access types', () => {
     expectTypeOf<AuthDatabase>().not.toHaveProperty('pool');
   });
 });
+
+describe('a deadline', () => {
+  const noWork = () => Promise.resolve();
+
+  it('is for tenant work alone, as nothing else reads it', () => {
+    const unused = (db: Database, tenant: TenantRef, org: OrganizationRef) => {
+      void withTenant(db, tenant, noWork, { deadlineMs: 1000 });
+      // @ts-expect-error organization work has no deadline
+      void withOrganization(db, org, noWork, { deadlineMs: 1000 });
+    };
+    expect(typeof unused).toBe('function');
+  });
+});

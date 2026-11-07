@@ -69,9 +69,9 @@ describe('the engine config', () => {
 });
 
 describe('the pool protection limits', () => {
-  it('defaults to a ceiling of 8, a queue of 64 and a 15 s hold', () => {
+  it('leaves the ceiling to the pool unless set, with a queue of 64 and a 15 s hold', () => {
+    expect(DEFAULT_ENGINE_CONFIG.poolCeiling).toBeUndefined();
     expect(DEFAULT_ENGINE_CONFIG).toMatchObject({
-      poolCeiling: 8,
       poolQueue: 64,
       slotHoldMs: 15_000,
     });

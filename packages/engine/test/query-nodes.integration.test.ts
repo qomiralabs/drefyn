@@ -653,7 +653,7 @@ update app.nodes set head_fields = jsonb_set(head_fields, '{${other}}', '"0000-0
     const { promise: full, resolve: filled } = Promise.withResolvers<undefined>();
     let holding = 0;
     const store: EngineStore = {
-      gate: createPoolGate(gateLimits(config)),
+      gate: createPoolGate(gateLimits(config, 10)),
       tenant: (tenant, work, options) =>
         inner.tenant(
           tenant,
