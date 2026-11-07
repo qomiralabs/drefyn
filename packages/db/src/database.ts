@@ -311,6 +311,7 @@ class TransactionConnection implements DatabaseConnection {
   #client: pg.PoolClient | undefined;
   #failure: unknown;
   #unanswered: Error | undefined;
+  readonly #inFlight = new Set<Promise<unknown>>();
 
   constructor(client: pg.PoolClient) {
     this.#client = client;
@@ -320,14 +321,22 @@ class TransactionConnection implements DatabaseConnection {
     return this.#failure;
   }
 
-  // The first failure that came from this side rather than from the server, such as the pool's
-  // query_timeout. The statement may still be running, and may yet succeed.
+  // The first failure Postgres did not raise itself: the pool's query_timeout, a socket error,
+  // a value the driver could not read. Postgres aborts only on its own errors, so after any of
+  // these the commit would land for work that saw a failure, and the statement may still be
+  // running.
   get unanswered(): Error | undefined {
     return this.#unanswered;
   }
 
   close(): void {
     this.#client = undefined;
+  }
+
+  // A statement the work started and never awaited can still fail after the work returns.
+  // Called once closed, so the set only shrinks.
+  async settled(): Promise<void> {
+    await Promise.allSettled([...this.#inFlight]);
   }
 
   async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
@@ -337,10 +346,10 @@ class TransactionConnection implements DatabaseConnection {
     }
     // Queued behind the unanswered one, each statement would get a full limit of its own.
     if (this.#unanswered !== undefined) throw this.#unanswered;
+    const running = client.query<R & pg.QueryResultRow>(compiled.sql, [...compiled.parameters]);
+    this.#inFlight.add(running);
     try {
-      const result = await client.query<R & pg.QueryResultRow>(compiled.sql, [
-        ...compiled.parameters,
-      ]);
+      const result = await running;
       const counted = ['INSERT', 'UPDATE', 'DELETE', 'MERGE'].includes(result.command);
       const affected = counted ? result.rowCount : null;
       return affected === null
@@ -348,8 +357,12 @@ class TransactionConnection implements DatabaseConnection {
         : { rows: result.rows, numAffectedRows: BigInt(affected) };
     } catch (error) {
       this.#failure ??= error;
-      if (error instanceof Error && sqlState(error) === undefined) this.#unanswered ??= error;
+      if (error instanceof Error && !(error instanceof pg.DatabaseError)) {
+        this.#unanswered ??= error;
+      }
       throw error;
+    } finally {
+      this.#inFlight.delete(running);
     }
   }
 
@@ -524,8 +537,9 @@ async function runTransaction<DB, T>(
     let result: T;
     try {
       result = await work(transactionOn<DB>(connection));
-      // Postgres aborts on an error it raised, so the commit refuses itself. It never heard of this
-      // one: the statement can answer late, and the commit would land for work that saw a failure.
+      // Closed first so nothing new starts while the floating ones finish.
+      connection.close();
+      await connection.settled();
       if (connection.unanswered !== undefined) throw connection.unanswered;
     } catch (error) {
       connection.close();
@@ -536,7 +550,6 @@ async function runTransaction<DB, T>(
       }
       throw error;
     }
-    connection.close();
     try {
       await client.query(contextCheck(settings));
     } catch (error) {
