@@ -8,7 +8,7 @@ import {
   createEngine,
   databaseStore,
   DEFAULT_ENGINE_CONFIG,
-  type Actor,
+  type MovingActor,
   type Engine,
   type EngineDeps,
   type NodeId,
@@ -39,7 +39,7 @@ export const PARSE_POLICY = {
 export const parseClient = (): ParseClient =>
   createParseClient(parseClientConfig(inject('engineParseUrl')));
 
-export const ACTOR: Actor = {
+export const ACTOR: MovingActor = {
   kind: 'user',
   userId: idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8099'),
   roles: ['editor'],
