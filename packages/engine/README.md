@@ -115,6 +115,9 @@ Past that the connection is closed from this side, the caller gets `engine.unava
 replaces it. Timeouts in Postgres cannot do this: a socket that stopped answering never hears them.
 A gated place is held for at most the pool wait plus the hold, 17 s at the defaults. The backend may
 run on until its statement timeout, so the server can briefly see more connections than the pool.
+`getHead`, `listVersions` and `backfillStep` take no place and have no hold, so only the client limit
+in `@drefyn/db` bounds them: 130 s on a peer that goes silent, 195 s on one that answers late and then
+dies.
 
 A save re-reads its input before it trusts it:
 
