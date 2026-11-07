@@ -1,12 +1,13 @@
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import { commandBar, openShell, products, ROUTES } from './fixtures.ts';
 import { readInp, recordInp, slowCpu, watchInp, watchPress, type InpReading } from './inp.ts';
-import { describeInp, inpLimit, overBudget, summarize } from './inp-summary.ts';
+import { describeInp, inpFigure, inpLimit, overBudget, summarize } from './inp-summary.ts';
 import { test } from './test.ts';
 import { archive, openPages, select, toastRegion } from './undo-helpers.ts';
 
 const SAMPLES = 7;
 const LIMIT_MS = inpLimit(process.env);
+const FIGURE = inpFigure(process.env);
 
 // Each scenario gets a fresh page, ready and quiet. Then the slowdown starts, and whatever a
 // person does first happens under it, because work left over from that step is part of what
@@ -92,8 +93,8 @@ for (const scenario of SCENARIOS) {
       if (miss !== null) console.warn(miss);
     }
     recordInp(session, readings);
-    expect(session.median, `median of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
-    expect(press.median, `median press of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
+    expect(session[FIGURE], `${FIGURE} of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
+    expect(press[FIGURE], `${FIGURE} press of ${String(SAMPLES)} samples`).toBeLessThan(LIMIT_MS);
   });
 }
 

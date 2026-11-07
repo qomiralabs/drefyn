@@ -7,6 +7,11 @@ export const SHARED_RUNNER_CEILING_MS = 300;
 export const inpLimit = (env: Readonly<Record<string, string | undefined>>): number =>
   env['DREFYN_QUIET_BENCH'] === 'on' ? BUDGET_MS : SHARED_RUNNER_CEILING_MS;
 
+// The budget is a p75 target, so the quiet bench holds p75. A shared runner holds its ceiling
+// at the median, because its tail is the runner's neighbours, not the page.
+export const inpFigure = (env: Readonly<Record<string, string | undefined>>): 'p75' | 'median' =>
+  env['DREFYN_QUIET_BENCH'] === 'on' ? 'p75' : 'median';
+
 export interface InpSummary {
   readonly name: string;
   readonly samples: number;
