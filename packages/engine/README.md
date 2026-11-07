@@ -37,6 +37,7 @@ compares each list with the migration, so the two cannot drift.
 | `createNode`    | Adds a node with no version. Its id always comes from the database.              |
 | `saveDraft`     | Adds a version when `expectedHeadVersionId` is still the head.                   |
 | `rollback`      | Adds a version with an older version's content, and keeps that version's origin. |
+| `moveNode`      | Puts a node under a parent, after a sibling. Writes that one row.                |
 | `getHead`       | Reads the head, content included.                                                |
 | `listVersions`  | Lists versions newest first, without content.                                    |
 | `declareSchema` | Stores a type's definition and gives declared fields their slots.                |
@@ -46,6 +47,26 @@ Every call returns a `Result`, and only a bug throws. `engine.not_found` covers 
 ids as well, so a caller cannot tell them apart. `engine.unavailable` is the one retryable code:
 the database or parse host is down or full, and nothing was stored. Writes need the `engine.writes`
 flag, off in production, and are `engine.forbidden` without it. Reads never need it.
+
+`moveNode` takes a parent and the sibling to land after, and writes one row, however large the
+subtree. Keys come from the server. Moves in a project queue on one advisory lock, so two moves
+that would close a cycle cannot both pass: the second sees the first and gets
+`engine.validation_failed` with `engine.cycle` on `parentId`. A parent or sibling that is another
+tenant's, deleted, or not a child of that parent is `engine.not_found`, with nothing naming which.
+`createNode` lands after the last sibling unless the caller sends `orderKey`. A key the caller sent
+can tie with a sibling, and nothing fits between a tie, so a move there gets
+`engine.order_key_no_room`. One gap takes about 6,000 inserts in a row before `engine.too_large`.
+
+A tree is at most 64 levels, a root being level 1. `createNode` under a parent and `moveNode`
+refuse anything past that with `engine.validation_failed` and `engine.tree_too_deep` on `parentId`,
+and a move counts the height of the subtree it carries. Rows already deeper stay readable and
+saveable, and can always move up, along or to the root. A move down that would have to read more
+than 50,000 rows of its subtree is `engine.too_large` on `nodeId`.
+
+Writers that pick a place in a tree wait at most 1 s for the project's lock, then answer
+`engine.unavailable` with nothing written. Each process lets 2 such writes per project reach the
+pool and keeps up to 32 more waiting, for at most 1 s, off the pool, so a busy project cannot take
+connections from another tenant. A root created with its own `orderKey` skips the queue.
 
 A save re-reads its input before it trusts it:
 
@@ -89,8 +110,10 @@ imports, expressions, link targets and component props stay out. This is a stopg
 yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
 footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
 the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
-characters a page. Past it a chunk has an empty path, so one save cannot grow by repeating a long
-path on every row.
+characters a page, split evenly across its headings. Past its share a chunk has an empty path, so
+one save cannot grow by repeating a long path on every row. An edit inside a section leaves the
+paths of the others alone, but adding or removing a heading changes every section's share, so it
+can change them.
 
 A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
 `engine.save.write`. The parse host reports its steps, and the engine records them through
@@ -135,8 +158,24 @@ are unnamed: a named one gets a generic plan, which took 341,004 buffers against
 A value that is missing is false to every comparison except `neq`, and `not` flips that cleanly, so
 `not eq` and `neq` agree. `contains` has no pattern language and ignores case. Sorting needs a
 declared `sortable` field, nulls come last in both directions, and pages walk by an opaque cursor
-that holds only to the order it came from. With no sort, newest first. A list that passes
-`DREFYN_ENGINE_QUERY_TIMEOUT_MS` returns `engine.unavailable` and no partial page.
+that holds only to the order it came from. With no sort, newest first. Each statement of a list has its own
+`DREFYN_ENGINE_QUERY_TIMEOUT_MS`, and one that passes it returns `engine.unavailable` and no partial
+page.
+
+A cursor names a node, the order and nothing else, so no field value is in a URL or an access log.
+The sort value is read back from that node on the next page. A cursor naming a node the tenant
+cannot see answers `engine.cursor_invalid`. Editing the sort field of the last item shown between
+two pages moves the place with it, so that walk can skip or repeat items near the edit.
+
+An organization runs at most `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT` lists at once in each process. The
+next one gets `engine.unavailable`, issue code `engine.query_busy`, and logs `engine.query_busy`.
+Nothing queues. Build one engine per process: the count lives in it, and an engine per request
+has no cap at all. Nothing in the package can check that, so the first route carries a test for it.
+A list on a connection that stops answering gives its place back at most 130 s later, through the
+pool's client side limit in `@drefyn/db`. Keep the cap under half of
+`DREFYN_DATABASE_POOL_MAX`. This is fairness between organizations: several busy ones can still fill
+the pool together. A date of year 0000 is refused
+on a save and in a filter, and one stored before that reads as missing.
 
 `drefyn maintain filter-rows` runs as the migration role, as vacuum and a rebuild need the table's
 owner. It rebuilds the key with `reindex concurrently` past 30 percent bloat, estimated from the
@@ -155,6 +194,7 @@ work and never tenant work. The role sees other roles' transactions only with `p
 | `DREFYN_CHUNK_TARGET_CHARS`               | 800     | Close a chunk before it passes this. At most the cap. |
 | `DREFYN_CHUNK_MAX_CHARS`                  | 2000    | Hard cap on a chunk, whatever the page holds.         |
 | `DREFYN_ENGINE_QUERY_TIMEOUT_MS`          | 2000    | `statement_timeout` for `queryNodes`, at most 60000.  |
+| `DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT`       | 4       | Lists at once, per organization, per process.         |
 | `DREFYN_ENGINE_UNDECLARED_SCAN_MAX_ITEMS` | 20000   | Largest type an undeclared filter may read.           |
 
 A tree is about 4 times its source at the corpus median and 7.5 times at worst, so a source cap

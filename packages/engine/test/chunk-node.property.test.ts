@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { chunkNode } from '../src/index.ts';
@@ -229,10 +230,13 @@ describe('an edit', () => {
             const was = chunksBySection(before, chunkNode(before, options));
             const now = chunksBySection(after, chunkNode(after, options));
             const others = (found: typeof was) => [...found].filter(([key]) => key !== home);
-            expect(others(now)).toEqual(others(was));
+            // Not toEqual: a miss there writes a diff of every chunk.
+            expect(isDeepStrictEqual(others(now), others(was))).toBe(true);
           },
         ),
-        RUNS,
+        // These pages stay large through thousands of shrink steps, so a shrink outlasts the time
+        // limit and CI shows a timeout. Stopping at the failure keeps its seed in the report.
+        { ...RUNS, endOnFailure: true },
       );
     },
     TIMEOUT_MS,

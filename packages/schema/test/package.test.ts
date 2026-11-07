@@ -55,6 +55,7 @@ describe('package layout', () => {
       'UNDECLARED_FILTER_MAX_ITEMS',
       'asFieldId',
       'asTypeId',
+      'canonicalInstant',
       'checkApiName',
       'checkFilter',
       'formatUnits',

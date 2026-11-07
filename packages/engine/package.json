@@ -13,7 +13,7 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "bench": "node bench/chunk.ts && node bench/save.ts && node bench/query.ts"
+    "bench": "node bench/chunk.ts && node bench/save.ts && node bench/query.ts && node bench/tree.ts"
   },
   "dependencies": {
     "@drefyn/db": "workspace:*",

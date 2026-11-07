@@ -1,5 +1,6 @@
 export { formatUnits, parseUnits } from './decimal.ts';
 export { checkFilter, parseFilterNode } from './filter.ts';
+export { canonicalInstant } from './instant.ts';
 export { asFieldId, asTypeId } from './ids.ts';
 export {
   FILTER_SLOTS,

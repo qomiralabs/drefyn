@@ -71,6 +71,8 @@ function typeOf(field: FieldDef): ValueType {
   }
 }
 
+const YEAR_ZERO = '0000-';
+
 const headValue = (id: FieldId): Raw => sql`n.head_fields ->> ${id}::text`;
 
 export function headOperand(field: FieldDef): Operand {
@@ -91,7 +93,13 @@ export function headOperand(field: FieldDef): Operand {
     case 'boolean':
       return { shape: 'scalar', type, expression: sql`(${value})::boolean::int::bigint` };
     case 'date':
-      return { shape: 'scalar', type, expression: sql`(${value})::timestamptz` };
+      // Year 0000 was once saved, and the cast throws on it. One such row must not fail every
+      // scan of its type or stall a fill, so it reads as missing.
+      return {
+        shape: 'scalar',
+        type,
+        expression: sql`case when starts_with(${value}, ${YEAR_ZERO}) then null else (${value})::timestamptz end`,
+      };
     default:
       return { shape: 'scalar', type, expression: value };
   }
@@ -111,7 +119,9 @@ export function operandOf(field: FieldDef, context: CompileContext): Operand {
   return slotOperand(field, entry.column);
 }
 
-// checkFilter has seen the value, but an instant shifted past year 9999 only shows up here.
+// checkFilter has seen the value. A scalar or json list compile that skipped it still must not
+// reach Postgres. slotListLeaf comes through neither path: it binds its values as text, and
+// counts on that check alone.
 function parameterOf(field: FieldDef, value: unknown): string | boolean {
   const scalar = filterValue(field, value);
   if (scalar !== null) return scalar;

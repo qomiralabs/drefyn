@@ -20,6 +20,7 @@ export type {
   DeclaredSchema,
   DeclareSchemaInput,
   IdempotencyKey,
+  MoveNodeInput,
   NodeHead,
   NodeId,
   NodePage,

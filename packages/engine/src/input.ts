@@ -2,6 +2,7 @@ import { idOf, type IdKind, type IdOf } from '@drefyn/tenancy';
 import { MAX_RETIRED_FIELDS } from '@drefyn/schema';
 import { z } from 'zod';
 import type { EngineIssue } from './errors.ts';
+import { isOrderKey } from './order-key.ts';
 import { NODE_FAMILIES, ORIGINS } from './vocabulary.ts';
 import type { Actor } from './types.ts';
 
@@ -62,12 +63,13 @@ export const createNodeSchema = z.strictObject({
     .string()
     .regex(/^[a-z0-9][a-z0-9-]{0,199}$/)
     .nullish(),
-  // Moves keep their own keys. A node with no siblings to sort against starts here.
-  orderKey: z
-    .string()
-    .regex(/^[0-9A-Za-z]{1,64}$/)
-    .default('a0'),
+  // Absent lands after the last sibling, which is what nearly every caller wants.
+  orderKey: z.string().max(64).refine(isOrderKey).optional(),
 });
+
+export const moveNodeSchema = z
+  .strictObject({ tenant, nodeId, parentId: nodeId.nullable(), afterId: nodeId.nullable() })
+  .refine(({ nodeId: id, afterId }) => id !== afterId, { path: ['afterId'] });
 
 // The content is left to the tree check, which can stand a tree of any depth.
 export const saveDraftSchema = z.strictObject({
@@ -94,8 +96,9 @@ export const rollbackSchema = z.strictObject({
 export const readSchema = z.strictObject({ tenant, nodeId });
 
 const MAX_PAGE = 100;
-// 256 bytes of control characters grow six times in JSON and a third again in base64.
-const MAX_CURSOR_CHARS = 4096;
+// The longest real cursor is 131 characters: two ids and a direction. Anything well past that
+// is not one of ours, and should not cost a read to find out.
+const MAX_CURSOR_CHARS = 256;
 
 export const pageSchema = z.strictObject({
   limit: z.int().min(1).max(MAX_PAGE).default(50),

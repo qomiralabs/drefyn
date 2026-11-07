@@ -29,11 +29,14 @@ const fieldId = z.custom<FieldId>(isUuid);
 const typeId = z.custom<TypeId>(isUuid);
 const positive = z.number().int().min(1);
 const noRepeats = (items: readonly unknown[]): boolean => new Set(items).size === items.length;
+// A definition lands in a jsonb column, which refuses both. Every other free string here has to
+// pass a name or number rule first, so the label is the only one that could reach it.
+const storable = (value: string): boolean => !value.includes('\0') && value.isWellFormed();
 
 const common = {
   id: fieldId,
   apiName: z.string(),
-  label: z.string().min(1),
+  label: z.string().min(1).refine(storable),
   required: z.boolean(),
   unique: z.boolean().exactOptional(),
   filterable: z.boolean().exactOptional(),

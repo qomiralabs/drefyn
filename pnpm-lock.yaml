@@ -401,6 +401,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@drefyn/test-watchdog':
+        specifier: workspace:*
+        version: link:../../scripts/test-watchdog
       '@stryker-mutator/core':
         specifier: 10.1.1
         version: 10.1.1(@types/node@24.19.1)
@@ -574,6 +577,12 @@ importers:
   scripts/lint-rules: {}
 
   scripts/review-gate: {}
+
+  scripts/test-watchdog:
+    devDependencies:
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
 
 packages:
 

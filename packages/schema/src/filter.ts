@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { exceedsBudget } from './bounded.ts';
 import { parseUnits } from './decimal.ts';
 import { isUuid } from './ids.ts';
+import { canonicalInstant } from './instant.ts';
 import {
   MAX_FILTER_DEPTH,
   MAX_FILTER_IN_VALUES,
@@ -101,8 +102,6 @@ function opsFor(field: FieldDef): readonly FilterOp[] {
 }
 
 const encoder = new TextEncoder();
-const dateOnly = z.iso.date();
-const dateTime = z.iso.datetime({ offset: true });
 
 function fitsField(field: FieldDef, value: string | boolean): boolean {
   switch (field.kind) {
@@ -111,16 +110,18 @@ function fitsField(field: FieldDef, value: string | boolean): boolean {
     case 'boolean':
       return typeof value === 'boolean';
     case 'date':
-      return (field.withTime ? dateTime : dateOnly).safeParse(value).success;
+      return canonicalInstant(value, field.withTime) !== null;
     case 'reference':
       return isUuid(value);
     case 'list':
       return fitsField(field.of, value);
     default:
-      // Postgres text cannot hold NUL, so this would surface as a server error.
+      // Postgres text cannot hold NUL and jsonb cannot hold a lone surrogate, so either one
+      // would surface as a server error.
       return (
         typeof value === 'string' &&
         !value.includes('\u0000') &&
+        value.isWellFormed() &&
         encoder.encode(value).length <= MAX_FILTER_TEXT_BYTES
       );
   }

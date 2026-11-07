@@ -24,7 +24,17 @@ export interface CreateNodeInput {
   readonly typeId: string;
   readonly parentId?: NodeId | null;
   readonly slug?: string | null;
+  // Absent lands after the last sibling. A caller that sends one owns any tie it makes.
   readonly orderKey?: string;
+}
+
+export interface MoveNodeInput {
+  readonly tenant: TenantRef;
+  readonly nodeId: NodeId;
+  // Null moves it to the root.
+  readonly parentId: NodeId | null;
+  // The child of parentId it lands after. Null puts it first.
+  readonly afterId: NodeId | null;
 }
 
 export interface SaveDraftInput {

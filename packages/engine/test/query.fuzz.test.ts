@@ -120,6 +120,7 @@ const compiled = (filter: FilterNode, route: Route) => {
 // into it, and then a word here would not cover it.
 const WORDS = new Set(
   `and or not coalesce false true null is distinct from any strpos lower int boolean
+   case when starts_with then else end
    text bigint timestamptz jsonb f n head_fields t1 i1 i2 d1 l2`.split(/\s+/),
 );
 
