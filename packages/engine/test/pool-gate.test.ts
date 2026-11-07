@@ -310,7 +310,7 @@ describe('the process wide ceiling', () => {
   });
 
   it('skips a waiter whose lane is full, so its project does not hold up another', async () => {
-    const pass = createPoolGate({ ...LIMITS, ceiling: 2, treeSlots: 1 });
+    const pass = createPoolGate({ ...LIMITS, ceiling: 3, treeSlots: 1 });
     const [a, b, c] = [held(), held(), held()];
     const first = pass.treeWrite(inOrganization(1, 1), a.work);
     const second = pass.treeWrite(inOrganization(2, 2), b.work);
