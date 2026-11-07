@@ -396,19 +396,21 @@ describe('queryNodes without a server', () => {
   });
 
   it('never throws on whatever comes back as a cursor', async () => {
+    // Any code point, lone surrogates included. The 'binary' unit leaves those out, and on first
+    // use it builds a table of all of Unicode, which took this test past its limit on CI.
+    const unit = fc.integer({ min: 0, max: 0x10ffff }).map((point) => String.fromCodePoint(point));
     const shapes = fc.oneof(
-      fc.string({ unit: 'binary', minLength: 1, maxLength: 64 }),
+      fc.string({ unit, minLength: 1, maxLength: 64 }),
       fc.json().map(encoded),
       fc
         .record({
-          s: fc.option(fc.string({ unit: 'binary' })),
+          s: fc.option(fc.string({ unit })),
           d: fc.string(),
-          v: fc.option(fc.string({ unit: 'binary' })),
+          v: fc.option(fc.string({ unit })),
           n: fc.string(),
         })
         .map(encoded),
     );
-    // One engine for every run: building one per run is what cost the time here, not the cursors.
     const { engine } = deps(answering({ anchor: null }));
     await fc.assert(
       fc.asyncProperty(shapes, async (cursor) => {
