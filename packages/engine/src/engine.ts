@@ -36,6 +36,7 @@ import type { EngineStore, EngineTx } from './store.ts';
 import { busyIssue, PoolBusy } from './pool-gate.ts';
 import { assertRoomUnder, lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
+  Actor,
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
@@ -115,6 +116,21 @@ const tenantFields = (tenant: TenantRef): LogFields => ({
   organization_id: tenant.organizationId,
   project_id: tenant.projectId,
 });
+
+// A move overwrites its row, so unlike a save it leaves no version to say who did it, and this
+// line is the record. Stable ids only: a git author's address is personal data.
+function actorFields(actor: Actor): LogFields {
+  switch (actor.kind) {
+    case 'user':
+      return { actor_kind: actor.kind, actor_id: actor.userId };
+    case 'api_key':
+      return { actor_kind: actor.kind, actor_id: actor.keyId };
+    case 'git':
+      return { actor_kind: actor.kind, actor_id: actor.installationId };
+    case 'system':
+      return { actor_kind: actor.kind, actor_id: actor.job };
+  }
+}
 
 async function assertTypeFits(tx: EngineTx, input: z.output<typeof createNodeSchema>) {
   const { tenant, typeId, family, parentId } = input;
@@ -383,11 +399,16 @@ export function createEngine(deps: EngineDeps): Engine {
     async moveNode(raw) {
       const input = parsedOrRefused(moveNodeSchema, raw);
       if (!input.ok) return input;
-      const { tenant, nodeId, parentId, afterId } = input.value;
+      const { tenant, nodeId, parentId, afterId, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
       return logged(
         'engine.move',
-        { ...tenantFields(tenant), node_id: nodeId, parent_id: parentId ?? 'root' },
+        {
+          ...tenantFields(tenant),
+          node_id: nodeId,
+          parent_id: parentId ?? 'root',
+          ...actorFields(actor),
+        },
         () =>
           settled(() =>
             writingTree(tenant, (tx) => moveWithinTree(tx, tenant, { nodeId, parentId, afterId })),

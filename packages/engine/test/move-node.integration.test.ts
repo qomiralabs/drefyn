@@ -13,6 +13,7 @@ import {
 } from '../src/index.ts';
 import { lockTree } from '../src/tree.ts';
 import {
+  ACTOR,
   admin,
   buildEngine,
   openDatabase,
@@ -48,7 +49,7 @@ const move = (
   nodeId: NodeId,
   parentId: NodeId | null,
   afterId: NodeId | null = null,
-) => engine.moveNode({ tenant: seeded.tenant, nodeId, parentId, afterId });
+) => engine.moveNode({ tenant: seeded.tenant, nodeId, parentId, afterId, actor: ACTOR });
 
 const moved = async (
   seeded: Seeded,
@@ -240,10 +241,10 @@ describeWithStack('moveNode against Postgres', () => {
     it('sorts by bytes whatever the database locale', async () => {
       const home = await seed();
       const parent = await created(home);
-      const keys = ['a0', 'Zz', 'a1', 'b00', 'az', 'aA'];
+      const keys = ['a0', 'Zz', 'a1', 'b00', 'az', 'aA', 'ab', 'aZ'];
       const made = new Map<string, NodeId>();
       for (const key of keys) made.set(key, await created(home, parent, key));
-      const sorted = ['Zz', 'a0', 'a1', 'aA', 'az', 'b00'];
+      const sorted = ['Zz', 'a0', 'a1', 'aA', 'aZ', 'ab', 'az', 'b00'];
       expect(await children(home, parent)).toEqual(sorted.map((key) => made.get(key)));
     });
   });
@@ -479,6 +480,23 @@ describeWithStack('moveNode against Postgres', () => {
       const target = { node, parent, ancestor, anchor }[which];
       await admin(`update app.nodes set deleted_at = now() where id = '${String(target)}';`);
       expect(codeOf(await move(home, node, parent, anchor))).toBe('engine.not_found');
+    });
+
+    it('keeps a node inside a deleted branch where it is, until the branch comes back', async () => {
+      const home = await seed();
+      const branch = await created(home);
+      const middle = await created(home, branch);
+      const node = await created(home, middle);
+      const live = await created(home);
+      await admin(`update app.nodes set deleted_at = now() where id = '${branch}';`);
+
+      const before = await fingerprint(home);
+      expect(codeOf(await move(home, node, null))).toBe('engine.not_found');
+      expect(codeOf(await move(home, node, live))).toBe('engine.not_found');
+      expect(await fingerprint(home)).toBe(before);
+
+      await admin(`update app.nodes set deleted_at = null where id = '${branch}';`);
+      expect(codeOf(await move(home, node, live))).toBe('ok');
     });
 
     it('skips deleted siblings when it finds the gap', async () => {

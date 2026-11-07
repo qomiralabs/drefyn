@@ -1,5 +1,5 @@
-// Keys sort as plain bytes, so digits come before capitals and capitals before lower case. The
-// column is collated to match.
+// Keys sort as plain bytes, so digits come before capitals and capitals before lower case: 'aZ'
+// sorts before 'ab', where a locale puts it after. The column is collated to match.
 const DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 // One spot used about 6,000 times in a row. Past this a key is refused rather than left to the
@@ -96,7 +96,10 @@ function midpoint(low: string, high: string | null): string {
 function below(high: string): string {
   const integer = integerOf(high);
   if (integer === SMALLEST_INTEGER) return integer + midpoint('', high.slice(integer.length));
-  return integer < high ? integer : previousInteger(integer);
+  if (integer < high) return integer;
+  const previous = previousInteger(integer);
+  // The bottom integer is reserved bare, so one step above it can only land on a fraction of it.
+  return previous === SMALLEST_INTEGER ? previous + midpoint('', null) : previous;
 }
 
 function above(low: string): string {

@@ -12,7 +12,9 @@ import {
 } from '../src/index.ts';
 import type { EngineTx } from '../src/store.ts';
 import { lockTree, MAX_TREE_LEVELS, TREE_LOCK_WAIT_MS } from '../src/tree.ts';
+import { lockNode } from '../src/write.ts';
 import {
+  ACTOR,
   admin,
   buildEngine,
   openDatabase,
@@ -48,7 +50,7 @@ const created = async (seeded: Seeded, parentId: NodeId | null = null): Promise<
 };
 
 const move = (seeded: Seeded, nodeId: NodeId, parentId: NodeId | null) =>
-  engine.moveNode({ tenant: seeded.tenant, nodeId, parentId, afterId: null });
+  engine.moveNode({ tenant: seeded.tenant, nodeId, parentId, afterId: null, actor: ACTOR });
 
 // A chain written straight to the table, which is also how a row deeper than the cap can exist:
 // nothing the engine offers can build one now. Top first.
@@ -117,8 +119,12 @@ const pause = (ms: number) =>
   });
 
 // Runs work with the project's tree lock held by another pool, as a slow move on another process
-// would hold it.
-const withLockHeld = async <T>(seeded: Seeded, work: () => Promise<T>): Promise<T> => {
+// would hold it. A hold of its own stands in for any other lock that process could sit on.
+const withLockHeld = async <T>(
+  seeded: Seeded,
+  work: () => Promise<T>,
+  hold: (tx: EngineTx) => Promise<unknown> = (tx) => lockTree(tx, seeded.tenant),
+): Promise<T> => {
   let release: () => void = () => undefined;
   const held = new Promise<void>((done) => {
     release = done;
@@ -130,7 +136,7 @@ const withLockHeld = async <T>(seeded: Seeded, work: () => Promise<T>): Promise<
   const holder = databaseStore(holderDb, DEFAULT_ENGINE_CONFIG).tenant(
     seeded.tenant,
     async (tx) => {
-      await lockTree(tx, seeded.tenant);
+      await hold(tx);
       locked();
       await held;
     },
@@ -269,6 +275,13 @@ describeWithStack('tree bounds against Postgres', () => {
       expect(await fingerprint(home)).toBe(before);
     });
 
+    it('sees a deleted branch only as far as the walk reaches', async () => {
+      const { home, nodes } = await deep();
+      await admin(`update app.nodes set deleted_at = now() where id = '${at(nodes, 0)}';`);
+      expect(codeOf(await move(home, at(nodes, 10), null))).toBe('engine.not_found');
+      expect(codeOf(await move(home, at(nodes, MAX_TREE_LEVELS + 1), null))).toBe('ok');
+    });
+
     it('stops at the cap on a cycle already in the data', async () => {
       const home = await seed();
       const [a, b, loose] = [await created(home), await created(home), await created(home)];
@@ -301,6 +314,54 @@ describeWithStack('tree bounds against Postgres', () => {
       expect(waited).toBeLessThan(5000);
       expect(await fingerprint(home)).toBe(before);
       expect(codeOf(await move(home, a, b))).toBe('ok');
+    });
+
+    it('gives up on a row lock the same way, so a stuck save cannot stall the queue', async () => {
+      const home = await seed();
+      const [a, b] = [await created(home), await created(home)];
+      const before = await fingerprint(home);
+      const started = performance.now();
+
+      const refused = await withLockHeld(
+        home,
+        () => move(home, a, b),
+        (tx) => lockNode(tx, home.tenant, a),
+      );
+      const waited = performance.now() - started;
+
+      expect(refused).toEqual({
+        ok: false,
+        error: { code: 'engine.unavailable', retryable: true, issues: [] },
+      });
+      expect(waited).toBeGreaterThanOrEqual(TREE_LOCK_WAIT_MS);
+      expect(waited).toBeLessThan(5000);
+      expect(await fingerprint(home)).toBe(before);
+      expect(codeOf(await move(home, a, b))).toBe('ok');
+    });
+
+    it('posts an incident with a key at once, and refuses one with none when the wait ends', async () => {
+      const home = await seed({ product: 'status', family: 'status_incident' });
+      const incident = (orderKey?: string) =>
+        engine.createNode({
+          tenant: home.tenant,
+          family: 'status_incident',
+          typeId: home.typeId,
+          ...(orderKey === undefined ? {} : { orderKey }),
+        });
+
+      const answers = await withLockHeld(home, async () => {
+        const started = performance.now();
+        const keyed = await incident('a5');
+        const keyedMs = performance.now() - started;
+        return { keyed, keyedMs, queued: await incident() };
+      });
+
+      expect(codeOf(answers.keyed)).toBe('ok');
+      expect(answers.keyedMs).toBeLessThan(TREE_LOCK_WAIT_MS);
+      expect(answers.queued).toEqual({
+        ok: false,
+        error: { code: 'engine.unavailable', retryable: true, issues: [] },
+      });
     });
 
     it('leaves no lock wait on the connection when it goes back to the pool', async () => {

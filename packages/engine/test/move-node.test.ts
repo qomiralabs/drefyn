@@ -85,7 +85,8 @@ const build = (respond: Responder, on = true) => {
   return { ...scripted, engine, info };
 };
 
-const move = { tenant, nodeId: NODE, parentId: PARENT, afterId: ANCHOR };
+const ACTOR = { kind: 'system', job: 'test' } as const;
+const move = { tenant, nodeId: NODE, parentId: PARENT, afterId: ANCHOR, actor: ACTOR };
 
 describe('moveNode', () => {
   it('takes the lock first and alone, then writes one update with both tenant ids', async () => {
@@ -130,7 +131,8 @@ describe('moveNode', () => {
     ['an id that is no uuid', { ...move, nodeId: 'nope' }, 'nodeId'],
     ['an unknown key', { ...move, orderKey: 'a1' }, ''],
     ['a node after itself', { ...move, afterId: NODE }, 'afterId'],
-    ['a missing parent field', { tenant, nodeId: NODE, afterId: null }, 'parentId'],
+    ['a missing parent field', { tenant, nodeId: NODE, afterId: null, actor: ACTOR }, 'parentId'],
+    ['a missing actor', { tenant, nodeId: NODE, parentId: null, afterId: null }, 'actor'],
   ])('refuses %s before any statement', async (_name, input, path) => {
     const { engine, statements } = build(treeOf());
     const moved = await engine.moveNode(input as typeof move);
@@ -139,12 +141,26 @@ describe('moveNode', () => {
     expect(statements).toEqual([]);
   });
 
-  it('skips the walk for a move to the root', async () => {
+  it('walks up from the node alone for a move to the root', async () => {
     const { engine, statements } = build(treeOf());
     expect(await engine.moveNode({ ...move, parentId: null })).toMatchObject({ ok: true });
-    expect(statements.some((statement) => has(statement, 'with recursive'))).toBe(false);
+    expect(statements.map(walkOf).filter((walk) => walk !== null)).toEqual(['node']);
     const update = statements.find((statement) => has(statement, 'update "nodes"'));
     expect(update?.parameters).toEqual(expect.arrayContaining([null]));
+  });
+
+  it.each([
+    ['a live parent', PARENT],
+    ['the root', null],
+  ])('reads a node inside a deleted branch as not found, moving to %s', async (_name, parentId) => {
+    const { engine, statements } = build(treeOf({ node: climb(3, { gone: true }) }));
+    expect(await engine.moveNode({ ...move, parentId, afterId: null })).toEqual({
+      ok: false,
+      error: { code: 'engine.not_found', retryable: false, issues: [] },
+    });
+    expect(statements.some((statement) => has(statement, 'update "nodes"'))).toBe(false);
+    // Before the plan is read, so it answers the same in a read only project.
+    expect(statements.some((statement) => has(statement, '"organizations"'))).toBe(false);
   });
 
   it('puts a node first with no anchor, and last with nothing after the anchor', async () => {
@@ -263,12 +279,14 @@ describe('moveNode', () => {
       expect(await engine.moveNode(move)).toMatchObject({ ok: true });
     });
 
-    it('checks nothing for a move to the root, the way out of a tree that is too deep', async () => {
-      const { engine, statements } = build(treeOf({ anchor: [], next: [] }));
+    it('checks no depth for a move to the root, the way out of a tree that is too deep', async () => {
+      const { engine, statements } = build(
+        treeOf({ anchor: [], next: [], node: climb(MAX_TREE_LEVELS + 1) }),
+      );
       expect(await engine.moveNode({ ...move, parentId: null, afterId: null })).toMatchObject({
         ok: true,
       });
-      expect(statements.some((statement) => walkOf(statement) !== null)).toBe(false);
+      expect(statements.map(walkOf).filter((walk) => walk !== null)).toEqual(['node']);
     });
   });
 
@@ -350,6 +368,45 @@ describe('moveNode', () => {
       }),
     );
     expect(JSON.stringify(info.mock.calls)).not.toContain('"a1"');
+  });
+
+  it.each([
+    [
+      'a person',
+      { kind: 'user', userId: idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8008'), roles: ['a'] },
+      'user',
+      idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8008'),
+    ],
+    ['an API key', { kind: 'api_key', keyId: 'key_1', scopes: ['b'] }, 'api_key', 'key_1'],
+    [
+      'a git sync',
+      {
+        kind: 'git',
+        installationId: 'install_1',
+        commitSha: 'a'.repeat(40),
+        authorEmail: 'author@example.com',
+      },
+      'git',
+      'install_1',
+    ],
+    ['a job', { kind: 'system', job: 'import' }, 'system', 'import'],
+  ] as const)('records who moved it: %s', async (_name, actor, kind, id) => {
+    const { engine, info } = build(treeOf());
+    expect(await engine.moveNode({ ...move, actor })).toMatchObject({ ok: true });
+    expect(info).toHaveBeenCalledWith(
+      'engine.move',
+      expect.objectContaining({ actor_kind: kind, actor_id: id }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain('author@example.com');
+  });
+
+  it('records who tried, when a move is refused', async () => {
+    const { engine, info } = build(treeOf({ parent: climb(0) }));
+    await engine.moveNode(move);
+    expect(info).toHaveBeenCalledWith(
+      'engine.move.refused',
+      expect.objectContaining({ actor_kind: 'system', actor_id: 'test' }),
+    );
   });
 
   it('logs the refusal with its code', async () => {

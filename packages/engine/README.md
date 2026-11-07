@@ -59,6 +59,9 @@ subtree. Keys come from the server. Moves in a project queue on one advisory loc
 that would close a cycle cannot both pass: the second sees the first and gets
 `engine.validation_failed` with `engine.cycle` on `parentId`. A parent or sibling that is another
 tenant's, deleted, or not a child of that parent is `engine.not_found`, with nothing naming which.
+So is a node inside a deleted branch: it stays where it is until the branch comes back. A move
+leaves no version, so `actor` is required and its kind and stable id go on the `engine.move` line,
+refused or not. A git author's address never does.
 `createNode` lands after the last sibling unless the caller sends `orderKey`. A key the caller sent
 can tie with a sibling, and nothing fits between a tie, so a move there gets
 `engine.order_key_no_room`. One gap takes about 6,000 inserts in a row before `engine.too_large`.
@@ -71,7 +74,9 @@ than 50,000 rows of its subtree is `engine.too_large` on `nodeId`.
 
 Writers that pick a place in a tree wait at most 1 s for the project's lock, then answer
 `engine.unavailable` with nothing written. Each process lets 2 such writes per project reach the
-pool. A root created with its own `orderKey` skips that lane, not the ceiling below.
+pool. A root created with its own `orderKey` skips that lane, not the ceiling below, which is how
+a status route posts an incident behind a stuck queue. With no key it gets that same 1 s answer.
+`bench/incident.ts` measures the difference.
 
 ## Protecting the pool
 

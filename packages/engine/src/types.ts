@@ -35,6 +35,7 @@ export interface MoveNodeInput {
   readonly parentId: NodeId | null;
   // The child of parentId it lands after. Null puts it first.
   readonly afterId: NodeId | null;
+  readonly actor: Actor;
 }
 
 export interface SaveDraftInput {

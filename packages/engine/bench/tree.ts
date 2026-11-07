@@ -154,6 +154,7 @@ try {
       nodeId,
       parentId: null,
       afterId: ids[(turn + 25) % ids.length] ?? null,
+      actor: { kind: 'system', job: 'bench' },
     });
     if (!moved.ok) throw new Error(`moveNode refused: ${moved.error.code}`);
   });

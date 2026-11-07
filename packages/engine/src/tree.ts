@@ -141,12 +141,13 @@ export async function assertRoomUnder(
 
 // A cycle can only close with the node on the way up from its new parent. A move that goes no
 // deeper cannot break the cap, and is how a tree already past it gets back under, so only a move
-// down reads the subtree.
+// down reads the subtree. The node's own walk comes in from the caller, sought with this parent.
 async function assertParentFits(
   tx: EngineTx,
   tenant: TenantRef,
   nodeId: NodeId,
   parentId: NodeId,
+  node: Climb,
 ): Promise<void> {
   const parent = await climb(tx, tenant, parentId, nodeId);
   // A parent inside a deleted branch cannot be seen, so it does not exist for this caller.
@@ -154,7 +155,6 @@ async function assertParentFits(
   if (parent.holds) {
     throw new Refusal('engine.validation_failed', [{ path: 'parentId', code: 'engine.cycle' }]);
   }
-  const node = await climb(tx, tenant, nodeId, parentId);
   if (node.holds || parent.levels < node.levels) return;
   const room = MAX_TREE_LEVELS - parent.levels;
   if (room <= 0) throw tooDeep();
@@ -197,8 +197,15 @@ async function keyForMove(
 export async function moveWithinTree(tx: EngineTx, tenant: TenantRef, move: Move): Promise<void> {
   await lockTree(tx, tenant);
   const node = await lockNode(tx, tenant, move.nodeId);
+  const place = await climb(tx, tenant, move.nodeId, move.parentId);
+  // Deleted with its branch, so it does not exist for this caller either. Letting it out would
+  // leave a restore with a hole in the tree. The walk is capped, so a row more than 64 levels
+  // under the deleted one still moves; only rows from before the cap can sit that deep.
+  if (place.gone) throw new Refusal('engine.not_found');
   await assertWritable(tx, tenant, node.family);
-  if (move.parentId !== null) await assertParentFits(tx, tenant, move.nodeId, move.parentId);
+  if (move.parentId !== null) {
+    await assertParentFits(tx, tenant, move.nodeId, move.parentId, place);
+  }
   const orderKey = await keyForMove(tx, tenant, move);
   await tx
     .updateTable('nodes')

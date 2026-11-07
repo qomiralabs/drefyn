@@ -160,6 +160,7 @@ describeWithStack('the process wide ceiling against Postgres', () => {
             nodeId: nodeOf(nodes, seeded),
             parentId: null,
             afterId: null,
+            actor: { kind: 'system', job: 'test' },
           });
         });
         const seen: string[] = [];
