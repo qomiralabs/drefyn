@@ -3,7 +3,13 @@ import { closeDatabase, type Database } from '@drefyn/db';
 import { idOf } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { databaseStore, type Engine, type EngineResult, type NodeId } from '../src/index.ts';
+import {
+  databaseStore,
+  DEFAULT_ENGINE_CONFIG,
+  type Engine,
+  type EngineResult,
+  type NodeId,
+} from '../src/index.ts';
 import type { EngineTx } from '../src/store.ts';
 import { lockTree, MAX_TREE_LEVELS, TREE_LOCK_WAIT_MS } from '../src/tree.ts';
 import {
@@ -121,11 +127,14 @@ const withLockHeld = async <T>(seeded: Seeded, work: () => Promise<T>): Promise<
   const taken = new Promise<void>((done) => {
     locked = done;
   });
-  const holder = databaseStore(holderDb).tenant(seeded.tenant, async (tx) => {
-    await lockTree(tx, seeded.tenant);
-    locked();
-    await held;
-  });
+  const holder = databaseStore(holderDb, DEFAULT_ENGINE_CONFIG).tenant(
+    seeded.tenant,
+    async (tx) => {
+      await lockTree(tx, seeded.tenant);
+      locked();
+      await held;
+    },
+  );
   await taken;
   try {
     return await work();
@@ -297,14 +306,17 @@ describeWithStack('tree bounds against Postgres', () => {
     it('leaves no lock wait on the connection when it goes back to the pool', async () => {
       const home = await seed();
       await created(home);
-      const left = await databaseStore(db).tenant(home.tenant, async (tx) => {
-        await lockTree(tx, home.tenant);
-        return 'done';
-      });
+      const left = await databaseStore(db, DEFAULT_ENGINE_CONFIG).tenant(
+        home.tenant,
+        async (tx) => {
+          await lockTree(tx, home.tenant);
+          return 'done';
+        },
+      );
       expect(left).toBe('done');
       const after = await Promise.all(
         Array.from({ length: 10 }, () =>
-          databaseStore(db).tenant(home.tenant, async (tx) => {
+          databaseStore(db, DEFAULT_ENGINE_CONFIG).tenant(home.tenant, async (tx) => {
             const { rows } = await sqlShow(tx);
             return rows[0]?.lock_timeout;
           }),

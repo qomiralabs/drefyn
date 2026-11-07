@@ -13,6 +13,7 @@ export {
   createAuthDatabase,
   createDatabase,
   createPublishedDatabase,
+  poolSizeOf,
   withApiKeyLimiter,
   withAuth,
   withOrganization,
@@ -25,6 +26,7 @@ export {
   type DbLogger,
   type LogFields,
   type PublishedDatabase,
+  type TenantTransactionOptions,
   type TransactionOptions,
 } from './database.ts';
 export { toSafeInteger, type SafeIntegerOptions } from './integers.ts';

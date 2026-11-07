@@ -4,7 +4,13 @@ import { idOf } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { databaseStore, type Engine, type EngineResult, type NodeId } from '../src/index.ts';
+import {
+  databaseStore,
+  DEFAULT_ENGINE_CONFIG,
+  type Engine,
+  type EngineResult,
+  type NodeId,
+} from '../src/index.ts';
 import { lockTree } from '../src/tree.ts';
 import {
   admin,
@@ -111,7 +117,7 @@ const fingerprint = (seeded: Seeded) =>
   );
 
 const explained = (seeded: Seeded, statement: string): Promise<string> =>
-  databaseStore(db).tenant(seeded.tenant, async (tx) => {
+  databaseStore(db, DEFAULT_ENGINE_CONFIG).tenant(seeded.tenant, async (tx) => {
     const plan = await sql.raw<{ 'QUERY PLAN': string }>(`explain ${statement}`).execute(tx);
     return plan.rows.map((line) => line['QUERY PLAN']).join('\n');
   });
@@ -374,7 +380,7 @@ describeWithStack('moveNode against Postgres', () => {
       const taken = new Promise<void>((done) => {
         locked = done;
       });
-      const holder = databaseStore(db).tenant(home.tenant, async (tx) => {
+      const holder = databaseStore(db, DEFAULT_ENGINE_CONFIG).tenant(home.tenant, async (tx) => {
         await lockTree(tx, home.tenant);
         locked();
         await held;

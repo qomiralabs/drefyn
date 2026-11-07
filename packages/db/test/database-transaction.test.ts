@@ -2,9 +2,10 @@ import { EventEmitter } from 'node:events';
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import type pg from 'pg';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   databaseOverPool,
+  poolSizeOf,
   withOrganization,
   withTenant,
   type Database,
@@ -208,5 +209,115 @@ describe('the end of every transaction', () => {
     });
     expect(await rejected(withTenant(db, TENANT, () => Promise.resolve(1)))).toBe(failure);
     expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+});
+
+// A socket that stopped answering: the query never comes back until the client closes it, which
+// is what a real client does to its active query.
+class HungClient extends ScriptedClient {
+  ended = 0;
+  private abandon: (error: Error) => void = () => undefined;
+
+  override query(text: string): Promise<unknown> {
+    if (!text.includes('hang_forever')) return super.query(text);
+    this.sent.push(text);
+    return new Promise((_done, fail) => {
+      this.abandon = fail;
+    });
+  }
+
+  end(): Promise<void> {
+    this.ended += 1;
+    this.abandon(new Error('Connection terminated'));
+    return Promise.resolve();
+  }
+}
+
+function hung(logger?: DbLogger) {
+  const client = new HungClient(() => undefined);
+  const pool = { connect: () => Promise.resolve(client) };
+  const db = databaseOverPool(pool as unknown as pg.Pool, 'app', {
+    statementTimeoutMs: 5000,
+    ...(logger === undefined ? {} : { logger }),
+  }) as Database;
+  return { db, client };
+}
+
+describe('a deadline on a transaction', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hanging = (db: Database, deadlineMs: number) =>
+    withTenant(db, TENANT, (tx) => sql`select hang_forever`.execute(tx), { deadlineMs });
+
+  it('closes a socket that stopped answering, and the connection never goes back', async () => {
+    vi.useFakeTimers();
+    const warn = vi.fn<DbLogger['warn']>();
+    const { db, client } = hung({ warn });
+    const failure = rejected(hanging(db, 1000));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(client.ended).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(client.ended).toBeGreaterThan(0);
+    expect(client.released).toBe(true);
+    expect(client.sent.join()).not.toContain('discard all');
+    expect(warn).toHaveBeenCalledWith('db_transaction_deadline', {
+      pool: 'app',
+      organization_id: ORG,
+      project_id: PRJ,
+      deadline_ms: 1000,
+    });
+  });
+
+  it('leaves a transaction that ends in time alone', async () => {
+    vi.useFakeTimers();
+    const { db, client } = hung();
+    await withTenant(db, TENANT, () => Promise.resolve(1), { deadlineMs: 1000 });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(client.ended).toBe(0);
+    expect(client.released).toBeUndefined();
+  });
+
+  it('sets no timer unless asked, so nothing else changes', async () => {
+    vi.useFakeTimers();
+    const { db } = hung();
+    await withTenant(db, TENANT, () => Promise.resolve(1));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('survives a logger that throws', async () => {
+    vi.useFakeTimers();
+    const { db, client } = hung({
+      warn: () => {
+        throw new Error('logger down');
+      },
+    });
+    const failure = rejected(hanging(db, 10));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(client.released).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, 300_001, Number.NaN])('refuses %s before any SQL', async (deadlineMs) => {
+    const { db, clients } = scripted();
+    const error = await rejected(hanging(db, deadlineMs));
+    expect((error as DbError).code).toBe('DB_CONFIG_INVALID');
+    expect(clients).toHaveLength(0);
+  });
+});
+
+describe('poolSizeOf', () => {
+  it('reads the size the pool was built with', () => {
+    const pool = { options: { max: 7 } };
+    const db = databaseOverPool(pool as unknown as pg.Pool, 'app', {
+      statementTimeoutMs: 5000,
+    }) as Database;
+    expect(poolSizeOf(db)).toBe(7);
+  });
+
+  it('refuses anything else', () => {
+    expect(() => poolSizeOf({} as Database)).toThrow(/poolSizeOf/);
   });
 });

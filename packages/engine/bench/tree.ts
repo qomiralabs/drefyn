@@ -8,7 +8,7 @@ import { closeDatabase, createDatabase, parseDatabaseConfig, withTenant } from '
 import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { createEngine, databaseStore, type NodeId } from '../src/index.ts';
+import { createEngine, databaseStore, DEFAULT_ENGINE_CONFIG, type NodeId } from '../src/index.ts';
 import setup from '../test/support/global-setup.ts';
 import { superuser, urlFor } from '../test/support/stack.ts';
 import { percentile, rounded } from './support.ts';
@@ -75,7 +75,7 @@ const db = await createDatabase(
   parseDatabaseConfig({ DREFYN_DATABASE_URL: urlFor('app', name), DREFYN_DATABASE_SSL: 'disable' }),
 );
 const engine = createEngine({
-  store: databaseStore(db),
+  store: databaseStore(db, DEFAULT_ENGINE_CONFIG),
   parse: { print: () => Promise.reject(new Error('a move prints nothing')) },
   parsePolicy: {
     version: 1,

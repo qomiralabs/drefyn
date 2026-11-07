@@ -31,6 +31,7 @@ import {
   assertWritableSettings,
   organizationSettings,
   projectSettings,
+  transactionDeadline,
   transactionTimeout,
   userSettings,
   type TenantSettings,
@@ -56,6 +57,12 @@ export interface AuthDatabase {
 
 export interface TransactionOptions {
   readonly timeoutMs?: number;
+}
+
+// Apart from TransactionOptions so nothing else can be handed a limit it would quietly ignore.
+export interface TenantTransactionOptions extends TransactionOptions {
+  // Past this the connection is closed from this side, whatever it was doing.
+  readonly deadlineMs?: number;
 }
 
 export type LogFields = Readonly<Record<string, string | number | boolean>>;
@@ -276,6 +283,14 @@ export async function createAuthDatabase(
   return (await open(config, 'auth', deps)) as AuthDatabase;
 }
 
+// The most connections this database can hold open, as DREFYN_DATABASE_POOL_MAX set it. For
+// whatever has to stay below the pool, so it compares with the real pool and not a second read
+// of the key.
+export function poolSizeOf(db: Database): number {
+  const { max } = stateOf('app', db, 'poolSizeOf').pool.options;
+  return max;
+}
+
 export async function closeDatabase(
   db: Database | PublishedDatabase | AuthDatabase,
 ): Promise<void> {
@@ -413,6 +428,19 @@ function transactionInvalid(state: PoolState, settings: TenantSettings, scope: s
   );
 }
 
+function noteDeadline(state: PoolState, settings: TenantSettings, deadlineMs: number): void {
+  try {
+    state.logger?.warn('db_transaction_deadline', {
+      pool: state.kind,
+      organization_id: settings.organizationId,
+      project_id: settings.projectId,
+      deadline_ms: deadlineMs,
+    });
+  } catch {
+    // Logging is best effort.
+  }
+}
+
 // What a transaction without an organization is for, named in the log when it goes wrong.
 type Scope = 'tenant' | 'user' | 'auth' | 'api_key_limiter';
 
@@ -422,6 +450,7 @@ async function runTransaction<DB, T>(
   timeoutMs: number,
   work: (tx: Transaction<DB>) => Promise<T>,
   scope: Scope = 'tenant',
+  deadlineMs?: number,
 ): Promise<T> {
   let client: pg.PoolClient;
   try {
@@ -432,7 +461,7 @@ async function runTransaction<DB, T>(
   const connection = new TransactionConnection(client);
   // pg-pool drops its own error listener while a client is checked out, so a connection
   // lost between two statements of the work would otherwise crash the process.
-  const events = { lost: false, ended: false };
+  const events = { lost: false, ended: false, expired: false };
   const onError = () => {
     events.lost = true;
   };
@@ -441,6 +470,17 @@ async function runTransaction<DB, T>(
   };
   client.on('error', onError);
   client.on('notice', onNotice);
+  // statement_timeout runs on the server, so it cannot fire through a socket that stopped
+  // answering, and TCP can take hours to notice. Ending the client fails the query in flight.
+  const deadline =
+    deadlineMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          events.expired = true;
+          events.lost = true;
+          noteDeadline(state, settings, deadlineMs);
+          client.end().catch(() => undefined);
+        }, deadlineMs);
   // A client whose state is unknown is destroyed instead of going back to the pool.
   let doubtful = true;
   const rollback = async () => {
@@ -497,6 +537,10 @@ async function runTransaction<DB, T>(
     doubtful = false;
     return result;
   } catch (error) {
+    if (events.expired) {
+      // Not DB_TIMEOUT, which says the server rolled back. A commit may have landed here.
+      throw new DbError('DB_UNAVAILABLE', 'the transaction ran past its deadline');
+    }
     throw toDbError(error, URL_KEYS[state.kind]);
   } finally {
     connection.close();
@@ -510,6 +554,7 @@ async function runTransaction<DB, T>(
         },
       );
     }
+    clearTimeout(deadline);
     client.removeListener('error', onError);
     client.removeListener('notice', onNotice);
     client.release(doubtful || events.lost ? true : undefined);
@@ -549,7 +594,7 @@ export async function withTenant<T>(
   db: Database,
   tenant: TenantRef & { readonly userId?: never },
   work: (tx: Transaction<TenantSchema>) => Promise<T>,
-  options?: TransactionOptions,
+  options?: TenantTransactionOptions,
 ): Promise<T> {
   const state = stateOf('app', db, 'withTenant');
   const settings = projectSettings(tenant);
@@ -558,7 +603,8 @@ export async function withTenant<T>(
     state.statementTimeoutMs,
     APP_TIMEOUT_MAX_MS,
   );
-  return runTransaction(state, settings, timeoutMs, work);
+  const deadlineMs = transactionDeadline(options?.deadlineMs);
+  return runTransaction(state, settings, timeoutMs, work, 'tenant', deadlineMs);
 }
 
 // Organization work (members, plans, the credit ledger): no project is set, and project

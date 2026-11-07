@@ -14,6 +14,7 @@ import { z } from 'zod';
 import {
   createEngine,
   databaseStore,
+  DEFAULT_ENGINE_CONFIG,
   type EngineTracer,
   type NodeId,
   type VersionId,
@@ -159,7 +160,7 @@ const parsePolicy = {
   linkProtocols: ['https', 'http', 'mailto'],
 } as const;
 
-const store = databaseStore(db);
+const store = databaseStore(db, DEFAULT_ENGINE_CONFIG);
 
 // One sample's time in each stage, read off the spans the engine opens in production.
 let stages = new Map<string, number>();

@@ -214,6 +214,7 @@ describe('queryNodes without a server', () => {
     const inner = scriptedStore(answering({}));
     const { engine } = deps(answering({}), {
       store: {
+        ...inner.store,
         tenant: (ref, work, options) => {
           seen.push(options);
           return inner.store.tenant(ref, work);
@@ -222,7 +223,7 @@ describe('queryNodes without a server', () => {
       config: { ...DEFAULT_ENGINE_CONFIG, queryTimeoutMs: 1234 },
     });
     await engine.queryNodes(tenant, { typeId: TYPE });
-    expect(seen).toEqual([{ timeoutMs: 1234 }]);
+    expect(seen).toEqual([{ timeoutMs: 1234, deadlineMs: DEFAULT_ENGINE_CONFIG.slotHoldMs }]);
   });
 
   it('turns a statement timeout into one retryable error and no page', async () => {
@@ -733,6 +734,7 @@ describe('queryNodes under load', () => {
     const entered: string[] = [];
     const watchers = new Map<number, () => void>();
     const store: EngineDeps['store'] = {
+      ...inner.store,
       tenant: (ref, work) =>
         inner.store.tenant(ref, async (tx) => {
           entered.push(ref.organizationId);
@@ -854,6 +856,8 @@ describe('queryNodes under load', () => {
       organization_id: tenant.organizationId,
       project_id: tenant.projectId,
       max_in_flight: CAP,
+      running: CAP,
+      waiting: 0,
     });
   });
 });
