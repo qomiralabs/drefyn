@@ -5,8 +5,7 @@ import type { EngineIssue } from './errors.ts';
 import { isOrderKey } from './order-key.ts';
 import { NODE_FAMILIES, ORIGINS } from './vocabulary.ts';
 import type { Actor } from './types.ts';
-
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+import { CANONICAL_UUID, INSTALLATION_ID, JOB_NAME, MAX_JOB_NAME_CHARS } from './actor.ts';
 
 const idSchema = <K extends IdKind>(kind: K) =>
   z
@@ -30,24 +29,43 @@ const stored = (max: number) =>
     .max(max)
     .refine((value) => !value.includes('\0') && value.isWellFormed());
 
+const user = z.strictObject({
+  kind: z.literal('user'),
+  userId: idSchema('usr'),
+  roles: z.array(stored(64)).max(32),
+});
+const scopes = z.array(stored(64)).max(64);
+const commitSha = z.string().regex(/^[0-9a-f]{40,64}$/);
+const authorEmail = stored(320);
+
+// What a version stores. Kept as wide as it was, since a saved actor is replayed and compared.
 const actor = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('user'),
-    userId: idSchema('usr'),
-    roles: z.array(stored(64)).max(32),
-  }),
-  z.strictObject({
-    kind: z.literal('api_key'),
-    keyId: stored(64),
-    scopes: z.array(stored(64)).max(64),
-  }),
+  user,
+  z.strictObject({ kind: z.literal('api_key'), keyId: stored(64), scopes }),
   z.strictObject({
     kind: z.literal('git'),
     installationId: stored(64),
-    commitSha: z.string().regex(/^[0-9a-f]{40,64}$/),
-    authorEmail: stored(320),
+    commitSha,
+    authorEmail,
   }),
   z.strictObject({ kind: z.literal('system'), job: stored(100) }),
+]) satisfies z.ZodType<Actor>;
+
+// A move leaves no version, only a log line and a span naming the actor, so it takes opaque
+// ids and nothing a person could have typed.
+const movingActor = z.discriminatedUnion('kind', [
+  user,
+  z.strictObject({ kind: z.literal('api_key'), keyId: z.string().regex(CANONICAL_UUID), scopes }),
+  z.strictObject({
+    kind: z.literal('git'),
+    installationId: z.string().regex(INSTALLATION_ID),
+    commitSha,
+    authorEmail,
+  }),
+  z.strictObject({
+    kind: z.literal('system'),
+    job: z.string().max(MAX_JOB_NAME_CHARS).regex(JOB_NAME),
+  }),
 ]) satisfies z.ZodType<Actor>;
 
 const idempotencyKey = z.string().regex(/^[\x21-\x7e]{1,200}$/);
@@ -68,7 +86,13 @@ export const createNodeSchema = z.strictObject({
 });
 
 export const moveNodeSchema = z
-  .strictObject({ tenant, nodeId, parentId: nodeId.nullable(), afterId: nodeId.nullable(), actor })
+  .strictObject({
+    tenant,
+    nodeId,
+    parentId: nodeId.nullable(),
+    afterId: nodeId.nullable(),
+    actor: movingActor,
+  })
   .refine(({ nodeId: id, afterId }) => id !== afterId, { path: ['afterId'] });
 
 // The content is left to the tree check, which can stand a tree of any depth.
