@@ -301,12 +301,16 @@ export async function closeDatabase(
   await state.closing;
 }
 
+// Errors and notices both carry the SQLSTATE in code; pg's notices are not Errors.
+const sqlState = (value: unknown): unknown => Reflect.get(Object(value), 'code');
+
 // The one connection a transaction runs on. Closing it makes every later query through the
 // same Transaction object fail, so a tx kept past its work cannot reach the next tenant's
 // transaction on the same pooled connection.
 class TransactionConnection implements DatabaseConnection {
   #client: pg.PoolClient | undefined;
   #failure: unknown;
+  #unanswered: Error | undefined;
 
   constructor(client: pg.PoolClient) {
     this.#client = client;
@@ -314,6 +318,12 @@ class TransactionConnection implements DatabaseConnection {
 
   get failure(): unknown {
     return this.#failure;
+  }
+
+  // The first failure that came from this side rather than from the server, such as the pool's
+  // query_timeout. The statement may still be running, and may yet succeed.
+  get unanswered(): Error | undefined {
+    return this.#unanswered;
   }
 
   close(): void {
@@ -325,6 +335,8 @@ class TransactionConnection implements DatabaseConnection {
     if (client === undefined) {
       throw new Error('this transaction has ended; use the transaction only inside its work');
     }
+    // Queued behind the unanswered one, each statement would get a full limit of its own.
+    if (this.#unanswered !== undefined) throw this.#unanswered;
     try {
       const result = await client.query<R & pg.QueryResultRow>(compiled.sql, [
         ...compiled.parameters,
@@ -336,6 +348,7 @@ class TransactionConnection implements DatabaseConnection {
         : { rows: result.rows, numAffectedRows: BigInt(affected) };
     } catch (error) {
       this.#failure ??= error;
+      if (error instanceof Error && sqlState(error) === undefined) this.#unanswered ??= error;
       throw error;
     }
   }
@@ -391,9 +404,6 @@ const CONTEXT_CHANGED = 'DRF01';
 const IN_FAILED_TRANSACTION = '25P02';
 // "there is no transaction in progress", on COMMIT or ROLLBACK: the work ended it itself.
 const NO_TRANSACTION = '25P01';
-
-// Errors and notices both carry the SQLSTATE in code; pg's notices are not Errors.
-const sqlState = (value: unknown): unknown => Reflect.get(Object(value), 'code');
 
 // Runs in the same string as COMMIT, so it costs no round trip. The ids are validated
 // canonical UUIDs or empty, so they can be part of the text. If the work switched the
@@ -471,7 +481,10 @@ async function runTransaction<DB, T>(
   client.on('error', onError);
   client.on('notice', onNotice);
   // statement_timeout runs on the server, so it cannot fire through a socket that stopped
-  // answering, and TCP can take hours to notice. Ending the client fails the query in flight.
+  // answering, and TCP can take hours to notice. Destroying the socket fails the query in flight.
+  // client.end() would not do: with nothing in flight it waits for the peer to close, a dead peer
+  // never does, and the pool wakes a waiter only once that happens. The slot goes back here and
+  // not after the work, which may be waiting on something that never comes.
   const deadline =
     deadlineMs === undefined
       ? undefined
@@ -479,7 +492,8 @@ async function runTransaction<DB, T>(
           events.expired = true;
           events.lost = true;
           noteDeadline(state, settings, deadlineMs);
-          client.end().catch(() => undefined);
+          client.connection.stream.destroy();
+          client.release(true);
         }, deadlineMs);
   // A client whose state is unknown is destroyed instead of going back to the pool.
   let doubtful = true;
@@ -510,6 +524,9 @@ async function runTransaction<DB, T>(
     let result: T;
     try {
       result = await work(transactionOn<DB>(connection));
+      // Postgres aborts on an error it raised, so the commit refuses itself. It never heard of this
+      // one: the statement can answer late, and the commit would land for work that saw a failure.
+      if (connection.unanswered !== undefined) throw connection.unanswered;
     } catch (error) {
       connection.close();
       await rollback();
@@ -557,7 +574,7 @@ async function runTransaction<DB, T>(
     clearTimeout(deadline);
     client.removeListener('error', onError);
     client.removeListener('notice', onNotice);
-    client.release(doubtful || events.lost ? true : undefined);
+    if (!events.expired) client.release(doubtful || events.lost ? true : undefined);
   }
 }
 

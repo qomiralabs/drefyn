@@ -23,11 +23,16 @@ without one of those.
   `drefyn.project_id` set for that transaction only. The default timeout is
   `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms. `timeoutMs` is per
   statement and enforced by the server. `deadlineMs`, up to 300000 ms and off by default, is for the
-  whole transaction and enforced here: past it the client is closed, even on a socket that stopped
-  answering, and the call fails with `DB_UNAVAILABLE`, logging `db_transaction_deadline`. A commit
-  in flight may have landed. Only `withTenant` takes it. The pool's `query_timeout` is the bound on
-  everything else: `withOrganization`, `withUser`, `withAuth`, the statements run alone and the
-  reader.
+  whole transaction and enforced here: past it the socket is destroyed, even one that stopped
+  answering, the pool slot is free at once whether or not the work has returned, and the call fails
+  with `DB_UNAVAILABLE`, logging `db_transaction_deadline`. A commit in flight may have landed, and
+  a deadline that fires during the `discard all` after a commit still returns the result. Only
+  `withTenant` takes it. The pool's `query_timeout` is the bound on everything else:
+  `withOrganization`, `withUser`, `withAuth`, the statements run alone and the reader.
+- Work that catches a statement error and returns does not commit. After a server error Postgres
+  refuses the commit itself. After a failure on this side, such as `query_timeout`, the transaction
+  would still be open, so on every entry point that takes a work the later statements are refused,
+  the transaction is rolled back and the call fails with that first failure.
 - `poolSizeOf(db)` reads the pool size, for limits that must stay below it.
   `DREFYN_DATABASE_POOL_MAX` sizes the reader pool as well, so raising it raises both.
 - `withOrganization(db, org, work, { timeoutMs })` takes an `OrganizationRef` with no
@@ -271,9 +276,13 @@ with `is_local` false) in any tracked file.
   `DREFYN_DATABASE_SSL`.
   Each pool also gives up on an unanswered statement in the driver, 5 s past the longest timeout
   it allows: 65 s on the app pool, 15 s on the reader and auth pools. That covers a peer that
-  vanished, which no `statement_timeout` can reach. The connection is thrown away within two of
-  those limits, the statement and its rollback, and the caller gets `DB_UNAVAILABLE`. A limit that
-  fires on a `commit` leaves the outcome unknown, as any dropped connection does.
+  vanished, which no `statement_timeout` can reach. A peer that goes silent and stays silent costs
+  two of those limits, the statement and its rollback, 130 s on the app pool and 30 s on the reader
+  and auth pools. A peer that answers late and then dies costs three, as the `discard all` after an
+  answered rollback gets its own: 195 s on the app pool, 45 s on the reader and auth pools. Either
+  way the connection is thrown away and the caller gets `DB_UNAVAILABLE`, and the slot frees within
+  one limit of the last answer. A limit that fires on a `commit` leaves the outcome unknown, as any
+  dropped connection does.
 - `parseMigrationConfig(env)`: reads `DREFYN_MIGRATION_DATABASE_URL` and `DREFYN_DATABASE_SSL`.
   It never falls back to the application URL.
 - `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same

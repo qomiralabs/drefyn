@@ -212,10 +212,44 @@ describe('the end of every transaction', () => {
   });
 });
 
-// A socket that stopped answering: the query never comes back until the client closes it, which
+describe('a work that catches a statement error', () => {
+  it('still commits after a server error, as Postgres decides what the commit does', async () => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select fails')) throw serverError('23505', 'duplicate key');
+      return undefined;
+    });
+    await expect(
+      withTenant(db, TENANT, (tx) =>
+        sql`select fails`.execute(tx).catch(() => 'handled after a savepoint'),
+      ),
+    ).resolves.toBe('handled after a savepoint');
+    expect(clients[0]?.sent.at(-2)).toContain('commit');
+  });
+
+  it('does not commit after a client timeout, which Postgres never heard of', async () => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select slow')) throw new Error('Query read timeout');
+      return undefined;
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select slow`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+});
+
+// A socket that stopped answering: the query never comes back until the socket is destroyed, which
 // is what a real client does to its active query.
 class HungClient extends ScriptedClient {
   ended = 0;
+  readonly connection = {
+    stream: {
+      destroy: () => {
+        this.destroyed();
+      },
+    },
+  };
   private abandon: (error: Error) => void = () => undefined;
 
   override query(text: string): Promise<unknown> {
@@ -226,10 +260,9 @@ class HungClient extends ScriptedClient {
     });
   }
 
-  end(): Promise<void> {
+  private destroyed(): void {
     this.ended += 1;
     this.abandon(new Error('Connection terminated'));
-    return Promise.resolve();
   }
 }
 
