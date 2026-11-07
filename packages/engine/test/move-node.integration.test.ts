@@ -241,10 +241,10 @@ describeWithStack('moveNode against Postgres', () => {
     it('sorts by bytes whatever the database locale', async () => {
       const home = await seed();
       const parent = await created(home);
-      const keys = ['a0', 'Zz', 'a1', 'b00', 'az', 'aA'];
+      const keys = ['a0', 'Zz', 'a1', 'b00', 'az', 'aA', 'ab', 'aZ'];
       const made = new Map<string, NodeId>();
       for (const key of keys) made.set(key, await created(home, parent, key));
-      const sorted = ['Zz', 'a0', 'a1', 'aA', 'az', 'b00'];
+      const sorted = ['Zz', 'a0', 'a1', 'aA', 'aZ', 'ab', 'az', 'b00'];
       expect(await children(home, parent)).toEqual(sorted.map((key) => made.get(key)));
     });
   });

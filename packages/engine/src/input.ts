@@ -68,7 +68,7 @@ export const createNodeSchema = z.strictObject({
 });
 
 export const moveNodeSchema = z
-  .strictObject({ tenant, nodeId, parentId: nodeId.nullable(), afterId: nodeId.nullable() })
+  .strictObject({ tenant, nodeId, parentId: nodeId.nullable(), afterId: nodeId.nullable(), actor })
   .refine(({ nodeId: id, afterId }) => id !== afterId, { path: ['afterId'] });
 
 // The content is left to the tree check, which can stand a tree of any depth.
