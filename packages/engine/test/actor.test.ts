@@ -1,7 +1,7 @@
 import { idOf, organizationId, projectId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { actorFields, isOpaqueActorId } from '../src/actor.ts';
+import { actorFields, isOpaqueActorId, SYSTEM_JOBS } from '../src/actor.ts';
 import { moveNodeSchema, saveDraftSchema } from '../src/input.ts';
 import type { Actor } from '../src/types.ts';
 
@@ -25,7 +25,7 @@ describe('the actor a log line names', () => {
     ['a person', { kind: 'user', userId: idOf('usr', USER), roles: [] }, USER],
     ['a key', { kind: 'api_key', keyId: ISSUED_ROW, scopes: [] }, ISSUED_ROW],
     ['an installation', git('12345678'), '12345678'],
-    ['a job', { kind: 'system', job: 'filter.backfill' }, 'filter.backfill'],
+    ['a job', { kind: 'system', job: 'bench' }, 'bench'],
   ])('names %s by its id', (_name, actor, id) => {
     expect(actorFields(actor)).toEqual({ actor_kind: actor.kind, actor_id: id });
   });
@@ -35,6 +35,7 @@ describe('the actor a log line names', () => {
     ['a job with an address in it', { kind: 'system', job: 'sync for alice@example.com' }],
     ['a job with a line break', { kind: 'system', job: 'import\nengine.move ok' }],
     ['a key id that is a name', { kind: 'api_key', keyId: 'alice', scopes: [] }],
+    ['a job shaped like a code but not on the list', { kind: 'system', job: 'jane_doe' }],
     ['an installation that is an address', git('alice@example.com')],
     [
       'a user id that is not one',
@@ -63,6 +64,13 @@ describe('the actor a log line names', () => {
   });
 });
 
+describe('the jobs a move can name', () => {
+  it('are a closed list of codes from our own code', () => {
+    expect(SYSTEM_JOBS).toEqual(['bench', 'test']);
+    expect(Object.isFrozen(SYSTEM_JOBS)).toBe(true);
+  });
+});
+
 describe('a move takes opaque ids only', () => {
   const moveWith = (actor: unknown) =>
     moveNodeSchema.safeParse({ tenant, nodeId: NODE, parentId: null, afterId: null, actor });
@@ -70,6 +78,10 @@ describe('a move takes opaque ids only', () => {
   it.each([
     ['a job of plain words', { kind: 'system', job: 'sync for alice' }],
     ['a job over 64 characters', { kind: 'system', job: 'a'.repeat(65) }],
+    ['a job shaped like a host name', { kind: 'system', job: 'alice.example.com' }],
+    ['a job shaped like a user name', { kind: 'system', job: 'jane_doe' }],
+    ['a job with a name after a colon', { kind: 'system', job: 'export:john-smith' }],
+    ['a code that is not on the list', { kind: 'system', job: 'import' }],
     ['an upper case job', { kind: 'system', job: 'Import' }],
     ['a key id in another shape', { kind: 'api_key', keyId: `drf_${ISSUED_ROW}`, scopes: [] }],
     ['an upper case key id', { kind: 'api_key', keyId: ISSUED_ROW.toUpperCase(), scopes: [] }],
@@ -79,10 +91,8 @@ describe('a move takes opaque ids only', () => {
     expect(moveWith(actor).success).toBe(false);
   });
 
-  it.each([
-    ['a job', { kind: 'system', job: 'import' }],
-    ['a dotted job', { kind: 'system', job: 'git.sync' }],
-    ['a job of 64 characters', { kind: 'system', job: 'a'.repeat(64) }],
+  it.each<[string, unknown]>([
+    ...SYSTEM_JOBS.map((job): [string, unknown] => [`the job ${job}`, { kind: 'system', job }]),
     ['a key', { kind: 'api_key', keyId: ISSUED_ROW, scopes: ['content:write'] }],
     ['an installation', git('1')],
     ['a person', { kind: 'user', userId: USER, roles: ['editor'] }],

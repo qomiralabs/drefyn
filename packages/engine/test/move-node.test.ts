@@ -1,7 +1,7 @@
 import { DbError } from '@drefyn/db';
 import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
-import { createEngine, type EngineLogger } from '../src/index.ts';
+import { createEngine, type EngineLogger, type MovingActor } from '../src/index.ts';
 import { MAX_ORDER_KEY_CHARS } from '../src/order-key.ts';
 import { MAX_SUBTREE_ROWS, MAX_TREE_LEVELS, TREE_LOCK_WAIT_MS } from '../src/tree.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
@@ -394,7 +394,7 @@ describe('moveNode', () => {
       'git',
       '12345678',
     ],
-    ['a job', { kind: 'system', job: 'import' }, 'system', 'import'],
+    ['a job', { kind: 'system', job: 'bench' }, 'system', 'bench'],
   ] as const)('records who moved it: %s', async (_name, actor, kind, id) => {
     const { engine, info } = build(treeOf());
     expect(await engine.moveNode({ ...move, actor })).toMatchObject({ ok: true });
@@ -408,6 +408,9 @@ describe('moveNode', () => {
   it.each([
     ['a job named after a person', { kind: 'system', job: 'sync for alice@example.com' }, 'job'],
     ['a job that forges a log line', { kind: 'system', job: 'import\nengine.move ok' }, 'job'],
+    ['a job shaped like a host name', { kind: 'system', job: 'alice.example.com' }, 'job'],
+    ['a job shaped like a user name', { kind: 'system', job: 'jane_doe' }, 'job'],
+    ['a job with a name after a colon', { kind: 'system', job: 'export:john-smith' }, 'job'],
     [
       'a key id that is not an id',
       { kind: 'api_key', keyId: 'alice@example.com', scopes: [] },
@@ -425,7 +428,8 @@ describe('moveNode', () => {
     ],
   ] as const)('refuses %s before anything runs or is logged', async (_name, actor, field) => {
     const { engine, info, statements } = build(treeOf());
-    const result = await engine.moveNode({ ...move, actor });
+    // What a caller outside TypeScript could send; the type alone would not stop it.
+    const result = await engine.moveNode({ ...move, actor: actor as unknown as MovingActor });
     expect(result).toMatchObject({ ok: false, error: { code: 'engine.validation_failed' } });
     expect(result.ok ? [] : result.error.issues.map((issue) => issue.path)).toContain(
       `actor.${field}`,

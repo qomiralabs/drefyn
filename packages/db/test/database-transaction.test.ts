@@ -302,6 +302,48 @@ describe('a work that catches a statement error', () => {
     expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
   });
 
+  it('does not commit when a floating write queued behind another never ran', async () => {
+    const sent = sentSignal();
+    let refused: unknown;
+    const { db, clients } = scripted((text) => {
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((done) => {
+        setTimeout(() => {
+          done({ command: 'SELECT', rows: [], rowCount: 0 });
+        }, 20);
+      });
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        void sql`insert queued`.execute(tx).catch((error: unknown) => {
+          refused = error;
+        });
+        await sent.reached;
+        return 'ok';
+      }),
+    );
+    expect(String(failed)).toMatch(/this transaction has ended/);
+    expect(String(refused)).toMatch(/this transaction has ended/);
+    expect(clients[0]?.sent.some((text) => text.includes('insert queued'))).toBe(false);
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('does not commit after a rejection that is not an Error', async () => {
+    const { db, clients } = scripted((text) =>
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the case under test
+      text.includes('select odd') ? Promise.reject('not an error') : undefined,
+    );
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select odd`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toBe('not an error');
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
   it('commits only after a floating statement that succeeds has settled', async () => {
     const sent = sentSignal();
     let answered = false;
