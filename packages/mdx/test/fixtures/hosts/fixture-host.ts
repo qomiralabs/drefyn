@@ -1,3 +1,4 @@
+import { watchParent } from '../../../src/parent-watch.ts';
 import { startParseHost } from '../../../src/host.ts';
 import { parsePoolConfig } from '../../../src/pool-config.ts';
 import { startParseThread } from '../../../src/thread.ts';
@@ -15,4 +16,7 @@ await startParseHost({
   tokenSha256: process.env['DREFYN_PARSE_TOKEN_SHA256'] ?? '',
   logger: { warn: () => undefined },
   startThread: () => startParseThread(script, config),
+});
+watchParent(() => {
+  process.kill(process.pid, 'SIGKILL');
 });

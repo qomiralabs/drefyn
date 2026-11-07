@@ -234,6 +234,13 @@ supervisor logs `mdx.parse_host_crash_loop` at error level and stays down for th
 page that keeps killing the host cannot turn into a tight loop of outages. Alert on that event.
 Callers see `mdx.parse_unavailable` throughout.
 
+Both processes exit when their parent dies, since nothing else would stop them. They check the
+parent pid once a second, log `mdx.parse_host_parent_gone` and stop as they do on SIGTERM. A host
+gets `PARENT_GONE_GRACE_MS` and then kills itself. PID 1 in a container and a child of a service
+manager keep one parent for life, so neither ever sees this. Do not start the supervisor with
+`nohup` from a shell that then exits: run it in the foreground under a container or a service
+manager.
+
 The host is the boundary, not its threads. It refuses to start without `--permission`, with any
 flag that would allow more, or with any environment key outside a fixed list, so it holds no
 credentials. It binds the one address in `DREFYN_PARSE_BIND`, and every route but `/health` needs

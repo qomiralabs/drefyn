@@ -111,6 +111,11 @@ const APPLICATION_NAMES: Readonly<Record<PoolKind, string>> = {
 const SESSION_STATEMENT_TIMEOUT_MS = 10_000;
 // Work that stalls with a transaction open would hold a connection and its locks forever.
 const IDLE_IN_TRANSACTION_TIMEOUT_MS = 60_000;
+// A statement_timeout needs a server to enforce it, and a peer that vanished without a FIN leaves
+// the socket open for as long as the kernel's keepalive, hours by default. The driver gives up
+// this long after the longest timeout the pool allows, so on a live connection the server still
+// answers first and rolls back cleanly.
+const QUERY_GRACE_MS = 5000;
 
 const INT8 = 20;
 const INT8_ARRAY = 1016;
@@ -180,6 +185,7 @@ export function poolConfig(config: DatabaseConfig, kind: PoolKind): pg.PoolConfi
     connectionTimeoutMillis: config.poolWaitMs,
     idleTimeoutMillis: 30_000,
     statement_timeout: SESSION_STATEMENT_TIMEOUT_MS,
+    query_timeout: TIMEOUT_MAX[kind] + QUERY_GRACE_MS,
     idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     keepAlive: true,
     types: TYPES,

@@ -960,6 +960,29 @@ describeWithStack('filter rows in a save', () => {
     });
   });
 
+  it.each([
+    ['a lone surrogate', '\ud800'],
+    ['a NUL', 'a\0b'],
+  ])('refuses a label holding %s and stores nothing', async (_name, label) => {
+    const seeded = await seedItems();
+    const field = textField(fieldId(), 'title', { filterable: true });
+    const done = await built.engine.declareSchema({
+      tenant: seeded.tenant,
+      typeId: seeded.typeId,
+      schema: schemaOf(seeded, [{ ...field, label }]),
+    });
+    expect(done).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'fields.0.label', code: 'schema.malformed' }],
+      },
+    });
+    const page = await built.engine.queryNodes(seeded.tenant, { typeId: seeded.typeId });
+    expect(page.ok).toBe(true);
+    if (page.ok) expect(page.value.items).toEqual([]);
+  });
+
   it('the widest row a definition allows fits the index', async () => {
     const seeded = await seedItems();
     const [a, b, c, d, e] = [fieldId(), fieldId(), fieldId(), fieldId(), fieldId()] as [

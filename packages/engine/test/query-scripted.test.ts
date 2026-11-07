@@ -512,6 +512,24 @@ describe('declareSchema without a server', () => {
     expect(ends).toEqual(['rollback']);
   });
 
+  it.each([
+    ['a lone surrogate', '\ud800'],
+    ['a NUL', 'a\0b'],
+  ])('refuses a label holding %s before anything is written', async (_name, label) => {
+    const { engine, statements, ends } = deps(first());
+    const [field] = SCHEMA.fields;
+    const hostile = { ...SCHEMA, fields: [{ ...field, label }, ...SCHEMA.fields.slice(1)] };
+    expect(await declare(engine, hostile)).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'fields.0.label', code: 'schema.malformed' }],
+      },
+    });
+    expect(statements.some(({ sql }) => sql.startsWith('update'))).toBe(false);
+    expect(ends).toEqual(['rollback']);
+  });
+
   it('refuses a second first version', async () => {
     const { engine } = deps(first());
     expect(await declare(engine, { ...SCHEMA, version: 2 })).toMatchObject({

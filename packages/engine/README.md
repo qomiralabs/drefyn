@@ -140,8 +140,9 @@ yet what a reader sees: text between split raw HTML tags, children of unknown co
 footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
 the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
 characters a page, split evenly across its headings. Past its share a chunk has an empty path, so
-one save cannot grow by repeating a long path on every row, and an edit in one section cannot
-change the paths of another.
+one save cannot grow by repeating a long path on every row. An edit inside a section leaves the
+paths of the others alone, but adding or removing a heading changes every section's share, so it
+can change them.
 
 A save opens the spans `engine.save`, `engine.save.verify`, `engine.save.chunk` and
 `engine.save.write`. The parse host reports its steps, and the engine records them through
