@@ -164,7 +164,13 @@ export function chunkNode(content: NodeContent, options: ChunkOptions): readonly
   let openPath = '';
   let openHeadings: readonly string[] = [];
   let openHeadingsCost = 0;
-  let headingBudget = MAX_HEADING_PATH_CHARS_PER_PAGE;
+  // Shared out by section and not spent first come, so an edit that changes how many chunks one
+  // section makes cannot take a heading path off a chunk in another.
+  const sectionBudget = Math.floor(
+    MAX_HEADING_PATH_CHARS_PER_PAGE /
+      Math.max(1, content.children.filter(({ type }) => type === 'heading').length),
+  );
+  let headingBudget = sectionBudget;
 
   // Past the budget a chunk has no path. Its body still holds the text, so nothing is lost to
   // search. One to each element as well, because an empty string still costs a slot.
@@ -201,6 +207,7 @@ export function chunkNode(content: NodeContent, options: ChunkOptions): readonly
       headings.push({ depth: block.depth, text: headingText(block) });
       openHeadings = headings.map(({ text }) => text);
       openHeadingsCost = openHeadings.reduce((sum, text) => sum + text.length + 1, 0);
+      headingBudget = sectionBudget;
     }
     const text = visibleText(block);
     if (text.trim() !== '') place(String(index), text);
