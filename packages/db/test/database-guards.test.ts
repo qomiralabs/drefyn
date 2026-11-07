@@ -137,6 +137,17 @@ describe('poolConfig', () => {
     });
   });
 
+  // The server's own timeout has to answer first on a healthy connection, as that one rolls back
+  // cleanly, so each limit sits past the longest timeout that pool allows.
+  it.each([
+    ['app', 65_000],
+    ['reader', 15_000],
+    ['auth', 15_000],
+  ] as const)('gives up on a %s query at %i ms', (kind, limit) => {
+    const pool = poolConfig(config('postgres://u:x@127.0.0.1/drefyn'), kind);
+    expect(pool.query_timeout).toBe(limit);
+  });
+
   it('names the auth pool', () => {
     expect(poolConfig(config('postgres://drefyn_auth:x@127.0.0.1/drefyn'), 'auth')).toMatchObject({
       application_name: 'drefyn-auth',
