@@ -2,7 +2,7 @@ import { Duplex } from 'node:stream';
 import { organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { sql, type Transaction } from 'kysely';
 import pg from 'pg';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDatabaseConfig } from '../src/config.ts';
 import { databaseOverPool, poolConfig, withTenant, type Database } from '../src/database.ts';
 import { DbError } from '../src/errors.ts';
@@ -130,6 +130,8 @@ function oneSlot(options: SlotOptions = {}): {
   readonly db: Database;
   readonly sent: readonly string[];
   readonly answerLate: () => void;
+  // Resolves once the client has asked for a statement ending in text, that many times.
+  readonly reached: (text: string, times?: number) => Promise<void>;
 } {
   const { poolWaitMs = 5000, answerLateOn, ...script } = options;
   const config = parseDatabaseConfig({
@@ -155,11 +157,25 @@ function oneSlot(options: SlotOptions = {}): {
   closers.push(() => pool.end());
   // What the client asked for, as a queued statement never reaches the silent server.
   const sent: string[] = [];
+  const waiting: { readonly text: string; readonly times: number; readonly wake: () => void }[] =
+    [];
+  const asked = (text: string) => sent.filter((statement) => statement.endsWith(text)).length;
+  const reached = (text: string, times = 1) =>
+    asked(text) >= times
+      ? Promise.resolve()
+      : new Promise<void>((wake) => {
+          waiting.push({ text, times, wake });
+        });
   pool.on('connect', (client) => {
     const query = client.query.bind(client) as (...args: unknown[]) => unknown;
     Object.assign(client, {
       query: (...args: unknown[]) => {
-        sent.push(String(args[0]));
+        const text = String(args[0]);
+        sent.push(text);
+        for (const waiter of waiting.filter((entry) => asked(entry.text) >= entry.times)) {
+          waiting.splice(waiting.indexOf(waiter), 1);
+          waiter.wake();
+        }
         const answer = query(...args);
         if (args[0] === answerLateOn) answerLate();
         return answer;
@@ -167,7 +183,7 @@ function oneSlot(options: SlotOptions = {}): {
     });
   });
   const db = databaseOverPool(pool, 'app', { statementTimeoutMs: 1000 }) as Database;
-  return { pool, db, sent, answerLate };
+  return { pool, db, sent, answerLate, reached };
 }
 
 describe('a connection that stops answering', () => {
@@ -254,15 +270,38 @@ describe('a statement that passes the client limit and then gets its answer', ()
   });
 });
 
+// The deadline runs on a fake clock and the peer on real ticks, so each test moves the clock only
+// once the step it is about has been reached. On the wall clock a busy machine could spend the
+// whole deadline on the statements before that step, and the test would prove something else.
 describe('a deadline on a connection that stops answering', () => {
   const DEADLINE_MS = 30;
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const hanging = (db: Database) =>
     withTenant(db, TENANT, (tx) => sql.raw(HANGS).execute(tx), { deadlineMs: DEADLINE_MS });
+  const expire = (): void => {
+    vi.advanceTimersByTime(DEADLINE_MS);
+  };
+  const signal = () => {
+    let mark = (): void => undefined;
+    const reached = new Promise<void>((resolve) => {
+      mark = resolve;
+    });
+    return { mark, reached };
+  };
 
   it('fails the work and gives the connection up, ahead of the client limit', async () => {
-    const { pool, db, sent } = oneSlot();
+    const { pool, db, sent, reached } = oneSlot();
     const started = performance.now();
-    const failed = await rejected(hanging(db));
+    const failure = rejected(hanging(db));
+    await reached(HANGS);
+    expire();
+    const failed = await failure;
     const elapsed = performance.now() - started;
 
     expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
@@ -273,16 +312,19 @@ describe('a deadline on a connection that stops answering', () => {
   });
 
   it('leaves the pool able to open the next one, so a dead socket costs no capacity', async () => {
-    const { db } = oneSlot();
-    await rejected(hanging(db));
+    const { db, reached } = oneSlot();
+    const failure = rejected(hanging(db));
+    await reached(HANGS);
+    expire();
+    await failure;
     await expect(
       withTenant(db, TENANT, () => Promise.resolve('next'), { deadlineMs: DEADLINE_MS }),
     ).resolves.toBe('next');
   });
 
   it('reports the deadline, however much work was left', async () => {
-    const { db } = oneSlot();
-    const failure = await rejected(
+    const { db, reached } = oneSlot();
+    const failure = rejected(
       withTenant(
         db,
         TENANT,
@@ -293,14 +335,19 @@ describe('a deadline on a connection that stops answering', () => {
         { deadlineMs: DEADLINE_MS },
       ),
     );
-    expect((failure as DbError).message).toContain('deadline');
+    await reached(HANGS);
+    expire();
+    expect(((await failure) as DbError).message).toContain('deadline');
   });
 
   it('fails during commit, where the outcome is unknown, and drops the connection', async () => {
-    const { pool, db, sent } = oneSlot({ silentOn: 'commit' });
-    const failed = await rejected(
+    const { pool, db, sent, reached } = oneSlot({ silentOn: 'commit' });
+    const failure = rejected(
       withTenant(db, TENANT, () => Promise.resolve('done'), { deadlineMs: DEADLINE_MS }),
     );
+    await reached('commit');
+    expire();
+    const failed = await failure;
 
     expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
     expect((failed as DbError).message).toContain('deadline');
@@ -309,27 +356,48 @@ describe('a deadline on a connection that stops answering', () => {
     expect(pool.totalCount).toBe(0);
   });
 
+  // discard all is only sent once the commit has answered, which is the order this is about.
   it('still reports success during discard all, as the commit landed', async () => {
-    const { pool, db, sent } = oneSlot({ silentOn: 'discard all' });
-    await expect(
-      withTenant(db, TENANT, () => Promise.resolve('done'), { deadlineMs: DEADLINE_MS }),
-    ).resolves.toBe('done');
+    const { pool, db, sent, reached } = oneSlot({ silentOn: 'discard all' });
+    const outcome = withTenant(db, TENANT, () => Promise.resolve('done'), {
+      deadlineMs: DEADLINE_MS,
+    });
+    await reached('discard all');
+    expire();
+    await expect(outcome).resolves.toBe('done');
 
     expect(sent.at(-1)).toBe('discard all');
     expect(pool.totalCount).toBe(0);
-    await expect(withTenant(db, TENANT, () => Promise.resolve('next'))).resolves.toBe('next');
+    // The fresh connection is silent on discard all too, which ends on the client limit.
+    const next = withTenant(db, TENANT, () => Promise.resolve('next'));
+    await reached('discard all', 2);
+    vi.advanceTimersByTime(LIMIT_MS);
+    await expect(next).resolves.toBe('next');
   });
 
-  // The wait is far longer than the deadline and far shorter than the test's own timeout, so a
-  // waiter that only wakes when the wait runs out fails instead of passing slowly.
+  // The pool wait is on the fake clock too and never moves past the deadline, so a waiter that
+  // only wakes when its wait runs out is never served and the test fails.
   it('wakes a pool waiter when it fires between statements on a peer ignoring close', async () => {
     const { pool, db } = oneSlot({ poolWaitMs: 1000 });
+    const working = signal();
     let finish = (): void => undefined;
     const idle = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const cut = rejected(withTenant(db, TENANT, () => idle, { deadlineMs: DEADLINE_MS }));
+    const cut = rejected(
+      withTenant(
+        db,
+        TENANT,
+        () => {
+          working.mark();
+          return idle;
+        },
+        { deadlineMs: DEADLINE_MS },
+      ),
+    );
     const next = withTenant(db, TENANT, () => Promise.resolve('next'));
+    await working.reached;
+    expire();
 
     // The work is still out: the slot must not depend on it coming back.
     const [served] = await Promise.allSettled([next]);
@@ -345,11 +413,13 @@ describe('a deadline on a connection that stops answering', () => {
 
   it('wakes a waiter on the same peer once a work that outlasts the deadline returns', async () => {
     const { db, sent } = oneSlot({ poolWaitMs: 1000 });
+    const working = signal();
     const cut = rejected(
       withTenant(
         db,
         TENANT,
         async (tx) => {
+          working.mark();
           await new Promise((resolve) => setTimeout(resolve, 3 * DEADLINE_MS));
           await sql`select too_late`.execute(tx);
         },
@@ -357,6 +427,9 @@ describe('a deadline on a connection that stops answering', () => {
       ),
     );
     const next = withTenant(db, TENANT, () => Promise.resolve('next'));
+    await working.reached;
+    // Fires the deadline, then wakes the work, in that order.
+    vi.advanceTimersByTime(3 * DEADLINE_MS);
 
     await expect(next).resolves.toBe('next');
     expect((await cut) as DbError).toMatchObject({ code: 'DB_UNAVAILABLE' });
@@ -364,8 +437,8 @@ describe('a deadline on a connection that stops answering', () => {
   });
 
   it('reports the deadline for a work that swallowed the failure', async () => {
-    const { db, sent } = oneSlot();
-    const failed = await rejected(
+    const { db, sent, reached } = oneSlot();
+    const failure = rejected(
       withTenant(
         db,
         TENANT,
@@ -377,6 +450,9 @@ describe('a deadline on a connection that stops answering', () => {
         { deadlineMs: DEADLINE_MS },
       ),
     );
+    await reached(HANGS);
+    expire();
+    const failed = await failure;
 
     expect((failed as DbError).message).toContain('deadline');
     expect(sent.some((text) => text.endsWith('commit'))).toBe(false);
