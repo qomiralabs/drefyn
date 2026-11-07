@@ -8,6 +8,11 @@ vitest waits on the worker for good. The thread does what the worker cannot:
   default), it kills the worker. Vitest fails the file with `Worker exited unexpectedly`.
 - If the run that started the worker is gone, it kills the worker within a second.
 
+A global setup does the same one level up. A timeout around `pnpm` or `turbo` kills only that
+wrapper, so vitest's main process exits within a second of its parent going, and its workers
+follow. To put a timeout around a test run from a script, start it in its own process group and
+kill the group: the wrapper is not the only thing running.
+
 To see a spin end:
 
 ```sh

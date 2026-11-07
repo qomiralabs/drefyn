@@ -10,6 +10,7 @@ import type { Seen } from '../src/tree.ts';
 const here = import.meta.dirname;
 const fixtures = resolve(here, 'fixtures');
 const vitest = resolve(here, '../../../node_modules/vitest/vitest.mjs');
+const wrapper = resolve(fixtures, 'wrapper.ts');
 
 interface Fixture {
   readonly child: ChildProcess;
@@ -36,8 +37,8 @@ afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-function run(file: string, env: NodeJS.ProcessEnv): Fixture {
-  const child = spawn(process.execPath, [vitest, 'run', '--root', fixtures], {
+function run(file: string, env: NodeJS.ProcessEnv, via: readonly string[] = []): Fixture {
+  const child = spawn(process.execPath, [...via, vitest, 'run', '--root', fixtures], {
     cwd: fixtures,
     env: {
       PATH: process.env['PATH'],
@@ -78,6 +79,23 @@ describe('a worker stuck in sync code', () => {
 
     child.kill('SIGKILL');
     await exit;
+    await expect.poll(() => stillRunning(tree), { timeout: 30_000, interval: 100 }).toEqual([]);
+  });
+});
+
+describe('a run started through a wrapper, as pnpm and turbo do', () => {
+  // A timeout around pnpm kills pnpm. Vitest is only its child, and carries on.
+  it('ends with its worker when the wrapper is killed', async () => {
+    const { child } = run('spin.fixture.ts', { DREFYN_TEST_STALL_LIMIT_MS: '3600000' }, [wrapper]);
+    await expect
+      .poll(() => existsSync(join(scratch, 'ready')), { timeout: 30_000, interval: 50 })
+      .toBe(true);
+    const tree = descendants(child.pid ?? 0);
+    seen = tree;
+    expect(tree.filter(({ command }) => command.includes('vitest.mjs'))).toHaveLength(1);
+    expect(tree.filter(({ command }) => command.includes('workers/forks'))).toHaveLength(1);
+
+    child.kill('SIGKILL');
     await expect.poll(() => stillRunning(tree), { timeout: 30_000, interval: 100 }).toEqual([]);
   });
 });

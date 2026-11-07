@@ -29,5 +29,6 @@ describe('every vitest config', () => {
   it.each(configs)('%s runs under the watchdog', (file) => {
     const text = readFileSync(join(repoRoot, file), 'utf8');
     expect(text).toMatch(/sharedConfig|watchdogSetup|@drefyn\/test-watchdog\/setup/);
+    expect(text).toMatch(/sharedConfig|watchdogGlobalSetup|@drefyn\/test-watchdog\/global-setup/);
   });
 });

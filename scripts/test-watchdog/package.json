@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./setup": "./src/setup.ts",
+    "./global-setup": "./src/global-setup.ts",
     "./tree": "./src/tree.ts",
     "./package.json": "./package.json"
   },

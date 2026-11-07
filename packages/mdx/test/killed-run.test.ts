@@ -12,6 +12,7 @@ const TIMEOUT_MS = 120_000;
 const here = import.meta.dirname;
 const root = resolve(here, 'fixtures/killed-run');
 const vitest = resolve(here, '../../../node_modules/vitest/vitest.mjs');
+const wrapper = resolve(here, 'fixtures/hosts/fixture-parent.ts');
 
 let scratch = '';
 let left: readonly Seen[] = [];
@@ -31,14 +32,19 @@ const count = (tree: readonly Seen[], part: string) =>
 
 describe('a test run killed part way', () => {
   it.each([
-    ['waiting on its hosts', '0'],
-    ['stuck in sync code', '1'],
+    ['waiting on its hosts', '0', false],
+    ['stuck in sync code', '1', false],
+    // A timeout around pnpm kills pnpm, and vitest is only its child.
+    ['killed through its wrapper', '0', true],
+    ['killed through its wrapper while stuck', '1', true],
   ])(
     'leaves nothing behind when %s',
-    async (_, spin) => {
+    async (_, spin, wrapped) => {
       scratch = mkdtempSync(join(tmpdir(), 'killed-run-'));
       const ready = join(scratch, 'ready');
-      const child = spawn(process.execPath, [vitest, 'run', '--root', root], {
+      const command = [vitest, 'run', '--root', root];
+      const args = wrapped ? [wrapper, process.execPath, ...command] : command;
+      const child = spawn(process.execPath, args, {
         cwd: root,
         env: {
           PATH: process.env['PATH'],

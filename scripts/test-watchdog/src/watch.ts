@@ -39,6 +39,27 @@ export function watch(deps: WatchDeps, { parent, limitTicks }: WatchPlan): Reaso
   }
 }
 
+const RUN_CHECK_MS = 1_000;
+
+export interface RunWatch extends Omit<Ending, 'limitMs'> {
+  readonly parent: number;
+  readonly ppid: () => number;
+}
+
+export function watchRun({ parent, ppid, ...ending }: RunWatch): void {
+  const timer = setInterval(() => {
+    if (ppid() === parent) return;
+    clearInterval(timer);
+    try {
+      ending.write(`test watchdog: the wrapper of run ${String(ending.pid)} is gone, killing it\n`);
+    } finally {
+      // With the wrapper gone the pipe may have no reader, and the write throws.
+      ending.kill();
+    }
+  }, RUN_CHECK_MS);
+  timer.unref();
+}
+
 export interface Ending {
   readonly pid: number;
   readonly limitMs: number;

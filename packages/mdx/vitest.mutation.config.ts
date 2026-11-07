@@ -14,5 +14,6 @@ export default defineConfig({
     ],
     restoreMocks: true,
     setupFiles: ['@drefyn/test-watchdog/setup'],
+    globalSetup: ['@drefyn/test-watchdog/global-setup'],
   },
 });

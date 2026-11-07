@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { watchdogSetup } from '../../vitest.shared.ts';
+import { watchdogGlobalSetup, watchdogSetup } from '../../vitest.shared.ts';
 
 // Timing budgets, measured alone after the parallel files: those hammer the same database on
 // purpose (200 parallel verifies, the lockout scenario), and their load is not what the
@@ -7,7 +7,7 @@ import { watchdogSetup } from '../../vitest.shared.ts';
 export default defineConfig({
   test: {
     include: ['test/integration/serial/**/*.test.ts'],
-    globalSetup: ['test/integration/support/global-setup.ts'],
+    globalSetup: [watchdogGlobalSetup, 'test/integration/support/global-setup.ts'],
     fileParallelism: false,
     restoreMocks: true,
     setupFiles: [watchdogSetup],

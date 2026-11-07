@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
-import { end, guard, limitFrom, ticksFor, watch } from '../src/watch.ts';
+import { end, guard, limitFrom, ticksFor, watch, watchRun } from '../src/watch.ts';
 
 const PARENT = 4_242;
 
@@ -110,6 +110,48 @@ describe('guard', () => {
     guard({ cell: cell(), parent: process.ppid + 1, limitMs: 4 }, seen);
     expect(seen.lines.join('')).toContain('is gone');
     expect(seen.kill).toHaveBeenCalledOnce();
+  });
+});
+
+describe('watchRun', () => {
+  const start = (write: (line: string) => void = () => undefined) => {
+    const kill = vi.fn();
+    let parent = 7;
+    watchRun({ pid: 9, parent: 7, ppid: () => parent, write, kill });
+    return {
+      kill,
+      adopt: () => {
+        parent = 1;
+      },
+    };
+  };
+
+  it('leaves a run alone while its wrapper lives, and then kills it once', () => {
+    vi.useFakeTimers();
+    try {
+      const { kill, adopt } = start();
+      vi.advanceTimersByTime(60_000);
+      expect(kill).not.toHaveBeenCalled();
+      adopt();
+      vi.advanceTimersByTime(60_000);
+      expect(kill).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still kills when the write fails', () => {
+    vi.useFakeTimers();
+    try {
+      const { kill, adopt } = start(() => {
+        throw new Error('EPIPE');
+      });
+      adopt();
+      expect(() => vi.advanceTimersByTime(1_000)).toThrow('EPIPE');
+      expect(kill).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
