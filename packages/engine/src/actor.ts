@@ -4,16 +4,19 @@ import type { Actor } from './types.ts';
 export const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // GitHub's own number for an installation.
 export const INSTALLATION_ID = /^[1-9][0-9]{0,19}$/;
-// A name from our own code, such as filter.backfill. Free text could carry an address or a
-// forged log line, and a job never needs it.
-export const JOB_NAME = /^[a-z][a-z0-9_]*(?:[.:-][a-z0-9_]+)*$/;
-export const MAX_JOB_NAME_CHARS = 64;
+// Every job that may move a node, named here. A pattern would still take a code built from a
+// person's name, so a new job is added to this list, never assembled from a field.
+export const SYSTEM_JOBS = Object.freeze(['bench', 'test'] as const);
+export type SystemJob = (typeof SYSTEM_JOBS)[number];
+
+const isSystemJob = (id: string): id is SystemJob =>
+  (SYSTEM_JOBS as readonly string[]).includes(id);
 
 const SHAPES: Readonly<Record<Actor['kind'], (id: string) => boolean>> = {
   user: (id) => CANONICAL_UUID.test(id),
   api_key: (id) => CANONICAL_UUID.test(id),
   git: (id) => INSTALLATION_ID.test(id),
-  system: (id) => id.length <= MAX_JOB_NAME_CHARS && JOB_NAME.test(id),
+  system: isSystemJob,
 };
 
 export function isOpaqueActorId(kind: Actor['kind'], id: string): boolean {

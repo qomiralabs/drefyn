@@ -4,8 +4,8 @@ import { z } from 'zod';
 import type { EngineIssue } from './errors.ts';
 import { isOrderKey } from './order-key.ts';
 import { NODE_FAMILIES, ORIGINS } from './vocabulary.ts';
-import type { Actor } from './types.ts';
-import { CANONICAL_UUID, INSTALLATION_ID, JOB_NAME, MAX_JOB_NAME_CHARS } from './actor.ts';
+import type { Actor, MovingActor } from './types.ts';
+import { CANONICAL_UUID, INSTALLATION_ID, SYSTEM_JOBS } from './actor.ts';
 
 const idSchema = <K extends IdKind>(kind: K) =>
   z
@@ -62,11 +62,8 @@ const movingActor = z.discriminatedUnion('kind', [
     commitSha,
     authorEmail,
   }),
-  z.strictObject({
-    kind: z.literal('system'),
-    job: z.string().max(MAX_JOB_NAME_CHARS).regex(JOB_NAME),
-  }),
-]) satisfies z.ZodType<Actor>;
+  z.strictObject({ kind: z.literal('system'), job: z.enum(SYSTEM_JOBS) }),
+]) satisfies z.ZodType<MovingActor>;
 
 const idempotencyKey = z.string().regex(/^[\x21-\x7e]{1,200}$/);
 
