@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
-import { sql } from 'kysely';
+import { sql, type Transaction } from 'kysely';
 import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -367,6 +367,96 @@ describe('a work that catches a statement error', () => {
       }),
     ).resolves.toBe('ok');
     expect(answeredAtCommit).toBe(true);
+  });
+});
+
+// The clock is fake, so the abort lands before the answer by step and not by how fast the
+// runner is.
+describe('a statement the work tried to abort or stream', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const committed = (client: ScriptedClient | undefined) =>
+    client?.sent.some((text) => text.endsWith('; commit')) ?? false;
+  type Notes = Transaction<{ notes: { body: string } }>;
+  // The scripted tables are not in the generated schema, so the transaction is cast.
+  const notes = (tx: unknown) => (tx as Notes).selectFrom('notes').selectAll();
+
+  it('does not commit an insert whose signal fired before it answered', async () => {
+    vi.useFakeTimers();
+    const { db, clients } = scripted((text) =>
+      text.includes('insert probe')
+        ? new Promise((done) => {
+            setTimeout(() => {
+              done({ command: 'INSERT', rows: [], rowCount: 1 });
+            }, 30);
+          })
+        : undefined,
+    );
+    let seen: unknown;
+    const outcome = rejected(
+      withTenant(db, TENANT, async (tx) => {
+        const controller = new AbortController();
+        setTimeout(() => {
+          controller.abort(new Error('stop'));
+        }, 5);
+        await sql`insert probe`
+          .execute(tx, { signal: controller.signal })
+          .catch((error: unknown) => {
+            seen = error;
+          });
+        return 'ok';
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30);
+    const failed = await outcome;
+
+    expect(String(failed)).toMatch(/abort signals are not supported/);
+    expect(String(seen)).toMatch(/abort signals are not supported/);
+    expect(clients[0]?.sent.some((text) => text.includes('insert probe'))).toBe(false);
+    expect(committed(clients[0])).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('refuses a signal that never fires, as the work cannot know it would not', async () => {
+    const { db, clients } = scripted();
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) =>
+        sql`select calm`.execute(tx, { signal: new AbortController().signal }),
+      ),
+    );
+
+    expect(String(failed)).toMatch(/abort signals are not supported/);
+    expect(clients[0]?.sent.some((text) => text.includes('select calm'))).toBe(false);
+    expect(committed(clients[0])).toBe(false);
+  });
+
+  it.each<[string, (tx: unknown) => AsyncIterableIterator<unknown>, RegExp]>([
+    ['a stream', (tx) => notes(tx).stream(), /streaming is not supported/],
+    [
+      'a stream with a signal',
+      (tx) => notes(tx).stream({ signal: new AbortController().signal }),
+      /abort signals are not supported/,
+    ],
+  ])('does not commit after the work caught the refusal of %s', async (_label, open, refusal) => {
+    const { db, clients } = scripted();
+    let seen: unknown;
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        try {
+          for await (const row of open(tx)) return row;
+        } catch (error) {
+          seen = error;
+        }
+        return 'carried on';
+      }),
+    );
+
+    expect(String(seen)).toMatch(refusal);
+    expect(String(failed)).toMatch(refusal);
+    expect(committed(clients[0])).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   PostgresQueryCompiler,
   SingleConnectionProvider,
   Transaction,
+  type AbortableOperationOptions,
   type CompiledQuery,
   type ConnectionProvider,
   type DatabaseConnection,
@@ -331,6 +332,14 @@ class TransactionConnection implements DatabaseConnection {
     return this.#unanswered;
   }
 
+  // A statement turned away never ran, and the work may catch the refusal and carry on as if
+  // it had, so it counts the same as one that went unanswered.
+  refuse(message: string): Error {
+    const error = new Error(message);
+    this.#unanswered ??= { error };
+    return error;
+  }
+
   close(): void {
     this.#client = undefined;
   }
@@ -356,11 +365,7 @@ class TransactionConnection implements DatabaseConnection {
   async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
     const client = this.#client;
     if (client === undefined) {
-      const ended = new Error(
-        'this transaction has ended; use the transaction only inside its work',
-      );
-      this.#unanswered ??= { error: ended };
-      throw ended;
+      throw this.refuse('this transaction has ended; use the transaction only inside its work');
     }
     // Queued behind the unanswered one, each statement would get a full limit of its own.
     if (this.#unanswered !== undefined) throw this.#unanswered.error;
@@ -383,7 +388,7 @@ class TransactionConnection implements DatabaseConnection {
   // eslint-disable-next-line require-yield -- refuses before yielding anything
   async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
     await Promise.resolve();
-    throw new Error('streaming is not supported inside a tenant transaction');
+    throw this.refuse('streaming is not supported inside a tenant transaction');
   }
 }
 
@@ -418,7 +423,18 @@ class TrackedProvider implements ConnectionProvider {
     this.#single = new SingleConnectionProvider(connection);
   }
 
-  provideConnection<T>(consumer: (connection: DatabaseConnection) => Promise<T>): Promise<T> {
+  // An aborted signal makes Kysely stop waiting while the statement keeps running, and nothing
+  // tells this connection, so the commit could land a write the work saw fail. Refused here and
+  // not in executeQuery, as a signal also reaches streams and Kysely's own abort handlers.
+  provideConnection<T>(
+    consumer: (connection: DatabaseConnection) => Promise<T>,
+    options?: AbortableOperationOptions,
+  ): Promise<T> {
+    if (options?.signal !== undefined) {
+      return Promise.reject(
+        this.#connection.refuse('abort signals are not supported inside a tenant transaction'),
+      );
+    }
     return this.#connection.track(this.#single.provideConnection(consumer));
   }
 }
