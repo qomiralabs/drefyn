@@ -136,6 +136,8 @@ export async function assertRoomUnder(
   parentId: NodeId,
 ): Promise<void> {
   const parent = await climb(tx, tenant, parentId, null);
+  // A row under a deleted one cannot be seen, so it does not exist for this caller, as for a move.
+  if (parent.levels === 0 || parent.gone) throw new Refusal('engine.not_found');
   if (parent.levels >= MAX_TREE_LEVELS) throw tooDeep();
 }
 

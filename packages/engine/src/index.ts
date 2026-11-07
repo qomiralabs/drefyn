@@ -13,6 +13,7 @@ export {
   type LogFields,
 } from './ports.ts';
 export type { PoolGate } from './pool-gate.ts';
+export type { SystemJob } from './actor.ts';
 export { databaseStore, type EngineStore } from './store.ts';
 export type {
   Actor,
@@ -22,6 +23,7 @@ export type {
   DeclareSchemaInput,
   IdempotencyKey,
   MoveNodeInput,
+  MovingActor,
   NodeHead,
   NodeId,
   NodePage,

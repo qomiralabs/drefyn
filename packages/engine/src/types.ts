@@ -1,4 +1,5 @@
 import type { IdOf, TenantRef, UserId } from '@drefyn/tenancy';
+import type { SystemJob } from './actor.ts';
 import type { NodeContent } from './content.ts';
 import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
@@ -18,6 +19,12 @@ export type Actor =
     }
   | { readonly kind: 'system'; readonly job: string };
 
+// What a move takes: the same, with a job from the closed list, so a job name built at runtime
+// does not compile.
+export type MovingActor =
+  | Exclude<Actor, { readonly kind: 'system' }>
+  | { readonly kind: 'system'; readonly job: SystemJob };
+
 export interface CreateNodeInput {
   readonly tenant: TenantRef;
   readonly family: NodeFamily;
@@ -35,7 +42,7 @@ export interface MoveNodeInput {
   readonly parentId: NodeId | null;
   // The child of parentId it lands after. Null puts it first.
   readonly afterId: NodeId | null;
-  readonly actor: Actor;
+  readonly actor: MovingActor;
 }
 
 export interface SaveDraftInput {

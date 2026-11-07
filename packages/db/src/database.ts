@@ -9,6 +9,7 @@ import {
   SingleConnectionProvider,
   Transaction,
   type CompiledQuery,
+  type ConnectionProvider,
   type DatabaseConnection,
   type Dialect,
   type Kysely,
@@ -310,7 +311,9 @@ const sqlState = (value: unknown): unknown => Reflect.get(Object(value), 'code')
 class TransactionConnection implements DatabaseConnection {
   #client: pg.PoolClient | undefined;
   #failure: unknown;
-  #unanswered: Error | undefined;
+  // Boxed, so a rejection with undefined or any other value still counts.
+  #unanswered: { readonly error: unknown } | undefined;
+  readonly #inFlight = new Set<Promise<unknown>>();
 
   constructor(client: pg.PoolClient) {
     this.#client = client;
@@ -320,9 +323,11 @@ class TransactionConnection implements DatabaseConnection {
     return this.#failure;
   }
 
-  // The first failure that came from this side rather than from the server, such as the pool's
-  // query_timeout. The statement may still be running, and may yet succeed.
-  get unanswered(): Error | undefined {
+  // The first failure Postgres did not raise itself: the pool's query_timeout, a socket error,
+  // a value the driver could not read. Postgres aborts only on its own errors, so after any of
+  // these the commit would land for work that saw a failure, and the statement may still be
+  // running. A statement that arrives after close counts too: it never ran.
+  get unanswered(): { readonly error: unknown } | undefined {
     return this.#unanswered;
   }
 
@@ -330,13 +335,35 @@ class TransactionConnection implements DatabaseConnection {
     this.#client = undefined;
   }
 
+  // Counted from the moment Kysely asks for the connection, before it queues the statement
+  // behind the one running, so the commit waits for every statement the work started.
+  track<T>(statement: Promise<T>): Promise<T> {
+    this.#inFlight.add(statement);
+    const done = () => {
+      this.#inFlight.delete(statement);
+    };
+    statement.then(done, done);
+    return statement;
+  }
+
+  // A statement the work started and never awaited can still fail after the work returns.
+  // Called once closed, so nothing new joins; one queued behind another settles in a later
+  // pass.
+  async settled(): Promise<void> {
+    while (this.#inFlight.size > 0) await Promise.allSettled([...this.#inFlight]);
+  }
+
   async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
     const client = this.#client;
     if (client === undefined) {
-      throw new Error('this transaction has ended; use the transaction only inside its work');
+      const ended = new Error(
+        'this transaction has ended; use the transaction only inside its work',
+      );
+      this.#unanswered ??= { error: ended };
+      throw ended;
     }
     // Queued behind the unanswered one, each statement would get a full limit of its own.
-    if (this.#unanswered !== undefined) throw this.#unanswered;
+    if (this.#unanswered !== undefined) throw this.#unanswered.error;
     try {
       const result = await client.query<R & pg.QueryResultRow>(compiled.sql, [
         ...compiled.parameters,
@@ -348,7 +375,7 @@ class TransactionConnection implements DatabaseConnection {
         : { rows: result.rows, numAffectedRows: BigInt(affected) };
     } catch (error) {
       this.#failure ??= error;
-      if (error instanceof Error && sqlState(error) === undefined) this.#unanswered ??= error;
+      if (!(error instanceof pg.DatabaseError)) this.#unanswered ??= { error };
       throw error;
     }
   }
@@ -380,6 +407,22 @@ class TransactionDialect implements Dialect {
   }
 }
 
+// Kysely's own provider runs one statement at a time, so a second statement the work did not
+// await waits in there and has not reached the connection yet.
+class TrackedProvider implements ConnectionProvider {
+  readonly #connection: TransactionConnection;
+  readonly #single: SingleConnectionProvider;
+
+  constructor(connection: TransactionConnection) {
+    this.#connection = connection;
+    this.#single = new SingleConnectionProvider(connection);
+  }
+
+  provideConnection<T>(consumer: (connection: DatabaseConnection) => Promise<T>): Promise<T> {
+    return this.#connection.track(this.#single.provideConnection(consumer));
+  }
+}
+
 const dialect = new TransactionDialect();
 const adapter = dialect.createAdapter();
 const compiler = dialect.createQueryCompiler();
@@ -389,12 +432,7 @@ const driver = dialect.createDriver();
 // settings, commit) is run here on the raw client, so nothing in Kysely decides when the
 // connection goes back to the pool.
 function transactionOn<DB>(connection: TransactionConnection): Transaction<DB> {
-  const executor = new DefaultQueryExecutor(
-    compiler,
-    adapter,
-    new SingleConnectionProvider(connection),
-    [],
-  );
+  const executor = new DefaultQueryExecutor(compiler, adapter, new TrackedProvider(connection), []);
   return new Transaction<DB>({ config: { dialect }, driver, executor, dialect });
 }
 
@@ -524,9 +562,10 @@ async function runTransaction<DB, T>(
     let result: T;
     try {
       result = await work(transactionOn<DB>(connection));
-      // Postgres aborts on an error it raised, so the commit refuses itself. It never heard of this
-      // one: the statement can answer late, and the commit would land for work that saw a failure.
-      if (connection.unanswered !== undefined) throw connection.unanswered;
+      // Closed first so nothing new starts while the floating ones finish.
+      connection.close();
+      await connection.settled();
+      if (connection.unanswered !== undefined) throw connection.unanswered.error;
     } catch (error) {
       connection.close();
       await rollback();
@@ -536,7 +575,6 @@ async function runTransaction<DB, T>(
       }
       throw error;
     }
-    connection.close();
     try {
       await client.query(contextCheck(settings));
     } catch (error) {

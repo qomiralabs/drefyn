@@ -1,7 +1,7 @@
 import { DbError } from '@drefyn/db';
 import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
-import { createEngine, type EngineLogger } from '../src/index.ts';
+import { createEngine, type EngineLogger, type MovingActor } from '../src/index.ts';
 import { MAX_ORDER_KEY_CHARS } from '../src/order-key.ts';
 import { MAX_SUBTREE_ROWS, MAX_TREE_LEVELS, TREE_LOCK_WAIT_MS } from '../src/tree.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
@@ -377,19 +377,24 @@ describe('moveNode', () => {
       'user',
       idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8008'),
     ],
-    ['an API key', { kind: 'api_key', keyId: 'key_1', scopes: ['b'] }, 'api_key', 'key_1'],
+    [
+      'an API key',
+      { kind: 'api_key', keyId: '01890a5d-ac96-774b-bcce-b302099a8009', scopes: ['b'] },
+      'api_key',
+      '01890a5d-ac96-774b-bcce-b302099a8009',
+    ],
     [
       'a git sync',
       {
         kind: 'git',
-        installationId: 'install_1',
+        installationId: '12345678',
         commitSha: 'a'.repeat(40),
         authorEmail: 'author@example.com',
       },
       'git',
-      'install_1',
+      '12345678',
     ],
-    ['a job', { kind: 'system', job: 'import' }, 'system', 'import'],
+    ['a job', { kind: 'system', job: 'bench' }, 'system', 'bench'],
   ] as const)('records who moved it: %s', async (_name, actor, kind, id) => {
     const { engine, info } = build(treeOf());
     expect(await engine.moveNode({ ...move, actor })).toMatchObject({ ok: true });
@@ -398,6 +403,39 @@ describe('moveNode', () => {
       expect.objectContaining({ actor_kind: kind, actor_id: id }),
     );
     expect(JSON.stringify(info.mock.calls)).not.toContain('author@example.com');
+  });
+
+  it.each([
+    ['a job named after a person', { kind: 'system', job: 'sync for alice@example.com' }, 'job'],
+    ['a job that forges a log line', { kind: 'system', job: 'import\nengine.move ok' }, 'job'],
+    ['a job shaped like a host name', { kind: 'system', job: 'alice.example.com' }, 'job'],
+    ['a job shaped like a user name', { kind: 'system', job: 'jane_doe' }, 'job'],
+    ['a job with a name after a colon', { kind: 'system', job: 'export:john-smith' }, 'job'],
+    [
+      'a key id that is not an id',
+      { kind: 'api_key', keyId: 'alice@example.com', scopes: [] },
+      'keyId',
+    ],
+    [
+      'an installation that is not a number',
+      {
+        kind: 'git',
+        installationId: 'alice@example.com',
+        commitSha: 'a'.repeat(40),
+        authorEmail: 'author@example.com',
+      },
+      'installationId',
+    ],
+  ] as const)('refuses %s before anything runs or is logged', async (_name, actor, field) => {
+    const { engine, info, statements } = build(treeOf());
+    // What a caller outside TypeScript could send; the type alone would not stop it.
+    const result = await engine.moveNode({ ...move, actor: actor as unknown as MovingActor });
+    expect(result).toMatchObject({ ok: false, error: { code: 'engine.validation_failed' } });
+    expect(result.ok ? [] : result.error.issues.map((issue) => issue.path)).toContain(
+      `actor.${field}`,
+    );
+    expect(statements).toEqual([]);
+    expect(info).not.toHaveBeenCalled();
   });
 
   it('records who tried, when a move is refused', async () => {
@@ -489,6 +527,20 @@ describe('createNode with no key', () => {
     });
     expect(insertOf(over.statements)).toBeUndefined();
     expect(over.ends).toEqual(['rollback']);
+  });
+
+  it.each([
+    ['inside a deleted branch', climb(3, { gone: true }), {}],
+    ['inside a deleted branch, with a key', climb(3, { gone: true }), { orderKey: 'a7' }],
+    ['gone before the lock was taken', climb(0), {}],
+  ])('answers not found for a parent %s, with nothing written', async (_name, parent, keyed) => {
+    const { engine, statements, ends } = build(respond([], parent));
+    expect(await engine.createNode({ ...create, ...keyed, parentId: PARENT })).toMatchObject({
+      ok: false,
+      error: { code: 'engine.not_found' },
+    });
+    expect(insertOf(statements)).toBeUndefined();
+    expect(ends).toEqual(['rollback']);
   });
 
   it.each(['a', 'a00', '!', `a${'1'.repeat(64)}`])('refuses %j as a key', async (orderKey) => {
