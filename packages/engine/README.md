@@ -57,6 +57,17 @@ tenant's, deleted, or not a child of that parent is `engine.not_found`, with not
 can tie with a sibling, and nothing fits between a tie, so a move there gets
 `engine.order_key_no_room`. One gap takes about 6,000 inserts in a row before `engine.too_large`.
 
+A tree is at most 64 levels, a root being level 1. `createNode` under a parent and `moveNode`
+refuse anything past that with `engine.validation_failed` and `engine.tree_too_deep` on `parentId`,
+and a move counts the height of the subtree it carries. Rows already deeper stay readable and
+saveable, and can always move up, along or to the root. A move down that would have to read more
+than 50,000 rows of its subtree is `engine.too_large` on `nodeId`.
+
+Writers that pick a place in a tree wait at most 1 s for the project's lock, then answer
+`engine.unavailable` with nothing written. Each process lets 2 such writes per project reach the
+pool and keeps up to 32 more waiting, for at most 1 s, off the pool, so a busy project cannot take
+connections from another tenant. A root created with its own `orderKey` skips the queue.
+
 A save re-reads its input before it trusts it:
 
 1. `validateTree` from `@drefyn/mdx` applies closed key sets per node type, a known `astVersion`,

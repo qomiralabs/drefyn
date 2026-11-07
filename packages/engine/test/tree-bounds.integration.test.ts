@@ -193,10 +193,11 @@ describeWithStack('tree bounds against Postgres', () => {
     it('never lets two moves that fit alone stack past the cap together', async () => {
       for (let round = 0; round < 10; round += 1) {
         const home = await seed();
-        const [left, right] = [await chain(home, 40), await chain(home, 40)];
+        const base = await chain(home, 30);
+        const [upper, lower] = [await chain(home, 20), await chain(home, 20)];
         const results = await Promise.all([
-          move(home, at(left, 0), at(right, -1)),
-          move(home, at(right, 0), at(left, -1)),
+          move(home, at(upper, 0), at(base, -1)),
+          move(home, at(lower, 0), at(upper, -1)),
         ]);
         expect(results.map(codeOf).sort()).toEqual(['engine.validation_failed', 'ok']);
         expect(await deepest(home)).toBeLessThanOrEqual(MAX_TREE_LEVELS);
@@ -230,7 +231,7 @@ describeWithStack('tree bounds against Postgres', () => {
       const tail = at(nodes, -1);
       expect(codeOf(await engine.getHead(home.tenant, tail))).toBe('ok');
       expect(codeOf(await engine.listVersions(home.tenant, tail, {}))).toBe('ok');
-      const listed = await engine.queryNodes(home.tenant, { typeId: home.typeId, limit: 200 });
+      const listed = await engine.queryNodes(home.tenant, { typeId: home.typeId, limit: 100 });
       expect(listed.ok && listed.value.items.length).toBe(nodes.length);
       const saved = await save(built, home, tail, null, 'still here\n');
       expect(saved.seq).toBe(1);
@@ -320,9 +321,16 @@ describeWithStack('tree bounds against Postgres', () => {
 
       const answers = await withLockHeld(home, async () => {
         let running = true;
-        const clients = Array.from({ length: 100 }, async () => {
+        const clients = Array.from({ length: 100 }, async (_, client) => {
           const seen: string[] = [];
-          while (running) seen.push(codeOf(await move(home, at(nodes, 2), at(nodes, 0))));
+          while (running) {
+            const write =
+              client % 2 === 0
+                ? move(home, at(nodes, 2), at(nodes, 0))
+                : create(home, at(nodes, 0));
+            seen.push(codeOf(await write));
+            await pause(5);
+          }
           return seen;
         });
         while ((await lockWaiters()) === 0) await pause(10);
@@ -357,6 +365,7 @@ describeWithStack('tree bounds against Postgres', () => {
         while (running) {
           const parent = client % 2 === 0 ? at(nodes, -1) : at(nodes, MAX_TREE_LEVELS - 2);
           seen.push(codeOf(await move(home, loose, parent)));
+          await pause(5);
         }
         return seen;
       });
@@ -370,8 +379,11 @@ describeWithStack('tree bounds against Postgres', () => {
       const loads = (await Promise.all(clients)).flat();
 
       expect(served).toEqual(Array.from({ length: 40 }, () => 'ok'));
-      expect(new Set(loads).has('ok')).toBe(true);
-      expect(new Set(loads).has('engine.validation_failed')).toBe(true);
+      const allowed = new Set(['ok', 'engine.validation_failed', 'engine.unavailable']);
+      expect(loads.filter((code) => !allowed.has(code))).toEqual([]);
+      // The load proves nothing if the moves were all turned away, so both answers are read here.
+      expect(issueOf(await move(home, loose, at(nodes, -1)))).toBe('engine.tree_too_deep');
+      expect(codeOf(await move(home, loose, at(nodes, MAX_TREE_LEVELS - 2)))).toBe('ok');
     });
   });
 });

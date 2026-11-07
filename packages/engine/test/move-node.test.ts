@@ -92,10 +92,11 @@ describe('moveNode', () => {
     const { engine, statements, ends } = build(treeOf());
     expect(await engine.moveNode(move)).toEqual({ ok: true, value: undefined });
 
-    expect(statements[0]?.sql).toMatch(/^select pg_advisory_xact_lock/);
-    expect(statements[0]?.sql).not.toMatch(/from/);
-    expect(statements[0]?.parameters.join()).toContain(tenant.organizationId);
-    expect(statements[0]?.parameters.join()).toContain(tenant.projectId);
+    expect(statements[0]?.sql).toMatch(/^set local lock_timeout/);
+    expect(statements[1]?.sql).toMatch(/^select pg_advisory_xact_lock/);
+    expect(statements[1]?.sql).not.toMatch(/from/);
+    expect(statements[1]?.parameters.join()).toContain(tenant.organizationId);
+    expect(statements[1]?.parameters.join()).toContain(tenant.projectId);
 
     const updates = statements.filter((statement) => has(statement, 'update "nodes"'));
     expect(updates).toHaveLength(1);
@@ -109,7 +110,7 @@ describe('moveNode', () => {
   it('names both tenant ids in every statement after the lock', async () => {
     const { engine, statements } = build(treeOf());
     await engine.moveNode(move);
-    for (const statement of statements.slice(1)) {
+    for (const statement of statements.slice(2)) {
       expect(statement.parameters).toEqual(
         expect.arrayContaining([tenant.organizationId, tenant.projectId]),
       );
@@ -352,7 +353,7 @@ describe('moveNode', () => {
   });
 
   it('logs the refusal with its code', async () => {
-    const { engine, info } = build(treeOf({ chain: [] }));
+    const { engine, info } = build(treeOf({ parent: climb(0) }));
     await engine.moveNode({ ...move, parentId: PARENT });
     expect(info).toHaveBeenCalledWith(
       'engine.move.refused',
@@ -369,10 +370,10 @@ describe('createNode with no key', () => {
       if (has(statement, '"content_types"')) return [{ family: 'docs_page' }];
       if (has(statement, '"organizations"')) return [PLAN];
       if (has(statement, 'with recursive chain')) return [parent];
-      if (has(statement, 'from "nodes" where')) return [{ id: PARENT }];
       if (has(statement, 'insert into "organization_node_counts"')) return [{ nodes: 1 }];
       if (has(statement, 'insert into "nodes"')) return [{ id: NODE }];
       if (has(statement, 'order by "order_key" desc')) return [...last];
+      if (has(statement, 'from "nodes" where')) return [{ id: PARENT }];
       return [];
     };
   const insertOf = (statements: readonly Statement[]) =>
