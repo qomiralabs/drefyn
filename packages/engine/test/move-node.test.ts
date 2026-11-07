@@ -3,6 +3,7 @@ import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy
 import { describe, expect, it, vi } from 'vitest';
 import { createEngine, type EngineLogger } from '../src/index.ts';
 import { MAX_ORDER_KEY_CHARS } from '../src/order-key.ts';
+import { MAX_SUBTREE_ROWS, MAX_TREE_LEVELS, TREE_LOCK_WAIT_MS } from '../src/tree.ts';
 import { scriptedStore, type Responder, type Statement } from './support/scripted-store.ts';
 
 const tenant: TenantRef = {
@@ -19,15 +20,34 @@ const has = (statement: Statement, text: string) => statement.sql.includes(text)
 
 const PLAN = { plan_tier: 'self_hosted', organization_read_only: null, project_read_only: null };
 
+// What one walk answers. Never a list: the point is that no chain reaches Node.
+const climb = (levels: number, over: Partial<{ gone: boolean; holds: boolean }> = {}) => ({
+  levels,
+  gone: false,
+  holds: false,
+  ...over,
+});
+
 interface Tree {
-  readonly chain?: readonly Record<string, unknown>[];
+  readonly parent?: ReturnType<typeof climb>;
+  readonly node?: ReturnType<typeof climb>;
+  readonly below?: { readonly height: number; readonly rows: number };
   readonly anchor?: readonly Record<string, unknown>[];
   readonly next?: readonly Record<string, unknown>[];
 }
 
+const walkOf = (statement: Statement) => {
+  if (has(statement, 'with recursive chain')) {
+    return statement.parameters[2] === PARENT ? 'parent' : 'node';
+  }
+  return has(statement, 'with recursive below') ? 'below' : null;
+};
+
 const treeOf =
   ({
-    chain = [{ id: PARENT, deleted_at: null }],
+    parent = climb(1),
+    node = climb(1),
+    below = { height: 1, rows: 1 },
     anchor = [{ id: ANCHOR, order_key: 'a0' }],
     next = [{ id: NEXT, order_key: 'a2' }],
   }: Tree = {}): Responder =>
@@ -37,7 +57,10 @@ const treeOf =
       return [{ id: NODE, family: 'docs_page', type_id: TYPE, head_version_id: null }];
     }
     if (has(statement, '"organizations"')) return [PLAN];
-    if (has(statement, 'with recursive')) return [...chain];
+    const walk = walkOf(statement);
+    if (walk === 'parent') return [parent];
+    if (walk === 'node') return [node];
+    if (walk === 'below') return [below];
     if (has(statement, 'update')) return [];
     return has(statement, 'order by') ? [...next] : [...anchor];
   };
@@ -136,16 +159,8 @@ describe('moveNode', () => {
   });
 
   it.each([
-    ['the node itself as parent', { chain: [{ id: NODE, deleted_at: null }] }],
-    [
-      'a descendant as parent',
-      {
-        chain: [
-          { id: PARENT, deleted_at: null },
-          { id: NODE, deleted_at: null },
-        ],
-      },
-    ],
+    ['the node itself as parent', { parent: climb(1, { holds: true }) }],
+    ['a descendant as parent', { parent: climb(2, { holds: true }) }],
   ])('refuses %s and writes nothing', async (_name, tree) => {
     const { engine, statements, ends } = build(treeOf(tree));
     expect(await engine.moveNode(move)).toMatchObject({
@@ -160,17 +175,9 @@ describe('moveNode', () => {
   });
 
   it.each([
-    ['a parent that is gone', { chain: [] }],
-    ['a deleted parent', { chain: [{ id: PARENT, deleted_at: new Date(0) }] }],
-    [
-      'a deleted ancestor',
-      {
-        chain: [
-          { id: PARENT, deleted_at: null },
-          { id: ANCHOR, deleted_at: new Date(0) },
-        ],
-      },
-    ],
+    ['a parent that is gone', { parent: climb(0) }],
+    ['a deleted parent', { parent: climb(1, { gone: true }) }],
+    ['a deleted ancestor', { parent: climb(2, { gone: true }) }],
     ['an anchor that is not a child of the parent', { anchor: [] }],
   ])('answers not found for %s, with nothing naming which id', async (_name, tree) => {
     const { engine, ends } = build(treeOf(tree));
@@ -179,6 +186,106 @@ describe('moveNode', () => {
       error: { code: 'engine.not_found', retryable: false, issues: [] },
     });
     expect(ends).toEqual(['rollback']);
+  });
+
+  describe('depth', () => {
+    const tooDeep = {
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'parentId', code: 'engine.tree_too_deep' }],
+      },
+    };
+    const wrote = (statements: readonly Statement[]) =>
+      statements.some((statement) => has(statement, 'update "nodes"'));
+
+    it('refuses a parent with no level left under it', async () => {
+      const { engine, statements, ends } = build(
+        treeOf({ parent: climb(MAX_TREE_LEVELS), node: climb(1) }),
+      );
+      expect(await engine.moveNode(move)).toMatchObject(tooDeep);
+      expect(wrote(statements)).toBe(false);
+      expect(ends).toEqual(['rollback']);
+    });
+
+    it('counts the levels of the moved subtree', async () => {
+      const fits = build(treeOf({ parent: climb(60), below: { height: 4, rows: 9 } }));
+      expect(await fits.engine.moveNode(move)).toMatchObject({ ok: true });
+
+      const over = build(treeOf({ parent: climb(60), below: { height: 5, rows: 9 } }));
+      expect(await over.engine.moveNode(move)).toMatchObject(tooDeep);
+      expect(wrote(over.statements)).toBe(false);
+    });
+
+    it('stops reading a subtree one level past the room it has, and at a row budget', async () => {
+      const { engine, statements } = build(treeOf({ parent: climb(60) }));
+      await engine.moveNode(move);
+      const walk = statements.find((statement) => walkOf(statement) === 'below');
+      expect(walk?.parameters).toEqual(expect.arrayContaining([4, MAX_SUBTREE_ROWS]));
+    });
+
+    it('stops a climb one level past the cap, so a deep chain costs what a legal one does', async () => {
+      const { engine, statements } = build(treeOf());
+      await engine.moveNode(move);
+      const walks = statements.filter((statement) => has(statement, 'with recursive chain'));
+      expect(walks.length).toBeGreaterThan(0);
+      for (const walk of walks) expect(walk.parameters).toContain(MAX_TREE_LEVELS);
+    });
+
+    it('refuses a subtree too large to measure rather than guess', async () => {
+      const { engine, statements } = build(
+        treeOf({ parent: climb(3), below: { height: 2, rows: MAX_SUBTREE_ROWS } }),
+      );
+      expect(await engine.moveNode(move)).toMatchObject({
+        ok: false,
+        error: {
+          code: 'engine.too_large',
+          issues: [{ path: 'nodeId', code: 'engine.too_large' }],
+        },
+      });
+      expect(wrote(statements)).toBe(false);
+    });
+
+    it.each([
+      ['to the same level', { parent: climb(4), node: climb(5) }],
+      ['to a shallower level', { parent: climb(2), node: climb(5) }],
+      ['up to an ancestor', { parent: climb(9), node: climb(9, { holds: true }) }],
+    ])('does not read the subtree for a move %s', async (_name, tree) => {
+      const { engine, statements } = build(treeOf(tree));
+      expect(await engine.moveNode(move)).toMatchObject({ ok: true });
+      expect(statements.some((statement) => walkOf(statement) === 'below')).toBe(false);
+    });
+
+    it('lets a node already past the cap reorder under its own parent', async () => {
+      const deep = MAX_TREE_LEVELS + 1;
+      const { engine } = build(treeOf({ parent: climb(deep), node: climb(deep, { holds: true }) }));
+      expect(await engine.moveNode(move)).toMatchObject({ ok: true });
+    });
+
+    it('checks nothing for a move to the root, the way out of a tree that is too deep', async () => {
+      const { engine, statements } = build(treeOf({ anchor: [], next: [] }));
+      expect(await engine.moveNode({ ...move, parentId: null, afterId: null })).toMatchObject({
+        ok: true,
+      });
+      expect(statements.some((statement) => walkOf(statement) !== null)).toBe(false);
+    });
+  });
+
+  describe('the queue', () => {
+    it('sets a lock wait of its own before it takes the lock', async () => {
+      const { engine, statements } = build(treeOf());
+      await engine.moveNode(move);
+      const limit = statements.findIndex((statement) =>
+        has(statement, `set local lock_timeout = ${String(TREE_LOCK_WAIT_MS)}`),
+      );
+      const lock = statements.findIndex((statement) => has(statement, 'pg_advisory_xact_lock'));
+      expect(limit).toBeGreaterThanOrEqual(0);
+      expect(limit).toBeLessThan(lock);
+    });
+
+    it('waits well under the two seconds a pooled connection may be waited for', () => {
+      expect(TREE_LOCK_WAIT_MS).toBeLessThanOrEqual(1000);
+    });
   });
 
   it('refuses a read only project', async () => {
@@ -257,10 +364,12 @@ describe('moveNode', () => {
 describe('createNode with no key', () => {
   const create = { tenant, family: 'docs_page', typeId: TYPE } as const;
   const respond =
-    (last: readonly Record<string, unknown>[]): Responder =>
+    (last: readonly Record<string, unknown>[], parent = climb(1)): Responder =>
     (statement) => {
       if (has(statement, '"content_types"')) return [{ family: 'docs_page' }];
       if (has(statement, '"organizations"')) return [PLAN];
+      if (has(statement, 'with recursive chain')) return [parent];
+      if (has(statement, 'from "nodes" where')) return [{ id: PARENT }];
       if (has(statement, 'insert into "organization_node_counts"')) return [{ nodes: 1 }];
       if (has(statement, 'insert into "nodes"')) return [{ id: NODE }];
       if (has(statement, 'order by "order_key" desc')) return [...last];
@@ -290,6 +399,38 @@ describe('createNode with no key', () => {
     expect(await engine.createNode({ ...create, orderKey: 'a7' })).toMatchObject({ ok: true });
     expect(insertOf(statements)?.parameters).toContain('a7');
     expect(statements.some((statement) => has(statement, 'pg_advisory_xact_lock'))).toBe(false);
+  });
+
+  it.each([
+    ['no key', {}],
+    ['a key the caller chose', { orderKey: 'a7' }],
+  ])('checks a parent under the lock with %s', async (_name, keyed) => {
+    const { engine, statements } = build(respond([]));
+    expect(await engine.createNode({ ...create, ...keyed, parentId: PARENT })).toMatchObject({
+      ok: true,
+    });
+    const lock = statements.findIndex((statement) => has(statement, 'pg_advisory_xact_lock'));
+    const walk = statements.findIndex((statement) => has(statement, 'with recursive chain'));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(lock).toBeLessThan(walk);
+  });
+
+  it('takes the last level and refuses the one after it', async () => {
+    const fits = build(respond([], climb(MAX_TREE_LEVELS - 1)));
+    expect(await fits.engine.createNode({ ...create, parentId: PARENT })).toMatchObject({
+      ok: true,
+    });
+
+    const over = build(respond([], climb(MAX_TREE_LEVELS)));
+    expect(await over.engine.createNode({ ...create, parentId: PARENT })).toMatchObject({
+      ok: false,
+      error: {
+        code: 'engine.validation_failed',
+        issues: [{ path: 'parentId', code: 'engine.tree_too_deep' }],
+      },
+    });
+    expect(insertOf(over.statements)).toBeUndefined();
+    expect(over.ends).toEqual(['rollback']);
   });
 
   it.each(['a', 'a00', '!', `a${'1'.repeat(64)}`])('refuses %j as a key', async (orderKey) => {

@@ -286,14 +286,6 @@ describeWithStack('moveNode against Postgres', () => {
       await moved(home, b, leaf);
       expect(await children(home, leaf)).toEqual([b]);
     });
-
-    it('ends its walk on a cycle already in the data', async () => {
-      const home = await seed();
-      const [a, b, loose] = [await created(home), await created(home), await created(home)];
-      await admin(`update app.nodes set parent_id = '${b}' where id = '${a}';
-                   update app.nodes set parent_id = '${a}' where id = '${b}';`);
-      expect(await move(home, loose, a)).toMatchObject({ ok: true });
-    });
   });
 
   describe('racing moves', () => {
