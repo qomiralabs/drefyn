@@ -3,7 +3,8 @@
 // store wrapper keeps each crowd list's connection open, so the crowd never makes progress. The
 // quiet tenant then reads, lists and saves. Needs a stack:
 //   COMPOSE_PROJECT_NAME=<stack> node bench/pool.ts
-// A comparison and not a budget, so any server will do. Exits 1 if the quiet tenant saw a failure.
+// A comparison and not a budget, so any server will do. Exits 1 if the quiet tenant had a read or
+// a list fail. Its saves are reported only: when every place is stalled a write has to be refused.
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import { closeDatabase, createDatabase, parseDatabaseConfig, type Database } from '@drefyn/db';
@@ -373,7 +374,7 @@ const write = (line: object) => {
 };
 
 const failedIn = (result: Awaited<ReturnType<typeof measure>>) =>
-  result.reads.failed + result.lists.failed + result.saves.failed;
+  result.reads.failed + result.lists.failed;
 
 const report = z.string().parse(process.env['DREFYN_BENCH_LABEL'] ?? 'run');
 

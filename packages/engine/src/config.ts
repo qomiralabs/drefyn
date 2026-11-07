@@ -48,7 +48,7 @@ const QUERY_TIMEOUT_CEILING_MS = 60_000;
 const QUERY_MAX_IN_FLIGHT = 4;
 const QUERY_IN_FLIGHT_CEILING = 256;
 // Leaves two connections of the default pool for reads, and takes more than three organizations
-// to fill, so a fourth still gets in.
+// to fill, so a fourth still gets in. Writes stop at three quarters of it.
 const POOL_CEILING = 8;
 const POOL_CEILING_MAX = 1024;
 // One organization alone reaches half of this: the 32 a project could queue before.

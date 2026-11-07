@@ -79,7 +79,9 @@ many projects are busy. The rest of the pool is for what the gate does not cover
 The ceiling is shared, not split. An organization may take one more place while it holds less than
 what is still free, so one alone reaches half the ceiling, several share what they leave, and one
 with nothing running gets in while any place is free. At the default of 8, three organizations
-taking all they can stop at 7, and a fourth is answered.
+taking all they can stop at 7, and a fourth is answered. Writes stop at three quarters of the
+ceiling, as a stalled write holds its place for seconds, so stalls cannot shut lists out. That is
+6 writes and an organization's 3 at the default, and lists can use the rest.
 
 A write with no place waits off the pool, for at most 1 s, in a queue of `DREFYN_ENGINE_POOL_QUEUE`
 for the process, shared the same way. Then it gets `engine.unavailable` with nothing written, and

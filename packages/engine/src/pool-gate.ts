@@ -8,6 +8,9 @@ const TREE_SLOTS = 2;
 // A place costs no connection, so this only has to outlast a burst. Same as the tree lock wait,
 // which is the longest a writer ahead should take to fail.
 const QUEUE_WAIT_MS = 1000;
+// A stalled write holds its place for seconds and a list for milliseconds, so without this a few
+// stalls would refuse every list in the process. One part in this many is for lists alone.
+const LIST_ONLY_PARTS = 4;
 
 export interface PoolGateLimits {
   readonly ceiling: number;
@@ -98,11 +101,12 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
   const queued = tally();
   const lanes = tally();
   const lists = inFlightLimit(limits.listsPerOrganization);
+  const writeCeiling = limits.ceiling - Math.floor(limits.ceiling / LIST_ONLY_PARTS);
   // A set keeps arrival order and lets a waiter that gave up leave from the middle.
   const waiting = new Set<Waiter>();
 
   const hasRoom = ({ organization, lane }: Seat) =>
-    hasShare(running, organization, limits.ceiling) &&
+    hasShare(running, organization, writeCeiling) &&
     (lane === null || lanes.of(lane) < limits.treeSlots);
 
   const sit = ({ organization, lane }: Seat) => {
@@ -172,7 +176,7 @@ export function createPoolGate(limits: PoolGateLimits): PoolGate {
       ),
     enterList(tenant) {
       const seat = { organization: tenant.organizationId, lane: null };
-      if (!hasRoom(seat)) return null;
+      if (!hasShare(running, seat.organization, limits.ceiling)) return null;
       const leave = lists.enter(seat.organization);
       if (leave === null) return null;
       sit(seat);
