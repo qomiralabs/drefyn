@@ -5,6 +5,7 @@ import { isValidElement, type ReactElement } from 'react';
 import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 import { z } from 'zod';
 import { HARD_FIRST_RESPONSE_BYTES } from './config.ts';
+import { contentSecurityPolicy, inlineHash, inlineText, type Policy } from './csp.ts';
 import { pruneCss } from './prune-css.ts';
 import { themeCss, themeSchema } from './theme.ts';
 import type {
@@ -31,6 +32,8 @@ const GZIP = { level: 9 } as const;
 const gzipBytes = (text: string) => gzipSync(text, GZIP).length;
 
 const THEME_SCRIPT_GZIP_BYTES = gzipBytes(themeScript);
+const THEME_SCRIPT = inlineText(themeScript);
+const THEME_SCRIPT_HASH = inlineHash(THEME_SCRIPT);
 
 // renderToStaticMarkup answers a suspended boundary with its fallback and no sign of it, and a
 // static page has no client to finish the job. renderToString marks the same boundary, and
@@ -118,17 +121,20 @@ function pageHtml(
   page: PageContent,
   body: string,
   css: string,
+  policy: Policy,
 ): string {
   const scripts = input.data.scripts.map(
     (script) => `<script defer src="${escapeHtml(script.href)}"></script>`,
   );
   return [
     `<!doctype html><html lang="${escapeHtml(input.locale)}"><head><meta charset="utf-8">`,
+    // First after the charset, so it guards every element the page carries.
+    `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(policy.meta)}">`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     `<title>${escapeHtml(page.title)}</title>`,
     `<meta name="description" content="${escapeHtml(page.description)}">`,
     `<meta name="dr-built-at" content="${escapeHtml(input.data.builtAt)}">`,
-    `<style>${css}</style><script>${themeScript}</script></head>`,
+    `<style>${css}</style><script>${THEME_SCRIPT}</script></head>`,
     `<body>${body}${scripts.join('')}</body></html>`,
   ].join('');
 }
@@ -214,7 +220,12 @@ function renderPage(
     });
   }
 
-  const html = pageHtml(input, content, body, css);
+  const style = inlineText(css);
+  const policy = contentSecurityPolicy({
+    scripts: [THEME_SCRIPT_HASH],
+    styles: [inlineHash(style)],
+  });
+  const html = pageHtml(input, content, body, style, policy);
   const htmlGzipBytes = gzipBytes(html);
   const gated = surface === 'status';
   if (gated && htmlGzipBytes >= HARD_FIRST_RESPONSE_BYTES) {
@@ -233,7 +244,12 @@ function renderPage(
   const assets: AssetRef[] = [...fonts, ...input.data.scripts];
   return {
     ok: true,
-    value: { html, assets, report: { htmlGzipBytes, jsGzipBytes, overFirstResponseTarget } },
+    value: {
+      html,
+      csp: policy.header,
+      assets,
+      report: { htmlGzipBytes, jsGzipBytes, overFirstResponseTarget },
+    },
   };
 }
 
