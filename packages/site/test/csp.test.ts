@@ -20,10 +20,17 @@ const directives = (policy: string): Map<string, string[]> =>
       .map(([name = '', ...values]) => [name, values]),
   );
 
+// Any case and any attributes, so an inline element the render grew later cannot hide from
+// the count. A script with a src is not inline.
+const elements = (html: string, tag: string) =>
+  [...html.matchAll(new RegExp(`<${tag}\\b([^>]*)>([\\s\\S]*?)<\\/${tag}\\b[^>]*>`, 'gi'))].map(
+    (m) => ({ attributes: m[1] ?? '', text: m[2] ?? '' }),
+  );
 const inlineScripts = (html: string) =>
-  [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
-const inlineStyles = (html: string) =>
-  [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1] ?? '');
+  elements(html, 'script')
+    .filter((element) => !/\bsrc\s*=/i.test(element.attributes))
+    .map((element) => element.text);
+const inlineStyles = (html: string) => elements(html, 'style').map((element) => element.text);
 const metaPolicy = (html: string) =>
   /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/
     .exec(html)?.[1]
