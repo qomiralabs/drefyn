@@ -87,11 +87,11 @@ async function compileOnly(): Promise<void> {
     // @ts-expect-error sessions are written after sign in, never by the sign in role
     await tx.selectFrom('sessions').selectAll().execute();
     // @ts-expect-error the sign in role reads no sealed secret
-    await tx.selectFrom('totp_credentials').selectAll().execute();
+    tx.selectFrom('totp_credentials');
     // @ts-expect-error nor a recovery hash
-    await tx.selectFrom('recovery_codes').selectAll().execute();
+    tx.selectFrom('recovery_codes');
     // @ts-expect-error nor a half finished sign in
-    await tx.selectFrom('factor_challenges').selectAll().execute();
+    tx.selectFrom('factor_challenges');
     // @ts-expect-error the API limiter belongs to the API service
     await tx.selectFrom('api_key_failures').selectAll().execute();
   });

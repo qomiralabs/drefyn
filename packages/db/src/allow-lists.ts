@@ -498,7 +498,10 @@ export const COLUMN_GRANT_TABLES: readonly AllowEntry[] = [
     name: 'app.totp_credentials',
     reason: 'holds sealed secrets; only the columns a verify or enrolment moves are updatable',
   },
-  { name: 'app.recovery_codes', reason: 'holds code hashes; a code is only ever spent' },
+  {
+    name: 'app.recovery_codes',
+    reason: 'holds code hashes; a code is only ever spent',
+  },
   {
     name: 'app.factor_challenges',
     reason: 'only the attempt count moves; a new challenge is a delete then an insert',
