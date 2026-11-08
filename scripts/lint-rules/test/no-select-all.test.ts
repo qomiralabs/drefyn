@@ -122,7 +122,16 @@ describe('no-select-all', () => {
     )) as { rules?: Record<string, unknown> };
     expect(config.rules?.[RULE]).toEqual([
       2,
-      { tables: ['users', 'password_credentials', 'known_devices'] },
+      {
+        tables: [
+          'users',
+          'password_credentials',
+          'known_devices',
+          'totp_credentials',
+          'recovery_codes',
+          'factor_challenges',
+        ],
+      },
     ]);
   });
 });
