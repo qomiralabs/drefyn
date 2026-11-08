@@ -162,6 +162,26 @@ describe('resolve', () => {
       code: 'AUTH_UNAVAILABLE',
     });
   });
+
+  // The second factor will write these. An image that cannot read them would throw on every
+  // request from a person who stepped up with one, so reading lands first.
+  it.each(['totp', 'recovery_code'] as const)(
+    'reads back a session that stepped up with %s',
+    async (stepUp) => {
+      const row = () => sessionResponder([sessionRow({ step_up_method: stepUp })]);
+      const info = await setup(row()).sessions.resolveSession(tokenFor());
+      expect(info?.stepUpMethod).toBe(stepUp);
+      const resolved = await setup(row()).sessions.resolve(tokenFor());
+      expect(resolved).not.toBeNull();
+    },
+  );
+
+  it('refuses a stored step up method it does not know', async () => {
+    const { sessions } = setup(sessionResponder([sessionRow({ step_up_method: 'sms' })]));
+    await expect(sessions.resolveSession(tokenFor())).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
+  });
 });
 
 describe('touchSession', () => {
