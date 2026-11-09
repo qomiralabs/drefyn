@@ -8,7 +8,7 @@ import {
   type RouteReport,
   type ScriptSize,
 } from '../src/bundle/budget.ts';
-import { OPEN_ORIGIN, ROUTES } from './fixtures.ts';
+import { COMMAND_BAR_MARK, OPEN_ORIGIN, ROUTES } from './fixtures.ts';
 import { MAYA, SIGNED_OUT, stateFile, ZARA } from './people.ts';
 import { test } from './test.ts';
 
@@ -43,6 +43,44 @@ async function coldLoad(
   return scripts;
 }
 
+// The scripts of a cold load that carry the command bar's own text, by URL.
+async function commandBarScripts(
+  browser: Browser,
+  path: string,
+  storageState: NonNullable<BrowserContextOptions['storageState']>,
+): Promise<string[]> {
+  const context = await browser.newContext({ storageState });
+  const page = await context.newPage();
+  const pending: Promise<string | null>[] = [];
+  page.on('response', (res) => {
+    if (res.request().resourceType() !== 'script') return;
+    pending.push(
+      res
+        .text()
+        .then((body) => (body.includes(COMMAND_BAR_MARK) ? res.url() : null))
+        .catch(() => null),
+    );
+  });
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  const found = (await Promise.all(pending)).filter((url): url is string => url !== null);
+  await context.close();
+  return found;
+}
+
+const SHELL_ROUTES = [
+  ROUTES.overview,
+  ROUTES.project,
+  ROUTES.empty,
+  ROUTES.success,
+  ROUTES.error,
+  '/acme/settings/members',
+  '/acme/settings/api-keys',
+  '/account',
+  '/account/sign-in',
+  '/account/sessions',
+] as const;
+
 const kb = (bytes: number) => `${(bytes / KB).toFixed(1)} KB`;
 
 test.describe.configure({ mode: 'serial' });
@@ -51,18 +89,7 @@ test('every shell route stays under 150 KB beyond the framework baseline', async
   const baseline = await coldLoad(browser, BASELINE_ROUTE, SIGNED_OUT);
   expect(baseline.length, 'the baseline route loads the framework').toBeGreaterThan(0);
   const reports: RouteReport[] = [];
-  for (const path of [
-    ROUTES.overview,
-    ROUTES.project,
-    ROUTES.empty,
-    ROUTES.success,
-    ROUTES.error,
-    '/acme/settings/members',
-    '/acme/settings/api-keys',
-    '/account',
-    '/account/sign-in',
-    '/account/sessions',
-  ]) {
+  for (const path of SHELL_ROUTES) {
     reports.push(routeReport(path, await coldLoad(browser, path, stateFile(MAYA)), baseline));
   }
   console.log(
@@ -76,6 +103,17 @@ test('every shell route stays under 150 KB beyond the framework baseline', async
   // The shell itself is real code, so a route that adds nothing means the count is broken.
   for (const r of reports) expect(r.beyondBaselineBytes, r.route).toBeGreaterThan(0);
   expect(reports.filter((r) => r.overBudget).map((r) => r.route)).toEqual([]);
+});
+
+// Its frame opens on the first press, so only the results code may wait for that press.
+test("the command bar results are in no route's initial load", async ({ browser }) => {
+  const found: string[] = [];
+  for (const path of SHELL_ROUTES) {
+    found.push(
+      ...(await commandBarScripts(browser, path, stateFile(MAYA))).map((u) => `${path}: ${u}`),
+    );
+  }
+  expect(found).toEqual([]);
 });
 
 test('the framework baseline has not grown more than 5 percent', async ({ browser }) => {

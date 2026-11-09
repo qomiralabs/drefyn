@@ -1,5 +1,5 @@
-import { expect } from '@playwright/test';
-import { MOBILE, openShell, ROUTES } from './fixtures.ts';
+import { expect, type Page } from '@playwright/test';
+import { inbox, MOBILE, openShell, ROUTES, routeCommandBar } from './fixtures.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
@@ -49,6 +49,41 @@ test('the command bar opens without travel under reduced motion', async ({ page 
       }).length,
   );
   expect(moving).toBe(0);
+});
+
+const travelling = (page: Page) =>
+  page.evaluate(
+    () =>
+      document.getAnimations().filter((a) => {
+        const effect = a.effect as KeyframeEffect | null;
+        return (effect?.getKeyframes() ?? []).some((k) => 'transform' in k || 'translate' in k);
+      }).length,
+  );
+
+test('the inbox fades in place under reduced motion', async ({ page }) => {
+  await openShell(page, ROUTES.success);
+  await page.getByRole('button', { name: /^Inbox/ }).click();
+  await expect(inbox(page)).toBeVisible();
+  expect(await travelling(page)).toBe(0);
+  const timing = await inbox(page).evaluate((el) => getComputedStyle(el).animationDuration);
+  for (const value of seconds(timing)) expect(value).toBeLessThanOrEqual(0.12);
+});
+
+test('the command bar frame opens without travel while its code loads', async ({ page }) => {
+  const chunk = await routeCommandBar(page, 'hold');
+  await openShell(page, ROUTES.overview);
+  await page.keyboard.press('ControlOrMeta+k');
+  const bar = page.getByRole('dialog', { name: 'Search or run a command' });
+  await expect(bar.locator('[data-pending-rows] > span').first()).toBeVisible();
+  expect(await travelling(page)).toBe(0);
+  chunk.release();
+});
+
+test('the shortcuts sheet opens without travel under reduced motion', async ({ page }) => {
+  await openShell(page, ROUTES.overview);
+  await page.keyboard.press('?');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+  expect(await travelling(page)).toBe(0);
 });
 
 test('a settings dialog opens without travel under reduced motion', async ({ page }) => {

@@ -2,12 +2,23 @@
 import { IconCross, IconPage, IconPulse, IconSchema, useLandmark } from '@drefyn/ui/react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
+import { useIncident } from '../incident/provider.tsx';
 import { projectKey, seatMeta, type ShellData } from './data.ts';
 import { useShell } from './frame.tsx';
 import { PRODUCTS, type ProductId } from './products.ts';
 import { ProductsNav } from './products-nav.tsx';
 import { parseShellPath, sectionHref, shellHref } from './route.ts';
+import type { RailTipProps } from './rail-tip.tsx';
 import { ICON_BY_NAME } from './section-icons.ts';
 import { ACCOUNT_SECTIONS, ORG_SECTIONS, SECTIONS, type SectionIcon } from './sections.ts';
 import { OrganizationMenu } from './top-bar.tsx';
@@ -40,6 +51,40 @@ const onPhoneChange = (onChange: () => void) => {
 };
 const onPhone = () => window.matchMedia(PHONE).matches;
 
+// The rail's tooltips load only once a rail is on screen, at tablet widths or in incident
+// mode, so wide and phone screens never pay for them. Until then, and if the load fails, the
+// labels are still the links' names.
+const TABLET = '(40rem <= width < 64rem)';
+const onTabletChange = (onChange: () => void) => {
+  const query = window.matchMedia(TABLET);
+  query.addEventListener('change', onChange);
+  return () => {
+    query.removeEventListener('change', onChange);
+  };
+};
+const onTablet = () => window.matchMedia(TABLET).matches;
+
+type Tip = ComponentType<RailTipProps>;
+const TipContext = createContext<Tip | null>(null);
+
+function useRailTip(rail: boolean): Tip | null {
+  const [tip, setTip] = useState<Tip | null>(null);
+  useEffect(() => {
+    if (!rail || tip !== null) return;
+    import('./rail-tip.tsx')
+      .then((mod) => {
+        setTip(() => mod.RailTip);
+      })
+      .catch(() => undefined);
+  }, [rail, tip]);
+  return tip;
+}
+
+function RailTip(props: RailTipProps): ReactNode {
+  const Loaded = useContext(TipContext);
+  return Loaded === null ? props.children : <Loaded {...props} />;
+}
+
 interface Item {
   readonly href: string;
   readonly label: string;
@@ -49,30 +94,35 @@ interface Item {
 
 function NavLink({ item, current }: { item: Item; current: boolean }): ReactNode {
   const Icon = ICONS[item.icon];
+  const label = useRef<HTMLSpanElement>(null);
   return (
-    <Link
-      href={item.href}
-      aria-current={current ? 'page' : undefined}
-      className={[
-        'flex min-h-row-compact items-center gap-8 rounded-e-sm border-s-indicator px-8 transition-colors duration-fast ease-enter focus-visible:focus-ring-inset sm:max-md:justify-center sm:max-md:px-0',
-        current
-          ? 'border-accent-ink font-medium text-ink'
-          : 'border-transparent text-body hover:bg-hover hover:text-ink',
-      ].join(' ')}
-    >
-      <span className={current ? 'inline-flex shrink-0' : 'inline-flex shrink-0 text-secondary'}>
-        <Icon />
-      </span>
-      <span className={`min-w-0 flex-1 truncate ${RAIL_HIDDEN}`}>{item.label}</span>
-      {item.meta === undefined ? null : (
-        <>
-          {' '}
-          <span data-numeric="" className={`font-regular text-secondary ${RAIL_HIDDEN}`}>
-            {item.meta}
-          </span>
-        </>
-      )}
-    </Link>
+    <RailTip label={label} text={item.label}>
+      <Link
+        href={item.href}
+        aria-current={current ? 'page' : undefined}
+        className={[
+          'flex min-h-row-compact items-center gap-8 rounded-e-sm border-s-indicator px-8 transition-colors duration-fast ease-enter focus-visible:focus-ring-inset sm:max-md:justify-center sm:max-md:px-0',
+          current
+            ? 'border-accent-ink font-medium text-ink'
+            : 'border-transparent text-body hover:bg-hover hover:text-ink',
+        ].join(' ')}
+      >
+        <span className={current ? 'inline-flex shrink-0' : 'inline-flex shrink-0 text-secondary'}>
+          <Icon />
+        </span>
+        <span ref={label} className={`min-w-0 flex-1 truncate ${RAIL_HIDDEN}`}>
+          {item.label}
+        </span>
+        {item.meta === undefined ? null : (
+          <>
+            {' '}
+            <span data-numeric="" className={`font-regular text-secondary ${RAIL_HIDDEN}`}>
+              {item.meta}
+            </span>
+          </>
+        )}
+      </Link>
+    </RailTip>
   );
 }
 
@@ -82,6 +132,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const { org, drawerOpen, setDrawerOpen } = useShell();
   const closeRef = useRef<HTMLButtonElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const projectLabel = useRef<HTMLSpanElement>(null);
   const project =
     here?.product === undefined || here.project === undefined
       ? undefined
@@ -114,6 +165,9 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const label = project?.name ?? data.organization.name;
   // A closed drawer is display none, which cannot take focus, so F6 passes it by.
   const phone = useSyncExternalStore(onPhoneChange, onPhone, () => false);
+  const tablet = useSyncExternalStore(onTabletChange, onTablet, () => false);
+  const cockpit = useIncident().view === 'cockpit';
+  const tip = useRailTip(tablet || cockpit);
   const landmark = useLandmark(navRef, {
     role: 'navigation',
     label,
@@ -152,7 +206,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   }, [pathname, setDrawerOpen]);
 
   return (
-    <>
+    <TipContext value={tip}>
       {drawerOpen ? (
         <div
           aria-hidden="true"
@@ -198,19 +252,21 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
 
           {/* A plain link to the product's project list until the switcher popover exists. */}
           {project === undefined || product === undefined ? null : (
-            <Link
-              href={`/${org}/${product}`}
-              className="flex items-center gap-8 rounded-sm px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:px-0"
-            >
-              <span className="inline-flex text-secondary">{PRODUCT_ICON[product]({})}</span>
-              <span className={`flex min-w-0 flex-1 flex-col ${RAIL_HIDDEN}`}>
-                <span className="truncate font-medium text-ink">{project.name}</span>
-                <span className="text-caption text-secondary">
-                  {productLabel} project
-                  <span className="sr-only">, all {productLabel} projects</span>
+            <RailTip label={projectLabel} text={project.name}>
+              <Link
+                href={`/${org}/${product}`}
+                className="flex items-center gap-8 rounded-sm px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:px-0"
+              >
+                <span className="inline-flex text-secondary">{PRODUCT_ICON[product]({})}</span>
+                <span ref={projectLabel} className={`flex min-w-0 flex-1 flex-col ${RAIL_HIDDEN}`}>
+                  <span className="truncate font-medium text-ink">{project.name}</span>
+                  <span className="text-caption text-secondary">
+                    {productLabel} project
+                    <span className="sr-only">, all {productLabel} projects</span>
+                  </span>
                 </span>
-              </span>
-            </Link>
+              </Link>
+            </RailTip>
           )}
 
           {SETTINGS_PATH.test(pathname) ? (
@@ -270,6 +326,6 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
           )}
         </nav>
       </div>
-    </>
+    </TipContext>
   );
 }

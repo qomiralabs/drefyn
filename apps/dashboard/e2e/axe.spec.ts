@@ -1,7 +1,17 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { expect } from '@playwright/test';
 import { authStatePaths, SELF_HOSTED } from './auth-states.ts';
-import { MOBILE, ROUTES, settingsStatePaths, TABLET, THEMES, useTheme } from './fixtures.ts';
+import {
+  inbox,
+  MOBILE,
+  ROUTES,
+  routeCommandBar,
+  settingsStatePaths,
+  shortcutsSheet,
+  TABLET,
+  THEMES,
+  useTheme,
+} from './fixtures.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
@@ -46,6 +56,68 @@ for (const theme of THEMES) {
     await page.goto(ROUTES.project);
     await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
     await page.getByRole('button', { name: 'Open navigation' }).click();
+    const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+    expect(violations.map((v) => v.id)).toEqual([]);
+  });
+}
+
+// The shell's own overlays, open, in both themes on a wide screen and a phone; the rail's
+// tooltip at tablet width, where the rail is.
+for (const theme of THEMES) {
+  for (const [width, viewport] of [
+    ['wide', { width: 1280, height: 800 }],
+    ['390', MOBILE],
+  ] as const) {
+    test(`the open inbox has no axe violations in ${theme} at ${width}`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await page.goto(ROUTES.success);
+      await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+      await page.getByRole('button', { name: /^Inbox/ }).click();
+      await expect(inbox(page)).toBeVisible();
+      // Measured once it has faded in, not halfway.
+      await inbox(page).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+      const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+      expect(violations.map((v) => v.id)).toEqual([]);
+    });
+
+    test(`the shortcuts sheet has no axe violations in ${theme} at ${width}`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await page.goto(ROUTES.overview);
+      await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+      await page.keyboard.press('?');
+      await expect(shortcutsSheet(page)).toBeVisible();
+      const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+      expect(violations.map((v) => v.id)).toEqual([]);
+    });
+
+    test(`the command bar frame, still loading, has no axe violations in ${theme} at ${width}`, async ({
+      page,
+    }) => {
+      const chunk = await routeCommandBar(page, 'hold');
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await page.goto(ROUTES.overview);
+      await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+      await page.keyboard.press('ControlOrMeta+k');
+      const bar = page.getByRole('dialog', { name: 'Search or run a command' });
+      await expect(bar.locator('[data-pending-rows] > span').first()).toBeVisible();
+      const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+      expect(violations.map((v) => v.id)).toEqual([]);
+      chunk.release();
+    });
+  }
+
+  test(`the rail with its tooltip open has no axe violations in ${theme}`, async ({ page }) => {
+    await page.setViewportSize(TABLET);
+    await useTheme(page, theme);
+    await page.goto(ROUTES.project);
+    await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+    await page.keyboard.press('F6');
+    await page.keyboard.press('F6');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[role="tooltip"]')).toBeVisible();
     const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
     expect(violations.map((v) => v.id)).toEqual([]);
   });

@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
 
 export const ON_PORT = 3100;
 export const OFF_PORT = 3101;
@@ -145,3 +145,43 @@ export async function focusedRegion(page: Page): Promise<string> {
     return 'none';
   });
 }
+
+// Text only the command bar's own chunk carries: its empty results line.
+export const COMMAND_BAR_MARK = 'Nothing matches';
+
+// Routes every script and treats the command bar's chunk by its content, not by timing: a
+// route set after the load would miss a copy fetched while the page settled. `hold` keeps it
+// until the returned function runs; `fail` aborts it every time.
+export async function routeCommandBar(
+  page: Page,
+  mode: 'hold' | 'fail',
+): Promise<{ release: () => void; requested: () => number }> {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let seen = 0;
+  const handle = async (route: Route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (!body.includes(COMMAND_BAR_MARK)) {
+      await route.fulfill({ response, body });
+      return;
+    }
+    seen += 1;
+    if (mode === 'fail') {
+      await route.abort('failed');
+      return;
+    }
+    await released;
+    await route.fulfill({ response, body });
+  };
+  // A test can end while a script is still in flight or the chunk is still held; its page is
+  // gone by then, and so is anything to answer.
+  await page.route('**/_next/static/**/*.js', (route) => handle(route).catch(() => undefined));
+  return { release, requested: () => seen };
+}
+
+export const inbox = (page: Page): Locator => page.getByRole('dialog', { name: 'Inbox' });
+export const shortcutsSheet = (page: Page): Locator =>
+  page.getByRole('dialog', { name: 'Keyboard shortcuts' });
