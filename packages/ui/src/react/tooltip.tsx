@@ -1,5 +1,6 @@
 'use client';
 import {
+  cloneElement,
   useEffect,
   useRef,
   useState,
@@ -17,6 +18,13 @@ export interface TooltipProps {
   children: ReactElement;
   placement?: 'top' | 'bottom' | 'start' | 'end';
   defaultOpen?: boolean;
+  // The text is already the trigger's name, kept out of sight, as on an icon rail. The
+  // tooltip is then for sighted people only: hidden from assistive tech, and it describes
+  // nothing, so the name is not read twice.
+  repeats?: boolean;
+  // Asked each time it would open; false keeps it shut, as when the name it repeats is on
+  // screen after all.
+  when?: () => boolean;
 }
 
 // Focusable is typed for a host element, but it only clones the child with its handlers and
@@ -38,11 +46,25 @@ function keyboardFocused(el: HTMLElement | null): boolean {
   }
 }
 
+// React Aria passes no aria-hidden through to the tooltip, so it is written on the element.
+const hideFromReaders = (el: HTMLElement | null) => {
+  el?.setAttribute('aria-hidden', 'true');
+};
+
+// The trigger's own props win over the ones React Aria lends it, and null renders no
+// attribute, so this keeps the tooltip from describing a trigger whose name it repeats.
+function undescribed(child: ReactElement): ReactElement {
+  const own = (child.props as { 'aria-describedby'?: string })['aria-describedby'];
+  return cloneElement(child, { 'aria-describedby': own ?? null } as Record<string, unknown>);
+}
+
 export function Tooltip({
   content,
   children,
   placement = 'top',
   defaultOpen = false,
+  repeats = false,
+  when,
 }: TooltipProps): ReactNode {
   if (content.trim() === '') throw new Error('Tooltip needs text to show.');
   const [open, setOpen] = useState(defaultOpen);
@@ -71,6 +93,7 @@ export function Tooltip({
   }, []);
 
   const onOpenChange = (next: boolean) => {
+    if (next && when !== undefined && !when()) return;
     setOpen(next);
     if (next || !scrolling.current || !keyboardFocused(trigger.current)) return;
     requestAnimationFrame(() => {
@@ -80,8 +103,11 @@ export function Tooltip({
 
   return (
     <TooltipTrigger delay={tokens.timer.tooltip.ms} isOpen={open} onOpenChange={onOpenChange}>
-      <Focusable ref={trigger}>{children as FocusableChild}</Focusable>
+      <Focusable ref={trigger}>
+        {(repeats ? undescribed(children) : children) as FocusableChild}
+      </Focusable>
       <AriaTooltip
+        {...(repeats ? { ref: hideFromReaders } : {})}
         placement={placement}
         offset={tokens.space[4]}
         className="z-overlay max-w-measure rounded-sm border border-rule-strong bg-overlay px-8 py-4 text-caption text-body shadow-1"
