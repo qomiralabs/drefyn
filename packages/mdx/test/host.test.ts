@@ -198,15 +198,19 @@ describe('the parse host', () => {
     TIMEOUT_MS,
   );
 
+  // The abort fixture dies by SIGKILL on macOS, where a SIGABRT process can sit in the crash
+  // reporter for a day with its sockets open. Linux still proves the real SIGABRT.
+  const abortSignal = process.platform === 'darwin' ? 'SIGKILL' : 'SIGABRT';
+
   it(
-    'leaves the caller serving with a retryable refusal when a thread aborts the host',
+    `leaves the caller serving with a retryable refusal when a thread aborts the host (${abortSignal} on ${process.platform})`,
     async () => {
       const { host, url } = start([fixtureHost, 'abort']);
       const client = createParseClient({ ...CLIENT, url: await url });
       await expect(client.parse(page('a'))).resolves.toMatchObject({
         error: [{ code: 'mdx.parse_unavailable' }],
       });
-      await expect(ended(host)).resolves.toBe('SIGABRT');
+      await expect(ended(host)).resolves.toBe(abortSignal);
       await expect(client.parse(page('a'))).resolves.toMatchObject({
         error: [{ code: 'mdx.parse_unavailable' }],
       });
