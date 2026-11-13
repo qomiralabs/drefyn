@@ -2,7 +2,12 @@ import { parentPort } from 'node:worker_threads';
 
 // A V8 fatal in a thread takes its whole process with SIGABRT. No page is known to reach one,
 // so this raises the same signal on the host. Not sealed, because the seal would refuse it.
+// macOS hands a SIGABRT process to its crash reporter, which can hold it half dead with its
+// sockets open for a day, so there the host dies by SIGKILL instead: just as abrupt, no
+// handler and no cleanup run, and the caller sees the same dropped connection.
+const signal = process.platform === 'darwin' ? 'SIGKILL' : 'SIGABRT';
+
 parentPort?.on('message', () => {
-  process.kill(process.pid, 'SIGABRT');
+  process.kill(process.pid, signal);
 });
 parentPort?.postMessage({ ready: true });
