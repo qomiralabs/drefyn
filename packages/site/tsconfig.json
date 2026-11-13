@@ -4,5 +4,5 @@
     "jsx": "react-jsx",
     "lib": ["es2024", "dom", "dom.iterable"]
   },
-  "include": ["src", "test", "bench", "vitest.config.ts"]
+  "include": ["src", "test", "bench", "e2e", "vitest.config.ts", "playwright.config.ts"]
 }

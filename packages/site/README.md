@@ -28,7 +28,7 @@ if (result.ok) upload(renderKey('status', input), result.value.html);
 ```
 
 - `renderDocsPage(input, deps?)` and `renderStatusPage(input, deps?)` return
-  `{ ok: true, value: { html, assets, report } }` or `{ ok: false, error }`. They never throw.
+  `{ ok: true, value: { html, csp, assets, report } }` or `{ ok: false, error }`. They never throw.
   The same input gives the same bytes. They read no clock, no random source and no environment,
   so the build time arrives in `data.builtAt`.
 - `pruneCss(html, css)` returns the CSS one page needs: rules whose classes appear in the page
@@ -43,6 +43,32 @@ if (result.ok) upload(renderKey('status', input), result.value.html);
   not among them.
 
 Interactive React components stay out of public pages. A component that suspends fails the page.
+
+## Content Security Policy
+
+Every page carries its own policy, and `csp` is the `Content-Security-Policy` header to serve
+with it. Static files cannot carry a fresh nonce per response, so the policy allows the one
+inline theme line and the page's inline stylesheet by SHA-256 hash, and plain scripts from the
+page's own origin. Nothing else runs or styles the page: no `unsafe-inline`, no `unsafe-eval`,
+no style attributes, no other host.
+
+```text
+default-src 'none';script-src 'self' 'sha256-<theme line>';style-src 'sha256-<this page's CSS>';
+img-src 'self' data:;font-src 'self';connect-src 'self';form-action 'self';base-uri 'none';
+object-src 'none';frame-ancestors 'none'
+```
+
+The page repeats the policy in a `<meta>` tag ahead of everything it guards, so a plain static
+host that sets no headers is still covered. Browsers ignore `frame-ancestors` there, so only the
+header stops framing. Serve the header wherever the host allows it.
+
+The inline CSS is written out with line endings and NUL characters already as the HTML parser
+leaves them, so the hash the browser computes matches ours. The same input gives the same hashes.
+
+`pnpm --filter @drefyn/site test:e2e` renders one page of each type and loads it in Chromium,
+Firefox and WebKit: the clean page must report no violation, a page with one byte changed in
+its theme line or stylesheet must report, and a page with injected scripts, handlers and styles
+must run none of them, by header, by meta tag and by both.
 
 ## Errors
 

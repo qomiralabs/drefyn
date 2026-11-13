@@ -62,6 +62,9 @@ export interface PageReport {
 
 export interface RenderedPage {
   readonly html: string;
+  // The Content-Security-Policy header to serve with this page. The page also carries it in a
+  // meta tag, less frame-ancestors, for hosts that set no headers.
+  readonly csp: string;
   readonly assets: readonly AssetRef[];
   readonly report: PageReport;
 }
