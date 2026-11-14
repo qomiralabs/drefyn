@@ -19,14 +19,31 @@ function addressDomain(domain: string): string | null {
   return result.ok ? result.value.slice(result.value.indexOf('@') + 1) : null;
 }
 
-const letter = fc.constantFrom(...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-const unicodeLetter = fc.constantFrom(...'äöüßéñçøåıİΣσςж中文日本한국');
-const label = fc
-  .array(fc.oneof({ weight: 8, arbitrary: letter }, { weight: 1, arbitrary: fc.constant('-') }), {
-    minLength: 1,
-    maxLength: 20,
-  })
-  .map((chars) => chars.join(''));
+const unicodeLetter = fc.constantFrom(
+  'ä',
+  'ö',
+  'ü',
+  'ß',
+  'é',
+  'ñ',
+  'ç',
+  'ø',
+  'å',
+  'ı',
+  'İ',
+  'Σ',
+  'σ',
+  'ς',
+  'ж',
+  '中',
+  '文',
+  '日',
+  '本',
+  '한',
+  '국',
+);
+const label = fc.stringMatching(/^[A-Za-z0-9-]{1,20}$/);
+const letter = fc.stringMatching(/^[A-Za-z0-9]$/);
 const idnLabel = fc
   .array(fc.oneof(letter, unicodeLetter), { minLength: 1, maxLength: 12 })
   .map((chars) => chars.join(''));
@@ -46,7 +63,13 @@ describe('normalizeSsoDomain', () => {
     fc.assert(
       fc.property(fc.oneof(domainish, noise), (input) => {
         const ours = normalizeSsoDomain(input);
-        const theirs = addressDomain(input);
+        // A line break is refused before trimming, as the address rule does.
+        if (/[\r\n]/.test(input)) {
+          expect(ours).toBeNull();
+          return;
+        }
+        // Around the domain itself: spaces and one trailing dot, the root, are not part of it.
+        const theirs = addressDomain(input.trim().replace(/\.$/, ''));
         if (ours === null) {
           // Refused here but kept there only when the TXT name would run past 253.
           if (theirs !== null) expect(theirs.length + TXT_PREFIX_LENGTH).toBeGreaterThan(253);

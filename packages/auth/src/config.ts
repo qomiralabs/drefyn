@@ -63,6 +63,11 @@ export interface AuthConfig {
   };
   // null when unset, which leaves libuv at its default of 4.
   readonly threadPoolSize: number | null;
+  readonly sso: {
+    readonly dnsTimeoutMs: number;
+    // Read at start with loadFreeMailDomains; null means the built in list alone.
+    readonly freeMailDomainsFile: string | null;
+  };
 }
 
 const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
@@ -81,6 +86,8 @@ const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
   password_fail_ip: '30/10m',
   // A link carries 256 random bits, so this only caps the work a flood of guesses costs.
   cli_link_verify: '20/15m',
+  // Each verify is a DNS query this server makes on the organization's behalf.
+  sso_domain_verify: '20/1h',
 };
 
 // Every reason is fixed text: a value may be a secret pasted into the wrong key.
@@ -390,6 +397,15 @@ export function parseAuthConfig(
     }
   }
 
+  const dnsTimeoutMs = wholeKey(env, 'DREFYN_AUTH_SSO_DNS_TIMEOUT_MS', 3000, 100, 30_000);
+  const freeMailRaw = read(env, 'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE');
+  if (
+    freeMailRaw !== undefined &&
+    (!freeMailRaw.startsWith('/') || freeMailRaw.includes('\u0000'))
+  ) {
+    invalid('DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE', 'must be an absolute path');
+  }
+
   const limits = {} as Record<RateBucket, readonly RateLimit[]>;
   for (const bucket of RATE_BUCKETS) {
     limits[bucket] = rateLimits(env, rateKey(bucket), DEFAULT_RATE_LIMITS[bucket]);
@@ -416,6 +432,7 @@ export function parseAuthConfig(
       breachedPasswordsFile: fileRaw ?? null,
     },
     threadPoolSize,
+    sso: { dnsTimeoutMs, freeMailDomainsFile: freeMailRaw ?? null },
   });
 }
 

@@ -34,7 +34,11 @@ export type AuthErrorCode =
   | 'AUTH_BOT_CHECK_REQUIRED'
   | 'AUTH_ORIGIN_REFUSED'
   | 'AUTH_STEP_UP_IDENTITY_MISMATCH'
-  | 'AUTH_CLI_LINK_INVALID';
+  | 'AUTH_CLI_LINK_INVALID'
+  | 'AUTH_SSO_DISABLED'
+  | 'AUTH_SSO_DOMAIN_TAKEN'
+  | 'AUTH_SSO_DOMAIN_REFUSED'
+  | 'AUTH_SSO_DOMAIN_UNVERIFIED';
 
 // Fixed text per code. Callers pass untrusted values and secrets around this class, so
 // nothing they hand in ever becomes part of a message.
@@ -72,6 +76,10 @@ const MESSAGES: Readonly<Record<AuthErrorCode, string>> = {
   AUTH_ORIGIN_REFUSED: 'request origin refused',
   AUTH_STEP_UP_IDENTITY_MISMATCH: 'step up identity does not belong to this user',
   AUTH_CLI_LINK_INVALID: 'sign in link is not valid',
+  AUTH_SSO_DISABLED: 'single sign on is not available here',
+  AUTH_SSO_DOMAIN_TAKEN: 'another organization has verified this domain',
+  AUTH_SSO_DOMAIN_REFUSED: 'this domain cannot be claimed',
+  AUTH_SSO_DOMAIN_UNVERIFIED: 'the domain is not verified',
 };
 
 export interface AuthErrorDetail {

@@ -39,7 +39,7 @@ describe('the bundled Public Suffix List', () => {
 
   it('is the file ASSETS.md records, byte for byte, with its licence beside it', () => {
     expect(section).toBeDefined();
-    for (const file of ['public_suffix_list.dat', 'MPL-2.0.txt']) {
+    for (const file of ['public_suffix_list.txt', 'MPL-2.0.txt']) {
       const row = section?.split('\n').find((line) => line.includes(`\`${file}\``));
       expect(row, file).toBeDefined();
       expect(row).toContain(sha256(join(listDir, file)));
@@ -49,7 +49,7 @@ describe('the bundled Public Suffix List', () => {
   });
 
   it('still carries the MPL notice and the source address in its header', () => {
-    const head = readFileSync(join(listDir, 'public_suffix_list.dat'), 'utf8').slice(0, 600);
+    const head = readFileSync(join(listDir, 'public_suffix_list.txt'), 'utf8').slice(0, 600);
     expect(head).toContain('This Source Code Form is subject to the terms of the Mozilla Public');
     expect(head).toContain('https://mozilla.org/MPL/2.0/');
     expect(head).toContain('https://publicsuffix.org/list/public_suffix_list.dat');
@@ -59,23 +59,23 @@ describe('the bundled Public Suffix List', () => {
   });
 
   it('is found at the path the loader reads', () => {
-    expect(bundledPublicSuffixListPath()).toBe(join(listDir, 'public_suffix_list.dat'));
+    expect(bundledPublicSuffixListPath()).toBe(join(listDir, 'public_suffix_list.txt'));
   });
 
   it('loads into thousands of rules that answer for known names', async () => {
     const list = await loadPublicSuffixList();
     expect(list.size).toBeGreaterThan(9000);
-    for (const suffix of [
-      'com',
-      'co.uk',
-      'github.io',
-      'xn--55qx5d.cn',
-      'kawasaki.jp',
-      'x.kawasaki.jp',
-    ]) {
+    for (const suffix of ['com', 'co.uk', 'github.io', 'xn--55qx5d.cn', 'x.kawasaki.jp']) {
       expect(list.isPublicSuffix(suffix), suffix).toBe(true);
     }
-    for (const name of ['acme.com', 'acme.co.uk', 'city.kawasaki.jp', 'www.ck', 'acme.github.io']) {
+    for (const name of [
+      'acme.com',
+      'acme.co.uk',
+      'kawasaki.jp',
+      'city.kawasaki.jp',
+      'www.ck',
+      'acme.github.io',
+    ]) {
       expect(list.isPublicSuffix(name), name).toBe(false);
     }
   });
@@ -170,6 +170,18 @@ describe('free mail domains', () => {
     await expect(loadFreeMailDomains(fileWith('a.test\n'.repeat(200_000)))).rejects.toMatchObject({
       code: 'AUTH_CONFIG_INVALID',
     });
+  });
+
+  it('refuses an extra entry that is not a domain when the policy is built', () => {
+    expectAuthError(
+      () =>
+        createSsoDomainPolicy({
+          publicSuffixes: parsePublicSuffixList('test\n'),
+          extraFreeMail: ['not a domain'],
+        }),
+      'AUTH_CONFIG_INVALID',
+      'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE',
+    );
   });
 
   it('refuses the extra entries in the policy with the built in ones', () => {

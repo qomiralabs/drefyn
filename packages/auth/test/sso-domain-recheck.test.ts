@@ -55,16 +55,15 @@ describe('the daily recheck', () => {
       domainId: row.id,
       domain: 'acme.test',
     });
-    expect(w.events.events).toEqual([
-      expect.objectContaining({
-        type: 'sso.domain_unverified',
-        organizationId: ORG_A,
-        connectionId: CONNECTION_A,
-        domainId: row.id,
-        actorUserId: null,
-        domainKey: expect.stringMatching(/^[0-9a-f]{16}$/),
-      }),
-    ]);
+    expect(w.events.events).toHaveLength(1);
+    expect(w.events.events[0]).toMatchObject({
+      type: 'sso.domain_unverified',
+      organizationId: ORG_A,
+      connectionId: CONNECTION_A,
+      domainId: row.id,
+      actorUserId: null,
+    });
+    expect(w.events.events[0]?.domainKey).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('never counts a timeout, before, between or after misses', async () => {

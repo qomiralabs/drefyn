@@ -1,7 +1,7 @@
 import { DbError } from '@drefyn/db';
 import { idOf } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
-import { AuthError, type SsoDomainClaim } from '../src/index.ts';
+import { AuthError, createSsoDomains, type SsoDomainClaim } from '../src/index.ts';
 import {
   ADMIN,
   ADMIN_B,
@@ -334,7 +334,7 @@ describe('the sso_domain_verify limit', () => {
     const lookups = w.dns.calls.length;
     const refused = await w.domains.verifyDomain(admin(), claim.domainId);
     expect(codeOf(refused)).toBe('AUTH_RATE_LIMITED');
-    expect(refused.ok ? null : (refused.error as AuthError).retryAfterSeconds).toBe(3600);
+    expect(refused.ok ? null : refused.error.retryAfterSeconds).toBe(3600);
     expect(w.dns.calls).toHaveLength(lookups);
   });
 
@@ -573,6 +573,45 @@ describe('redaction', () => {
 });
 
 describe('an unexpected database error', () => {
+  it('reads a raw 23505 from inside the work as AUTH_SSO_DOMAIN_TAKEN', async () => {
+    const w = domainWorld();
+    const claim = await claimed(w);
+    w.dns.answer(claim.txtName, [claim.txtValue ?? '']);
+    const raw = Object.assign(new Error('duplicate key'), { code: '23505' });
+    const racing = createSsoDomains({
+      ...w.deps,
+      repository: {
+        ...w.repo.repository,
+        inOrganization: (organizationId, actor, work) =>
+          w.repo.repository.inOrganization(organizationId, actor, (ops) =>
+            work({ ...ops, markVerified: () => Promise.reject(raw) }),
+          ),
+      },
+    });
+    expect(codeOf(await racing.verifyDomain(admin(), claim.domainId))).toBe(
+      'AUTH_SSO_DOMAIN_TAKEN',
+    );
+  });
+
+  it('answers AUTH_UNAVAILABLE when marking verified fails for another reason', async () => {
+    const w = domainWorld();
+    const claim = await claimed(w);
+    w.dns.answer(claim.txtName, [claim.txtValue ?? '']);
+    const broken = createSsoDomains({
+      ...w.deps,
+      repository: {
+        ...w.repo.repository,
+        inOrganization: (organizationId, actor, work) =>
+          w.repo.repository.inOrganization(organizationId, actor, (ops) =>
+            work({ ...ops, markVerified: () => Promise.reject(new Error('disk full')) }),
+          ),
+      },
+    });
+    const result = await broken.verifyDomain(admin(), claim.domainId);
+    expect(codeOf(result)).toBe('AUTH_UNAVAILABLE');
+    expect(w.repo.rows[0]?.verifiedAt).toBeNull();
+  });
+
   it('maps a unique violation outside verification to AUTH_UNAVAILABLE', async () => {
     const w = domainWorld();
     w.repo.failNextTransaction(new DbError('DB_UNIQUE_VIOLATION', 'unique constraint refused'));

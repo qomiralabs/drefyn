@@ -71,6 +71,7 @@ interface Row {
   verifiedAt: Date | null;
   lastCheckedAt: Date | null;
   failedChecks: number;
+  updatedAt: Date;
 }
 
 const view = (row: Row): StoredSsoDomain =>
@@ -82,6 +83,7 @@ const view = (row: Row): StoredSsoDomain =>
     verifiedAt: row.verifiedAt,
     lastCheckedAt: row.lastCheckedAt,
     failedChecks: row.failedChecks,
+    updatedAt: row.updatedAt,
   });
 
 // An in memory stand in for the SSO domain tables under their policies: each organization
@@ -107,8 +109,9 @@ export function fakeRepository() {
 
   function opsFor(organizationId: OrganizationId): SsoDomainOps {
     const mine = () => rows.filter((r) => r.organizationId === organizationId);
-    const write = () => {
+    const write = (row?: Row) => {
       writes += 1;
+      if (row !== undefined) row.updatedAt = clock;
     };
     const byId = (id: string) => mine().find((r) => r.id === id);
     return {
@@ -141,6 +144,7 @@ export function fakeRepository() {
           verifiedAt: null,
           lastCheckedAt: null,
           failedChecks: 0,
+          updatedAt: clock,
         };
         rows.push(row);
         return Promise.resolve(view(row));
@@ -148,7 +152,7 @@ export function fakeRepository() {
       reissueToken: (id, connectionId, tokenHash) => {
         const row = byId(id);
         if (row === undefined) throw new Error('reissue of a missing row');
-        write();
+        write(row);
         row.connectionId = connectionId;
         row.tokenHash = Buffer.from(tokenHash);
         row.failedChecks = 0;
@@ -156,7 +160,8 @@ export function fakeRepository() {
       },
       markVerified: (id, tokenHash) => {
         const row = byId(id);
-        if (row === undefined || !row.tokenHash.equals(tokenHash)) return Promise.resolve(null);
+        if (row === undefined) return Promise.resolve(null);
+        if (!row.tokenHash.equals(tokenHash)) return Promise.resolve(null);
         const holder = rows.find(
           (r) => r.domain === row.domain && r.verifiedAt !== null && r !== row,
         );
@@ -165,7 +170,7 @@ export function fakeRepository() {
             new DbError('DB_UNIQUE_VIOLATION', 'unique constraint sso_domains_verified_domain_key'),
           );
         }
-        write();
+        write(row);
         row.verifiedAt ??= clock;
         row.lastCheckedAt = clock;
         row.failedChecks = 0;
@@ -177,8 +182,8 @@ export function fakeRepository() {
       },
       recordFound: (id, tokenHash, failedChecks) => {
         const row = byId(id);
+        if (row === undefined) return Promise.resolve(null);
         if (
-          row === undefined ||
           row.verifiedAt === null ||
           !row.tokenHash.equals(tokenHash) ||
           row.failedChecks !== failedChecks ||
@@ -186,15 +191,15 @@ export function fakeRepository() {
         ) {
           return Promise.resolve(null);
         }
-        write();
+        write(row);
         row.failedChecks = 0;
         row.lastCheckedAt = clock;
         return Promise.resolve(view(row));
       },
       recordMiss: (id, tokenHash, failedChecks, strikes) => {
         const row = byId(id);
+        if (row === undefined) return Promise.resolve(null);
         if (
-          row === undefined ||
           row.verifiedAt === null ||
           !row.tokenHash.equals(tokenHash) ||
           row.failedChecks !== failedChecks ||
@@ -202,7 +207,7 @@ export function fakeRepository() {
         ) {
           return Promise.resolve(null);
         }
-        write();
+        write(row);
         row.failedChecks += 1;
         row.lastCheckedAt = clock;
         if (row.failedChecks >= strikes) row.verifiedAt = null;
@@ -314,6 +319,7 @@ export function fakeRepository() {
         verifiedAt: clock,
         lastCheckedAt: clock,
         failedChecks: 0,
+        updatedAt: clock,
       };
       rows.push(row);
       return row;
@@ -360,7 +366,7 @@ export function memoryReserve() {
   const reserve = (_db: unknown, request: RateWindowRequest): Promise<readonly WindowCount[]> =>
     Promise.resolve(
       request.windowSeconds.map((windowSeconds) => {
-        const key = `${request.bucket}:${request.keyHmac.toString('hex')}:${String(windowSeconds)}`;
+        const key = `${request.bucket}:${Buffer.from(request.keyHmac).toString('hex')}:${String(windowSeconds)}`;
         const count = (counts.get(key) ?? 0) + 1;
         counts.set(key, count);
         return { windowSeconds, count, retryAfterSeconds: windowSeconds };
@@ -507,7 +513,7 @@ export function domainWorld(
     mailer,
     events,
   });
-  return { repo, dns, lines, mailer, events, flags, memory, domains, recheck, keys, policy };
+  return { repo, dns, lines, mailer, events, flags, memory, domains, recheck, keys, policy, deps };
 }
 
 export type DomainWorld = ReturnType<typeof domainWorld>;

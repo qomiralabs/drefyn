@@ -63,9 +63,9 @@ describe('createNodeTxtResolver', () => {
     },
   );
 
-  it('cannot say for an error with no code, or a thrown value that is no error', async () => {
-    for (const thrown of [new Error('boom'), 'boom']) {
-      const { factory } = backend(() => Promise.reject(thrown as Error));
+  it('cannot say for an error with no code, or a code that is not a string', async () => {
+    for (const thrown of [new Error('boom'), Object.assign(new Error('boom'), { code: 42 })]) {
+      const { factory } = backend(() => Promise.reject(thrown));
       const resolver = createNodeTxtResolver({ timeoutMs: 3000, backend: factory });
       expect(await resolver.lookupTxt('_drefyn-sso.acme.test')).toEqual({ kind: 'unknown' });
     }
@@ -103,5 +103,23 @@ describe('createNodeTxtResolver', () => {
   it('builds a Node resolver by default without a network call', () => {
     const resolver = createNodeTxtResolver({ timeoutMs: 3000 });
     expect(typeof resolver.lookupTxt).toBe('function');
+  });
+
+  it('hands the servers to the backend', async () => {
+    const { factory, made } = backend(() => Promise.resolve([]));
+    const resolver = createNodeTxtResolver({
+      timeoutMs: 3000,
+      servers: ['192.0.2.53'],
+      backend: factory,
+    });
+    await resolver.lookupTxt('_drefyn-sso.acme.test');
+    expect(made.options).toEqual([{ timeoutMs: 3000, servers: ['192.0.2.53'] }]);
+  });
+
+  // Loopback only: the discard port has nothing listening, so the real Node resolver either
+  // hears a refusal or runs out of time. Both say nothing about the record.
+  it.each([1, 300])('asks a loopback resolver that never answers (%i ms)', async (timeoutMs) => {
+    const resolver = createNodeTxtResolver({ timeoutMs, servers: ['127.0.0.1:9'] });
+    expect(await resolver.lookupTxt('_drefyn-sso.acme.test')).toEqual({ kind: 'unknown' });
   });
 });

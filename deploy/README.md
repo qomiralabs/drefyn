@@ -417,6 +417,19 @@ The list is checked only when a password is chosen, never at sign in. A check th
 answer within one second lets the password through and logs and counts
 `auth.breach_check_unavailable`. A rebuilt list takes effect on the next restart.
 
+## SSO domain verification
+
+Team SSO proves a domain with a DNS TXT record, so the dashboard makes TXT queries to the
+resolvers the host is set up with. Allow outbound DNS from the dashboard container.
+
+- `DREFYN_AUTH_SSO_DNS_TIMEOUT_MS` (default 3000, 100 to 30000): how long one lookup may take. A
+  lookup that runs out of time never counts against a domain.
+- `DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE`: an absolute path to a UTF-8 file of extra domains
+  that can never be claimed, one a line, `#` for comments, at most 1 MiB. A line that is not a
+  domain stops startup with `AUTH_CONFIG_INVALID`. The built in list of large free mail
+  providers always applies.
+- `DREFYN_AUTH_RATE_SSO_DOMAIN_VERIFY` (default `20/1h`): verify attempts per organization.
+
 ## Managed Postgres
 
 On a managed database, run the same file once as the master user, with
