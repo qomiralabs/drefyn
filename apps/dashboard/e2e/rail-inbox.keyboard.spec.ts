@@ -1,6 +1,17 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './csp.ts';
-import { banner, DESKTOP, inbox, main, openShell, ROUTES, TABLET, tabKey } from './fixtures.ts';
+import {
+  banner,
+  DESKTOP,
+  inbox,
+  main,
+  openShell,
+  RAIL_TIP_MARK,
+  ROUTES,
+  routeChunk,
+  TABLET,
+  tabKey,
+} from './fixtures.ts';
 import { openCockpit, sidebar } from './incident-helpers.ts';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Payments API docs' });
@@ -50,6 +61,31 @@ test.describe('the tablet rail', () => {
     expect(tipBox?.x ?? 0).toBeGreaterThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0) - 1);
     await page.mouse.move(DESKTOP.width / 2, 600);
     await expect(tip).toHaveCount(0);
+  });
+
+  // The tooltip code lands after the page is ready, and a fast keyboard can reach the rail
+  // first. Its arrival wraps every link anew, so the focused link must not lose focus to it.
+  test('an item focused before the tooltip code lands keeps focus and shows its label', async ({
+    page,
+    browserName,
+  }) => {
+    const chunk = await routeChunk(page, RAIL_TIP_MARK, 'hold');
+    await openShell(page, ROUTES.project);
+    await expect
+      .poll(chunk.requested, { message: 'the tooltip code was asked for' })
+      .toBeGreaterThan(0);
+    await page.keyboard.press('F6');
+    await page.keyboard.press('F6');
+    await page.keyboard.press(tabKey(browserName));
+    const first = rail(page).getByRole('link').first();
+    await expect(first).toBeFocused();
+    const tip = page.locator('[role="tooltip"]');
+    await expect(tip).toHaveCount(0);
+    chunk.release();
+    await expect(tip).toBeVisible();
+    await expect(first).toBeFocused();
+    const label = (await first.locator('span.truncate').first().textContent())?.trim() ?? '';
+    await expect(tip).toHaveText(label);
   });
 });
 

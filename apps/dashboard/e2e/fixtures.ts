@@ -148,12 +148,23 @@ export async function focusedRegion(page: Page): Promise<string> {
 
 // Text only the command bar's own chunk carries: its empty results line.
 export const COMMAND_BAR_MARK = 'Nothing matches';
+// Text only the rail tooltip's chunk carries: the shared Tooltip's own check.
+export const RAIL_TIP_MARK = 'Tooltip needs text to show.';
 
 // Routes every script and treats the command bar's chunk by its content, not by timing: a
 // route set after the load would miss a copy fetched while the page settled. `hold` keeps it
 // until the returned function runs; `fail` aborts it every time.
 export async function routeCommandBar(
   page: Page,
+  mode: 'hold' | 'fail',
+): Promise<{ release: () => void; requested: () => number }> {
+  return routeChunk(page, COMMAND_BAR_MARK, mode);
+}
+
+// The same for any lazy chunk, found by text only it carries.
+export async function routeChunk(
+  page: Page,
+  mark: string,
   mode: 'hold' | 'fail',
 ): Promise<{ release: () => void; requested: () => number }> {
   let release: () => void = () => undefined;
@@ -164,7 +175,7 @@ export async function routeCommandBar(
   const handle = async (route: Route) => {
     const response = await route.fetch();
     const body = await response.text();
-    if (!body.includes(COMMAND_BAR_MARK)) {
+    if (!body.includes(mark)) {
       await route.fulfill({ response, body });
       return;
     }

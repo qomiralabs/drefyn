@@ -114,6 +114,27 @@ test('Escape closes the frame while the code loads, and focus goes back', async 
   await expect(commandBar(page).getByRole('combobox')).toBeFocused();
 });
 
+// When the loaded field takes the first one's place, focus rests on the page for a moment
+// before the new field takes it. An Escape in that moment must still close the frame.
+test('Escape closes the frame while focus is out of it, as when the field is swapped', async ({
+  page,
+}) => {
+  const chunk = await routeCommandBar(page, 'hold');
+  await openShell(page, ROUTES.overview);
+  await banner(page)
+    .getByRole('button', { name: /Search or run a command/ })
+    .click();
+  await expect(commandBar(page)).toBeVisible();
+  // One step, so nothing can move focus back between the two.
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await expect(commandBar(page)).toBeHidden();
+  chunk.release();
+});
+
 test('a failed chunk closes the frame, shows the error toast, and the next press works', async ({
   page,
 }) => {
