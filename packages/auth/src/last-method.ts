@@ -23,6 +23,7 @@ const FROM_SESSION: Readonly<Record<SessionMethod, LastMethod | null>> = {
   password: 'password',
   github: 'github',
   google: 'google',
+  sso: 'sso',
   cli_link: null,
 };
 

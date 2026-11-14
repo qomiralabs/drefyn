@@ -64,6 +64,7 @@ describe('lastMethodCookie', () => {
     expect(lastMethodCookie(secure, session('password'))[0]?.value).toBe('password');
     expect(lastMethodCookie(secure, session('github'))[0]?.value).toBe('github');
     expect(lastMethodCookie(secure, session('google'))[0]?.value).toBe('google');
+    expect(lastMethodCookie(secure, session('sso'))[0]?.value).toBe('sso');
   });
 
   it('writes nothing for a CLI link or a sign in without a session', () => {
