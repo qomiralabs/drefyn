@@ -14,6 +14,8 @@ const PASSWORD = 'paper lantern over the harbour';
 const BUCKET = 10;
 // Longer than the next step takes, so a try that moves on before its answer loses the race.
 const SLOW_ANSWER_MS = 250;
+const WRONG = 'That address and password do not match.';
+const LIMITED = 'Too many password tries for this address.';
 
 async function client(browser: Browser, ip: string) {
   const context = await browser.newContext({ storageState: SIGNED_OUT });
@@ -38,17 +40,24 @@ test('a filled password bucket refuses the right password and leaves the email c
   test.setTimeout(120_000);
   const victim = uniqueAddress('throttled');
   await seedPerson(victim, PASSWORD);
+  // A /64 of this run's own for each attacker, so the per address limit is the only one
+  // that fills, however often the spec ran on this stack in the last ten minutes.
+  const run = randomBytes(2).toString('hex');
+  const attackers = [`2001:db8:21:${run}::1`, `2001:db8:22:${run}::1`];
   let tries = 0;
-  for (const ip of ['2001:db8:21::1', '2001:db8:22::1']) {
+  for (const ip of attackers) {
     const attacker = await client(browser, ip);
     await slowAnswers(attacker);
     const tab = await attacker.newPage();
-    while (tries < Math.ceil(((BUCKET + 1) * (ip.endsWith('21::1') ? 1 : 2)) / 2)) {
+    while (tries < Math.ceil(((BUCKET + 1) * (ip === attackers[0] ? 1 : 2)) / 2)) {
       await tab.goto('/sign-in/password');
       await tab.getByLabel('Email address').fill(victim);
       await tab.getByLabel('Password', { exact: true }).fill(randomBytes(12).toString('hex'));
       await tab.getByRole('button', { name: 'Sign in', exact: true }).click();
-      await expect(tab.getByRole('alert').or(tab.getByRole('status')).first()).toBeVisible();
+      // The answer to this try, by its words: Next's route announcer is an empty alert on
+      // every page, so any alert at all is there before the post lands. Each try is counted
+      // before the hash runs, so the last one meets the full bucket.
+      await expect(tab.getByText(tries < BUCKET ? WRONG : LIMITED)).toBeVisible();
       tries += 1;
     }
     await attacker.close();
@@ -60,7 +69,7 @@ test('a filled password bucket refuses the right password and leaves the email c
   await page.getByLabel('Email address').fill(victim);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByText('Too many password tries for this address.')).toBeVisible();
+  await expect(page.getByText(LIMITED)).toBeVisible();
   expect((await own.cookies()).some((c) => c.name.endsWith('session'))).toBe(false);
 
   const seen = await countTo(victim);
