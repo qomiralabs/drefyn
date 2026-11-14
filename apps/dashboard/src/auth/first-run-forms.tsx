@@ -40,11 +40,7 @@ export function OrganizationForm(props: Omit<OrganizationProps, 'action' | 'stat
   const shown = unsaved(notice) ?? view.notice;
   if (view.closed === true) {
     return (
-      <NoOrganizationScreen
-        hosted={props.hosted}
-        email={props.email}
-        invitation={props.invitation}
-      />
+      <NoOrganizationScreen site={props.site} email={props.email} invitation={props.invitation} />
     );
   }
   return (

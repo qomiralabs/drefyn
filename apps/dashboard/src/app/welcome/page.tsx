@@ -6,7 +6,7 @@ import { authConfig, dashboardAuth } from '../../server/auth.ts';
 import { heldInvitation, instead, WELCOME } from '../../server/first-run.ts';
 import { guardSignedIn } from '../../server/guard.ts';
 import { appOrigin } from '../../server/origin.ts';
-import { hosted } from '../../server/sign-in-support.ts';
+import { site } from '../../server/sign-in-support.ts';
 
 interface Props {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
@@ -28,7 +28,7 @@ export default async function Welcome({ searchParams }: Props) {
   const { methods } = await dashboardAuth();
   return (
     <WelcomeForm
-      hosted={hosted()}
+      site={site()}
       email={session.email}
       next={next === '/' ? '' : next}
       passwordOn={methods.password && account.passwordSetAt === null}

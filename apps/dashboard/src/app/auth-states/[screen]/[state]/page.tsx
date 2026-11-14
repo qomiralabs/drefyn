@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { STATES } from '../../../../auth/gallery.tsx';
+import { docsUrl } from '../../../../server/docs-url.ts';
 import { guardPublic } from '../../../../server/guard.ts';
 
 interface Props {
@@ -22,5 +23,5 @@ export default async function AuthState({ params, searchParams }: Props) {
   const { host } = await searchParams;
   const draw = STATES[screen]?.[state];
   if (draw === undefined) notFound();
-  return draw(host !== 'self');
+  return draw({ hosted: host !== 'self', docs: docsUrl() });
 }

@@ -1,5 +1,17 @@
 import { expect } from '@playwright/test';
+import {
+  answerDocs,
+  DOCS_URL,
+  docsLink,
+  expectSplit,
+  FRAME_PAGES,
+  frameBoxes,
+  type FrameBoxes,
+} from './auth-frame.ts';
+import { uniqueAddress } from './auth-helpers.ts';
+import { SELF_HOSTED } from './auth-states.ts';
 import { DESKTOP, MOBILE, openShell, products, ROUTES, TABLET } from './fixtures.ts';
+import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
 test.describe('phone, 390 px', () => {
@@ -120,5 +132,92 @@ test.describe('wide command bar', () => {
     const bar = page.getByRole('dialog', { name: 'Search or run a command' });
     await expect(bar).toBeVisible();
     await expect(bar.getByRole('button', { name: 'Cancel' })).toBeHidden();
+  });
+});
+
+// The signed out frame: the form first at two fifths from 64rem, then the side panel.
+test.describe('signed out frame', () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  for (const width of [1280, 1024]) {
+    test(`at ${String(width)} px every page splits two fifths and three fifths`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      for (const path of FRAME_PAGES) {
+        await page.goto(path);
+        expectSplit(await frameBoxes(page), path);
+        await expect(page.getByRole('complementary', { name: 'About Drefyn' }), path).toBeVisible();
+        await expect(docsLink(page), path).toBeVisible();
+      }
+    });
+  }
+
+  test('sign in, verify, password and reset keep the form panel in place', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const seen: { path: string; boxes: FrameBoxes }[] = [];
+    await page.goto('/sign-in');
+    seen.push({ path: '/sign-in', boxes: await frameBoxes(page) });
+    await page.getByLabel('Email address').fill(uniqueAddress('frame'));
+    await page.getByRole('button', { name: 'Email me a code' }).click();
+    await expect(page).toHaveURL(/\/sign-in\/verify/);
+    seen.push({ path: 'verify', boxes: await frameBoxes(page) });
+    for (const path of ['/sign-in/password', '/sign-in/reset']) {
+      await page.goto(path);
+      seen.push({ path, boxes: await frameBoxes(page) });
+    }
+    const [first] = seen;
+    for (const { path, boxes } of seen) {
+      expect(boxes.main, path).toEqual(first?.boxes.main);
+      expect(boxes.content, path).toEqual(first?.boxes.content);
+    }
+  });
+
+  for (const width of [1023, 390]) {
+    test(`at ${String(width)} px there is no side panel and the docs link is in the header`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      for (const path of FRAME_PAGES) {
+        await page.goto(path);
+        const boxes = await frameBoxes(page);
+        expect(boxes.side, path).toBeNull();
+        expect(boxes.main.width, path).toBe(boxes.viewport);
+        await expect(page.getByRole('complementary'), path).toHaveCount(0);
+        const link = await docsLink(page).boundingBox();
+        const head = await page.getByRole('banner').boundingBox();
+        expect(link, path).not.toBeNull();
+        expect(link?.y ?? -1, path).toBeGreaterThanOrEqual(head?.y ?? 0);
+        expect((link?.y ?? 0) + (link?.height ?? 0), path).toBeLessThanOrEqual(
+          (head?.y ?? 0) + (head?.height ?? 0),
+        );
+        expect((link?.x ?? 0) + (link?.width ?? 0), path).toBeLessThanOrEqual(boxes.viewport);
+      }
+    });
+  }
+
+  test('the Documentation link is a plain same tab link to the configured docs', async ({
+    page,
+  }) => {
+    await answerDocs(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/sign-in');
+    const link = docsLink(page);
+    expect(await link.evaluate((node) => node.tagName)).toBe('A');
+    await expect(link).toHaveAttribute('href', DOCS_URL);
+    expect(await link.getAttribute('target')).toBeNull();
+    await link.click();
+    await expect(page).toHaveURL(`${DOCS_URL}/`);
+    expect(page.context().pages()).toHaveLength(1);
+  });
+
+  test('a self hosted server keeps the docs link and has no card', async ({ page }) => {
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(SELF_HOSTED);
+      await expect(docsLink(page)).toHaveAttribute('href', DOCS_URL);
+      await expect(page.getByRole('complementary')).toHaveCount(0);
+      expect((await frameBoxes(page)).side).toBeNull();
+    }
   });
 });

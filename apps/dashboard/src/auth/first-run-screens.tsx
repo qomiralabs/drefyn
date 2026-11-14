@@ -2,6 +2,7 @@ import { TextField } from '@drefyn/ui/react';
 import type { ReactNode } from 'react';
 import { SecretField, Submit } from './controls.tsx';
 import { Answer, AuthFrame, Head, Notice } from './parts.tsx';
+import type { Site } from './site.ts';
 import { passwordProblem, type FormAction } from './screens.tsx';
 import type { OrganizationState, WelcomeState } from './states.ts';
 
@@ -35,7 +36,7 @@ function OpenInvitation({ invitation }: { invitation: Invitation }): ReactNode {
 }
 
 export interface WelcomeProps {
-  readonly hosted: boolean;
+  readonly site: Site;
   readonly email: string;
   // Where the person was heading. Empty when nothing is waiting.
   readonly next: string;
@@ -51,7 +52,7 @@ const LATE =
   'It has been a while since you signed in, so a password cannot be saved here. Leave this empty and add one later.';
 
 export function WelcomeScreen({
-  hosted,
+  site,
   email,
   next,
   passwordOn,
@@ -67,7 +68,7 @@ export function WelcomeScreen({
           state.problem === 'breached',
         );
   return (
-    <AuthFrame hosted={hosted} label="Welcome">
+    <AuthFrame site={site} label="Welcome">
       <Head>
         <Answer claim="Welcome to Drefyn." rest={`Your address ${email} is confirmed.`} />
       </Head>
@@ -109,7 +110,7 @@ export function WelcomeScreen({
 }
 
 export interface OrganizationProps {
-  readonly hosted: boolean;
+  readonly site: Site;
   readonly email: string;
   // Already in an organization, so this is a second one and there is a way back.
   readonly member: boolean;
@@ -121,7 +122,7 @@ export interface OrganizationProps {
 const NAME_HINT = 'Your company or team. Web addresses are not allowed in names.';
 
 export function OrganizationScreen({
-  hosted,
+  site,
   email,
   member,
   invitation,
@@ -130,7 +131,7 @@ export function OrganizationScreen({
 }: OrganizationProps): ReactNode {
   const limited = state.limited === true;
   return (
-    <AuthFrame hosted={hosted} label="New organization">
+    <AuthFrame site={site} label="New organization">
       <Head>
         <Answer
           claim="Name your organization."
@@ -157,7 +158,7 @@ export function OrganizationScreen({
           busyLabel="Creating"
           stopped={limited ? 'Paused until tomorrow.' : undefined}
         />
-        {hosted ? (
+        {site.hosted ? (
           <p className="auth-fine">
             New organizations start on the Free plan. There is nothing to pay until you choose
             another.
@@ -176,16 +177,16 @@ export function OrganizationScreen({
 }
 
 export function NoOrganizationScreen({
-  hosted,
+  site,
   email,
   invitation,
 }: {
-  hosted: boolean;
+  site: Site;
   email: string;
   invitation: Invitation | null;
 }): ReactNode {
   return (
-    <AuthFrame hosted={hosted} label="Organizations">
+    <AuthFrame site={site} label="Organizations">
       <Head>
         <Answer
           claim="You are not in an organization yet."

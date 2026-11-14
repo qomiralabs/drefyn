@@ -57,6 +57,14 @@ describe('the absolute link check', () => {
     expect(locationProblem('https://status.drefyn.com', ORIGIN)).toBe('https://status.drefyn.com');
   });
 
+  it('allows the default docs link by exact value, in a link only', () => {
+    expect(absoluteLinkProblems('<a href="https://docs.drefyn.com">d</a>', ORIGIN)).toEqual([]);
+    for (const link of ['https://docs.drefyn.com/x', 'https://docs.drefyn.com.evil.test']) {
+      expect(absoluteLinkProblems(`<a href="${link}">d</a>`, ORIGIN)).toEqual([link]);
+    }
+    expect(locationProblem('https://docs.drefyn.com', ORIGIN)).toBe('https://docs.drefyn.com');
+  });
+
   it('passes relative links, own origin links, fragments and known outside hosts', () => {
     const html = `<a href="/acme">x</a><a href="#main">y</a><a href="${ORIGIN}/z">z</a>
       <a href="mailto:a@b.c">m</a><svg xmlns="http://www.w3.org/2000/svg"></svg>`;
