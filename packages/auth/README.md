@@ -39,6 +39,37 @@ system.
 
 Nothing else in `src/` is public.
 
+## Team SSO sign in
+
+- `VerifiedIdentity` is a type only outside the package. It is minted inside `src/` by the
+  OIDC and SAML verifiers alone, keyed by a module private symbol and checked again at run
+  time, so nothing outside can hand in a claimed identity. `subject` is 1 to 255 code points
+  with no control character, else refused and never trimmed; `displayName` loses control
+  characters and outer space and is cut to 120 code points, or is null; `idpAuthenticatedAt`
+  is clamped to the last day.
+- `signInWithVerifiedIdentity(b, identity, returnTo)`, internal: the connection must be
+  `active` or `test` (else `AUTH_SSO_DISABLED`) and the address in one of its verified domains
+  (else `AUTH_SSO_EMAIL_OUTSIDE_DOMAIN`). Then a known (`organization_id`, `connection_id`,
+  `subject`) is that person; an unknown subject whose address has an account gets a
+  `link_identity` code and nothing is linked until the code is proved in the same browser,
+  through `createEmailSignIn({ ssoLinks })`; no account is created only as the sign up mode
+  allows, where in `invite_only` a just in time `active` connection or a live invitation to the
+  organization counts, and `closed` refuses with `AUTH_SSO_SIGNUP_CLOSED`. Membership is the
+  existing one, a live invitation for the address, or just in time as `member` with the
+  connection's project role under the organization row lock and `checkLimit(tier,
+'org.seats', used + 1)` (`AUTH_SSO_SEAT_LIMIT`), else `AUTH_SSO_NOT_PROVISIONED`. A person
+  with a confirmed second factor gets `factor_required` and no session; until the factor gate
+  ships the challenge itself, that sign in cannot finish, and an SSO link code redeemed by such
+  a person answers `AUTH_FACTOR_REQUIRED` and links nothing. A `test` connection signs in only
+  the member who made it and never provisions anyone.
+- The user and the link are written in one transaction; membership in another, idempotent on
+  (`organization_id`, `user_id`), so a failure there leaves a valid user with no organization,
+  and the next sign in completes it.
+- Events `auth.sso_signed_in`, `auth.sso_refused`, `auth.sso_link_sent`, `auth.sso_linked`,
+  `auth.sso_provisioned`, `auth.sso_user_created`, `auth.sso_factor_required` and
+  `auth.sso_failed` carry public ids and outcome codes only, never an address, a domain, a
+  subject or a code.
+
 ## Config
 
 ```ts

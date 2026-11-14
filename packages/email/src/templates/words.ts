@@ -3,6 +3,8 @@ import type { LinkProvider } from '../types.ts';
 export const PROVIDER: Readonly<Record<LinkProvider, string>> = {
   github: 'GitHub',
   google: 'Google',
+  // The account named beside it is the connection, such as Okta, so this reads as a kind.
+  sso: 'company SSO',
 };
 
 const MONTHS = [

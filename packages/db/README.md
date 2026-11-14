@@ -208,6 +208,18 @@ work cannot write either yet. A session that signed in through SSO has `method =
 both `sso_connection_id` and `sso_organization_id`; any other session has neither. The down
 migration drops the tables and ends SSO sessions, so it is for use before SSO ships only.
 
+SSO sign in adds what it writes outside those tables. A link code in `email_challenges` with
+`pending_provider = 'sso'` carries `pending_sso_organization_id` and
+`pending_sso_connection_id`, set exactly then. A `factor_challenges` row with `method = 'sso'`
+carries `sso_connection_id` and `sso_organization_id` for the session it will start, and only
+then. `drefyn_auth` may update `sso_identities.last_used_at` and nothing else on a link; the
+catalog lets the sign in role update a tenant column only when the column names no owner (never
+`id` or a column ending in `_id`). `membership_insert_origin` gains a third arm: a `member` with
+no invitation, for a person who has an identity in the organization through an `active`
+connection with `jit_enabled`, and exactly that connection's `jit_default_project_role`. The
+down migration removes pending SSO link codes and factor challenges and keeps members who
+joined just in time.
+
 `reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
 `reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,

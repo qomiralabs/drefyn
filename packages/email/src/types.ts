@@ -13,7 +13,7 @@ export const SIGN_IN_CODE_PURPOSES = Object.freeze([
 ] as const);
 export type SignInCodePurpose = (typeof SIGN_IN_CODE_PURPOSES)[number];
 
-export const LINK_PROVIDERS = Object.freeze(['github', 'google'] as const);
+export const LINK_PROVIDERS = Object.freeze(['github', 'google', 'sso'] as const);
 export type LinkProvider = (typeof LINK_PROVIDERS)[number];
 
 export const SECURITY_NOTICE_KINDS = Object.freeze([

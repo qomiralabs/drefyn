@@ -49,6 +49,7 @@ export {
   type RotatedSession,
   type Sessions,
   type SessionsDeps,
+  type SsoScope,
   type StartSessionInput,
   type StartedSession,
   type StepUpMethod,
@@ -229,6 +230,15 @@ export {
   type OAuthSessions,
   type OAuthTransport,
 } from './oauth.ts';
+export type { LinkProvider } from './oauth-types.ts';
+// Types only: the identity is minted and signed in inside this package, never outside it.
+export type { SsoCompleted, SsoRefusal } from './sso-sign-in.ts';
+export type {
+  SsoConnectionId,
+  SsoConnectionStatus,
+  SsoProtocol,
+  VerifiedIdentity,
+} from './verified-identity.ts';
 export {
   createEmailChange,
   type AuthNoticeMailer,
