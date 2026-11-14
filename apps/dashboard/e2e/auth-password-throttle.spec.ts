@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { expect, type Browser } from '@playwright/test';
+import { expect, type Browser, type BrowserContext } from '@playwright/test';
 import { seedPerson, uniqueAddress } from './auth-helpers.ts';
 import { behindHop } from './hop.ts';
 import { countTo, nextMail } from './mailpit.ts';
@@ -12,11 +12,24 @@ test.use({ storageState: SIGNED_OUT });
 const PASSWORD = 'paper lantern over the harbour';
 // The default password_fail limit for one address.
 const BUCKET = 10;
+// Longer than the next step takes, so a try that moves on before its answer loses the race.
+const SLOW_ANSWER_MS = 250;
 
 async function client(browser: Browser, ip: string) {
   const context = await browser.newContext({ storageState: SIGNED_OUT });
   await behindHop(context, ip);
   return context;
+}
+
+// Holds each password post before the hop sends it on, as a slow network would. A try that
+// navigates away first cancels its post, and the server never counts it.
+async function slowAnswers(context: BrowserContext) {
+  await context.route('**/sign-in/password', async (route) => {
+    if (route.request().method() === 'POST') {
+      await new Promise((resolve) => setTimeout(resolve, SLOW_ANSWER_MS));
+    }
+    await route.fallback().catch(() => undefined);
+  });
 }
 
 test('a filled password bucket refuses the right password and leaves the email code', async ({
@@ -28,6 +41,7 @@ test('a filled password bucket refuses the right password and leaves the email c
   let tries = 0;
   for (const ip of ['2001:db8:21::1', '2001:db8:22::1']) {
     const attacker = await client(browser, ip);
+    await slowAnswers(attacker);
     const tab = await attacker.newPage();
     while (tries < Math.ceil(((BUCKET + 1) * (ip.endsWith('21::1') ? 1 : 2)) / 2)) {
       await tab.goto('/sign-in/password');
