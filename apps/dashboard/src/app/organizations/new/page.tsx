@@ -10,7 +10,7 @@ import {
   NEW_ORGANIZATION,
 } from '../../../server/first-run.ts';
 import { guardSignedIn } from '../../../server/guard.ts';
-import { hosted } from '../../../server/sign-in-support.ts';
+import { site } from '../../../server/sign-in-support.ts';
 
 // Answers first, so with the flag off the title is the 404's and not the product's.
 export async function generateMetadata(): Promise<Metadata> {
@@ -26,11 +26,11 @@ export default async function NewOrganization() {
   const { session, organizations } = person;
   const invitation = await heldInvitation(session);
   if (!mayCreateOrganization(signUp)) {
-    return <NoOrganizationScreen hosted={hosted()} email={session.email} invitation={invitation} />;
+    return <NoOrganizationScreen site={site()} email={session.email} invitation={invitation} />;
   }
   return (
     <OrganizationForm
-      hosted={hosted()}
+      site={site()}
       email={session.email}
       member={organizations.length > 0}
       invitation={invitation}

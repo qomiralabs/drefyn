@@ -594,3 +594,31 @@ test('every provider call in the stack landed on the fake', async ({ page, provi
     expect(log).toContain(call);
   }
 });
+
+// Providers first, each in a fixed place, then the email code, then the password link. SSO
+// takes the place after Google when it exists.
+const WAY_IN = /^(Continue with (GitHub|Google)|Email me a code|Use a password instead)$/;
+
+test('sign in offers GitHub, Google, the email code, then the password link', async ({ page }) => {
+  await page.goto('/sign-in');
+  const order = await page
+    .getByRole('main')
+    .locator('a, button')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).innerText.trim()));
+  expect(order.filter((name) => WAY_IN.test(name))).toEqual([
+    'Continue with GitHub',
+    'Continue with Google',
+    'Email me a code',
+    'Use a password instead',
+  ]);
+  const boxes = await Promise.all(
+    [
+      page.getByRole('link', { name: 'Continue with GitHub' }),
+      page.getByRole('link', { name: 'Continue with Google' }),
+      page.getByRole('button', { name: 'Email me a code' }),
+      page.getByRole('link', { name: 'Use a password instead' }),
+    ].map((way) => way.boundingBox()),
+  );
+  const tops = boxes.map((box) => box?.y ?? Number.NaN);
+  expect(tops).toEqual([...tops].sort((a, b) => a - b));
+});

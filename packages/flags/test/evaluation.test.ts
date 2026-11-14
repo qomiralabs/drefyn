@@ -12,6 +12,7 @@ import {
   type EvaluationContext,
   type Hook,
 } from '@openfeature/server-sdk';
+import { organizationId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -678,6 +679,62 @@ describe('evaluation context', () => {
       expect(fake.callsFor(RELEASE).map((call) => call.context)).toEqual([EXACT]);
     } finally {
       OpenFeature.setTransactionContextPropagator(NOOP_TRANSACTION_CONTEXT_PROPAGATOR);
+    }
+  });
+});
+
+describe('auth.team_sso', () => {
+  // The sign in page has no organization yet, so it asks about the nil UUID, which no
+  // generated id ever is.
+  const NOBODY = organizationId('00000000-0000-0000-0000-000000000000');
+
+  async function bootShipped(fake: FakeProvider): Promise<FlagClient> {
+    install(fake);
+    const client = await createFlagClient(fileConfig, { entitlements: entitlements().reader });
+    open.push(client);
+    return client;
+  }
+
+  it('evaluates without an organization, as on the sign in page', async () => {
+    const fake = new FakeProvider().set('auth.team_sso', {
+      kind: 'rule',
+      rule: (context) => context.targetingKey === NOBODY,
+    });
+    const client = await bootShipped(fake);
+    expect(await client.evaluate('auth.team_sso', { organizationId: NOBODY })).toEqual({
+      value: true,
+      source: 'provider',
+    });
+    expect(fake.callsFor('auth.team_sso')[0]?.context).toEqual({
+      targetingKey: NOBODY,
+      organizationId: NOBODY,
+      internal: false,
+    });
+  });
+
+  it('evaluates per organization, as in settings and on connection lookup', async () => {
+    const fake = new FakeProvider().set('auth.team_sso', {
+      kind: 'rule',
+      rule: (context) => context.targetingKey === ORG,
+    });
+    const client = await bootShipped(fake);
+    expect(await client.isOn('auth.team_sso', { organizationId: ORG, userId: USER })).toBe(true);
+    expect(await client.isOn('auth.team_sso', { organizationId: OTHER_ORG })).toBe(false);
+    expect(await client.isOn('auth.team_sso', { organizationId: NOBODY })).toBe(false);
+    expect(fake.callsFor('auth.team_sso')[0]?.context).toMatchObject({
+      targetingKey: ORG,
+      organizationId: ORG,
+    });
+  });
+
+  it('is off in both contexts when the flag source has no entry for it', async () => {
+    const client = await bootShipped(new FakeProvider());
+    for (const organization of [NOBODY, ORG]) {
+      expect(await client.evaluate('auth.team_sso', { organizationId: organization })).toEqual({
+        value: false,
+        source: 'safe_value',
+        errorCode: 'FLAG_NOT_FOUND',
+      });
     }
   });
 });

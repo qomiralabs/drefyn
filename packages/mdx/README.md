@@ -235,11 +235,21 @@ page that keeps killing the host cannot turn into a tight loop of outages. Alert
 Callers see `mdx.parse_unavailable` throughout.
 
 Both processes exit when their parent dies, since nothing else would stop them. They check the
-parent pid once a second, log `mdx.parse_host_parent_gone` and stop as they do on SIGTERM. A host
-gets `PARENT_GONE_GRACE_MS` and then kills itself. PID 1 in a container and a child of a service
-manager keep one parent for life, so neither ever sees this. Do not start the supervisor with
-`nohup` from a shell that then exits: run it in the foreground under a container or a service
-manager.
+parent pid once a second, log `mdx.parse_host_parent_gone` at error level, stop as they do on
+SIGTERM and exit with code 69. A host gets `PARENT_GONE_GRACE_MS` and then kills itself, which
+reads as SIGKILL rather than 69. Alert on the event or the code: whatever ran the process died
+without stopping it. PID 1 in a container and a child of a service manager keep one parent for
+life, so neither ever sees this.
+
+Each entry reads its parent before it loads anything else, so a parent that dies while the parser
+loads still stops it. One window is left: a parent that dies during Node's own start, before the
+entry's first line runs. The process then reads whatever adopted it as its parent and keeps
+running.
+
+That window decides what `nohup` from a shell that then exits does. If the shell is still there
+when the supervisor reads its parent, the supervisor stops once the shell goes. If the shell is
+already gone, it keeps running. Do not rely on either: run it in the foreground under a container
+or a service manager.
 
 The host is the boundary, not its threads. It refuses to start without `--permission`, with any
 flag that would allow more, or with any environment key outside a fixed list, so it holds no

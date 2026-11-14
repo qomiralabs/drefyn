@@ -80,6 +80,24 @@ interface BadCase {
   readonly allow?: AllowLists;
 }
 
+// Only the listed columns of a second factor row may change, so a table level update is
+// refused on each, and the sign in role holds nothing there at all.
+const SECOND_FACTOR_CASES: Record<string, BadCase> = {};
+for (const table of ['totp_credentials', 'recovery_codes', 'factor_challenges']) {
+  SECOND_FACTOR_CASES[`a table level update on ${table}`] = {
+    rule: 'column_grant',
+    object: `app.${table}`,
+    mentions: ['UPDATE', 'drefyn_app'],
+    up: () => `grant update on app.${table} to drefyn_app;`,
+  };
+  SECOND_FACTOR_CASES[`a grant to drefyn_auth on ${table}`] = {
+    rule: 'auth_grant',
+    object: `app.${table}`,
+    mentions: ['SELECT', 'drefyn_auth'],
+    up: () => `grant select (user_id) on app.${table} to drefyn_auth;`,
+  };
+}
+
 const CASES: Record<string, BadCase> = {
   'a table without organization_id': {
     rule: 'tenant_column',
@@ -778,6 +796,9 @@ grant select (body) on app.bad_auth_column_option to drefyn_auth with grant opti
     mentions: ['INSERT', 'drefyn_app'],
     up: () => 'grant insert on app.password_credentials to drefyn_app;',
   },
+  // Only the listed columns of a second factor row may change, so a table level update is
+  // refused on each, and the sign in role holds nothing there at all.
+  ...SECOND_FACTOR_CASES,
   // The auth only tables hold addresses of people who never signed up, codes and limiter
   // keys; drefyn_app runs every request, so it holds nothing there.
   'a grant to drefyn_app on email_challenges': {

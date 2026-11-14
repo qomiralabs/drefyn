@@ -19,6 +19,7 @@
 .auth-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--dr-space-16);
   padding: var(--dr-space-24) var(--dr-space-48);
 }
@@ -234,9 +235,10 @@
   content: '';
   border-top: var(--dr-stroke-hairline) solid var(--dr-border-rule);
 }
+/* One per row, in a fixed order, so each method keeps its place whichever are on. */
 .auth-providers {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--dr-space-8);
 }
 .auth-ways {
@@ -326,10 +328,10 @@
   height: var(--dr-size-control-lg);
 }
 
-/* The brand half: hidden from assistive technology, hosted only, gone below 64rem. A halftone
-   of four dot sizes on one grid, each masked to a band, so dots grow from nothing around the
-   words. The masks choose which dots print; there is no colour gradient. */
-.auth-brand {
+/* The side panel: hosted only and gone below 64rem. It holds a halftone of four dot sizes on one
+   grid, each masked to a band so dots grow from nothing around the card, and the card. The
+   masks choose which dots print; there is no colour gradient. */
+.auth-side {
   display: none;
 }
 .auth-dots {
@@ -347,7 +349,7 @@
 .auth-dots-1 {
   --r: calc(var(--dr-stroke-hairline) * 0.75);
   mask-image: radial-gradient(
-    ellipse 75% 70% at 50% 46%,
+    ellipse 75% 70% at 50% 50%,
     transparent 48%,
     black 58%,
     black 66%,
@@ -357,7 +359,7 @@
 .auth-dots-2 {
   --r: calc(var(--dr-stroke-hairline) * 1.5);
   mask-image: radial-gradient(
-    ellipse 75% 70% at 50% 46%,
+    ellipse 75% 70% at 50% 50%,
     transparent 64%,
     black 72%,
     black 80%,
@@ -367,7 +369,7 @@
 .auth-dots-3 {
   --r: calc(var(--dr-stroke-hairline) * 2.5);
   mask-image: radial-gradient(
-    ellipse 75% 70% at 50% 46%,
+    ellipse 75% 70% at 50% 50%,
     transparent 78%,
     black 86%,
     black 94%,
@@ -376,60 +378,101 @@
 }
 .auth-dots-4 {
   --r: calc(var(--dr-stroke-hairline) * 4.25);
-  mask-image: radial-gradient(ellipse 75% 70% at 50% 46%, transparent 92%, black 100%);
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 92%, black 100%);
 }
-.auth-brand-copy {
+
+/* Small and quiet, so the form keeps the attention. Flat: a hairline, no shadow, because it
+   does not float over anything. */
+.auth-card {
   position: relative;
   display: grid;
-  justify-items: center;
-  gap: var(--dr-space-16);
-  max-width: calc(var(--dr-space-128) * 4);
-  padding: var(--dr-space-48);
-  text-align: center;
+  gap: var(--dr-space-12);
+  width: min(100%, var(--dr-layout-auth));
+  padding: var(--dr-space-32);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule);
+  border-radius: var(--dr-radius-md);
+  background: var(--dr-surface-ground);
   color: var(--dr-text-ink);
 }
-.auth-brand-copy [data-mark] {
-  width: var(--dr-space-48);
-  height: var(--dr-space-48);
+.auth-card-figure {
+  display: grid;
+  gap: var(--dr-space-16);
 }
-.auth-brand-line {
-  font: var(--dr-type-display-m);
-  letter-spacing: var(--dr-type-display-m-tracking);
+.auth-card-line {
+  font: var(--dr-type-title);
+  letter-spacing: var(--dr-type-title-tracking);
+  color: var(--dr-text-ink);
   text-wrap: balance;
 }
-.auth-brand-support {
-  font: var(--dr-type-body-m);
+.auth-card-support {
+  font: var(--dr-type-body-s);
   color: var(--dr-text-secondary);
   text-wrap: balance;
 }
+.auth-card-person {
+  display: flex;
+  align-items: center;
+  gap: var(--dr-space-12);
+  font: var(--dr-type-body-s);
+}
+.auth-card-person img {
+  width: var(--dr-space-32);
+  height: var(--dr-space-32);
+  border-radius: var(--dr-radius-sm);
+}
+.auth-card-name {
+  display: block;
+  color: var(--dr-text-ink);
+  font-weight: var(--dr-weight-medium);
+}
+.auth-card-handle {
+  display: block;
+  color: var(--dr-text-secondary);
+}
+.auth-card-link {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--dr-space-24);
+  font: var(--dr-type-body-s);
+  color: var(--dr-accent-ink);
+  text-decoration: underline;
+}
 @media (prefers-reduced-motion: no-preference) {
-  .auth-brand-copy {
+  .auth-card {
     animation: dr-fade-in var(--dr-duration-slow) var(--dr-ease-enter) both;
   }
 }
+
+/* From 64rem the form panel takes the start two fifths and the side panel the rest, behind
+   the header, so the Documentation link lands at its top end without a second copy in the
+   DOM. Every page uses this frame, so moving between steps never shifts the form. */
 @media (width >= 64rem) {
   .auth[data-hosted] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas:
-      'brand head'
-      'brand main';
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   }
-  .auth[data-hosted] .auth-brand {
-    grid-area: brand;
+  .auth[data-hosted] .auth-head {
     position: relative;
+    z-index: 1;
+    grid-row: 1;
+    grid-column: 1 / -1;
+  }
+  .auth[data-hosted] .auth-main {
+    grid-row: 2;
+    grid-column: 1;
+    align-content: center;
+    padding-block: var(--dr-space-48) var(--dr-space-64);
+  }
+  .auth[data-hosted] .auth-side {
+    position: relative;
+    grid-row: 1 / -1;
+    grid-column: 2;
     display: grid;
     place-items: center;
     overflow: hidden;
+    padding: var(--dr-space-96) var(--dr-space-48);
     background: var(--dr-surface-raised);
-    border-inline-end: var(--dr-stroke-hairline) solid var(--dr-border-rule);
-  }
-  .auth[data-hosted] .auth-head {
-    grid-area: head;
-  }
-  .auth[data-hosted] .auth-main {
-    grid-area: main;
-    align-content: center;
-    padding-block: var(--dr-space-48) var(--dr-space-64);
+    border-inline-start: var(--dr-stroke-hairline) solid var(--dr-border-rule);
   }
 }
 
@@ -442,9 +485,6 @@
   }
   .auth-content {
     gap: var(--dr-space-24);
-  }
-  .auth-providers {
-    grid-template-columns: minmax(0, 1fr);
   }
   .auth-code-show {
     font: var(--dr-type-title);

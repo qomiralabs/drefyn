@@ -1,4 +1,12 @@
 import { expect } from '@playwright/test';
+import {
+  answerDocs,
+  DOCS_URL,
+  docsLink,
+  expectSplit,
+  FRAME_PAGES,
+  frameBoxes,
+} from './auth-frame.ts';
 import { uniqueAddress } from './auth-helpers.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { MAYA, SIGNED_OUT } from './people.ts';
@@ -36,4 +44,18 @@ test('the CLI page takes the part after the hash in a field', async ({ page }) =
   await expect(page.getByRole('heading', { level: 1 })).toContainText(
     'This sign in link no longer works.',
   );
+});
+
+test('every signed out page keeps the split and a working docs link', async ({ page }) => {
+  await answerDocs(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  for (const path of FRAME_PAGES) {
+    await page.goto(path);
+    expectSplit(await frameBoxes(page), path);
+    await expect(page.getByRole('complementary', { name: 'About Drefyn' }), path).toBeVisible();
+    await expect(docsLink(page), path).toHaveAttribute('href', DOCS_URL);
+  }
+  await page.goto('/sign-in');
+  await docsLink(page).click();
+  await expect(page).toHaveURL(`${DOCS_URL}/`);
 });

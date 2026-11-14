@@ -95,12 +95,21 @@ export default tseslint.config(
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
       'drefyn/no-mdx-evaluate': 'error',
       'drefyn/no-tier-literals': 'error',
-      // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * is refused
-      // there for every role, so it must not compile into a query either. A test holds this
-      // list to that one.
+      // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * fails on a
+      // column the role lacks, or would read a column granted later, so it must not compile
+      // into a query either. A test holds this list to that one.
       'drefyn/no-select-all': [
         'error',
-        { tables: ['users', 'password_credentials', 'known_devices'] },
+        {
+          tables: [
+            'users',
+            'password_credentials',
+            'known_devices',
+            'totp_credentials',
+            'recovery_codes',
+            'factor_challenges',
+          ],
+        },
       ],
     },
   },

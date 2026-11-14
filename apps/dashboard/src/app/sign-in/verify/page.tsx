@@ -5,7 +5,7 @@ import { dashboardAuth } from '../../../server/auth.ts';
 import { visitorBrowser } from '../../../server/actions.ts';
 import { guardPublic } from '../../../server/guard.ts';
 import { NONCE_HEADER } from '../../../server/security-headers.ts';
-import { formBinding, hosted } from '../../../server/sign-in-support.ts';
+import { formBinding, site } from '../../../server/sign-in-support.ts';
 
 interface Props {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
@@ -40,7 +40,7 @@ export default async function Verify({ searchParams }: Props) {
     <>
       <script nonce={nonce} dangerouslySetInnerHTML={{ __html: FRAGMENT_SCRIPT }} />
       <VerifyForm
-        hosted={hosted()}
+        site={site()}
         csrf={csrf}
         email={await askedAddress()}
         fromSignUp={query['from'] === 'sign-up'}

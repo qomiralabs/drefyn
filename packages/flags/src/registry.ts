@@ -64,6 +64,15 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'auth.team_sso',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'Continue with SSO on sign in, and SSO settings for organizations.',
+    created: '2026-11-14',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

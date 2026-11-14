@@ -178,6 +178,17 @@ list and the `AuthSchema` and `UserSchema` table types are both built from it, s
 `drefyn_app` reads `id`, `email`, `display_name` and `created_at` of users and updates only
 `display_name` and `updated_at`; only `drefyn_auth` writes the address.
 
+`totp_credentials`, `recovery_codes` and `factor_challenges` hold a person's second factor: a
+sealed TOTP secret, recovery code hashes and the one live challenge of a sign in that still
+needs the factor. They are global, with forced row level security and a `self_access` policy
+for `drefyn_app`, and only `UserSchema` names them. `drefyn_auth` holds no grant on any of
+them, so a stolen sign in credential reads no sealed secret and no recovery hash.
+`drefyn_app` selects and inserts every column, deletes rows, and updates only the columns
+listed in `src/identity-columns.ts`; on `factor_challenges` that is `attempts` alone, so a new
+challenge is a delete then an insert, and a second insert racing it fails on the key. Deleting
+a user removes all three. The down migration drops the tables, and with them every enrolment,
+so it is for use before the factor ships only.
+
 `reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
 `reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
@@ -252,8 +263,9 @@ and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alik
 to `PUBLIC`, restrictive ones included; a restrictive policy in `app` that is not on the
 `restrictivePolicies` list, differs from its entry, or is listed but missing (a permissive one
 of the same name counts as missing); a unique key without `organization_id` on a tenant table
-unless it is on the global unique list; and on `users` and `password_credentials`, any table
-level `SELECT` or `UPDATE` and any column grant off the column grant list, so a new column is
+unless it is on the global unique list; and on `users`, `password_credentials`,
+`known_devices` and the three second factor tables, any table level `SELECT`, `INSERT` or
+`UPDATE` and any column grant off the column grant list, so a new column is
 closed until someone grants it. Insert is per column there too, so no insert can set a column
 such as `email_verified_at` that the role was not given. It refuses any grant to `drefyn_app`,
 even one column, on the auth only tables (`email_challenges`, `oauth_states`,

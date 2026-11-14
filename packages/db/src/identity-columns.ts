@@ -1,11 +1,15 @@
 import type {
   ColumnType,
+  FactorChallengesTable,
   KnownDevicesTable,
   PasswordCredentialsTable,
+  RecoveryCodesTable,
+  TotpCredentialsTable,
   UsersTable,
 } from './schema.generated.ts';
 
-// The column grants on users, password_credentials and known_devices, written once. The catalog allow list
+// The column grants on users, password_credentials, known_devices and the second factor
+// tables, written once. The catalog allow list
 // and the transaction types are both built from this, so a type can never offer a column
 // the role cannot touch, and the migration is held to the same list by check:catalog.
 
@@ -67,6 +71,65 @@ export const KNOWN_DEVICE_COLUMNS = {
   },
 } as const satisfies Record<ColumnGrantee, RoleColumns<KnownDevicesTable>>;
 
+// The second factor tables are the person's alone: the auth role holds nothing, and only the
+// columns a verify or a spend moves are updatable.
+const NO_AUTH = { SELECT: [], INSERT: [], UPDATE: [] } as const;
+
+const TOTP_ALL = [
+  'user_id',
+  'key_id',
+  'secret_nonce',
+  'secret_sealed',
+  'last_used_step',
+  'failed_attempts',
+  'confirmed_at',
+  'last_used_at',
+  'created_at',
+  'updated_at',
+] as const;
+
+export const TOTP_CREDENTIAL_COLUMNS = {
+  drefyn_app: {
+    SELECT: TOTP_ALL,
+    INSERT: TOTP_ALL,
+    UPDATE: [
+      'key_id',
+      'secret_nonce',
+      'secret_sealed',
+      'last_used_step',
+      'failed_attempts',
+      'confirmed_at',
+      'last_used_at',
+      'updated_at',
+    ],
+  },
+  drefyn_auth: NO_AUTH,
+} as const satisfies Record<ColumnGrantee, RoleColumns<TotpCredentialsTable>>;
+
+const RECOVERY_ALL = ['id', 'user_id', 'code_hash', 'used_at', 'created_at'] as const;
+
+export const RECOVERY_CODE_COLUMNS = {
+  drefyn_app: { SELECT: RECOVERY_ALL, INSERT: RECOVERY_ALL, UPDATE: ['used_at'] },
+  drefyn_auth: NO_AUTH,
+} as const satisfies Record<ColumnGrantee, RoleColumns<RecoveryCodesTable>>;
+
+const CHALLENGE_ALL = [
+  'user_id',
+  'secret_hash',
+  'method',
+  'return_to',
+  'attempts',
+  'expires_at',
+  'created_at',
+] as const;
+
+// Only attempts moves, so a new challenge is a delete then an insert and a racing second
+// insert fails on the key.
+export const FACTOR_CHALLENGE_COLUMNS = {
+  drefyn_app: { SELECT: CHALLENGE_ALL, INSERT: CHALLENGE_ALL, UPDATE: ['attempts'] },
+  drefyn_auth: NO_AUTH,
+} as const satisfies Record<ColumnGrantee, RoleColumns<FactorChallengesTable>>;
+
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
 type InsertOf<C> = C extends ColumnType<unknown, infer I, unknown> ? I : C;
 type UpdateOf<C> = C extends ColumnType<unknown, unknown, infer U> ? U : C;
@@ -103,6 +166,19 @@ export type AuthKnownDevicesTable = GrantedColumns<
   (typeof KNOWN_DEVICE_COLUMNS)['drefyn_auth']
 >;
 
+export type AppTotpCredentialsTable = GrantedColumns<
+  TotpCredentialsTable,
+  (typeof TOTP_CREDENTIAL_COLUMNS)['drefyn_app']
+>;
+export type AppRecoveryCodesTable = GrantedColumns<
+  RecoveryCodesTable,
+  (typeof RECOVERY_CODE_COLUMNS)['drefyn_app']
+>;
+export type AppFactorChallengesTable = GrantedColumns<
+  FactorChallengesTable,
+  (typeof FACTOR_CHALLENGE_COLUMNS)['drefyn_app']
+>;
+
 export interface ColumnGrant {
   readonly name: string;
   readonly grantee: ColumnGrantee;
@@ -130,6 +206,9 @@ export const IDENTITY_COLUMN_GRANTS: readonly ColumnGrant[] = [
   ...grantsOn('users', USER_COLUMNS),
   ...grantsOn('password_credentials', PASSWORD_CREDENTIAL_COLUMNS),
   ...grantsOn('known_devices', KNOWN_DEVICE_COLUMNS),
+  ...grantsOn('totp_credentials', TOTP_CREDENTIAL_COLUMNS),
+  ...grantsOn('recovery_codes', RECOVERY_CODE_COLUMNS),
+  ...grantsOn('factor_challenges', FACTOR_CHALLENGE_COLUMNS),
   // The expiry cleanup deletes in batches by ctid, so the auth role selects that system column.
   { name: 'app.known_devices.ctid', grantee: 'drefyn_auth', privilege: 'SELECT' },
 ];

@@ -142,7 +142,8 @@ of its reach. It runs in the root config and in the guard, like the other bounda
 ### `drefyn/no-select-all`
 
 Refuses `selectAll()` and `returningAll()` on a table whose grants are per column, because the
-database refuses `select *` and `returning *` there for every role. It reads the chain and
+database refuses `select *` and `returning *` there for a role that lacks a column, and where a
+role holds every column today it would read one granted later. It reads the chain and
 follows local variables, including each value written to a `let`. It cannot see a query passed
 as a parameter or returned by a helper, a table name held in a variable, a template with a
 placeholder, or a computed method name; `test/no-select-all.test.ts` pins those limits, and the

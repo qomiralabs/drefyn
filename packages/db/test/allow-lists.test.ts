@@ -197,12 +197,89 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('control the grants on users, password_credentials and known_devices by column', () => {
+  it('control the grants on the identity and second factor tables by column', () => {
     expect(COLUMN_GRANT_TABLES.map((t) => t.name).sort()).toEqual([
+      'app.factor_challenges',
       'app.known_devices',
       'app.password_credentials',
+      'app.recovery_codes',
+      'app.totp_credentials',
       'app.users',
     ]);
+  });
+
+  describe('the second factor tables', () => {
+    const TABLES = ['app.factor_challenges', 'app.recovery_codes', 'app.totp_credentials'];
+    const grantsOn = (table: string) =>
+      COLUMN_GRANTS.filter((g) => g.name.startsWith(`${table}.`)).map(
+        (g) => `${g.grantee} ${g.privilege} ${g.name.slice(table.length + 1)}`,
+      );
+
+    it('are global, each with the reviewed reason', () => {
+      for (const name of TABLES) {
+        expect(GLOBAL_TABLES.find((t) => t.name === name)?.reason, name).toBe(
+          "a person's own second factor, read under their user context",
+        );
+      }
+    });
+
+    // A stolen sign in credential must read no sealed secret and no recovery hash.
+    it('give drefyn_auth nothing at all', () => {
+      const authTables = AUTH_TABLES.map((t) => t.name);
+      for (const name of TABLES) {
+        expect(authTables, name).not.toContain(name);
+        expect(
+          grantsOn(name).filter((g) => g.startsWith('drefyn_auth ')),
+          name,
+        ).toEqual([]);
+        expect(
+          USER_POLICIES.filter((p) => p.name.startsWith(`${name}.`)).map((p) => p.name),
+          name,
+        ).toEqual([`${name}.self_access`]);
+      }
+    });
+
+    it('let drefyn_app read and insert every column and update only the listed ones', () => {
+      const update = (table: string) =>
+        grantsOn(table)
+          .filter((g) => g.startsWith('drefyn_app UPDATE '))
+          .map((g) => g.slice('drefyn_app UPDATE '.length))
+          .sort();
+      expect(update('app.totp_credentials')).toEqual([
+        'confirmed_at',
+        'failed_attempts',
+        'key_id',
+        'last_used_at',
+        'last_used_step',
+        'secret_nonce',
+        'secret_sealed',
+        'updated_at',
+      ]);
+      expect(update('app.recovery_codes')).toEqual(['used_at']);
+      // So replacing a challenge is a delete then an insert, never a rewrite of its secret.
+      expect(update('app.factor_challenges')).toEqual(['attempts']);
+      for (const name of TABLES) {
+        const select = grantsOn(name).filter((g) => g.startsWith('drefyn_app SELECT '));
+        const insert = grantsOn(name).filter((g) => g.startsWith('drefyn_app INSERT '));
+        expect(insert.map((g) => g.split(' ')[2]).sort(), name).toEqual(
+          select.map((g) => g.split(' ')[2]).sort(),
+        );
+      }
+      expect(
+        grantsOn('app.factor_challenges')
+          .filter((g) => g.startsWith('drefyn_app SELECT '))
+          .map((g) => g.split(' ')[2])
+          .sort(),
+      ).toEqual([
+        'attempts',
+        'created_at',
+        'expires_at',
+        'method',
+        'return_to',
+        'secret_hash',
+        'user_id',
+      ]);
+    });
   });
 
   it('let drefyn_auth reach one tenant table, to find and delete old revoked keys', () => {

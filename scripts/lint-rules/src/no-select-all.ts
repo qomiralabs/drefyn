@@ -2,10 +2,11 @@ import type { Rule, Scope } from 'eslint';
 import { literal } from './references.ts';
 import { isRecord } from './workspace.ts';
 
-// Kysely's selectAll() sends `select *` and returningAll() sends `returning *`, and on a table
-// whose grants are per column the database refuses both for every role. The schema types cannot
-// stop the methods compiling, so this rule refuses them at build time instead, by reading the
-// query they end, through local variables too. Parameters, helper results, table names held in
+// Kysely's selectAll() sends `select *` and returningAll() sends `returning *`. On a table whose
+// grants are per column, both fail for a role missing a column, and where a role holds every
+// column they would read one granted later. The schema types cannot stop the methods
+// compiling, so this rule refuses them at build time instead, by reading the query they end,
+// through local variables too. Parameters, helper results, table names held in
 // variables and templates with a placeholder are out of its reach; the tests pin those limits.
 
 const FROM = new Set([
@@ -155,9 +156,9 @@ export const noSelectAll: Rule.RuleModule = {
     ],
     messages: {
       selectAll:
-        'selectAll() on {{table}} sends select *, which the database refuses: its grants are per column. Name the columns you need.',
+        'selectAll() on {{table}} sends select *, which fails for a role missing a column and reads any column granted later: its grants are per column. Name the columns you need.',
       returningAll:
-        'returningAll() on {{table}} sends returning *, which the database refuses: its grants are per column. Name the columns you need.',
+        'returningAll() on {{table}} sends returning *, which fails for a role missing a column and reads any column granted later: its grants are per column. Name the columns you need.',
     },
   },
   create(context) {

@@ -1,7 +1,10 @@
 import type { AuthTableName, MemberTableName, UserTableName } from './allow-lists.ts';
 import type {
+  AppFactorChallengesTable,
   AppKnownDevicesTable,
   AppPasswordCredentialsTable,
+  AppRecoveryCodesTable,
+  AppTotpCredentialsTable,
   AppUsersTable,
   AuthKnownDevicesTable,
   AuthPasswordCredentialsTable,
@@ -49,13 +52,23 @@ type ReadOnlyTables<S, T extends string> = Omit<S, T> & {
   [K in keyof S & T]: ReadOnlyTable<S[K]>;
 };
 
+// The second factor tables, swapped for their granted columns. Only the user context names
+// them, so this applies to UserSchema alone.
+type WithFactorColumns<S> = Omit<S, 'totp_credentials' | 'recovery_codes' | 'factor_challenges'> & {
+  totp_credentials: AppTotpCredentialsTable;
+  recovery_codes: AppRecoveryCodesTable;
+  factor_challenges: AppFactorChallengesTable;
+};
+
 // The signed in person's own rows, and the organizations they belong to, read only.
 export type UserSchema = ReadOnlyTables<
-  WithColumns<
-    NamedTables<Schema, UserTableName>,
-    AppUsersTable,
-    AppPasswordCredentialsTable,
-    AppKnownDevicesTable
+  WithFactorColumns<
+    WithColumns<
+      NamedTables<Schema, UserTableName>,
+      AppUsersTable,
+      AppPasswordCredentialsTable,
+      AppKnownDevicesTable
+    >
   >,
   MemberTableName
 >;
