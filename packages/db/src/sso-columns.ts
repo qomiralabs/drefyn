@@ -84,24 +84,34 @@ export const SSO_STATE_AUTH_INSERT = [
 export interface SsoAuthGrant {
   readonly name: string;
   readonly privilege: 'SELECT' | 'INSERT' | 'DELETE';
+  readonly reason: string;
 }
+
+// Why the sign in role reaches each table, before anyone is signed in.
+const CONNECTION_REASON =
+  'discovery and sign in find the connection; never the sealed client secret or a later column';
+const DOMAIN_REASON = 'discovery maps a verified domain to its organization and connection';
+const IDENTITY_REASON = 'sign in finds the person by subject and links a new one';
+const STATE_REASON =
+  'the round trip is written at start, consumed once at the callback and swept after expiry';
 
 const columns = (
   table: string,
   privilege: 'SELECT' | 'INSERT',
   list: readonly string[],
-): SsoAuthGrant[] => list.map((column) => ({ name: `app.${table}.${column}`, privilege }));
+  reason: string,
+): SsoAuthGrant[] => list.map((column) => ({ name: `app.${table}.${column}`, privilege, reason }));
 
 export const SSO_AUTH_GRANTS: readonly SsoAuthGrant[] = [
-  ...columns('sso_connections', 'SELECT', SSO_CONNECTION_AUTH_SELECT),
-  ...columns('sso_domains', 'SELECT', SSO_DOMAIN_AUTH_SELECT),
-  ...columns('sso_identities', 'SELECT', SSO_IDENTITY_AUTH_SELECT),
-  ...columns('sso_identities', 'INSERT', SSO_IDENTITY_AUTH_INSERT),
-  ...columns('sso_states', 'SELECT', SSO_STATE_AUTH_SELECT),
-  ...columns('sso_states', 'INSERT', SSO_STATE_AUTH_INSERT),
+  ...columns('sso_connections', 'SELECT', SSO_CONNECTION_AUTH_SELECT, CONNECTION_REASON),
+  ...columns('sso_domains', 'SELECT', SSO_DOMAIN_AUTH_SELECT, DOMAIN_REASON),
+  ...columns('sso_identities', 'SELECT', SSO_IDENTITY_AUTH_SELECT, IDENTITY_REASON),
+  ...columns('sso_identities', 'INSERT', SSO_IDENTITY_AUTH_INSERT, IDENTITY_REASON),
+  ...columns('sso_states', 'SELECT', SSO_STATE_AUTH_SELECT, STATE_REASON),
+  ...columns('sso_states', 'INSERT', SSO_STATE_AUTH_INSERT, STATE_REASON),
   // A state is consumed by delete ... returning, and the expiry cleanup deletes by ctid.
-  { name: 'app.sso_states.ctid', privilege: 'SELECT' },
-  { name: 'app.sso_states', privilege: 'DELETE' },
+  { name: 'app.sso_states.ctid', privilege: 'SELECT', reason: STATE_REASON },
+  { name: 'app.sso_states', privilege: 'DELETE', reason: STATE_REASON },
 ];
 
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;

@@ -177,16 +177,6 @@ export const AUTH_TABLES: readonly AllowEntry[] = [
   },
 ];
 
-// Why the sign in role reaches each SSO table, before anyone is signed in.
-const SSO_AUTH_REASONS: Readonly<Record<string, string>> = {
-  sso_connections:
-    'discovery and sign in find the connection; never the sealed client secret or a later column',
-  sso_domains: 'discovery maps a verified domain to its organization and connection',
-  sso_identities: 'sign in finds the person by subject and links a new one',
-  sso_states:
-    'the round trip is written at start, consumed once at the callback and swept after expiry',
-};
-
 const KEY_EXPIRY =
   'the expiry cleanup removes keys revoked over 90 days ago; the auth_expire policies hide every other row';
 
@@ -205,11 +195,7 @@ export const AUTH_TENANT_GRANTS: readonly ColumnGrantEntry[] = [
     reason: KEY_EXPIRY,
   },
   { name: 'app.api_keys', grantee: 'drefyn_auth', privilege: 'DELETE', reason: KEY_EXPIRY },
-  ...SSO_AUTH_GRANTS.map((grant) => ({
-    ...grant,
-    grantee: 'drefyn_auth',
-    reason: SSO_AUTH_REASONS[grant.name.split('.')[1] ?? ''] ?? '',
-  })),
+  ...SSO_AUTH_GRANTS.map((grant) => ({ ...grant, grantee: 'drefyn_auth' })),
 ];
 
 const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limiter keys';
