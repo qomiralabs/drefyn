@@ -30,7 +30,7 @@ const CLI_INVALID = (
 );
 
 export function CliScreen({
-  hosted,
+  site,
   csrf,
   view,
   notice,
@@ -43,7 +43,7 @@ export function CliScreen({
   pending?: boolean | undefined;
 }): ReactNode {
   return (
-    <AuthFrame hosted={hosted} label="Sign in" busy={pending}>
+    <AuthFrame site={site} label="Sign in" busy={pending}>
       {view.kind === 'invalid' ? CLI_INVALID : null}
       {view.kind === 'failed' ? <Failed notice={view.notice} /> : null}
       {notice === undefined ? null : <Failed notice={notice} />}
@@ -127,7 +127,7 @@ const INVALID_INVITE = (
 );
 
 export function InviteScreen({
-  hosted,
+  site,
   csrf,
   view,
   notice,
@@ -140,7 +140,7 @@ export function InviteScreen({
   joinAction?: FormAction;
 }): ReactNode {
   return (
-    <AuthFrame hosted={hosted} label="Invitation" busy={view.kind === 'reading'}>
+    <AuthFrame site={site} label="Invitation" busy={view.kind === 'reading'}>
       {view.kind === 'reading' ? (
         <>
           <div className="auth-needs-script contents">
@@ -227,7 +227,7 @@ export function InviteScreen({
 }
 
 export function BlockScreen({
-  hosted,
+  site,
   csrf,
   view,
   notice,
@@ -238,7 +238,7 @@ export function BlockScreen({
   action?: FormAction;
 }): ReactNode {
   return (
-    <AuthFrame hosted={hosted} label="Invitations" busy={view.kind === 'reading'}>
+    <AuthFrame site={site} label="Invitations" busy={view.kind === 'reading'}>
       {view.kind === 'reading' ? (
         <>
           <div className="auth-needs-script contents">

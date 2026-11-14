@@ -12,7 +12,9 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { after } from 'next/server';
 import { preRedirect } from '../auth/pre-target.ts';
+import type { Site } from '../auth/site.ts';
 import { authConfig } from './auth.ts';
+import { docsUrl } from './docs-url.ts';
 import { arrival } from './first-run.ts';
 import { logWarn } from './log.ts';
 import { appOrigin } from './origin.ts';
@@ -81,3 +83,5 @@ export async function formBinding(path: string): Promise<string> {
 }
 
 export const hosted = (): boolean => process.env['DREFYN_HOSTED'] === 'true';
+
+export const site = (): Site => ({ hosted: hosted(), docs: docsUrl() });

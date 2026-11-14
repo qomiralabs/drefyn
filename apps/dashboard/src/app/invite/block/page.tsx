@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { BlockForm } from '../../../auth/forms.tsx';
 import { guardPublic } from '../../../server/guard.ts';
-import { formBinding, hosted } from '../../../server/sign-in-support.ts';
+import { formBinding, site } from '../../../server/sign-in-support.ts';
 
 export async function generateMetadata(): Promise<Metadata> {
   await guardPublic();
@@ -12,5 +12,5 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function InviteBlock() {
   await guardPublic();
   const csrf = await formBinding('/invite/block');
-  return <BlockForm hosted={hosted()} csrf={csrf} />;
+  return <BlockForm site={site()} csrf={csrf} />;
 }

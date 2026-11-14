@@ -9,6 +9,8 @@ const LINK = /\b(?:href|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>
 // alike host on it still fails.
 const OUR_OWN_LINKS: ReadonlySet<string> = new Set([
   'https://status.drefyn.com',
+  // The Documentation link on the signed out pages, when DREFYN_DOCS_URL is not set.
+  'https://docs.drefyn.com',
   'https://drefyn.com/terms',
   'https://drefyn.com/privacy',
 ]);

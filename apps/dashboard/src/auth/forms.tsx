@@ -132,7 +132,7 @@ interface VerifyProps extends Shared {
   readonly fromSignUp: boolean;
 }
 
-export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): ReactNode {
+export function VerifyForm({ site, csrf, email, fromSignUp }: VerifyProps): ReactNode {
   const [typed, typedAction] = useForm<TypedCodeState>(verifyCode, {});
   const [link, readAction, reading] = useForm<LinkState>(inspectLink, { kind: 'idle' });
   const [finished, finishAction] = useForm<LinkState>(finishLink, { kind: 'idle' });
@@ -151,11 +151,11 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
   const focus = useFocusOnChange(current.kind === 'idle' ? typed : current);
   const { view: resetView } = noticed(reset, { step: 'ask' });
   if (resetView.step === 'saved' || (resetView.step === 'choose' && current.kind === 'choose')) {
-    return <ResetScreen hosted={hosted} csrf={csrf} action={resetAction} state={resetView} />;
+    return <ResetScreen site={site} csrf={csrf} action={resetAction} state={resetView} />;
   }
   return (
     <div ref={focus} className="contents">
-      <AuthFrame hosted={hosted} label={VERIFY_LABEL} busy={reading}>
+      <AuthFrame site={site} label={VERIFY_LABEL} busy={reading}>
         <div className="auth-reading contents">
           <Reading title="Signing you in" />
         </div>
@@ -178,20 +178,14 @@ export function VerifyForm({ hosted, csrf, email, fromSignUp }: VerifyProps): Re
           />
         ) : null}
         {current.kind === 'gone' ? (
-          <TypedCode
-            hosted={hosted}
-            csrf={csrf}
-            email={null}
-            fromSignUp={false}
-            problem="expired"
-          />
+          <TypedCode site={site} csrf={csrf} email={null} fromSignUp={false} problem="expired" />
         ) : null}
         {current.kind === 'failed' ? <Failed notice={current.notice} /> : null}
         {linkNotice === undefined ? null : <Failed notice={linkNotice} />}
         {current.kind === 'idle' && !reading && linkNotice === undefined ? (
           <div className="auth-typed contents">
             <TypedCode
-              hosted={hosted}
+              site={site}
               csrf={csrf}
               action={typedAction}
               email={email}
@@ -229,20 +223,20 @@ export function PasswordForm(props: PasswordBase): ReactNode {
   );
 }
 
-export function ResetForm({ hosted, csrf }: Shared): ReactNode {
+export function ResetForm({ site, csrf }: Shared): ReactNode {
   const [state, action] = useForm<ResetState>(resetStep, { step: 'ask' });
   const { view, notice } = noticed(state, { step: 'ask' });
   const focus = useFocusOnChange(state);
   const shown: ResetState = notice === undefined ? view : { step: 'ask', notice };
   return (
     <div ref={focus} className="contents">
-      <ResetScreen hosted={hosted} csrf={csrf} action={action} state={shown} />
+      <ResetScreen site={site} csrf={csrf} action={action} state={shown} />
     </div>
   );
 }
 
 export function LinkForm({
-  hosted,
+  site,
   csrf,
   email,
   provider,
@@ -253,7 +247,7 @@ export function LinkForm({
   return (
     <div ref={focus} className="contents">
       <LinkScreen
-        hosted={hosted}
+        site={site}
         csrf={csrf}
         action={action}
         email={email}
@@ -265,7 +259,7 @@ export function LinkForm({
   );
 }
 
-export function CliForm({ hosted, csrf }: Shared): ReactNode {
+export function CliForm({ site, csrf }: Shared): ReactNode {
   const [state, action, pending] = useForm<CliState>(redeemCliLink, { kind: 'idle' });
   const { view, notice } = noticed(state, { kind: 'idle' });
   useFragment((fragment) => {
@@ -276,7 +270,7 @@ export function CliForm({ hosted, csrf }: Shared): ReactNode {
   });
   return (
     <CliScreen
-      hosted={hosted}
+      site={site}
       csrf={csrf}
       view={view}
       notice={notice}
@@ -286,7 +280,7 @@ export function CliForm({ hosted, csrf }: Shared): ReactNode {
   );
 }
 
-export function InviteForm({ hosted, csrf }: Shared): ReactNode {
+export function InviteForm({ site, csrf }: Shared): ReactNode {
   const [state, action] = useForm<InviteState>(openInvitation, { kind: 'reading' });
   const [joined, joinAction] = useForm<InviteState>(joinInvitation, { kind: 'reading' });
   useFragment((fragment) => {
@@ -298,7 +292,7 @@ export function InviteForm({ hosted, csrf }: Shared): ReactNode {
   const { view, notice } = noticed<InviteState>(idle ? state : joined, { kind: 'invalid' });
   return (
     <InviteScreen
-      hosted={hosted}
+      site={site}
       csrf={csrf}
       view={view}
       notice={notice}
@@ -308,7 +302,7 @@ export function InviteForm({ hosted, csrf }: Shared): ReactNode {
   );
 }
 
-export function BlockForm({ hosted, csrf }: Shared): ReactNode {
+export function BlockForm({ site, csrf }: Shared): ReactNode {
   const [state, action] = useForm<BlockState>(readBlock, { kind: 'reading' });
   const [stopped, stopAction] = useForm<BlockState>(stopInvitations, { kind: 'reading' });
   useFragment((fragment) => {
@@ -321,7 +315,7 @@ export function BlockForm({ hosted, csrf }: Shared): ReactNode {
   const { view, notice } = noticed<BlockState>(idle ? state : stopped, { kind: 'invalid' });
   return (
     <BlockScreen
-      hosted={hosted}
+      site={site}
       csrf={csrf}
       view={view}
       notice={notice}
