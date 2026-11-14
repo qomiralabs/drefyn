@@ -2,7 +2,9 @@ import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PARENT_CHECK_MS,
+  PARENT_GONE_EXIT_CODE,
   PARENT_GONE_GRACE_MS,
+  PARENT_GONE_LINE,
   stopThenKill,
   watchParent,
 } from '../src/parent-watch.ts';
@@ -117,5 +119,23 @@ describe('stopThenKill', () => {
     }).toThrow('no');
     vi.advanceTimersByTime(PARENT_GONE_GRACE_MS);
     expect(kill).toHaveBeenCalledOnce();
+  });
+});
+
+describe('a stop for a lost parent', () => {
+  it('logs one line at error, so an alert on the level sees it', () => {
+    expect(PARENT_GONE_LINE.endsWith('\n')).toBe(true);
+    expect(PARENT_GONE_LINE.slice(0, -1)).not.toContain('\n');
+    expect(JSON.parse(PARENT_GONE_LINE)).toEqual({
+      level: 'error',
+      event: 'mdx.parse_host_parent_gone',
+    });
+  });
+
+  it('exits with a code no crash, clean stop or signal gives', () => {
+    // Node exits 1 to 14 for its own failures, and a shell reports a signal as 128 and up.
+    expect(PARENT_GONE_EXIT_CODE).toBe(69);
+    expect(PARENT_GONE_EXIT_CODE).toBeGreaterThan(14);
+    expect(PARENT_GONE_EXIT_CODE).toBeLessThan(128);
   });
 });
