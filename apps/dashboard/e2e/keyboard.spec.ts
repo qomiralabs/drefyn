@@ -317,14 +317,15 @@ test.describe('signed out pages', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/auth-states/sign-in/ready');
     await expect(page.getByRole('complementary', { name: 'About Drefyn' })).toBeVisible();
-    await page.evaluate(() => {
-      (document.activeElement as HTMLElement | null)?.blur();
-    });
-    const stops: string[] = [];
+    // Blurring the autofocused field keeps it as the start point, so the walk starts at the
+    // top on purpose.
+    await page.getByRole('link', { name: 'Skip to content' }).focus();
+    const stops: string[] = [await focused(page)];
     for (let i = 0; i < 40; i += 1) {
       await page.keyboard.press(tabKey(browserName));
       const here = await focused(page);
-      if (here === 'body') break;
+      // Past the last stop focus leaves the page or wraps to the top.
+      if (here === 'body' || here === stops[0]) break;
       const inCard = await page.evaluate(() => document.activeElement?.closest('aside') !== null);
       stops.push(inCard ? `card ${here}` : here);
     }
