@@ -79,6 +79,9 @@ export const PREFIXES = [
   'crd',
   'ses',
   'inv',
+  'ssc',
+  'ssd',
+  'ssi',
 ] as const;
 
 export const SCOPES = ['page', 'nav', 'search', 'retrieval', 'render', 'asset'] as const;

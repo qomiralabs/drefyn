@@ -57,6 +57,7 @@ const PAST_LIMIT = '01a14984-4476-77ce-9335-12800000ec11';
 const INSIDE_LIMIT = '01a14984-4476-77ce-9335-12800000ec12';
 const LIVE = '01a14984-4476-77ce-9335-12800000ec13';
 const EXPIRED = '01a14984-4476-77ce-9335-12800000ec14';
+const CONNECTION = '01a14984-4476-77ce-9335-12800000ec15';
 
 const keyRow = (id: string, createdAt: string, expiresAt: string, revokedAt: string) =>
   `('${id}', '${ORG}', 'CI', decode(repeat('ab', 32), 'hex'), 'a1b2', array['docs:read'], 'listed',
@@ -83,7 +84,15 @@ async function seedKeys(): Promise<void> {
          keyRow(EXPIRED, old, `now() - interval '199 days'`, 'null'),
        ].join(',')};
      insert into app.api_key_projects (organization_id, api_key_id, target_project_id)
-       select organization_id, id, '${PROJECT}' from app.api_keys;`,
+       select organization_id, id, '${PROJECT}' from app.api_keys;
+     insert into app.sso_connections (id, organization_id, protocol, display_name, idempotency_key)
+       values ('${CONNECTION}', '${ORG}', 'oidc', 'Okta', 'k-sso');
+     insert into app.sso_states (state_hash, organization_id, connection_id, protocol,
+         code_verifier, nonce, browser_hash, expires_at) values
+       (decode(repeat('0d', 32), 'hex'), '${ORG}', '${CONNECTION}', 'oidc', repeat('v', 43),
+        repeat('n', 22), decode(repeat('0d', 32), 'hex'), now() - interval '25 hours'),
+       (decode(repeat('0e', 32), 'hex'), '${ORG}', '${CONNECTION}', 'oidc', repeat('v', 43),
+        repeat('n', 22), decode(repeat('0e', 32), 'hex'), now() - interval '23 hours');`,
     db.name,
   );
 }
@@ -104,7 +113,8 @@ async function remaining(): Promise<string> {
               (select string_agg(encode(key_hmac, 'hex'), ',') from app.api_key_failures) || '|' ||
               (select string_agg(email_normalized, ',') from app.email_challenges) || '|' ||
               (select string_agg(encode(state_hash, 'hex'), ',') from app.oauth_states) || '|' ||
-              (select string_agg(encode(secret_hash, 'hex'), ',') from app.cli_sign_in_links);`,
+              (select string_agg(encode(secret_hash, 'hex'), ',') from app.cli_sign_in_links) || '|' ||
+              (select string_agg(encode(state_hash, 'hex'), ',') from app.sso_states);`,
       db.name,
     )
   ).trim();
@@ -129,6 +139,7 @@ describeWithStack('expiry cleanup', () => {
       cli_sign_in_links: 1,
       known_devices: 1,
       api_keys: 1,
+      sso_states: 1,
     });
     expect(
       (
@@ -137,9 +148,14 @@ describeWithStack('expiry cleanup', () => {
     ).toBe('0a'.repeat(32));
     expect(apiCounts).toEqual({ api_key_failures: 1 });
     expect(await remaining()).toBe(
-      ['02'.repeat(32), '04'.repeat(32), 'new@example.com', '08'.repeat(32), '0c'.repeat(32)].join(
-        '|',
-      ),
+      [
+        '02'.repeat(32),
+        '04'.repeat(32),
+        'new@example.com',
+        '08'.repeat(32),
+        '0c'.repeat(32),
+        '0e'.repeat(32),
+      ].join('|'),
     );
     const again = await withAuth(auth, (tx) => deleteExpired(tx, AUTH_EXPIRY_RULES));
     expect(again).toEqual({
@@ -149,6 +165,7 @@ describeWithStack('expiry cleanup', () => {
       cli_sign_in_links: 0,
       known_devices: 0,
       api_keys: 0,
+      sso_states: 0,
     });
   });
 
@@ -204,6 +221,7 @@ describeWithStack('expiry cleanup', () => {
       cli_sign_in_links: 0,
       known_devices: 0,
       api_keys: 0,
+      sso_states: 0,
     });
     expect(counted).toEqual([
       ['auth_rate_limits', 0],
@@ -212,6 +230,7 @@ describeWithStack('expiry cleanup', () => {
       ['cli_sign_in_links', 0],
       ['known_devices', 0],
       ['api_keys', 0],
+      ['sso_states', 0],
     ]);
     expect(await cleanup.maybeRun()).toBeNull();
   });

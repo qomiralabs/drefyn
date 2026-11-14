@@ -25,7 +25,7 @@ const RULES: readonly ExpiryRule<TwoTables>[] = [
 const tx = {} as Transaction<TwoTables>;
 
 describe('expiry rules', () => {
-  it('clear ended windows, challenges, states and CLI links a day after expiry, devices after 400 days, revoked keys after 90', () => {
+  it('clear ended windows, challenges, states and CLI links a day after expiry, devices after 400 days, revoked keys after 90, SSO states a day after expiry', () => {
     expect(AUTH_EXPIRY_RULES).toEqual([
       { table: 'auth_rate_limits', column: 'window_end', afterSeconds: 0 },
       { table: 'email_challenges', column: 'expires_at', afterSeconds: 86_400 },
@@ -36,6 +36,12 @@ describe('expiry rules', () => {
         table: 'api_keys',
         column: 'revoked_at',
         afterSeconds: 90 * 86_400,
+        organizationColumn: 'organization_id',
+      },
+      {
+        table: 'sso_states',
+        column: 'expires_at',
+        afterSeconds: 86_400,
         organizationColumn: 'organization_id',
       },
     ]);
