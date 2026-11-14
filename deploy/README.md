@@ -42,6 +42,10 @@ that others can read. Two first `up` runs at once share one generated file.
 If `up` fails, it says whether compose could not start the container or the healthcheck
 failed, with the last healthcheck message, and prints the command that shows the server log.
 A first start that was interrupted leaves nothing in the log; `reset --yes` and `up` again.
+Newer Compose releases (5.1 does, 2.38 does not) leave a secret with an empty value out of the
+container. With the superuser password empty, the server then cannot start at all, even with
+data already in the volume. Put the password back and run `up` again; do not reset, which would
+delete the data.
 
 ## Postgres
 
