@@ -178,6 +178,51 @@ describe('Tooltip', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  // An icon rail: the link keeps its words as its name, hidden from sight, and the tooltip
+  // shows them again for sighted people.
+  function RailLink({ when }: { when?: () => boolean }) {
+    return (
+      <Tooltip content="Pages" placement="end" repeats {...(when === undefined ? {} : { when })}>
+        <ButtonLink href="/pages" variant="quiet">
+          <IconMore />
+          <span className="sr-only">Pages</span>
+        </ButtonLink>
+      </Tooltip>
+    );
+  }
+
+  it('repeating a hidden name, it shows on focus and leaves the name and description alone', () => {
+    render(<RailLink />);
+    const link = screen.getByRole('link', { name: 'Pages' });
+    keyboardFocus(link);
+    const tip = screen.getByRole('tooltip', { hidden: true });
+    expect(tip.textContent).toBe('Pages');
+    expect(tip.getAttribute('aria-hidden')).toBe('true');
+    expect(link.hasAttribute('aria-describedby')).toBe(false);
+    expect(link.getAttribute('aria-label')).toBeNull();
+  });
+
+  it('repeating a hidden name, it shows on hover after the timer too', () => {
+    render(<RailLink />);
+    hover(screen.getByRole('link', { name: 'Pages' }));
+    wait(DELAY);
+    expect(screen.getByRole('tooltip', { hidden: true }).textContent).toBe('Pages');
+  });
+
+  it('stays shut while when says no, as when the name it repeats is on screen', () => {
+    let rail = false;
+    render(<RailLink when={() => rail} />);
+    const link = screen.getByRole('link', { name: 'Pages' });
+    keyboardFocus(link);
+    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+    act(() => {
+      link.blur();
+    });
+    rail = true;
+    keyboardFocus(link);
+    expect(screen.getByRole('tooltip', { hidden: true }).textContent).toBe('Pages');
+  });
+
   it('takes text only and no styling props', () => {
     const child = <Button>Publish</Button>;
     // @ts-expect-error content is text, never markup with links or buttons.

@@ -315,7 +315,8 @@ test.describe('command bar content', () => {
   const open = async (page: Page, path: string = ROUTES.overview) => {
     await openShell(page, path);
     await page.keyboard.press('ControlOrMeta+k');
-    await expect(commandBar(page)).toBeVisible();
+    // The results, not the frame that stands in while their code loads.
+    await expect(commandBar(page).getByRole('combobox')).toBeFocused();
     return commandBar(page);
   };
 
