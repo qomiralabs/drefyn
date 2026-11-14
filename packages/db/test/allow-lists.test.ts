@@ -282,15 +282,90 @@ describe('allow lists', () => {
     });
   });
 
-  it('let drefyn_auth reach one tenant table, to find and delete old revoked keys', () => {
+  it('let drefyn_auth reach old revoked keys and the SSO tables, and nothing else with organization_id', () => {
     expect(ALLOW_LISTS.authTenantGrants).toBe(AUTH_TENANT_GRANTS);
-    expect(AUTH_TENANT_GRANTS.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
+    const keys = AUTH_TENANT_GRANTS.filter((g) => g.name.startsWith('app.api_keys'));
+    expect(keys.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
       ['app.api_keys', 'drefyn_auth', 'DELETE'],
       ['app.api_keys.ctid', 'drefyn_auth', 'SELECT'],
       ['app.api_keys.organization_id', 'drefyn_auth', 'SELECT'],
       ['app.api_keys.revoked_at', 'drefyn_auth', 'SELECT'],
     ]);
-    for (const grant of AUTH_TENANT_GRANTS) expect(grant.reason.trim()).not.toBe('');
+    const tables = new Set(AUTH_TENANT_GRANTS.map((g) => g.name.split('.').slice(0, 2).join('.')));
+    expect([...tables].sort()).toEqual([
+      'app.api_keys',
+      'app.sso_connections',
+      'app.sso_domains',
+      'app.sso_identities',
+      'app.sso_states',
+    ]);
+    for (const grant of AUTH_TENANT_GRANTS) {
+      expect(grant.grantee).toBe('drefyn_auth');
+      expect(grant.reason.trim(), grant.name).not.toBe('');
+    }
+  });
+
+  describe('the sign in role on the SSO tables', () => {
+    const on = (table: string, privilege: string) =>
+      AUTH_TENANT_GRANTS.filter(
+        (g) => g.name.startsWith(`app.${table}.`) && g.privilege === privilege,
+      ).map((g) => g.name.slice(`app.${table}.`.length));
+
+    // A sign in credential that read the sealed secret could complete any organization's
+    // OIDC exchange.
+    it('reads the lookup columns of a connection, never the secret, and writes nothing', () => {
+      expect(on('sso_connections', 'SELECT')).not.toContain('oidc_client_secret_sealed');
+      expect(on('sso_connections', 'SELECT').sort()).toEqual([
+        'display_name',
+        'id',
+        'jit_default_project_role',
+        'jit_enabled',
+        'oidc_client_id',
+        'oidc_endpoints',
+        'oidc_issuer',
+        'organization_id',
+        'protocol',
+        'saml_idp_certs',
+        'saml_idp_entity_id',
+        'saml_idp_sso_url',
+        'session_max_seconds',
+        'status',
+      ]);
+      expect(
+        AUTH_TENANT_GRANTS.filter(
+          (g) => g.name.startsWith('app.sso_connections') && g.privilege !== 'SELECT',
+        ),
+      ).toEqual([]);
+    });
+
+    it('reads four columns of a domain, and only verified rows', () => {
+      expect(on('sso_domains', 'SELECT').sort()).toEqual([
+        'connection_id',
+        'domain',
+        'organization_id',
+        'verified_at',
+      ]);
+      expect(USER_POLICIES.find((p) => p.name === 'app.sso_domains.auth_read')?.using).toBe(
+        '(verified_at IS NOT NULL)',
+      );
+    });
+
+    it('reads and links identities, and consumes states, but updates nothing', () => {
+      expect(on('sso_identities', 'INSERT').sort()).toEqual([
+        'connection_id',
+        'email_normalized',
+        'last_used_at',
+        'organization_id',
+        'subject',
+        'user_id',
+      ]);
+      expect(on('sso_states', 'INSERT')).toContain('state_hash');
+      expect(on('sso_states', 'SELECT')).toContain('ctid');
+      expect(
+        AUTH_TENANT_GRANTS.filter((g) => g.name === 'app.sso_states').map((g) => g.privilege),
+      ).toEqual(['DELETE']);
+      expect(AUTH_TENANT_GRANTS.filter((g) => g.privilege === 'UPDATE')).toEqual([]);
+    });
   });
 
   it('keep the API key tables off the auth table list, so nothing else opens with them', () => {
@@ -565,11 +640,15 @@ describe('allow lists', () => {
 });
 
 describe('organization entries', () => {
-  it('list the one global unique key, the slug namespace, with its reason', () => {
+  it('list the global unique keys, each with its reason', () => {
     expect(GLOBAL_UNIQUE_CONSTRAINTS.map((e) => e.name)).toEqual([
       'app.organization_slugs.organization_slugs_slug_key',
+      'app.sso_domains.sso_domains_verified_domain_key',
+      'app.sso_states.sso_states_pkey',
     ]);
     expect(GLOBAL_UNIQUE_CONSTRAINTS[0]?.reason).toMatch(/one public namespace/);
+    expect(GLOBAL_UNIQUE_CONSTRAINTS[1]?.reason).toBe('a domain has one SSO owner');
+    expect(GLOBAL_UNIQUE_CONSTRAINTS[2]?.reason).toMatch(/before it knows the organization/);
   });
 
   it('keep the organization tables off the global and auth lists', () => {

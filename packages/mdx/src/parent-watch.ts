@@ -1,5 +1,10 @@
 export const PARENT_CHECK_MS = 1_000;
 export const PARENT_GONE_GRACE_MS = 5_000;
+// A lost parent is never a clean stop: whatever ran this process died without stopping it. So the
+// stop logs at error and exits non zero. 69 sits outside the 1 to 14 Node uses for its own
+// failures and the 128 and up of a signal, so an alert can tell it from a crash or a kill.
+export const PARENT_GONE_EXIT_CODE = 69;
+export const PARENT_GONE_LINE = `${JSON.stringify({ level: 'error', event: 'mdx.parse_host_parent_gone' })}\n`;
 
 // Read as this module loads. A parent that dies before the first read cannot be told from a
 // process that started under init, so the earlier the better.

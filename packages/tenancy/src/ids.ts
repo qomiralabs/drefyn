@@ -18,6 +18,9 @@ export const ID_KINDS = Object.freeze([
   'crd',
   'ses',
   'inv',
+  'ssc',
+  'ssd',
+  'ssi',
 ] as const);
 
 export type IdKind = (typeof ID_KINDS)[number];

@@ -176,6 +176,16 @@ describe('resolve', () => {
     },
   );
 
+  // SSO sign in will write this. Reading lands first, so an image that writes it can roll
+  // back to one that still reads every session.
+  it('reads back a session that signed in through SSO', async () => {
+    const row = () => sessionResponder([sessionRow({ method: 'sso' })]);
+    const info = await setup(row()).sessions.resolveSession(tokenFor());
+    expect(info?.method).toBe('sso');
+    const resolved = await setup(row()).sessions.resolve(tokenFor());
+    expect(resolved).not.toBeNull();
+  });
+
   it('refuses a stored step up method it does not know', async () => {
     const { sessions } = setup(sessionResponder([sessionRow({ step_up_method: 'sms' })]));
     await expect(sessions.resolveSession(tokenFor())).rejects.toMatchObject({

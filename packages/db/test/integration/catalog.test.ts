@@ -99,6 +99,14 @@ for (const table of ['totp_credentials', 'recovery_codes', 'factor_challenges'])
 }
 
 const CASES: Record<string, BadCase> = {
+  // Organization work would read it across every project, so leaving project_id out is
+  // reviewed per table.
+  'an organization table off the organization table list': {
+    rule: 'organization_table',
+    object: 'app.bad_org_scope',
+    mentions: ['no project_id'],
+    up: () => orgTable('bad_org_scope'),
+  },
   'a table without organization_id': {
     rule: 'tenant_column',
     object: 'app.bad_no_org',
@@ -1176,6 +1184,7 @@ create unique index ok_slugs_slug_key on app.ok_slugs (slug);`,
         ...FIXTURE_ALLOW_LISTS.globalUniqueConstraints,
         reviewed('app.ok_slugs.ok_slugs_slug_key'),
       ],
+      organizationTables: [...FIXTURE_ALLOW_LISTS.organizationTables, reviewed('app.ok_slugs')],
     });
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
@@ -1312,6 +1321,7 @@ describe('catalog case list', () => {
       'column_grant',
       'public_policy',
       'restrictive_policy',
+      'organization_table',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }
