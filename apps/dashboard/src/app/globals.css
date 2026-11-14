@@ -85,3 +85,24 @@
 input[type='search']::-webkit-search-cancel-button {
   appearance: none;
 }
+
+/* The inbox panel stops short of the bottom edge, so the page under it stays in reach, and on
+   a phone the bar above its sheet stays in view. */
+@utility max-h-inbox {
+  max-height: calc(100dvh - var(--dr-shell-bar) - var(--dr-space-16));
+}
+
+/* Out of sight until the reveal wait passes, so a quick load never flashes skeletons. A wait,
+   not motion: nothing moves or fades, so reduced motion keeps it. */
+@keyframes dr-reveal {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
+@utility animate-reveal {
+  animation: dr-reveal 0s linear var(--dr-timer-reveal) both;
+}

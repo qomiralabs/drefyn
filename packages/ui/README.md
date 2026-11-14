@@ -169,7 +169,10 @@ In an app that uses Tailwind:
   closed phone drawer. Never add a second F6 handler.
 
 - `Tooltip` wraps one Button or ButtonLink. Its text describes the control and is never its
-  only name. A disabled Button keeps hover and focus, so a tooltip can say why.
+  only name. A disabled Button keeps hover and focus, so a tooltip can say why. On an icon
+  rail, where the name is visually hidden, pass `repeats`: the tooltip shows the name for
+  sighted people, stays out of the accessibility tree and describes nothing. `when` is asked
+  before each opening, so a rail item stays quiet once its label is on screen.
 - `Dialog` takes a `trigger`, or `open` and `onOpenChange` from the caller. `footer` may be a
   function that gets `close`. Set `busy` while a submit is in flight and `error` when it
   failed. A click outside never closes it.

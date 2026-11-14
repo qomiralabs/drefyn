@@ -1,27 +1,52 @@
 'use client';
-import { IconInbox } from '@drefyn/ui/react';
+import { IconCross, IconInbox } from '@drefyn/ui/react';
 import Link from 'next/link';
-import { useRef, useState, type ReactNode } from 'react';
-import { Dialog, Heading, Popover } from 'react-aria-components';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { InboxItem } from './data.ts';
 
 // One inbox for the organization. The count is a plain number in a neutral keycap: red
 // means broken, and nothing here is broken.
+//
+// Non modal, so people can read it while they work: the page stays live under it, a press
+// outside leaves it open, and it sits right after its trigger in the page, so Tab walks in
+// and out of it in reading order. Escape inside it, the trigger and Close shut it. On a
+// phone it is a bottom sheet, still without a scrim.
 export function Inbox({ items }: { items: readonly InboxItem[] }): ReactNode {
   const count = items.length;
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Opening moves focus in, so a screen reader hears the panel's name and the next Tab
+  // reaches the first item.
+  useEffect(() => {
+    if (open) panel.current?.focus();
+  }, [open]);
+
+  const close = () => {
+    setOpen(false);
+    trigger.current?.focus();
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return;
+    event.stopPropagation();
+    close();
+  };
+
   return (
     <>
       <button
         ref={trigger}
         type="button"
         aria-label={count === 0 ? 'Inbox, nothing needs you' : `Inbox, ${count} need you`}
-        aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => {
+        aria-controls={open ? 'inbox-panel' : undefined}
+        onClick={(event) => {
+          // Safari does not focus a clicked button, and focus must come back here on close.
+          event.currentTarget.focus();
           setOpen((was) => !was);
         }}
+        onKeyDown={open ? onKeyDown : undefined}
         className="inline-flex h-control-md shrink-0 cursor-pointer items-center gap-4 rounded-sm px-4 text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring aria-expanded:bg-pressed"
       >
         <IconInbox size="md" />
@@ -34,21 +59,30 @@ export function Inbox({ items }: { items: readonly InboxItem[] }): ReactNode {
           </span>
         )}
       </button>
-      <Popover
-        triggerRef={trigger}
-        isOpen={open}
-        onOpenChange={setOpen}
-        placement="bottom end"
-        offset={4}
-        className="z-overlay w-shell-drawer overflow-auto rounded-md border border-rule-strong bg-overlay shadow-1 transition-opacity duration-base ease-enter data-entering:opacity-0"
-      >
-        <Dialog aria-labelledby="inbox-title" className="flex flex-col outline-none">
-          <Heading
-            id="inbox-title"
-            className="border-b border-rule px-12 py-8 text-body-s font-medium text-ink"
-          >
-            Inbox
-          </Heading>
+      {open ? (
+        <div
+          ref={panel}
+          id="inbox-panel"
+          role="dialog"
+          aria-labelledby="inbox-title"
+          tabIndex={-1}
+          data-inbox=""
+          onKeyDown={onKeyDown}
+          className="absolute end-12 top-full z-overlay mt-4 flex max-h-inbox w-shell-drawer flex-col overflow-auto rounded-md border border-rule-strong bg-overlay shadow-1 outline-none focus-visible:focus-ring max-sm:fixed max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-0 max-sm:mt-0 max-sm:w-full max-sm:rounded-b-none max-sm:border-b-0 max-sm:pb-safe-bottom max-sm:shadow-2 motion-safe:animate-settle motion-reduce:animate-fade-in"
+        >
+          <div className="flex items-center justify-between border-b border-rule py-4 ps-12 pe-4">
+            <h2 id="inbox-title" className="text-body-s font-medium text-ink">
+              Inbox
+            </h2>
+            <button
+              type="button"
+              aria-label="Close inbox"
+              onClick={close}
+              className="inline-grid size-control-md cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring"
+            >
+              <IconCross />
+            </button>
+          </div>
           {count === 0 ? (
             <p className="px-12 py-16 text-body-s text-secondary">Nothing needs you right now.</p>
           ) : (
@@ -79,8 +113,8 @@ export function Inbox({ items }: { items: readonly InboxItem[] }): ReactNode {
               </ul>
             </section>
           )}
-        </Dialog>
-      </Popover>
+        </div>
+      ) : null}
     </>
   );
 }

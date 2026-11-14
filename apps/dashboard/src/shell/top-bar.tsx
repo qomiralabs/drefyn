@@ -9,7 +9,6 @@ import {
   MenuItem,
   MenuSection,
   MenuSeparator,
-  toast,
   useLandmark,
 } from '@drefyn/ui/react';
 import Link from 'next/link';
@@ -25,11 +24,6 @@ import { applyTheme, currentTheme, type ThemeChoice } from './theme.ts';
 
 const QUIET_ICON =
   'inline-grid size-control-md shrink-0 cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring';
-
-// Things the placeholder shell lists but cannot do yet say so instead of doing nothing.
-const notYet = (what: string) => () => {
-  toast({ title: `${what} is not available yet.` });
-};
 
 export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
   const router = useRouter();
@@ -94,6 +88,7 @@ export function OrganizationMenu({ data }: { data: ShellData }): ReactNode {
 
 function AccountMenu({ data }: { data: ShellData }): ReactNode {
   const router = useRouter();
+  const { openShortcuts } = useShell();
   const [theme, setTheme] = useState<ThemeChoice>('system');
   const choose = (choice: ThemeChoice) => () => {
     applyTheme(choice);
@@ -129,7 +124,7 @@ function AccountMenu({ data }: { data: ShellData }): ReactNode {
         </MenuItem>
       </MenuSection>
       <MenuSeparator />
-      <MenuItem id="shortcuts" shortcut="?" onAction={notYet('The shortcuts sheet')}>
+      <MenuItem id="shortcuts" shortcut="?" onAction={openShortcuts}>
         Keyboard shortcuts
       </MenuItem>
       <MenuItem

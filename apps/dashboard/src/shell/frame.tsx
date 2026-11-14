@@ -13,15 +13,19 @@ import {
   type ReactNode,
 } from 'react';
 import type { CommandBarProps } from './command-bar.tsx';
+import { CommandFrame, type CommandBodyProps } from './command-frame.tsx';
 import type { Command } from './commands.ts';
 import type { ShellData } from './data.ts';
 import { isTyping, sequenceTarget } from './keys.ts';
+import type { ShortcutsSheetProps } from './shortcuts-sheet.tsx';
+import { SINGLE_KEYS_STORAGE, singleKeysOn } from './shortcuts.ts';
 
 interface ShellState {
   readonly org: string;
   readonly drawerOpen: boolean;
   readonly setDrawerOpen: (open: boolean) => void;
   readonly toggleCommandBar: () => void;
+  readonly openShortcuts: () => void;
 }
 
 const ShellContext = createContext<ShellState | null>(null);
@@ -34,6 +38,8 @@ export function useShell(): ShellState {
 
 // The command bar is not in the first load: it arrives on the first Cmd+K or Ctrl+K.
 const loadCommandBar = () => import('./command-bar.tsx').then((mod) => mod.CommandBar);
+// Nor is the shortcuts sheet, which most visits never open.
+const loadShortcutsSheet = () => import('./shortcuts-sheet.tsx').then((mod) => mod.ShortcutsSheet);
 
 export function ShellFrame({
   org,
@@ -53,31 +59,63 @@ export function ShellFrame({
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [CommandBar, setCommandBar] = useState<ComponentType<CommandBarProps> | null>(null);
   const loading = useRef(false);
   const pendingKey = useRef<{ key: string; at: number } | null>(null);
+  // Read in the load's callbacks, which outlive the render that started them.
+  const isOpen = useRef(false);
+
+  const showCommandBar = useCallback((open: boolean) => {
+    isOpen.current = open;
+    setCommandOpen(open);
+    if (!open) setQuery('');
+  }, []);
 
   // Read through a ref, so a key press that lands before React re-runs its effects still
   // sees the loaded command bar instead of loading it again.
   const loaded = useRef<ComponentType<CommandBarProps> | null>(null);
+  // The frame opens on the press itself; only its results wait for their code. A failed load
+  // closes the frame and says so, and the next press tries again.
   const toggleCommandBar = useCallback(() => {
-    if (loaded.current !== null) {
-      setCommandOpen((open) => !open);
+    if (isOpen.current) {
+      showCommandBar(false);
       return;
     }
-    if (loading.current) return;
+    showCommandBar(true);
+    if (loaded.current !== null || loading.current) return;
     loading.current = true;
     loadCommandBar()
       .then((component) => {
         loaded.current = component;
         setCommandBar(() => component);
-        setCommandOpen(true);
       })
       .catch(() => {
+        if (!isOpen.current) return;
+        showCommandBar(false);
         toast({ title: 'Could not open search. Try again.', tone: 'error' });
       })
       .finally(() => {
         loading.current = false;
+      });
+  }, [showCommandBar]);
+
+  const [Sheet, setSheet] = useState<ComponentType<ShortcutsSheetProps> | null>(null);
+  const sheetLoaded = useRef(false);
+  const openShortcuts = useCallback(() => {
+    if (sheetLoaded.current) {
+      setShortcutsOpen(true);
+      return;
+    }
+    loadShortcutsSheet()
+      .then((component) => {
+        sheetLoaded.current = true;
+        setSheet(() => component);
+        setShortcutsOpen(true);
+      })
+      .catch(() => {
+        toast({ title: 'Could not open the shortcuts. Try again.', tone: 'error' });
       });
   }, []);
 
@@ -91,10 +129,13 @@ export function ShellFrame({
   // The handler reads changing state through refs and is attached once. Re-attaching it on
   // each state change would let Firefox run the new copy for the same key press, because the
   // update commits between listeners.
-  const latest = useRef({ commandOpen, drawerOpen, org, router, toggleCommandBar });
+  const latest = useRef({ commandOpen, drawerOpen, org, router, toggleCommandBar, openShortcuts });
   useEffect(() => {
-    latest.current = { commandOpen, drawerOpen, org, router, toggleCommandBar };
+    latest.current = { commandOpen, drawerOpen, org, router, toggleCommandBar, openShortcuts };
   });
+
+  // A person who turned single keys off in the sheet keeps that choice in this browser.
+  const singleKeys = () => singleKeysOn(() => localStorage.getItem(SINGLE_KEYS_STORAGE));
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -112,7 +153,18 @@ export function ShellFrame({
       // Single key shortcuts never fire in a field, with a modifier, or over an overlay.
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (isTyping(document.activeElement) || commandOpen || drawerOpen) return;
-      if (document.querySelector('[role="menu"], [role="dialog"]') !== null) return;
+      // The inbox stays open while people work, so only focus inside it holds the keys back.
+      if (document.querySelector('[role="menu"], [role="dialog"]:not([data-inbox])') !== null) {
+        return;
+      }
+      if (document.activeElement?.closest('[data-inbox]') != null) return;
+      if (!singleKeys()) return;
+      if (event.key === '?') {
+        event.preventDefault();
+        pendingKey.current = null;
+        latest.current.openShortcuts();
+        return;
+      }
       const now = event.timeStamp;
       const target = sequenceTarget(pendingKey.current, key, now);
       pendingKey.current = target === null && key === 'g' ? { key, at: now } : null;
@@ -127,24 +179,38 @@ export function ShellFrame({
   }, []);
 
   const state = useMemo(
-    () => ({ org, drawerOpen, setDrawerOpen, toggleCommandBar }),
-    [org, drawerOpen, toggleCommandBar],
+    () => ({ org, drawerOpen, setDrawerOpen, toggleCommandBar, openShortcuts }),
+    [org, drawerOpen, toggleCommandBar, openShortcuts],
   );
+
+  // The results, drawn by the loaded code with what the shell knows bound in. A render
+  // function rather than a component, so a new render never remounts an open bar.
+  const body =
+    CommandBar === null
+      ? null
+      : (props: CommandBodyProps) => (
+          <CommandBar
+            {...props}
+            org={org}
+            orgName={orgName}
+            permissions={permissions}
+            projects={projects}
+            actions={actions}
+          />
+        );
 
   return (
     <ShellContext value={state}>
       {children}
-      {CommandBar === null ? null : (
-        <CommandBar
-          org={org}
-          orgName={orgName}
-          permissions={permissions}
-          projects={projects}
-          actions={actions}
-          open={commandOpen}
-          onOpenChange={setCommandOpen}
-        />
-      )}
+      <CommandFrame
+        open={commandOpen}
+        onOpenChange={showCommandBar}
+        orgName={orgName}
+        query={query}
+        onQueryChange={setQuery}
+        body={body}
+      />
+      {Sheet === null ? null : <Sheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />}
       <ToastRegion />
     </ShellContext>
   );
