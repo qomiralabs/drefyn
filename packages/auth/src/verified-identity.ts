@@ -1,11 +1,11 @@
-import type { IdOf, OrganizationId } from '@drefyn/tenancy';
+import type { OrganizationId } from '@drefyn/tenancy';
 import { z } from 'zod';
 import { normalizeAddress } from './address.ts';
+import type { SsoConnectionId } from './auth-events.ts';
 import { asId } from './session-support.ts';
 
 export type SsoProtocol = 'oidc' | 'saml';
 export type SsoConnectionStatus = 'draft' | 'test' | 'active' | 'disabled';
-export type SsoConnectionId = IdOf<'ssc'>;
 
 // Not exported. The interface below needs it as a key, so an object literal can never be one,
 // and the set beside it catches a cast at run time.

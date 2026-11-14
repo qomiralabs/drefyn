@@ -87,3 +87,45 @@ describe.each(['apps/dashboard/server.ts', 'apps/dashboard/test/integration/supp
     });
   },
 );
+
+// TXT lookups for SSO domain proof. The customer picks the name asked about, never the
+// server, so the entry may take Resolver from node:dns/promises and nothing else.
+describe('the SSO TXT resolver entry', () => {
+  const path = 'packages/auth/src/sso-dns.ts';
+  const code = readFileSync(join(repoRoot, path), 'utf8');
+  const lintFile = async (allow: readonly EgressAllowEntry[], text = code) => {
+    const eslint = makeEslint(repoRoot, { [RULE]: ['error', { allow }] });
+    return reports(await eslint.lintText(text, { filePath: join(repoRoot, path) }));
+  };
+
+  it('allows only the named Resolver import from node:dns/promises, with a reason', () => {
+    const entry = egressAllowList.find((e) => e.path === path);
+    expect(entry).toMatchObject({ only: [{ module: 'node:dns/promises', imports: ['Resolver'] }] });
+    expect(entry?.reason).toMatch(/never the server/);
+  });
+
+  it('lints the file clean with the shared list', async () => {
+    expect(await lintFile(egressAllowList)).toEqual([]);
+  });
+
+  it('is required: without it the file is reported', async () => {
+    const found = await lintFile(egressAllowList.filter((e) => e.path !== path));
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.every((r) => r.ruleId === RULE)).toBe(true);
+  });
+
+  it.each([
+    [
+      'another named import',
+      "import { lookup } from 'node:dns/promises';\nexport const x = lookup;",
+    ],
+    ['node:dns', "import { resolveTxt } from 'node:dns';\nexport const x = resolveTxt;"],
+    ['node:net', "export * as x from 'node:net';"],
+    ['a fetch call', "export const x = fetch('https://example.com');"],
+  ])('still reports %s in the same file', async (_name, extra) => {
+    const lines = code.split('\n').length;
+    const found = await lintFile(egressAllowList, `${code}\n${extra}\n`);
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.every((r) => r.line >= lines + 1)).toBe(true);
+  });
+});

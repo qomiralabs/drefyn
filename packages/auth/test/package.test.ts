@@ -66,11 +66,12 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in, password account, OAuth, SSO sign in, API keys, the CLI link and operator
-  // revoke, and the command that opens both pools for them. The OAuth fetch file
+  // change, password sign in, password account, OAuth, SSO sign in, API keys, the CLI link and
+  // operator revoke, SSO domains, and the command that opens both pools for them. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
-  // breached list lookup and its build command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke and the command, files only from the breached list, and no network anywhere', () => {
+  // breached list lookup and its build command, which is the only writer, and by the SSO
+  // domain lists. DNS is asked only by the TXT resolver.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke, SSO domains and the command, files only from the breached list and the SSO domain lists, DNS only from the TXT resolver, and no other network', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -97,6 +98,10 @@ describe('package layout', () => {
       'command.ts': database,
       'breached-file.ts': files,
       'password-list.ts': files,
+      'sso-domains.ts': database,
+      'sso-domain-store.ts': database,
+      'sso-domain-lists.ts': files,
+      'sso-dns.ts': /^node:dns\/promises$/,
     };
     const sources = sourceFiles(src);
     expect(sources).toContain('oauth/fetch.ts');
@@ -231,6 +236,21 @@ describe('the main entry', () => {
         'sha256',
         'slugFromOrganizationName',
         'userAgentFamily',
+        'FREE_MAIL_DOMAINS',
+        'SSO_DOMAIN_STRIKES',
+        'SSO_TXT_LABEL',
+        'bundledPublicSuffixListPath',
+        'createNodeTxtResolver',
+        'createSsoDomainPolicy',
+        'createSsoDomainRecheck',
+        'createSsoDomainRepository',
+        'createSsoDomains',
+        'loadFreeMailDomains',
+        'loadPublicSuffixList',
+        'normalizeSsoDomain',
+        'parseFreeMailDomains',
+        'parsePublicSuffixList',
+        'ssoTxtName',
       ].sort(),
     );
   });

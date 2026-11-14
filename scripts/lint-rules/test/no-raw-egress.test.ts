@@ -544,14 +544,25 @@ describe('no-raw-egress scoped entry validation', () => {
         only: [{ global: 'fetch' }],
       }),
     ).resolves.toBeDefined();
+    await expect(
+      load({
+        path: 'packages/auth/src/sso-dns.ts',
+        reason: 'txt lookups',
+        only: [{ module: 'node:dns/promises', imports: ['Resolver'] }],
+      }),
+    ).resolves.toBeDefined();
   });
 
-  it('rejects allowances outside the two known forms when the config loads', async () => {
+  it('rejects allowances outside the known forms when the config loads', async () => {
     const bad = [
       [],
       [{ global: 'WebSocket' }],
       [{ module: 'node:https', imports: ['createServer'] }],
       [{ module: 'node:http', imports: ['request'] }],
+      [{ module: 'node:http', imports: ['Resolver'] }],
+      [{ module: 'node:dns/promises', imports: ['createServer'] }],
+      [{ module: 'node:dns/promises', imports: ['lookup'] }],
+      [{ module: 'node:dns', imports: ['Resolver'] }],
       [{ module: 'node:http', imports: [] }],
       [{ module: 'node:http' }],
       [{ global: 'fetch', module: 'node:http', imports: ['createServer'] }],

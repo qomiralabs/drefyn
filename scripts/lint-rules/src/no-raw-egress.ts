@@ -315,6 +315,20 @@ export const noRawEgress: Rule.RuleModule = {
                       {
                         type: 'object',
                         additionalProperties: false,
+                        required: ['module', 'imports'],
+                        properties: {
+                          module: { enum: ['node:dns/promises'] },
+                          imports: {
+                            type: 'array',
+                            minItems: 1,
+                            uniqueItems: true,
+                            items: { enum: ['Resolver'] },
+                          },
+                        },
+                      },
+                      {
+                        type: 'object',
+                        additionalProperties: false,
                         required: ['global'],
                         properties: { global: { enum: ['fetch'] }, reads: { enum: [true] } },
                       },
