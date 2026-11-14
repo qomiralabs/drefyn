@@ -11,6 +11,30 @@ const region = (page: Page) => page.getByRole('region', { name: /notification/i 
 const card = (page: Page, title: string) => page.getByRole('alertdialog', { name: title });
 const output = (page: Page) => page.getByText(/^Last action: /);
 
+// Longer than the steps between a ready page and F6 take.
+const SLOW_EFFECT_MS = 1_000;
+
+// React runs effects from a MessageChannel message, and the story shows its toast from an
+// effect. Holding each message makes the toast arrive after the page looks ready, as it can
+// on a busy runner.
+async function slowEffects(page: Page) {
+  await page.addInitScript((ms) => {
+    const Real = window.MessageChannel;
+    window.MessageChannel = class extends Real {
+      constructor() {
+        super();
+        const port = this.port2;
+        const send = port.postMessage.bind(port) as (message: unknown) => void;
+        port.postMessage = (message: unknown) => {
+          setTimeout(() => {
+            send(message);
+          }, ms);
+        };
+      }
+    };
+  }, SLOW_EFFECT_MS);
+}
+
 async function setHidden(page: Page, hidden: boolean) {
   await page.evaluate((value) => {
     Object.defineProperty(document, 'visibilityState', {
@@ -79,6 +103,7 @@ for (const theme of THEMES) {
     page,
     browserName,
   }) => {
+    await slowEffects(page);
     await openStory(page, 'components-toast--undo', theme);
     const back = page.getByRole('button', { name: 'Edit page' });
     await back.focus();
