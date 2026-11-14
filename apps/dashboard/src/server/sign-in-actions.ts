@@ -1,5 +1,6 @@
 'use server';
 import {
+  lastMethodCookie,
   normalizeAddress,
   parseVerifyFragment,
   formatChallengeId,
@@ -149,7 +150,10 @@ export const resetStep = publicAction(async ({ browser }, form): Promise<ResetSt
     ...(challenge === '' ? {} : { challenge }),
   });
   if (done.ok) {
-    await applyCookies(done.value.setCookies);
+    await applyCookies([
+      ...done.value.setCookies,
+      ...lastMethodCookie(authConfig(), done.value.session),
+    ]);
     const { send } = done.value;
     if (send !== undefined) after(send);
     return { step: 'saved', returnTo: done.value.returnTo, email: done.value.session.email };
