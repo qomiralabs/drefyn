@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Answer, Eyebrow, Head } from '../views/calm.tsx';
 import { AUTH_CARD } from './card.ts';
 import { AuthCard } from './card-view.tsx';
+import type { LastMethod } from '@drefyn/auth';
 import type { Site } from './site.ts';
 import lockupInk from './marks/drefyn-lockup-ink.svg';
 import lockupPaper from './marks/drefyn-lockup-paper.svg';
@@ -94,12 +95,23 @@ function ProviderMark({ provider }: { provider: Provider }): ReactNode {
   );
 }
 
+// Text inside the control it marks, so it is part of that control's name and never only a
+// colour or a position.
+export const LastUsed = (): ReactNode => (
+  <span className="auth-last">
+    <span className="sr-only">, </span>
+    Last used
+  </span>
+);
+
 export function Providers({
   providers,
   next,
+  lastUsed,
 }: {
   providers: readonly Provider[];
   next?: string | undefined;
+  lastUsed?: LastMethod | null | undefined;
 }): ReactNode {
   if (providers.length === 0) return null;
   const query = next === undefined || next === '' ? '' : `?next=${encodeURIComponent(next)}`;
@@ -114,6 +126,7 @@ export function Providers({
         >
           <ProviderMark provider={provider} />
           Continue with {PROVIDER_NAMES[provider]}
+          {lastUsed === provider ? <LastUsed /> : null}
         </a>
       ))}
     </div>

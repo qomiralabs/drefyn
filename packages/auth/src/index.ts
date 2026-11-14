@@ -30,6 +30,13 @@ export {
   type CookieSpec,
 } from './cookies.ts';
 export {
+  LAST_METHODS,
+  LAST_METHOD_MAX_AGE_SECONDS,
+  lastMethodCookie,
+  parseLastMethod,
+  type LastMethod,
+} from './last-method.ts';
+export {
   createSessions,
   type CheckedCredential,
   type ResolvedSession,

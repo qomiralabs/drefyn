@@ -1,4 +1,4 @@
-import { safeReturnTo, serializeCookie, type AuthErrorCode } from '@drefyn/auth';
+import { lastMethodCookie, safeReturnTo, serializeCookie, type AuthErrorCode } from '@drefyn/auth';
 import { after, NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
@@ -49,7 +49,9 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
         : appUrl(safeReturnTo(outcome.returnTo, appOrigin()));
   const response = NextResponse.redirect(target, 303);
   const config = authConfig();
-  for (const spec of outcome.setCookies) {
+  // Linking or a step up is not a sign in, so only a signed in outcome marks the method.
+  const last = outcome.kind === 'signed_in' ? lastMethodCookie(config, outcome.session) : [];
+  for (const spec of [...outcome.setCookies, ...last]) {
     response.headers.append('set-cookie', serializeCookie(config, spec));
   }
   const send = 'send' in outcome ? outcome.send : undefined;

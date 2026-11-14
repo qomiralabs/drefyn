@@ -533,7 +533,10 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
         throw unavailable(error);
       }
       const owned: readonly string[] = Object.values(config.cookies);
-      return owned.filter((name) => name !== config.cookies.device).map((name) => clear(name));
+      // The known device and the last method outlive the session on purpose: neither signs
+      // anyone in, and both help the same person next time.
+      const kept = new Set([config.cookies.device, config.cookies.lastMethod]);
+      return owned.filter((name) => !kept.has(name)).map((name) => clear(name));
     },
 
     async signOutEverywhere(s) {

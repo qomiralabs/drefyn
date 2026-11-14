@@ -9,9 +9,12 @@ export function Submit({
   label,
   busyLabel,
   stopped,
+  mark,
 }: {
   label: string;
   busyLabel: string;
+  // Drawn on the button's edge and read as part of its name, such as Last used.
+  mark?: ReactNode;
   // Why it cannot be pressed right now, read with the button.
   stopped?: string | undefined;
 }): ReactNode {
@@ -29,9 +32,10 @@ export function Submit({
     );
   }
   return (
-    <span className="grid">
+    <span className="auth-submit grid">
       <Button type="submit" variant="primary" size="lg" busy={pending} busyLabel={busyLabel}>
         {label}
+        {mark}
       </Button>
     </span>
   );

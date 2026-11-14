@@ -518,3 +518,33 @@
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-offset);
 }
+
+/* Last used: a small tag on the top end edge of the control it marks. It is words inside the
+   control, so it never depends on colour, and it stays neutral because it is not a state. */
+.auth-provider,
+.auth-submit {
+  position: relative;
+}
+.auth-last {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: var(--dr-space-8);
+  translate: 0 -50%;
+  padding: 0 var(--dr-space-4);
+  border: var(--dr-stroke-hairline) solid var(--dr-border-rule-strong);
+  border-radius: var(--dr-radius-xs);
+  background: var(--dr-surface-ground);
+  color: var(--dr-text-secondary);
+  font: var(--dr-type-label);
+  font-family: var(--dr-font-sans);
+  letter-spacing: var(--dr-type-label-tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.auth-links .auth-last {
+  position: static;
+  display: inline-block;
+  translate: none;
+  margin-inline-start: var(--dr-space-8);
+  text-decoration: none;
+}
