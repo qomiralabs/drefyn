@@ -3,6 +3,9 @@ import {
   decodeSecret,
   encodeSecret,
   formBindingField,
+  lastMethodCookie,
+  parseLastMethod,
+  type LastMethod,
   PRE_MAX_AGE_SECONDS,
   safeReturnTo,
   type CookieSpec,
@@ -62,8 +65,14 @@ export function freshBinding(returnTo: string): readonly CookieSpec[] {
 }
 
 // Cookies, then the mail after the response, then the page. Throws the redirect.
+// The last method rides on the same response as the session, so it exists only once
+// someone is fully signed in.
 export async function finishSignIn(done: Finished): Promise<never> {
-  await applyCookies([...done.setCookies, ...freshBinding(done.returnTo)]);
+  await applyCookies([
+    ...done.setCookies,
+    ...freshBinding(done.returnTo),
+    ...lastMethodCookie(authConfig(), done.session),
+  ]);
   const { send, session } = done;
   if (send !== undefined) after(send);
   redirect(
@@ -85,3 +94,9 @@ export async function formBinding(path: string): Promise<string> {
 export const hosted = (): boolean => process.env['DREFYN_HOSTED'] === 'true';
 
 export const site = (): Site => ({ hosted: hosted(), docs: docsUrl() });
+
+// Read on the server, so the mark is in the HTML with scripts off and the cookie can stay
+// HttpOnly.
+export async function lastUsed(): Promise<LastMethod | null> {
+  return parseLastMethod((await cookies()).get(authConfig().cookies.lastMethod)?.value);
+}

@@ -97,10 +97,17 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
     'oauth-error': signIn({ notice: { kind: 'oauth_error', provider: 'GitHub' } }),
     'oauth-unverified': signIn({ notice: { kind: 'oauth_unverified', provider: 'GitHub' } }),
     none: signIn({ providers: [], emailOn: false }),
+    'last-github': signIn({ lastUsed: 'github' }),
+    'last-google': signIn({ lastUsed: 'google' }),
+    'last-email-code': signIn({ lastUsed: 'email_code' }),
+    'last-password': signIn({ lastUsed: 'password' }),
   },
   'sign-up': {
     ready: (h) => <SignUpScreen {...shared(h)} state="ready" providers={PROVIDERS} />,
     closed: (h) => <SignUpScreen {...shared(h)} state="closed" providers={PROVIDERS} />,
+    'last-email-code': (h) => (
+      <SignUpScreen {...shared(h)} state="ready" providers={PROVIDERS} lastUsed="email_code" />
+    ),
     'invite-only': (h) => <SignUpScreen {...shared(h)} state="invite_only" providers={[]} />,
     'botcheck-down': (h) => (
       <SignUpScreen

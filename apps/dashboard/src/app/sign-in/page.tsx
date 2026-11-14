@@ -6,7 +6,7 @@ import { SignInForm } from '../../auth/forms.tsx';
 import { authConfig, dashboardAuth } from '../../server/auth.ts';
 import { currentSession, guardPublic } from '../../server/guard.ts';
 import { appOrigin } from '../../server/origin.ts';
-import { formBinding, site } from '../../server/sign-in-support.ts';
+import { formBinding, lastUsed, site } from '../../server/sign-in-support.ts';
 
 interface Props {
   readonly searchParams: Promise<Readonly<Record<string, string | string[] | undefined>>>;
@@ -37,6 +37,7 @@ export default async function SignIn({ searchParams }: Props) {
       passwordOn={methods.password}
       signUp={authConfig().signUp}
       notice={oauthNotice(query['error'], query['provider'])}
+      lastUsed={await lastUsed()}
     />
   );
 }

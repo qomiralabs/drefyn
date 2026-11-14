@@ -2,6 +2,7 @@ import { IconClock, Skeleton, TextField } from '@drefyn/ui/react';
 import type { ReactNode } from 'react';
 import { CopyButton, SecretField, Submit } from './controls.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
+import type { LastMethod } from '@drefyn/auth';
 import type { Site } from './site.ts';
 import {
   Answer,
@@ -9,6 +10,7 @@ import {
   CodeField,
   FieldError,
   Head,
+  LastUsed,
   Notice,
   Or,
   PrimaryLink,
@@ -61,6 +63,7 @@ export interface SignInProps extends Shared {
   readonly emailOn: boolean;
   readonly passwordOn: boolean;
   readonly signUp: 'open' | 'invite_only' | 'closed';
+  readonly lastUsed?: LastMethod | null | undefined;
 }
 
 function AddressForm({
@@ -70,6 +73,7 @@ function AddressForm({
   invalid,
   next,
   from,
+  lastUsed,
   children,
 }: {
   action: FormAction;
@@ -78,6 +82,7 @@ function AddressForm({
   invalid?: boolean | undefined;
   next?: string | undefined;
   from?: string;
+  lastUsed?: LastMethod | null | undefined;
   children: ReactNode;
 }): ReactNode {
   return (
@@ -97,7 +102,11 @@ function AddressForm({
         autoFocus
         {...(invalid === true ? { error: 'Enter an address like name@example.com.' } : {})}
       />
-      <Submit label="Email me a code" busyLabel="Sending" />
+      <Submit
+        label="Email me a code"
+        busyLabel="Sending"
+        mark={lastUsed === 'email_code' ? <LastUsed /> : undefined}
+      />
       {children}
     </form>
   );
@@ -134,7 +143,7 @@ export function SignInScreen(props: SignInProps): ReactNode {
       </Head>
       {providers.length === 0 ? null : (
         <div className="auth-ways">
-          <Providers providers={providers} next={props.next} />
+          <Providers providers={providers} next={props.next} lastUsed={props.lastUsed} />
           {emailOn ? <Or /> : null}
         </div>
       )}
@@ -148,12 +157,18 @@ export function SignInScreen(props: SignInProps): ReactNode {
           email={props.email}
           invalid={props.invalid}
           next={props.next}
+          lastUsed={props.lastUsed}
         >
           <p className="auth-fine">
             We send an 8 digit code that works for 10 minutes. There is nothing to remember.
           </p>
           <p className="auth-links">
-            {passwordOn ? <a href="/sign-in/password">Use a password instead</a> : null}
+            {passwordOn ? (
+              <a href="/sign-in/password">
+                Use a password instead
+                {props.lastUsed === 'password' ? <LastUsed /> : null}
+              </a>
+            ) : null}
             <a href="/sign-in/reset">Forgot your password?</a>
           </p>
         </AddressForm>
@@ -180,6 +195,7 @@ export interface SignUpProps extends Shared {
   readonly invalid?: boolean | undefined;
   readonly notice?: FormNotice | null | undefined;
   readonly providers: readonly Provider[];
+  readonly lastUsed?: LastMethod | null | undefined;
 }
 
 export function SignUpScreen(props: SignUpProps): ReactNode {
@@ -239,7 +255,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
       </Head>
       {providers.length === 0 ? null : (
         <div className="auth-ways">
-          <Providers providers={providers} />
+          <Providers providers={providers} lastUsed={props.lastUsed} />
           <Or />
         </div>
       )}
@@ -252,6 +268,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
         email={props.email}
         invalid={props.invalid}
         from="sign-up"
+        lastUsed={props.lastUsed}
       >
         <p className="auth-fine">
           We ask for your name after the code, and you can add a password then if you want one.

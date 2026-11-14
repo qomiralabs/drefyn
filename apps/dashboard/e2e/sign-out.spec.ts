@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { askForCode, signInByCode, uniqueAddress } from './auth-helpers.ts';
 import { OPEN_ORIGIN } from './fixtures.ts';
 import { newDeviceNotices } from './mailpit.ts';
+import { expectMarkOn, LAST_METHOD, lastMethodValue } from './last-method.ts';
 import { SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
 
@@ -63,6 +64,14 @@ test('Sign out ends the session, keeps the device and leaves sign in working', a
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in/);
   await askForCode(page, address);
+});
+
+test('Sign out keeps the last method, and sign in still marks it', async ({ page }) => {
+  await signUp(page);
+  await signOut(page);
+  expect(await cookieNames(page)).toContain(LAST_METHOD);
+  expect(await lastMethodValue(page)).toBe('email_code');
+  await expectMarkOn(page.getByRole('button', { name: /^Email me a code/ }));
 });
 
 test('Sign out drops its own cookies and leaves every other cookie alone', async ({ page }) => {
