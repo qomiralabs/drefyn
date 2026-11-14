@@ -158,13 +158,21 @@ EOF
 # is still running, and the advice then is to wait, never to reset. Containers are recreated on
 # every up, so a later failure never sees an old init's lines.
 first_start_failure() {
-  local logs reason state restarts status
+  local logs reason state restarts status missing
   logs="$(docker logs "$1" 2>&1 | tail -n 300 || true)"
   state="$(docker inspect --format '{{.RestartCount}} {{.State.Status}}' "$1" 2>/dev/null || true)"
   restarts="${state%% *}"
   status="${state#* }"
   case "$restarts" in '' | *[!0-9]*) restarts=0 ;; esac
-  if [[ "$logs" == *"Database is uninitialized"* ]] ||
+  # Compose 5 leaves a secret whose value is empty out of the container, and the image reads
+  # the superuser's on every start. So this happens to a full volume too, and reset is the
+  # wrong advice: it would delete the data for want of a line in deploy/.env.
+  missing="$(grep -oE '/run/secrets/[a-z_]+: No such file or directory' <<<"$logs" | tail -n 1 || true)"
+  if [ -n "$missing" ]; then
+    missing="${missing#/run/secrets/}"
+    printf 'the server cannot start: secret %s is missing or empty; fix deploy/.env first, then run %s up again' \
+      "${missing%%:*}" "scripts/selfhost.sh"
+  elif [[ "$logs" == *"Database is uninitialized"* ]] ||
     { [[ "$logs" == *"The files belonging to this database system"* ||
       "$logs" == *"/docker-entrypoint-initdb.d/"* ]] &&
       [[ "$logs" != *"init process complete"* ]] &&
