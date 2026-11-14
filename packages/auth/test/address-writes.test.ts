@@ -11,6 +11,8 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   'email-sign-in.ts': ['insert'],
   'email-change.ts': ['update'],
   'oauth.ts': ['insert'],
+  // Sign up through an organization's IdP, for an address in a domain that organization proved.
+  'sso-sign-in.ts': ['insert'],
   // The operator's sign up: the address the person running the box vouches for.
   'cli-links.ts': ['insert'],
   // The display name only. The test below and the column grant both hold it to that.

@@ -66,7 +66,7 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in, password account, OAuth, API keys, the CLI link and operator
+  // change, password sign in, password account, OAuth, SSO sign in, API keys, the CLI link and operator
   // revoke, and the command that opens both pools for them. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
   // breached list lookup and its build command, and the build command is the only writer.
@@ -89,6 +89,7 @@ describe('package layout', () => {
       'password-sign-in.ts': database,
       'password-account.ts': database,
       'oauth.ts': database,
+      'sso-sign-in.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
       'cli-links.ts': database,
@@ -232,6 +233,24 @@ describe('the main entry', () => {
         'userAgentFamily',
       ].sort(),
     );
+  });
+
+  // Only the protocol callbacks inside this package mint an identity and sign it in, so no
+  // entry offers either, and no subpath reaches the modules that do.
+  it('offers no way to mint a verified identity or sign one in', () => {
+    for (const name of [
+      'mintVerifiedIdentity',
+      'isVerifiedIdentity',
+      'createSsoSignIn',
+      'signInWithVerifiedIdentity',
+      'enrolledFactorRule',
+    ]) {
+      expect(name in main, name).toBe(false);
+      expect(name in permissions, name).toBe(false);
+    }
+    for (const target of Object.values(manifest.exports)) {
+      expect(target).not.toMatch(/verified-identity|sso-sign-in/);
+    }
   });
 
   it('exports exactly the permission model from the pure entry', () => {
