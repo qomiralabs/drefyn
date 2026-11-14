@@ -136,6 +136,17 @@ export interface EngineOutboxTable {
   created_at: Generated<Date>;
 }
 
+// app.factor_challenges
+export interface FactorChallengesTable {
+  user_id: string;
+  secret_hash: Buffer;
+  method: string;
+  return_to: string | null;
+  attempts: Generated<number>;
+  expires_at: Date;
+  created_at: Generated<Date>;
+}
+
 // app.filter_backfills
 export interface FilterBackfillsTable {
   id: Generated<string>;
@@ -339,6 +350,15 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.recovery_codes
+export interface RecoveryCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  code_hash: Buffer;
+  used_at: Date | null;
+  created_at: Generated<Date>;
+}
+
 // app.scheduled_jobs
 export interface ScheduledJobsTable {
   name: string;
@@ -358,6 +378,20 @@ export interface SessionsTable {
   expires_at: Date;
   user_agent: string | null;
   created_at: Generated<Date>;
+}
+
+// app.totp_credentials
+export interface TotpCredentialsTable {
+  user_id: string;
+  key_id: string;
+  secret_nonce: Buffer;
+  secret_sealed: Buffer;
+  last_used_step: number | null;
+  failed_attempts: Generated<number>;
+  confirmed_at: Date | null;
+  last_used_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // app.users
@@ -383,6 +417,7 @@ export interface Schema {
   content_types: ContentTypesTable;
   email_challenges: EmailChallengesTable;
   engine_outbox: EngineOutboxTable;
+  factor_challenges: FactorChallengesTable;
   filter_backfills: FilterBackfillsTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
@@ -399,7 +434,9 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;
+  totp_credentials: TotpCredentialsTable;
   users: UsersTable;
 }

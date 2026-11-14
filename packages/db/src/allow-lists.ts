@@ -61,6 +61,8 @@ export interface AllowLists {
 }
 
 const BOOKKEEPING = 'migration bookkeeping, owner only, no tenant data';
+// A person signs in across organizations, so their factor belongs to none of them.
+const SECOND_FACTOR = "a person's own second factor, read under their user context";
 
 export const GLOBAL_TABLES: readonly AllowEntry[] = [
   { name: 'app.pgmigrations', reason: BOOKKEEPING },
@@ -105,6 +107,9 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
     name: 'app.scheduled_jobs',
     reason: 'times of recurring jobs that span every organization; holds no tenant data',
   },
+  { name: 'app.totp_credentials', reason: SECOND_FACTOR },
+  { name: 'app.recovery_codes', reason: SECOND_FACTOR },
+  { name: 'app.factor_challenges', reason: SECOND_FACTOR },
 ];
 
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
@@ -280,6 +285,9 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
   authAccess('auth_rate_limits', 'limits are reserved before sign in'),
   authAccess('scheduled_jobs', 'the expiry job takes its turn before it deletes'),
   selfAccess('known_devices'),
+  selfAccess('totp_credentials'),
+  selfAccess('recovery_codes'),
+  selfAccess('factor_challenges'),
   {
     name: 'app.known_devices.auth_read',
     command: 'select',
@@ -486,6 +494,18 @@ export const COLUMN_GRANT_TABLES: readonly AllowEntry[] = [
     name: 'app.known_devices',
     reason: 'the auth role must never read a future column, nor the family it has no use for',
   },
+  {
+    name: 'app.totp_credentials',
+    reason: 'holds sealed secrets; only the columns a verify or enrolment moves are updatable',
+  },
+  {
+    name: 'app.recovery_codes',
+    reason: 'holds code hashes; a code is only ever spent',
+  },
+  {
+    name: 'app.factor_challenges',
+    reason: 'only the attempt count moves; a new challenge is a delete then an insert',
+  },
 ];
 
 export const COLUMN_GRANTS: readonly ColumnGrantEntry[] = IDENTITY_COLUMN_GRANTS.map((grant) => ({
@@ -529,8 +549,17 @@ export type AuthTableName =
   | 'scheduled_jobs';
 // The organization tables a user context reads, through the person's own memberships.
 export type MemberTableName = 'memberships' | 'organizations' | 'organization_slugs';
+// The second factor tables are named here only: the auth role holds no grant on them.
 export type UserTableName =
-  'users' | 'identities' | 'sessions' | 'password_credentials' | 'known_devices' | MemberTableName;
+  | 'users'
+  | 'identities'
+  | 'sessions'
+  | 'password_credentials'
+  | 'known_devices'
+  | 'totp_credentials'
+  | 'recovery_codes'
+  | 'factor_challenges'
+  | MemberTableName;
 
 // Identity tables organization scope never names. users stays, for the members page.
 export type PersonalTableName =
