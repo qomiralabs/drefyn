@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { CliForm } from '../../../auth/forms.tsx';
 import { guardPublic } from '../../../server/guard.ts';
 import { NONCE_HEADER } from '../../../server/security-headers.ts';
-import { formBinding, hosted } from '../../../server/sign-in-support.ts';
+import { formBinding, site } from '../../../server/sign-in-support.ts';
 
 export async function generateMetadata(): Promise<Metadata> {
   await guardPublic();
@@ -20,7 +20,7 @@ export default async function CliLink() {
   return (
     <>
       <script nonce={nonce} dangerouslySetInnerHTML={{ __html: FRAGMENT_SCRIPT }} />
-      <CliForm hosted={hosted()} csrf={csrf} />
+      <CliForm site={site()} csrf={csrf} />
     </>
   );
 }

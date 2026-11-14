@@ -53,6 +53,17 @@ async function compileOnly(): Promise<void> {
       // @ts-expect-error created_at is the database's to set
       .values({ user_id: 'x', phc: '$argon2id$', created_at: new Date() })
       .execute();
+    await tx.updateTable('factor_challenges').set({ attempts: 1 }).execute();
+    await tx
+      .updateTable('factor_challenges')
+      // @ts-expect-error a challenge is replaced by delete then insert, never rewritten
+      .set({ secret_hash: Buffer.alloc(32) })
+      .execute();
+    await tx.updateTable('recovery_codes').set({ used_at: new Date() }).execute();
+    // @ts-expect-error a recovery code never moves to another person
+    await tx.updateTable('recovery_codes').set({ user_id: 'x' }).execute();
+    // @ts-expect-error nor does a credential
+    await tx.updateTable('totp_credentials').set({ user_id: 'x' }).execute();
     // @ts-expect-error the sign in tables are not the person's
     await tx.selectFrom('email_challenges').selectAll().execute();
     // @ts-expect-error nor the API limiter
@@ -75,6 +86,12 @@ async function compileOnly(): Promise<void> {
     await tx.selectFrom('password_credentials').select(['user_id', 'phc']).execute();
     // @ts-expect-error sessions are written after sign in, never by the sign in role
     await tx.selectFrom('sessions').selectAll().execute();
+    // @ts-expect-error the sign in role reads no sealed secret
+    tx.selectFrom('totp_credentials');
+    // @ts-expect-error nor a recovery hash
+    tx.selectFrom('recovery_codes');
+    // @ts-expect-error nor a half finished sign in
+    tx.selectFrom('factor_challenges');
     // @ts-expect-error the API limiter belongs to the API service
     await tx.selectFrom('api_key_failures').selectAll().execute();
   });
@@ -111,12 +128,30 @@ describe('identity schema types', () => {
       | 'sessions'
       | 'password_credentials'
       | 'known_devices'
+      | 'totp_credentials'
+      | 'recovery_codes'
+      | 'factor_challenges'
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'
+    >();
+  });
+
+  it('let a person update only the listed second factor columns', () => {
+    expectTypeOf<keyof Updateable<UserSchema['factor_challenges']>>().toEqualTypeOf<'attempts'>();
+    expectTypeOf<keyof Updateable<UserSchema['recovery_codes']>>().toEqualTypeOf<'used_at'>();
+    expectTypeOf<keyof Updateable<UserSchema['totp_credentials']>>().toEqualTypeOf<
+      | 'key_id'
+      | 'secret_nonce'
+      | 'secret_sealed'
+      | 'last_used_step'
+      | 'failed_attempts'
+      | 'confirmed_at'
+      | 'last_used_at'
+      | 'updated_at'
     >();
   });
 
@@ -160,6 +195,10 @@ describe('identity schema types', () => {
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('api_key_failures');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('password_credentials');
     expectTypeOf<OrganizationSchema>().not.toHaveProperty('known_devices');
+    expectTypeOf<OrganizationSchema>().not.toHaveProperty('totp_credentials');
+    expectTypeOf<OrganizationSchema>().not.toHaveProperty('recovery_codes');
+    expectTypeOf<OrganizationSchema>().not.toHaveProperty('factor_challenges');
+    expectTypeOf<TenantSchema>().not.toHaveProperty('totp_credentials');
     expectTypeOf<OrganizationSchema['users']>().toEqualTypeOf<UserSchema['users']>();
   });
 

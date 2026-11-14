@@ -45,6 +45,14 @@
         "off": false
       },
       "defaultVariant": "on"
+    },
+    "auth.team_sso": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "on"
     }
   }
 }

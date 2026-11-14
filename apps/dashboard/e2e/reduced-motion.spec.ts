@@ -64,14 +64,14 @@ test('a settings dialog opens without travel under reduced motion', async ({ pag
   expect(moving).toBe(0);
 });
 
-test.describe('the signed out brand half', () => {
+test.describe('the signed out card', () => {
   test.use({ storageState: SIGNED_OUT, viewport: { width: 1280, height: 800 } });
 
-  test('its words do not animate under reduced motion', async ({ page }) => {
+  test('it does not animate under reduced motion', async ({ page }) => {
     await page.goto('/auth-states/sign-in/ready');
-    await expect(page.locator('.auth-brand-copy')).toBeVisible();
-    await expect(page.locator('.auth-brand')).toHaveAttribute('aria-hidden', 'true');
-    const words = page.locator('.auth-brand-copy');
-    expect(await words.evaluate((el) => el.getAnimations().length)).toBe(0);
+    const card = page.getByRole('complementary', { name: 'About Drefyn' });
+    await expect(card).toBeVisible();
+    expect(await card.evaluate((el) => el.getAnimations().length)).toBe(0);
+    expect(await card.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
   });
 });

@@ -8,7 +8,13 @@ import {
 } from '@openfeature/server-sdk';
 import fc from 'fast-check';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFlagClient, type FlagEvaluation } from '../src/index.ts';
+import {
+  createFlagClient,
+  flags,
+  type FlagDefinition,
+  type FlagEvaluation,
+  type FlagName,
+} from '../src/index.ts';
 import { FakeProvider, type Behaviour, type InitMode } from './support/fake-provider.ts';
 import { install, reset } from './support/flagd.ts';
 import {
@@ -227,4 +233,59 @@ describe('the generated failures', () => {
     expect([...seenInit].sort()).toEqual(['hang', 'none', 'ready', 'reject']);
     expect(releaseChecks).toBeGreaterThan(100);
   });
+});
+
+// The fixture registry above proves the client; this proves the names that actually ship.
+// Widened, so the filter still means something once other kinds join the registry.
+const shippedRelease = (flags as readonly FlagDefinition[])
+  .filter((flag) => flag.kind === 'release')
+  .map((flag) => flag.name as FlagName);
+
+async function shipped(init: InitMode, name: FlagName, f?: Failure) {
+  const fake = new FakeProvider(init);
+  // No behaviour set means the provider has no entry for the flag, as when the production
+  // flag file leaves it out.
+  if (f !== undefined) fake.set(name, f.behaviour);
+  install(fake);
+  const pending = createFlagClient(fileConfig, { entitlements: entitlements().reader });
+  await vi.advanceTimersByTimeAsync(fileConfig.initTimeoutMs);
+  const client = await pending;
+  try {
+    const pendingResult = client.evaluate(name, ctx);
+    await vi.advanceTimersByTimeAsync(fileConfig.evalTimeoutMs);
+    const result = await pendingResult;
+    expect(result.value, `${name} after ${f?.tag ?? 'no entry'}`).toBe(false);
+    expect(result.source, name).toBe('safe_value');
+  } finally {
+    await vi.advanceTimersByTimeAsync(10_000);
+    await client.close();
+  }
+}
+
+describe('the shipped release flags', () => {
+  it('include auth.team_sso', () => {
+    expect(shippedRelease).toContain('auth.team_sso');
+  });
+
+  it.each(shippedRelease)('%s is off when the flag source has no entry for it', async (name) => {
+    for (const init of ['ready', 'hang', 'reject', 'none'] as const) await shipped(init, name);
+  });
+});
+
+describe.each(SEEDS)('the shipped release flags, seed %i', (seed) => {
+  it(
+    'never evaluate on under any provider failure',
+    { timeout: PROVIDER_PROPERTY_TIMEOUT_MS },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.constantFrom<InitMode>('ready', 'hang', 'reject', 'none'),
+          fc.constantFrom(...shippedRelease),
+          failure,
+          shipped,
+        ),
+        { seed, numRuns: 40 },
+      );
+    },
+  );
 });
