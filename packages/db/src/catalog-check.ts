@@ -42,7 +42,8 @@ export type CatalogRule =
   | 'public_policy'
   | 'restrictive_policy'
   | 'actor_policy'
-  | 'tenant_statistics';
+  | 'tenant_statistics'
+  | 'organization_table';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -120,11 +121,17 @@ function columnGrantUnsafe(
 // Reaching tenant rows is the one thing the sign in role is otherwise never allowed, so the
 // only shapes on offer are reading a named column and deleting: nothing that writes a row, and
 // never a whole table to read.
+// Never update: a sign in role that could rewrite a tenant row could move it to another
+// organization or person.
+const AUTH_COLUMN_PRIVILEGES = new Set(['SELECT', 'INSERT']);
+
 function authTenantGrantUnsafe(entry: ColumnGrantEntry): string | undefined {
   if (entry.grantee !== AUTH_ROLE) return `is to ${entry.grantee}, not ${AUTH_ROLE}`;
-  const wanted = entry.name.split('.').length === 3 ? 'SELECT' : 'DELETE';
-  if (entry.privilege === wanted) return undefined;
-  return `is for ${entry.privilege}; only SELECT on a column or DELETE on a table are allowed`;
+  const column = entry.name.split('.').length === 3;
+  if (column ? AUTH_COLUMN_PRIVILEGES.has(entry.privilege) : entry.privilege === 'DELETE') {
+    return undefined;
+  }
+  return `is for ${entry.privilege}; only SELECT or INSERT on a column or DELETE on a table are allowed`;
 }
 
 function policyUnsafe(entry: PolicyEntry): string | undefined {
@@ -208,6 +215,7 @@ export function allowListProblems(allow: AllowLists): readonly CatalogProblem[] 
       entries: allow.globalUniqueConstraints,
       shape: CONSTRAINT_NAME,
     },
+    { label: 'organization table', entries: allow.organizationTables, shape: TABLE_NAME },
     { label: 'column grant table', entries: allow.columnGrantTables, shape: TABLE_NAME },
     {
       label: 'column grant',
@@ -758,8 +766,18 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
     policies.set(table, list);
   }
   const userPolicies = new Map(allow.userPolicies.map((e) => [e.name, e]));
+  const organizationTables = new Set(allow.organizationTables.map((e) => e.name));
   for (const table of tables) {
     out.push(...tenantColumnProblems(table));
+    if (table.projectColumn === null && !organizationTables.has(table.name)) {
+      out.push(
+        problem(
+          'organization_table',
+          table.name,
+          `${table.name} has organization_id and no project_id, and is not on the organization table allow list`,
+        ),
+      );
+    }
     out.push(
       ...policyProblems(
         table,

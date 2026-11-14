@@ -32,6 +32,7 @@ const METHOD_WORDS: Readonly<Record<SessionMethod, string>> = {
   github: 'GitHub',
   google: 'Google',
   cli_link: 'One time link',
+  sso: 'Single sign on',
 };
 
 function address(value: string): NormalizedEmailAddress {

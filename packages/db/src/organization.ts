@@ -12,6 +12,9 @@ import type {
   ProjectRolesTable,
   ProjectsTable,
   Schema,
+  SsoConnectionsTable,
+  SsoDomainsTable,
+  SsoIdentitiesTable,
 } from './schema.generated.ts';
 
 // Tables with no project_id column, so organization scope cannot even name a project table.
@@ -44,6 +47,9 @@ type GrantedTables<S> = Omit<
   | 'api_key_projects'
   | 'node_versions'
   | 'project_roles'
+  | 'sso_connections'
+  | 'sso_domains'
+  | 'sso_identities'
 > & {
   organizations: UpdatableOnly<OrganizationsTable, 'name' | 'updated_at'>;
   memberships: UpdatableOnly<MembershipsTable, 'role' | 'default_project_role' | 'updated_at'>;
@@ -63,11 +69,44 @@ type GrantedTables<S> = Omit<
     | 'updated_at'
   >;
   invitation_blocks: UpdatableOnly<InvitationBlocksTable, never>;
+  // A connection never moves, changes protocol or loses its creator or key; a domain keeps
+  // its name. Only sign in links an identity, so organization work reads and removes them.
+  sso_connections: UpdatableOnly<
+    SsoConnectionsTable,
+    | 'status'
+    | 'display_name'
+    | 'oidc_issuer'
+    | 'oidc_client_id'
+    | 'oidc_client_secret_sealed'
+    | 'oidc_endpoints'
+    | 'saml_idp_entity_id'
+    | 'saml_idp_sso_url'
+    | 'saml_idp_certs'
+    | 'jit_enabled'
+    | 'jit_default_project_role'
+    | 'session_max_seconds'
+    | 'version'
+    | 'updated_at'
+  >;
+  sso_domains: UpdatableOnly<
+    SsoDomainsTable,
+    | 'connection_id'
+    | 'txt_token_hash'
+    | 'verified_at'
+    | 'last_checked_at'
+    | 'failed_checks'
+    | 'updated_at'
+  >;
+  sso_identities: {
+    [C in keyof SsoIdentitiesTable]: ColumnType<SelectOf<SsoIdentitiesTable[C]>, never, never>;
+  };
 };
 
 // Key hashes are organization work. A project path runs with an attacker supplied tenant, so
 // it never names them.
 type ApiKeyTableName = 'api_keys' | 'api_key_projects';
+// Identity provider configuration is organization work for the same reason.
+type SsoTableName = 'sso_connections' | 'sso_domains' | 'sso_identities';
 
 // The identity and limiter tables belong to a person or to sign in, never to an
 // organization. users stays, with drefyn_app's granted columns, for the members page.
@@ -82,5 +121,5 @@ export type OrganizationSchema = OrganizationView<
 // throttle or anyone's address.
 export type TenantSchema = Omit<
   GrantedTables<Omit<Schema, PersonalTableName | 'users'>>,
-  ApiKeyTableName
+  ApiKeyTableName | SsoTableName
 >;
