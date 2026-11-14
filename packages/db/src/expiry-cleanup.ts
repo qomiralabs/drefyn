@@ -60,6 +60,13 @@ export const AUTH_EXPIRY_RULES: readonly ExpiryRule<AuthSchema>[] = Object.freez
     afterSeconds: 90 * DAY,
     organizationColumn: 'organization_id',
   },
+  // A day past expiry, like OAuth state.
+  {
+    table: 'sso_states',
+    column: 'expires_at',
+    afterSeconds: DAY,
+    organizationColumn: 'organization_id',
+  },
 ]);
 
 export const API_KEY_EXPIRY_RULES: readonly ExpiryRule<ApiKeyLimiterSchema>[] = Object.freeze([

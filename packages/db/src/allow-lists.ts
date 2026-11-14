@@ -1,4 +1,5 @@
 import { IDENTITY_COLUMN_GRANTS } from './identity-columns.ts';
+import { SSO_AUTH_GRANTS } from './sso-columns.ts';
 
 // The reviewed allow lists the catalog check reads. Every entry is a possible leak path, so
 // each one carries a reason and goes through security review.
@@ -42,7 +43,8 @@ export interface AllowLists {
   // Tables drefyn_auth may hold grants on. A table with organization_id is refused even here.
   readonly authTables: readonly AllowEntry[];
   // The only grants drefyn_auth may hold on a table with organization_id: a named column to
-  // select, or a whole table to delete from, each bounded by a listed policy. All must exist.
+  // select or insert, or a whole table to delete from, each bounded by a listed policy. All
+  // must exist.
   readonly authTenantGrants: readonly ColumnGrantEntry[];
   // Auth tables drefyn_app may hold no grant on at all, not even one column.
   readonly authOnlyTables: readonly AllowEntry[];
@@ -53,6 +55,9 @@ export interface AllowLists {
   readonly restrictivePolicies: readonly PolicyEntry[];
   // Unique keys on tenant tables without organization_id, as app.table.index.
   readonly globalUniqueConstraints: readonly AllowEntry[];
+  // Tenant tables with no project_id. Organization work reads them across every project, so
+  // leaving project_id out is a reviewed choice per table.
+  readonly organizationTables: readonly AllowEntry[];
   // Tables whose select and update grants must be per column, so a new column is never
   // readable or writable until someone grants it.
   readonly columnGrantTables: readonly AllowEntry[];
@@ -190,6 +195,7 @@ export const AUTH_TENANT_GRANTS: readonly ColumnGrantEntry[] = [
     reason: KEY_EXPIRY,
   },
   { name: 'app.api_keys', grantee: 'drefyn_auth', privilege: 'DELETE', reason: KEY_EXPIRY },
+  ...SSO_AUTH_GRANTS.map((grant) => ({ ...grant, grantee: 'drefyn_auth' })),
 ];
 
 const AUTH_ONLY = 'holds addresses of people who never signed up, codes or limiter keys';
@@ -339,6 +345,36 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     withCheck: null,
     reason: 'the signed in person lists the organizations they belong to; never a write',
   },
+  {
+    name: 'app.sso_connections.auth_read',
+    command: 'select',
+    roles: ['drefyn_auth'],
+    using: 'true',
+    withCheck: null,
+    reason:
+      'discovery and sign in find a connection before anyone is signed in; grants allow the lookup columns only',
+  },
+  {
+    name: 'app.sso_domains.auth_read',
+    command: 'select',
+    roles: ['drefyn_auth'],
+    using: '(verified_at IS NOT NULL)',
+    withCheck: null,
+    reason: 'discovery answers with verified domains only; grants allow 4 columns',
+  },
+  authAccess(
+    'sso_identities',
+    'sign in finds and links an identity; grants allow select and insert',
+  ),
+  {
+    name: 'app.sso_identities.self_read',
+    command: 'select',
+    roles: ['drefyn_app'],
+    using: OWNED,
+    withCheck: null,
+    reason: 'the signed in person lists their own SSO links in every organization; never a write',
+  },
+  authAccess('sso_states', 'the SSO round trip is written, consumed and swept before sign in'),
   memberRead(
     'organizations',
     'a member reads the organization under a user context; a non member reads nothing',
@@ -479,6 +515,41 @@ export const GLOBAL_UNIQUE_CONSTRAINTS: readonly AllowEntry[] = [
     reason:
       'organization URL names are one public namespace; a taken slug is visible at creation and nothing else is',
   },
+  { name: 'app.sso_domains.sso_domains_verified_domain_key', reason: 'a domain has one SSO owner' },
+  {
+    name: 'app.sso_states.sso_states_pkey',
+    reason:
+      'a random 32 byte state hash the callback looks up before it knows the organization; only the sign in role writes it',
+  },
+];
+
+const SSO_SCOPE = 'SSO is organization scoped';
+
+export const ORGANIZATION_TABLES: readonly AllowEntry[] = [
+  { name: 'app.organizations', reason: 'the organization itself' },
+  { name: 'app.organization_slugs', reason: 'URL names of the organization' },
+  { name: 'app.memberships', reason: 'people belong to the organization, not to a project' },
+  { name: 'app.projects', reason: 'the projects themselves; their own id is the project' },
+  { name: 'app.invitations', reason: 'an invitation joins the organization' },
+  { name: 'app.invitation_blocks', reason: 'blocks stop invitations to the organization' },
+  { name: 'app.api_keys', reason: 'a key belongs to the organization and lists its projects' },
+  {
+    name: 'app.api_key_projects',
+    reason: 'the projects a key may reach, named by target_project_id',
+  },
+  {
+    name: 'app.project_roles',
+    reason:
+      'a member role on a project, named by target_project_id; managed by organization admins',
+  },
+  {
+    name: 'app.organization_node_counts',
+    reason: 'one count per organization for the plan limit, across its projects',
+  },
+  { name: 'app.sso_connections', reason: SSO_SCOPE },
+  { name: 'app.sso_domains', reason: SSO_SCOPE },
+  { name: 'app.sso_identities', reason: SSO_SCOPE },
+  { name: 'app.sso_states', reason: SSO_SCOPE },
 ];
 
 export const COLUMN_GRANT_TABLES: readonly AllowEntry[] = [
@@ -529,6 +600,7 @@ export const ALLOW_LISTS: AllowLists = {
   userPolicies: USER_POLICIES,
   restrictivePolicies: RESTRICTIVE_POLICIES,
   globalUniqueConstraints: GLOBAL_UNIQUE_CONSTRAINTS,
+  organizationTables: ORGANIZATION_TABLES,
   columnGrantTables: COLUMN_GRANT_TABLES,
   columnGrants: COLUMN_GRANTS,
 };
@@ -563,4 +635,7 @@ export type UserTableName =
 
 // Identity tables organization scope never names. users stays, for the members page.
 export type PersonalTableName =
-  Exclude<AuthTableName | UserTableName, 'users' | MemberTableName> | 'api_key_failures';
+  | Exclude<AuthTableName | UserTableName, 'users' | MemberTableName>
+  | 'api_key_failures'
+  // Organization work holds no grant on sign in state.
+  | 'sso_states';

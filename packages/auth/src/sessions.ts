@@ -129,7 +129,14 @@ export interface Sessions extends StepUps {
   revokeSession(s: SessionInfo, id: SessionId): Promise<Result<void, AuthError>>;
 }
 
-const METHODS: ReadonlySet<string> = new Set(['email', 'password', 'github', 'google', 'cli_link']);
+const METHODS: ReadonlySet<string> = new Set([
+  'email',
+  'password',
+  'github',
+  'google',
+  'cli_link',
+  'sso',
+] satisfies SessionMethod[]);
 const STEP_UP_METHODS: ReadonlySet<string> = new Set([
   'email',
   'password',
@@ -533,7 +540,10 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
         throw unavailable(error);
       }
       const owned: readonly string[] = Object.values(config.cookies);
-      return owned.filter((name) => name !== config.cookies.device).map((name) => clear(name));
+      // The known device and the last method outlive the session on purpose: neither signs
+      // anyone in, and both help the same person next time.
+      const kept = new Set([config.cookies.device, config.cookies.lastMethod]);
+      return owned.filter((name) => !kept.has(name)).map((name) => clear(name));
     },
 
     async signOutEverywhere(s) {

@@ -176,6 +176,16 @@ describe('resolve', () => {
     },
   );
 
+  // SSO sign in will write this. Reading lands first, so an image that writes it can roll
+  // back to one that still reads every session.
+  it('reads back a session that signed in through SSO', async () => {
+    const row = () => sessionResponder([sessionRow({ method: 'sso' })]);
+    const info = await setup(row()).sessions.resolveSession(tokenFor());
+    expect(info?.method).toBe('sso');
+    const resolved = await setup(row()).sessions.resolve(tokenFor());
+    expect(resolved).not.toBeNull();
+  });
+
   it('refuses a stored step up method it does not know', async () => {
     const { sessions } = setup(sessionResponder([sessionRow({ step_up_method: 'sms' })]));
     await expect(sessions.resolveSession(tokenFor())).rejects.toMatchObject({
@@ -460,12 +470,13 @@ describe('sign out and revocation', () => {
   });
 
   // Read from the config, so a cookie added later is cleared unless someone decides otherwise.
-  it('signOut expires every cookie auth owns except the known device', async () => {
+  it('signOut expires every cookie auth owns except the known device and the last method', async () => {
     const { sessions } = setup(() => [{ id: SESSION }]);
     const cookies = await sessions.signOut(sessionInfo());
-    const { device, ...rest } = config.cookies;
+    const { device, lastMethod, ...rest } = config.cookies;
     expect(cookies.map((cookie) => cookie.name).sort()).toEqual(Object.values(rest).sort());
     expect(cookies.map((cookie) => cookie.name)).not.toContain(device);
+    expect(cookies.map((cookie) => cookie.name)).not.toContain(lastMethod);
     expect(cookies.every((c) => c.value === '' && c.maxAgeSeconds === 0)).toBe(true);
   });
 

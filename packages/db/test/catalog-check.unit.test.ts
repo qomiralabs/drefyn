@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
 import { ALLOW_LISTS, type PolicyEntry } from '../src/allow-lists.ts';
-import { checkCatalog, runCheckCatalog } from '../src/catalog-check.ts';
+import { allowListProblems, checkCatalog, runCheckCatalog } from '../src/catalog-check.ts';
 import { rejected } from './support.ts';
 
 type Rows = Record<string, unknown>[];
@@ -193,6 +193,147 @@ describe('the actor rule', () => {
     expect(problems[0]).toMatchObject({ object: 'app.t' });
     expect(problems[0]?.message).toContain(String(over['name']));
     expect(problems[0]?.message).toContain('app.current_actor_id()');
+  });
+});
+
+describe('the organization table rule', () => {
+  const ISOLATION = '(organization_id = app.current_org())';
+  const SSO = ['app.sso_connections', 'app.sso_domains', 'app.sso_identities', 'app.sso_states'];
+  const tenant = (name: string, project: string | null = null) => ({
+    name,
+    organization_column: 'uuid not null',
+    project_column: project,
+    rls: true,
+    forced: true,
+  });
+  const isolation = (name: string) => ({
+    table_name: name,
+    name: 'tenant_isolation',
+    cmd: '*',
+    permissive: true,
+    roles: ['drefyn_app'],
+    qual: ISOLATION,
+    with_check: ISOLATION,
+  });
+
+  async function organizationProblems(names: readonly string[], allow = ALLOW_LISTS) {
+    const { client } = fakeClient([
+      [TABLES, names.map((name) => tenant(name))],
+      [POLICIES, names.map(isolation)],
+    ]);
+    return (await checkCatalog(client, allow)).filter((p) => p.rule === 'organization_table');
+  }
+
+  it('lists the SSO tables as organization scoped, with the reviewed reason', () => {
+    for (const name of SSO) {
+      expect(ALLOW_LISTS.organizationTables.find((e) => e.name === name)?.reason, name).toBe(
+        'SSO is organization scoped',
+      );
+    }
+  });
+
+  it('passes the SSO tables with their entries', async () => {
+    expect(await organizationProblems(SSO)).toEqual([]);
+  });
+
+  // A tenant table that leaves project_id out is readable by organization work across every
+  // project, so that choice is reviewed per table.
+  it.each(SSO)('fails %s without its entry', async (name) => {
+    const allow = {
+      ...ALLOW_LISTS,
+      organizationTables: ALLOW_LISTS.organizationTables.filter((e) => e.name !== name),
+    };
+    expect(await organizationProblems(SSO, allow)).toEqual([
+      {
+        rule: 'organization_table',
+        object: name,
+        message: `${name} has organization_id and no project_id, and is not on the organization table allow list`,
+      },
+    ]);
+  });
+
+  it('leaves a project table alone', async () => {
+    const { client } = fakeClient([
+      [TABLES, [tenant('app.notes', 'uuid not null')]],
+      [POLICIES, []],
+    ]);
+    const problems = await checkCatalog(client, ALLOW_LISTS);
+    expect(problems.filter((p) => p.rule === 'organization_table')).toEqual([]);
+  });
+});
+
+describe('the global unique key on SSO domains', () => {
+  const UNIQUE = /x\.indisunique/;
+  const KEY = 'app.sso_domains.sso_domains_verified_domain_key';
+  const domains = {
+    name: 'app.sso_domains',
+    organization_column: 'uuid not null',
+    project_column: null,
+    rls: true,
+    forced: true,
+  };
+  const index = {
+    table_name: 'app.sso_domains',
+    index_name: 'sso_domains_verified_domain_key',
+    columns: ['domain'],
+    has_expressions: false,
+  };
+
+  async function uniqueProblems(allow = ALLOW_LISTS) {
+    const { client } = fakeClient([
+      [TABLES, [domains]],
+      [UNIQUE, [index]],
+    ]);
+    return (await checkCatalog(client, allow)).filter((p) => p.rule === 'tenant_unique');
+  }
+
+  it('is reviewed with its reason', () => {
+    expect(ALLOW_LISTS.globalUniqueConstraints.find((e) => e.name === KEY)?.reason).toBe(
+      'a domain has one SSO owner',
+    );
+  });
+
+  it('passes with the entry and fails without it', async () => {
+    expect(await uniqueProblems()).toEqual([]);
+    const without = {
+      ...ALLOW_LISTS,
+      globalUniqueConstraints: ALLOW_LISTS.globalUniqueConstraints.filter((e) => e.name !== KEY),
+    };
+    expect(await uniqueProblems(without)).toEqual([
+      {
+        rule: 'tenant_unique',
+        object: 'app.sso_domains',
+        message:
+          'app.sso_domains has unique index sso_domains_verified_domain_key without organization_id',
+      },
+    ]);
+  });
+});
+
+describe('auth tenant grant entries', () => {
+  const entry = (name: string, privilege: string) => ({
+    name,
+    grantee: 'drefyn_auth',
+    privilege,
+    reason: 'test only',
+  });
+  const problemsFor = (grant: ReturnType<typeof entry>) =>
+    allowListProblems({ ...ALLOW_LISTS, authTenantGrants: [grant] }).map((p) => p.message);
+
+  // Sign in writes an SSO identity and a state row, each named column by column.
+  it('accept insert on a named column', () => {
+    expect(problemsFor(entry('app.t.subject', 'INSERT'))).toEqual([]);
+  });
+
+  it.each([
+    ['insert on a whole table', 'app.t', 'INSERT'],
+    ['update on a column', 'app.t.subject', 'UPDATE'],
+    ['select on a whole table', 'app.t', 'SELECT'],
+    ['delete on a column', 'app.t.subject', 'DELETE'],
+  ])('refuse %s', (_label, name, privilege) => {
+    expect(problemsFor(entry(name, privilege))).toEqual([
+      `auth tenant grant entry ${name} is for ${privilege}; only SELECT or INSERT on a column or DELETE on a table are allowed`,
+    ]);
   });
 });
 

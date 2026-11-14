@@ -20,6 +20,7 @@ import {
   toProvider,
   usersOf,
 } from './oauth-helpers.ts';
+import { expectMarkOn, forgetSession, lastMethodValue } from './last-method.ts';
 import { SIGNED_OUT } from './people.ts';
 
 // A real build through the whole redirect, in a browser, with sign up open. The provider is
@@ -88,6 +89,29 @@ for (const each of PROVIDERS) {
       expect(await usersOf(address)).toBe('1');
       expect(await identitiesOf(name, account)).toBe('1');
       expect(await sessionsOf(address)).toBe('1');
+    });
+
+    test('the next visit marks this provider as last used, on sign in and sign up', async ({
+      page,
+      provider,
+    }) => {
+      const account = newAccount(uniqueAddress(`oauth-last-${name}`));
+      await signInThrough(page, provider, each, { account });
+      await expect(page).toHaveURL(/\/welcome$/);
+      expect(await lastMethodValue(page)).toBe(name);
+      await forgetSession(page);
+      for (const path of ['/sign-in', '/sign-up']) {
+        await page.goto(path);
+        await expectMarkOn(page.getByRole('link', { name: new RegExp(`^Continue with ${label}`) }));
+      }
+    });
+
+    test('a refused return writes no mark', async ({ page, provider }) => {
+      provider.script = { account: newAccount(uniqueAddress(`oauth-last-no-${name}`)) };
+      await toProvider(page, label);
+      await page.goto(`/auth/oauth/${name}/callback?state=forged&code=x`);
+      await expect(page).toHaveURL(/\/sign-in\?error=/);
+      expect(await lastMethodValue(page)).toBeUndefined();
     });
 
     test('the start asks with PKCE and the fixed callback, and shows no secret', async ({

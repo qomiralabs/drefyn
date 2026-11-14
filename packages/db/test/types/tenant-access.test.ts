@@ -192,8 +192,15 @@ describe('tenant access types', () => {
   });
 
   it('build AuthSchema and UserSchema from their table lists only', () => {
-    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<AuthTableName | 'api_keys'>();
-    expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName>();
+    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<
+      | AuthTableName
+      | 'api_keys'
+      | 'sso_connections'
+      | 'sso_domains'
+      | 'sso_identities'
+      | 'sso_states'
+    >();
+    expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName | 'sso_identities'>();
     expectTypeOf<
       keyof NamedTables<FixtureSchema, 'fixture_drafts'>
     >().toEqualTypeOf<'fixture_drafts'>();

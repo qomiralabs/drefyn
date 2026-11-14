@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { SignUpForm } from '../../auth/forms.tsx';
 import { authConfig, dashboardAuth } from '../../server/auth.ts';
 import { currentSession, guardPublic } from '../../server/guard.ts';
-import { formBinding, site } from '../../server/sign-in-support.ts';
+import { formBinding, lastUsed, site } from '../../server/sign-in-support.ts';
 
 export async function generateMetadata(): Promise<Metadata> {
   await guardPublic();
@@ -28,6 +28,12 @@ export default async function SignUp() {
   const csrf = await formBinding('/sign-up');
   const { methods } = await dashboardAuth();
   return (
-    <SignUpForm site={site()} csrf={csrf} state={await pageState()} providers={methods.providers} />
+    <SignUpForm
+      site={site()}
+      csrf={csrf}
+      state={await pageState()}
+      providers={methods.providers}
+      lastUsed={await lastUsed()}
+    />
   );
 }

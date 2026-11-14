@@ -318,6 +318,8 @@ export interface OrganizationsTable {
   read_only_since: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  sso_enforcement: Generated<string>;
+  sso_enforcement_since: Date | null;
 }
 
 // app.password_credentials
@@ -378,6 +380,73 @@ export interface SessionsTable {
   expires_at: Date;
   user_agent: string | null;
   created_at: Generated<Date>;
+  sso_connection_id: string | null;
+  sso_organization_id: string | null;
+}
+
+// app.sso_connections
+export interface SsoConnectionsTable {
+  id: Generated<string>;
+  organization_id: string;
+  protocol: string;
+  status: Generated<string>;
+  display_name: string;
+  oidc_issuer: string | null;
+  oidc_client_id: string | null;
+  oidc_client_secret_sealed: Buffer | null;
+  oidc_endpoints: JsonValue | null;
+  saml_idp_entity_id: string | null;
+  saml_idp_sso_url: string | null;
+  saml_idp_certs: string[] | null;
+  jit_enabled: Generated<boolean>;
+  jit_default_project_role: string | null;
+  session_max_seconds: number | null;
+  version: Generated<number>;
+  created_by: string | null;
+  idempotency_key: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.sso_domains
+export interface SsoDomainsTable {
+  id: Generated<string>;
+  organization_id: string;
+  connection_id: string;
+  domain: string;
+  txt_token_hash: Buffer;
+  verified_at: Date | null;
+  last_checked_at: Date | null;
+  failed_checks: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.sso_identities
+export interface SsoIdentitiesTable {
+  id: Generated<string>;
+  organization_id: string;
+  connection_id: string;
+  user_id: string;
+  subject: string;
+  email_normalized: string;
+  last_used_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.sso_states
+export interface SsoStatesTable {
+  state_hash: Buffer;
+  organization_id: string;
+  connection_id: string;
+  protocol: string;
+  code_verifier: string | null;
+  nonce: string | null;
+  saml_request_id: string | null;
+  browser_hash: Buffer;
+  return_to: string | null;
+  expires_at: Date;
+  created_at: Generated<Date>;
 }
 
 // app.totp_credentials
@@ -437,6 +506,10 @@ export interface Schema {
   recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;
+  sso_connections: SsoConnectionsTable;
+  sso_domains: SsoDomainsTable;
+  sso_identities: SsoIdentitiesTable;
+  sso_states: SsoStatesTable;
   totp_credentials: TotpCredentialsTable;
   users: UsersTable;
 }

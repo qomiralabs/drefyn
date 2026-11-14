@@ -276,6 +276,7 @@ describe('security notices', () => {
     ['github', 'GitHub'],
     ['google', 'Google'],
     ['cli_link', 'One time link'],
+    ['sso', 'Single sign on'],
   ] as const)('prints the method %s as %s', async (method, words) => {
     const { send, adapter } = mailer();
     await adapter.sendSecurityNotice('a@example.com', {

@@ -71,12 +71,18 @@ export const FIXTURE_DOWN = [
   'drop table app.fixture_projects;',
 ].join('\n');
 
-// The shipped lists plus the fixture published table, which only tests ever create.
+// The shipped lists plus the fixture published and organization tables, which only tests
+// ever create.
 export const FIXTURE_ALLOW_LISTS: AllowLists = {
   ...ALLOW_LISTS,
   publishedTables: [
     ...ALLOW_LISTS.publishedTables,
     { name: 'app.fixture_published', reason: 'test fixture, never shipped' },
+  ],
+  organizationTables: [
+    ...ALLOW_LISTS.organizationTables,
+    { name: 'app.fixture_projects', reason: 'test fixture, never shipped' },
+    { name: 'app.fixture_members', reason: 'test fixture, never shipped' },
   ],
 };
 
