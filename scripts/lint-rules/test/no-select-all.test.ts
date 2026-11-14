@@ -87,8 +87,8 @@ describe('no-select-all', () => {
     expect(await lint(code)).toEqual([]);
   });
 
-  // What the rule cannot see. Each is pinned so a change in reach shows up here; the database
-  // still refuses all of them at run time.
+  // What the rule cannot see. Each is pinned so a change in reach shows up here; at run time the
+  // database still refuses any of them for a role missing a column.
   it.each([
     ['a query passed in as a parameter', 'function f(q) { return q.selectAll(); }'],
     ['a template with a placeholder', 'tx.selectFrom(`${schema}.users`).selectAll();'],
@@ -122,7 +122,16 @@ describe('no-select-all', () => {
     )) as { rules?: Record<string, unknown> };
     expect(config.rules?.[RULE]).toEqual([
       2,
-      { tables: ['users', 'password_credentials', 'known_devices'] },
+      {
+        tables: [
+          'users',
+          'password_credentials',
+          'known_devices',
+          'totp_credentials',
+          'recovery_codes',
+          'factor_challenges',
+        ],
+      },
     ]);
   });
 });

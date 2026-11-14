@@ -135,7 +135,9 @@ const STEP_UP_METHODS: ReadonlySet<string> = new Set([
   'password',
   'google',
   'github_session',
-]);
+  'totp',
+  'recovery_code',
+] satisfies StepUpMethod[]);
 const USER_AGENT_MAX = 256;
 const DAY_SECONDS = 86_400;
 // Compared against on a miss, so a missing row costs the same compare as a wrong secret.

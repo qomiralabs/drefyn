@@ -7,7 +7,10 @@ import type { AuthLogger } from './rate-limiter.ts';
 
 export type SessionId = IdOf<'ses'>;
 export type SessionMethod = 'email' | 'password' | 'github' | 'google' | 'cli_link';
-export type StepUpMethod = 'email' | 'password' | 'google' | 'github_session';
+// totp and recovery_code are read before anything writes them, so an image that ships the
+// factor can roll back to one that still reads its sessions.
+export type StepUpMethod =
+  'email' | 'password' | 'google' | 'github_session' | 'totp' | 'recovery_code';
 
 export interface SessionInfo {
   readonly sessionId: SessionId;
