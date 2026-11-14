@@ -340,3 +340,60 @@ export {
   type PasswordListFailure,
   type PasswordListSummary,
 } from './password-list.ts';
+export {
+  type AuthEvent,
+  type AuthEventSink,
+  type SsoConnectionId,
+  type SsoDomainEvent,
+  type SsoDomainId,
+} from './auth-events.ts';
+export {
+  FREE_MAIL_DOMAINS,
+  SSO_TXT_LABEL,
+  createSsoDomainPolicy,
+  normalizeSsoDomain,
+  parsePublicSuffixList,
+  ssoTxtName,
+  type PublicSuffixList,
+  type SsoDomainPolicy,
+  type SsoDomainPolicyInput,
+  type SsoDomainRefusal,
+} from './sso-domain-rules.ts';
+export {
+  bundledPublicSuffixListPath,
+  loadFreeMailDomains,
+  loadPublicSuffixList,
+  parseFreeMailDomains,
+} from './sso-domain-lists.ts';
+export {
+  createNodeTxtResolver,
+  type DnsBackend,
+  type NodeTxtResolverOptions,
+  type TxtLookup,
+  type TxtResolver,
+} from './sso-dns.ts';
+export {
+  createSsoDomainRepository,
+  type SsoDomainMember,
+  type SsoDomainOps,
+  type SsoDomainRepository,
+  type SsoDomainRepositoryDeps,
+  type SsoDomainSqlStore,
+  type StoredSsoDomain,
+  type VerifiedSsoDomainRef,
+} from './sso-domain-store.ts';
+export {
+  SSO_DOMAIN_STRIKES,
+  createSsoDomainRecheck,
+  createSsoDomains,
+  type SsoDomainClaim,
+  type SsoDomainNotice,
+  type SsoDomainNoticeMailer,
+  type SsoDomainRecheck,
+  type SsoDomainRecheckDeps,
+  type SsoDomainRecheckSummary,
+  type SsoDomainView,
+  type SsoDomains,
+  type SsoDomainsDeps,
+  type TeamSsoFlag,
+} from './sso-domains.ts';

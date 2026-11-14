@@ -4,8 +4,8 @@ Identity, sessions, API keys, organizations and seats for Docs, Studio and Statu
 holds config parsing, key derivation, credential formats, input validators, the built in
 password rules, log redaction, the permission model, the rate limiters, database sessions
 with step up, organizations, and invitations with seats. Only the limiters, the session files,
-organizations, invitations, CLI links, operator revoke and the command reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
-system.
+organizations, invitations, CLI links, operator revoke, SSO domains and the command reach the database, and only through `@drefyn/db`. The only network use is the OAuth fetch and the SSO
+TXT lookup; files are read only for the breached password list and the SSO domain lists.
 
 ## Entry points
 
@@ -697,3 +697,79 @@ const verifier = createApiKeyVerifier(process.env, { db, logger }); // API servi
   `checkApiKeyScope(actor, scope, projectId?)` gives `AUTH_API_KEY_SCOPE`.
 - `.gitleaks.toml` adds the `drefyn-api-key` rule on top of the defaults; CI proves it on a
   generated key with `packages/auth/test/gitleaks-fixture.ts`.
+
+## SSO domains
+
+An identity provider is trusted only for addresses in its own organization's verified domains.
+A domain is proved with a DNS TXT record and rechecked every day.
+
+```ts
+const policy = createSsoDomainPolicy({
+  publicSuffixes: await loadPublicSuffixList(), // the bundled snapshot
+  extraFreeMail:
+    config.sso.freeMailDomainsFile === null
+      ? []
+      : await loadFreeMailDomains(config.sso.freeMailDomainsFile),
+});
+const resolver = createNodeTxtResolver({ timeoutMs: config.sso.dnsTimeoutMs });
+const domains = createSsoDomains({
+  db,
+  authDb,
+  keys: config.keys,
+  limiter,
+  resolver,
+  policy,
+  flag,
+  logger,
+  mailer,
+  events,
+});
+const recheck = createSsoDomainRecheck({
+  db,
+  authDb,
+  keys: config.keys,
+  resolver,
+  flag,
+  logger,
+  mailer,
+  events,
+});
+```
+
+- `claimDomain(access, connectionId, domain)` answers `{ domainId, txtName, txtValue, verified }`.
+  `txtName` is `_drefyn-sso.<domain>`; `txtValue` is a fresh 32 byte token in base64url, and only
+  its SHA-256 is stored. A repeat claim of the same domain in any spelling returns the same row:
+  while unverified it issues a new token and the old one stops working; once verified it changes
+  nothing and `txtValue` is `null`. Moving a verified domain to another connection is
+  `AUTH_INPUT_INVALID`. Subdomains are their own claims.
+- Domains follow the `@drefyn/address` domain rule (lower case, IDN in punycode, one trailing dot
+  dropped), through `normalizeSsoDomain`. Public suffixes from the bundled Public Suffix List
+  (MPL 2.0, see `ASSETS.md`) and free mail domains (`FREE_MAIL_DOMAINS` plus the file in
+  `DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE`, one domain a line, `#` comments, subdomains included)
+  are `AUTH_SSO_DOMAIN_REFUSED`. A domain another organization holds verified is
+  `AUTH_SSO_DOMAIN_TAKEN`, at claim and at verify; the database's global unique index decides a
+  race.
+- `verifyDomain(access, domainId)` counts `sso_domain_verify` (20 an hour per organization), then
+  looks the TXT name up. A record that, trimmed, hashes to the stored token verifies the domain;
+  a missing, wrong or partial token is `AUTH_SSO_DOMAIN_UNVERIFIED`, and a lookup that gets no
+  answer is `AUTH_UNAVAILABLE`.
+- Both need the `auth.team_sso` flag for the organization and the person (`AUTH_SSO_DISABLED`,
+  a failed evaluation counts as off), a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`),
+  `org.manage_settings` on the stored membership (`AUTH_FORBIDDEN`) and `org.sso_saml` on the
+  stored plan (`AUTH_SSO_DISABLED`), all checked before anything is written or counted.
+- `createSsoDomainRecheck(deps).runOnce()` walks every verified domain. Each is looked up at most
+  once a day by database time. A lookup answered without the token is a strike; three in a row
+  unverify the domain. A lookup that times out or fails is not a strike and leaves the row as it
+  was, so the next run asks again. A success resets the count. An organization with the flag off
+  or without the entitlement is skipped and left untouched. Updates are conditional on the row
+  as it was read, so any number of servers may run it on any schedule. `maxPerRun` (500) bounds
+  the lookups of one run.
+- Claim, first verification and unverify each record an `AuthEventSink` event
+  (`sso.domain_claimed`, `sso.domain_verified`, `sso.domain_unverified`) and send
+  `sendSsoDomainNotice` to every owner, after the commit; a failure of either is logged and never
+  undoes the change. Events and logs carry `organization_id` and `domainKey`, the first 16 hex
+  digits of an HMAC of the domain, never the domain or the token. The notice names the domain,
+  since owners need to know which one.
+- `createNodeTxtResolver({ timeoutMs, servers? })` makes one try per lookup under
+  `DREFYN_AUTH_SSO_DNS_TIMEOUT_MS` (3000) and cancels it at the timeout. No records and no such
+  name are answers; everything else is unknown.

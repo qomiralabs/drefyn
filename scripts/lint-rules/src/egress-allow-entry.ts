@@ -2,6 +2,8 @@
 // reported in that file, so an exception is exactly as wide as the need.
 export type EgressAllowance =
   | { readonly module: 'node:http'; readonly imports: readonly ['createServer'] }
+  // A resolver object, so a lookup can be cancelled at its timeout.
+  | { readonly module: 'node:dns/promises'; readonly imports: readonly ['Resolver'] }
   // reads: true also lets the file hold fetch as a value, for wrapping it.
   | { readonly global: 'fetch'; readonly reads?: true };
 

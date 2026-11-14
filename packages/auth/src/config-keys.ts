@@ -12,6 +12,7 @@ export const RATE_BUCKETS = Object.freeze([
   'password_fail',
   'password_fail_ip',
   'cli_link_verify',
+  'sso_domain_verify',
 ] as const);
 
 export type RateBucket = (typeof RATE_BUCKETS)[number];
@@ -44,6 +45,8 @@ export const AUTH_CONFIG_KEYS = Object.freeze([
   'DREFYN_AUTH_PASSWORD_ARGON2_PARALLELISM',
   'DREFYN_AUTH_PASSWORD_HASH_CONCURRENCY',
   'DREFYN_AUTH_BREACHED_PASSWORDS_FILE',
+  'DREFYN_AUTH_SSO_DNS_TIMEOUT_MS',
+  'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE',
   ...RATE_BUCKETS.map(rateKey),
 ] as const);
 

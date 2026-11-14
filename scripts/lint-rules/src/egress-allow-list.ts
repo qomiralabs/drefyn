@@ -61,6 +61,12 @@ export const egressAllowList = [
     only: [{ global: 'fetch' }],
   },
   {
+    path: 'packages/auth/src/sso-dns.ts',
+    reason:
+      'TXT lookups that prove SSO domain ownership go to the resolvers the host is configured with; a customer picks the name asked about, never the server, and each lookup is one try under DREFYN_AUTH_SSO_DNS_TIMEOUT_MS',
+    only: [{ module: 'node:dns/promises', imports: ['Resolver'] }],
+  },
+  {
     path: 'apps/dashboard/server.ts',
     reason:
       'inbound server in front of the Next handler; it accepts connections and never opens one',
