@@ -107,14 +107,20 @@ expect_superuser_closed() {
 # up must fail, say why, and leave the superuser closed. The advice comes from the server log,
 # not the healthcheck, because compose may give up before the healthcheck ever runs. Pass
 # "silent" as the last argument when the server never starts listening, so there is nothing
-# to probe.
+# to probe. The expected log line may list alternatives split by |, for a case whose log
+# depends on the Compose version.
 bad_start() {
-  local case_name="$1" expected="$2" advice="$3" listens="${4:-listens}" out logs
+  local case_name="$1" expected="$2" advice="$3" listens="${4:-listens}" out logs line found lines
   if out="$(bash "$root/scripts/selfhost.sh" up 2>&1)"; then
     fail "$case_name stops the first start" "up succeeded: $out"
   else
     logs="$("${compose[@]}" logs --no-color postgres 2>&1 || true)"
-    if [[ "$logs" == *"$expected"* ]]; then
+    found=false
+    IFS='|' read -r -a lines <<<"$expected"
+    for line in "${lines[@]}"; do
+      if [[ "$logs" == *"$line"* ]]; then found=true; fi
+    done
+    if [ "$found" = true ]; then
       pass "$case_name stops the first start"
     else
       fail "$case_name stops the first start" "no [$expected] in the logs: $logs"
@@ -144,8 +150,11 @@ DREFYN_APP_PASSWORD="$(secret)"
 DREFYN_PUBLIC_READER_PASSWORD="$(secret)"
 DREFYN_AUTH_PASSWORD="$(secret)"
 
+# Compose 2 mounts an empty secret as an empty file, and the image refuses it. Compose 5
+# leaves the secret out, and the image fails reading a file that is not there.
 DREFYN_POSTGRES_PASSWORD=""
-bad_start "an empty superuser password" "superuser password is not specified" \
+bad_start "an empty superuser password" \
+  "superuser password is not specified|/run/secrets/postgres_password: No such file or directory" \
   "fix deploy/.env first" silent
 
 DREFYN_POSTGRES_PASSWORD=short-superuser
@@ -454,6 +463,28 @@ if out="$(bash "$root/scripts/selfhost.sh" restart 2>&1)"; then
   pass "after the documented change, restart is healthy again"
 else
   fail "after the documented change, restart is healthy again" "$out"
+fi
+
+# The image reads the superuser secret on every start, not only the first. Where compose leaves
+# an empty secret out, a database that is already there will not start, and reset would delete
+# it, so the advice must be to fix deploy/.env and nothing more. Where compose mounts an empty
+# file, the server starts and restart is healthy.
+good_superuser_password="$DREFYN_POSTGRES_PASSWORD"
+DREFYN_POSTGRES_PASSWORD=""
+if out="$(bash "$root/scripts/selfhost.sh" restart 2>&1)"; then
+  pass "restart with an empty superuser password never advises a reset"
+elif [[ "$out" == *"reset"* ]]; then
+  fail "restart with an empty superuser password never advises a reset" "it advised reset: $out"
+elif [[ "$out" == *"fix deploy/.env first"* ]]; then
+  pass "restart with an empty superuser password never advises a reset"
+else
+  fail "restart with an empty superuser password never advises a reset" "no advice in: $out"
+fi
+DREFYN_POSTGRES_PASSWORD="$good_superuser_password"
+if out="$(bash "$root/scripts/selfhost.sh" restart 2>&1)"; then
+  pass "restart with the superuser password back is healthy and keeps the data"
+else
+  fail "restart with the superuser password back is healthy and keeps the data" "$out"
 fi
 
 # A managed database's master user cannot change log settings for its session but can read
