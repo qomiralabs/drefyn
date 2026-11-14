@@ -1,6 +1,6 @@
 'use client';
 import { IconSearch, Skeleton } from '@drefyn/ui/react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Button, Dialog, Modal, ModalOverlay } from 'react-aria-components';
 
 // Shared with the results, so the field and its row sit in the same place before and after
@@ -105,6 +105,21 @@ export function CommandFrame({
   const close = () => {
     onOpenChange(false);
   };
+  // When the loaded field takes the first one's place, focus rests on the page until the new
+  // field takes it, and React Aria hears keys only inside the dialog. An Escape that lands
+  // there, handled by nothing, still closes it.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const active = document.activeElement;
+      if (active === null || active === document.body) onOpenChange(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, onOpenChange]);
   return (
     // No enter fade: React Aria keeps an overlay open if it is closed mid transition, and
     // Cmd+K pressed twice quickly must close it.

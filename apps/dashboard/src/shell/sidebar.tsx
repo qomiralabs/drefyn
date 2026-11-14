@@ -6,11 +6,13 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type ComponentType,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { useIncident } from '../incident/provider.tsx';
 import { projectKey, seatMeta, type ShellData } from './data.ts';
@@ -67,16 +69,37 @@ const onTablet = () => window.matchMedia(TABLET).matches;
 type Tip = ComponentType<RailTipProps>;
 const TipContext = createContext<Tip | null>(null);
 
-function useRailTip(rail: boolean): Tip | null {
+// Each rail link in order, the same before and after the tooltips wrap them.
+const railLinks = (nav: HTMLElement | null) => [
+  ...(nav?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []),
+];
+
+function useRailTip(rail: boolean, nav: RefObject<HTMLElement | null>): Tip | null {
   const [tip, setTip] = useState<Tip | null>(null);
+  // The loaded tooltips wrap every link anew, so a link focused while they loaded is
+  // replaced and focus falls to the page. It goes back to the same link, whose label then
+  // shows as it would have on the key press.
+  const refocus = useRef(-1);
   useEffect(() => {
     if (!rail || tip !== null) return;
     import('./rail-tip.tsx')
       .then((mod) => {
+        const active = document.activeElement;
+        refocus.current =
+          active instanceof HTMLAnchorElement ? railLinks(nav.current).indexOf(active) : -1;
         setTip(() => mod.RailTip);
       })
       .catch(() => undefined);
-  }, [rail, tip]);
+  }, [rail, tip, nav]);
+  useLayoutEffect(() => {
+    const index = refocus.current;
+    refocus.current = -1;
+    if (tip === null || index < 0) return;
+    // Focus that moved on by itself stays where it went.
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    railLinks(nav.current)[index]?.focus();
+  }, [tip, nav]);
   return tip;
 }
 
@@ -167,7 +190,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const phone = useSyncExternalStore(onPhoneChange, onPhone, () => false);
   const tablet = useSyncExternalStore(onTabletChange, onTablet, () => false);
   const cockpit = useIncident().view === 'cockpit';
-  const tip = useRailTip(tablet || cockpit);
+  const tip = useRailTip(tablet || cockpit, navRef);
   const landmark = useLandmark(navRef, {
     role: 'navigation',
     label,
