@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { ResetForm } from '../../../auth/forms.tsx';
 import { guardPublic } from '../../../server/guard.ts';
-import { formBinding, hosted } from '../../../server/sign-in-support.ts';
+import { formBinding, site } from '../../../server/sign-in-support.ts';
 
 export async function generateMetadata(): Promise<Metadata> {
   await guardPublic();
@@ -11,5 +11,5 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function Reset() {
   await guardPublic();
   const csrf = await formBinding('/sign-in/reset');
-  return <ResetForm hosted={hosted()} csrf={csrf} />;
+  return <ResetForm site={site()} csrf={csrf} />;
 }

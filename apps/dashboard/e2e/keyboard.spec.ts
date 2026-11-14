@@ -313,6 +313,31 @@ test.describe('signed out pages', () => {
     await expect(button).toBeFocused();
   });
 
+  test('the card is a named aside that Tab never enters', async ({ page, browserName }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/auth-states/sign-in/ready');
+    await expect(page.getByRole('complementary', { name: 'About Drefyn' })).toBeVisible();
+    // Blurring the autofocused field keeps it as the start point, so the walk starts at the
+    // top on purpose.
+    await page.getByRole('link', { name: 'Skip to content' }).focus();
+    const stops: string[] = [await focused(page)];
+    for (let i = 0; i < 40; i += 1) {
+      await page.keyboard.press(tabKey(browserName));
+      const here = await focused(page);
+      // Past the last stop focus leaves the page or wraps to the top.
+      if (here === 'body' || here === stops[0]) break;
+      const inCard = await page.evaluate(() => document.activeElement?.closest('aside') !== null);
+      stops.push(inCard ? `card ${here}` : here);
+    }
+    expect(stops.slice(0, 3)).toEqual([
+      'a Skip to content',
+      'a Drefyn, sign in',
+      'a Documentation',
+    ]);
+    expect(stops.at(-1)).toBe('a Create an account');
+    expect(stops.filter((stop) => stop.startsWith('card '))).toEqual([]);
+  });
+
   test('the first Tab reaches the skip link, and it moves to main', async ({
     page,
     browserName,
