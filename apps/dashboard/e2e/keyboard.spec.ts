@@ -16,6 +16,7 @@ import {
   tabKey,
 } from './fixtures.ts';
 import { askForCode, uniqueAddress } from './auth-helpers.ts';
+import { expectMarkOn } from './last-method.ts';
 import { SIGNED_OUT } from './people.ts';
 
 test('Tab goes skip link, top bar left to right, then the sidebar', async ({
@@ -311,6 +312,18 @@ test.describe('signed out pages', () => {
     await expect(button).toHaveAccessibleDescription('Paused until tomorrow.');
     await button.focus();
     await expect(button).toBeFocused();
+  });
+
+  test('Last used is part of the name of the control it marks', async ({ page }) => {
+    for (const [state, control] of [
+      ['last-github', page.getByRole('link', { name: /^Continue with GitHub/ })],
+      ['last-google', page.getByRole('link', { name: /^Continue with Google/ })],
+      ['last-email-code', page.getByRole('button', { name: /^Email me a code/ })],
+      ['last-password', page.getByRole('link', { name: /^Use a password instead/ })],
+    ] as const) {
+      await page.goto(`/auth-states/sign-in/${state}`);
+      await expectMarkOn(control);
+    }
   });
 
   test('the card is a named aside that Tab never enters', async ({ page, browserName }) => {

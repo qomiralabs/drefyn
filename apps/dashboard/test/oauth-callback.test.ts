@@ -5,8 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const ORIGIN = 'https://app.drefyn.test';
 const completeOAuth = vi.fn();
 const arrival = vi.fn<(s: unknown, to: string) => Promise<string>>();
-const SESSION = { email: 'a@example.com' };
-const COOKIES = { session: '__Host-drefyn_session', oauth: '__Host-drefyn_oauth' };
+const SESSION = { email: 'a@example.com', method: 'github' };
+const COOKIES = {
+  session: '__Host-drefyn_session',
+  oauth: '__Host-drefyn_oauth',
+  lastMethod: '__Host-drefyn_last_method',
+};
 const visitorBrowser = vi.fn<() => Promise<unknown>>();
 const guardPublic = vi.fn<() => Promise<void>>();
 const currentSession = vi.fn<() => Promise<unknown>>();
@@ -97,7 +101,39 @@ describe('the OAuth callback', () => {
     expect(response.status).toBe(303);
     expect(response.headers.getSetCookie()).toEqual([
       '__Host-drefyn_session=secret; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax',
+      '__Host-drefyn_last_method=github; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Lax',
     ]);
+  });
+
+  it('marks Google as the last method after a Google sign in', async () => {
+    completeOAuth.mockResolvedValue({
+      ok: true,
+      value: {
+        kind: 'signed_in',
+        session: { ...SESSION, method: 'google' },
+        setCookies: [],
+        returnTo: '/',
+      },
+    });
+    const response = await call('google');
+    expect(response.headers.getSetCookie()).toEqual([
+      '__Host-drefyn_last_method=google; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Lax',
+    ]);
+  });
+
+  it('marks nothing for a step up, a pending link or a refused return', async () => {
+    completeOAuth.mockResolvedValue({
+      ok: true,
+      value: { kind: 'stepped_up', session: SESSION, setCookies: [], returnTo: '/account' },
+    });
+    expect((await call()).headers.getSetCookie()).toEqual([]);
+    completeOAuth.mockResolvedValue({
+      ok: true,
+      value: { kind: 'link_pending', setCookies: [], returnTo: '/' },
+    });
+    expect((await call()).headers.getSetCookie()).toEqual([]);
+    refused('AUTH_OAUTH_STATE_INVALID');
+    expect((await call()).headers.getSetCookie()).toEqual([]);
   });
 
   it('owes no mail on a sign in with nothing to send', async () => {

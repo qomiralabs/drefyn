@@ -38,7 +38,13 @@ vi.mock('next/server', () => ({ after }));
 vi.mock('../src/server/guard.ts', () => ({ currentSession }));
 vi.mock('../src/server/auth.ts', () => ({
   dashboardAuth: () => Promise.resolve(auth),
-  authConfig: () => ({ cookieSecure: true, cookies: { invite: 'invite', pre: 'pre' } }),
+  authConfig: () => ({
+    cookieSecure: true,
+    cookies: { invite: 'invite', pre: 'pre', lastMethod: 'last' },
+  }),
+}));
+vi.mock('../src/server/first-run.ts', () => ({
+  arrival: (_session: unknown, to: string) => Promise.resolve(to),
 }));
 vi.mock('../src/server/origin.ts', () => ({ appOrigin: () => 'https://app.drefyn.test' }));
 const BROWSER = { ip: '203.0.113.9', userAgent: 'x', cookies: new Map() };
@@ -276,7 +282,7 @@ describe('resetStep', () => {
   it('says saved, never where the password went', async () => {
     auth.passwordAccount.completePasswordReset.mockResolvedValue({
       ok: true,
-      value: { ...SIGNED, session: { email: 'a@example.com' } },
+      value: { ...SIGNED, session: { email: 'a@example.com', method: 'password' } },
     });
     await expect(save()).resolves.toEqual({
       step: 'saved',
@@ -452,5 +458,111 @@ describe('the block page', () => {
     await expect(call['stopInvitations']?.(form({ token: 't' }))).resolves.toEqual({
       kind: 'invalid',
     });
+  });
+});
+
+// Written with the session and on nothing else, so a failed or unfinished sign in leaves the
+// mark from the last real one.
+describe('the last method', () => {
+  const as = (method: string) => ({ ok: true, value: { ...SIGNED, session: { method } } });
+  const written = () =>
+    jar.set.mock.calls
+      .map(([cookie]) => cookie as { name: string; value: string; maxAge: number })
+      .filter((cookie) => cookie.name === 'last');
+  const LAST = {
+    name: 'last',
+    maxAge: 34_560_000,
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+  };
+
+  it('marks the email code after a code sign in', async () => {
+    auth.emailSignIn.verifyEmailCode.mockResolvedValue(as('email'));
+    await expect(call['verifyCode']?.(form({ code: '12345678' }))).rejects.toThrow('/acme');
+    expect(written()).toEqual([{ ...LAST, value: 'email_code' }]);
+  });
+
+  it('marks the email code after Continue from the mail', async () => {
+    auth.emailSignIn.verifyLinkCode.mockResolvedValue({
+      ok: true,
+      value: { kind: 'signed_in', signedIn: { ...SIGNED, session: { method: 'email' } } },
+    });
+    await expect(
+      call['finishLink']?.(form({ challenge: PUBLIC, code: '12345678' })),
+    ).rejects.toThrow('/acme');
+    expect(written()).toEqual([{ ...LAST, value: 'email_code' }]);
+  });
+
+  it('marks the password after a password sign in', async () => {
+    auth.passwordSignIn.signInWithPassword.mockResolvedValue(as('password'));
+    await expect(
+      call['signInPassword']?.(form({ email: 'a@example.com', password: 'x', csrf: 'c' })),
+    ).rejects.toThrow('/acme');
+    expect(written()).toEqual([{ ...LAST, value: 'password' }]);
+  });
+
+  it('marks the password after a reset that signs in', async () => {
+    auth.passwordAccount.completePasswordReset.mockResolvedValue(as('password'));
+    await call['resetStep']?.(
+      form({ step: 'save', code: '12345678', challenge: '', password: 'p' }),
+    );
+    expect(written()).toEqual([{ ...LAST, value: 'password' }]);
+  });
+
+  it.each([
+    [
+      'a wrong code',
+      () => {
+        auth.emailSignIn.verifyEmailCode.mockResolvedValue(refused('AUTH_CODE_INVALID'));
+        return call['verifyCode']?.(form({ code: '12345678' }));
+      },
+    ],
+    [
+      'an expired code',
+      () => {
+        auth.emailSignIn.verifyEmailCode.mockResolvedValue(refused('AUTH_CHALLENGE_EXPIRED'));
+        return call['verifyCode']?.(form({ code: '12345678' }));
+      },
+    ],
+    [
+      'a wrong password',
+      () => {
+        auth.passwordSignIn.signInWithPassword.mockResolvedValue(
+          refused('AUTH_CREDENTIALS_INVALID'),
+        );
+        return call['signInPassword']?.(form({ email: 'a@example.com', password: 'x', csrf: 'c' }));
+      },
+    ],
+    [
+      'a refused reset',
+      () => {
+        auth.passwordAccount.completePasswordReset.mockResolvedValue(refused('AUTH_CODE_INVALID'));
+        return call['resetStep']?.(form({ step: 'save', code: '1', challenge: '', password: 'p' }));
+      },
+    ],
+    [
+      'a link that still needs a password',
+      () => {
+        auth.emailSignIn.verifyLinkCode.mockResolvedValue({
+          ok: true,
+          value: { kind: 'choose_password' },
+        });
+        return call['finishLink']?.(form({ challenge: PUBLIC, code: '12345678' }));
+      },
+    ],
+  ])('writes nothing after %s', async (_name, run) => {
+    await run();
+    expect(written()).toEqual([]);
+  });
+
+  it('writes nothing for a CLI link, which the page does not offer', async () => {
+    auth.cliLinks.redeem.mockResolvedValue({
+      ok: true,
+      value: { setCookies: [], session: { method: 'cli_link' } },
+    });
+    await expect(call['redeemCliLink']?.(form({ token: 't' }))).rejects.toThrow(REDIRECT);
+    expect(written()).toEqual([]);
   });
 });

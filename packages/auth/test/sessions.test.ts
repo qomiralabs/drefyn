@@ -460,12 +460,13 @@ describe('sign out and revocation', () => {
   });
 
   // Read from the config, so a cookie added later is cleared unless someone decides otherwise.
-  it('signOut expires every cookie auth owns except the known device', async () => {
+  it('signOut expires every cookie auth owns except the known device and the last method', async () => {
     const { sessions } = setup(() => [{ id: SESSION }]);
     const cookies = await sessions.signOut(sessionInfo());
-    const { device, ...rest } = config.cookies;
+    const { device, lastMethod, ...rest } = config.cookies;
     expect(cookies.map((cookie) => cookie.name).sort()).toEqual(Object.values(rest).sort());
     expect(cookies.map((cookie) => cookie.name)).not.toContain(device);
+    expect(cookies.map((cookie) => cookie.name)).not.toContain(lastMethod);
     expect(cookies.every((c) => c.value === '' && c.maxAgeSeconds === 0)).toBe(true);
   });
 

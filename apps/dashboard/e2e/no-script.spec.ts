@@ -8,6 +8,8 @@ import {
   frameBoxes,
 } from './auth-frame.ts';
 import { uniqueAddress } from './auth-helpers.ts';
+import { ON_ORIGIN } from './fixtures.ts';
+import { expectMarkOn, LAST_METHOD } from './last-method.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { MAYA, SIGNED_OUT } from './people.ts';
 import { test } from './test.ts';
@@ -58,4 +60,12 @@ test('every signed out page keeps the split and a working docs link', async ({ p
   await page.goto('/sign-in');
   await docsLink(page).click();
   await expect(page).toHaveURL(`${DOCS_URL}/`);
+});
+
+test('the last used mark comes from the server with scripts off', async ({ page }) => {
+  await page
+    .context()
+    .addCookies([{ name: LAST_METHOD, value: 'email_code', url: ON_ORIGIN, httpOnly: true }]);
+  await page.goto('/sign-in');
+  await expectMarkOn(page.getByRole('button', { name: /^Email me a code/ }));
 });
