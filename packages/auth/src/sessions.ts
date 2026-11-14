@@ -129,7 +129,14 @@ export interface Sessions extends StepUps {
   revokeSession(s: SessionInfo, id: SessionId): Promise<Result<void, AuthError>>;
 }
 
-const METHODS: ReadonlySet<string> = new Set(['email', 'password', 'github', 'google', 'cli_link']);
+const METHODS: ReadonlySet<string> = new Set([
+  'email',
+  'password',
+  'github',
+  'google',
+  'cli_link',
+  'sso',
+] satisfies SessionMethod[]);
 const STEP_UP_METHODS: ReadonlySet<string> = new Set([
   'email',
   'password',

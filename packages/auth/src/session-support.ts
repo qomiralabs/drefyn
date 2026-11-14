@@ -6,7 +6,9 @@ import { AuthError } from './errors.ts';
 import type { AuthLogger } from './rate-limiter.ts';
 
 export type SessionId = IdOf<'ses'>;
-export type SessionMethod = 'email' | 'password' | 'github' | 'google' | 'cli_link';
+// sso is read before anything writes it, so an image that ships SSO sign in can roll back to
+// one that still reads its sessions.
+export type SessionMethod = 'email' | 'password' | 'github' | 'google' | 'cli_link' | 'sso';
 // totp and recovery_code are read before anything writes them, so an image that ships the
 // factor can roll back to one that still reads its sessions.
 export type StepUpMethod =

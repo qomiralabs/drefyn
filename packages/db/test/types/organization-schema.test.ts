@@ -102,6 +102,7 @@ describe('organization schema types', () => {
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'
+      | 'sso_identities'
     >();
   });
 

@@ -62,7 +62,8 @@ without one of those.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
   known, with every setting empty. `drefyn_auth` holds grants on the identity tables and, for
   the expiry cleanup, on `ctid`, `organization_id`, `revoked_at` and delete of `api_keys`, past
-  the 90 day limit only, and on `scheduled_jobs`. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+  the 90 day limit only, on `scheduled_jobs`, and on the listed columns of the four SSO tables.
+  Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
   `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
@@ -189,6 +190,24 @@ challenge is a delete then an insert, and a second insert racing it fails on the
 a user removes all three. The down migration drops the tables, and with them every enrolment,
 so it is for use before the factor ships only.
 
+`sso_connections`, `sso_domains`, `sso_identities` and `sso_states` hold team SSO: an
+organization's identity provider connections, the domains it claimed and proved, the people
+linked through them, and the sign in round trips in flight. Each is a tenant table under
+`tenant_isolation` with no `project_id`, since SSO is organization scoped. `drefyn_auth` reads
+only the columns listed in `src/sso-columns.ts`: the connection lookup fields (never
+`oidc_client_secret_sealed`), four columns of verified domains for discovery, and identities
+and states, which it alone inserts; it deletes states when it consumes them and in the expiry
+cleanup, a day after `expires_at`. `drefyn_app` holds nothing on `sso_states`, cannot insert
+or update an identity (so an organization admin cannot map their IdP subject onto someone
+else's account), and reads a person's own links in every organization through `self_read`.
+Organization work updates only the listed columns of a connection or a domain; a domain is
+verified by one organization at a time, through the partial unique index
+`sso_domains_verified_domain_key`. `organizations.sso_enforcement` (`off`,
+`verified_domains`, `everyone`) is set together with `sso_enforcement_since`, and organization
+work cannot write either yet. A session that signed in through SSO has `method = 'sso'` and
+both `sso_connection_id` and `sso_organization_id`; any other session has neither. The down
+migration drops the tables and ends SSO sessions, so it is for use before SSO ships only.
+
 `reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
 `reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
@@ -253,7 +272,7 @@ beyond the bootstrap's.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
 `organization_id`, even one on the auth table list, unless that exact grant is on the auth tenant
-grant list (a column to select or a table to delete from, never with grant option, and a listed
+grant list (a column to select or insert, or a table to delete from, never with grant option, and a listed
 grant that is gone fails too), or on a table off that list; `EXECUTE` on
 any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; anything
 beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or any grant option;
@@ -263,7 +282,8 @@ and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alik
 to `PUBLIC`, restrictive ones included; a restrictive policy in `app` that is not on the
 `restrictivePolicies` list, differs from its entry, or is listed but missing (a permissive one
 of the same name counts as missing); a unique key without `organization_id` on a tenant table
-unless it is on the global unique list; and on `users`, `password_credentials`,
+unless it is on the global unique list; a tenant table without `project_id` unless it is on
+the organization table list; and on `users`, `password_credentials`,
 `known_devices` and the three second factor tables, any table level `SELECT`, `INSERT` or
 `UPDATE` and any column grant off the column grant list, so a new column is
 closed until someone grants it. Insert is per column there too, so no insert can set a column

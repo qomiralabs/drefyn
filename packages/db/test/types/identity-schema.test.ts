@@ -121,6 +121,10 @@ describe('identity schema types', () => {
       | 'known_devices'
       | 'scheduled_jobs'
       | 'api_keys'
+      | 'sso_connections'
+      | 'sso_domains'
+      | 'sso_identities'
+      | 'sso_states'
     >();
     expectTypeOf<keyof UserSchema>().toEqualTypeOf<
       | 'users'
@@ -134,6 +138,7 @@ describe('identity schema types', () => {
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'
+      | 'sso_identities'
     >();
     expectTypeOf<keyof UserSchema['users']>().toEqualTypeOf<
       'id' | 'email' | 'display_name' | 'created_at' | 'updated_at'

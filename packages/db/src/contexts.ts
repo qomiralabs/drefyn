@@ -10,7 +10,13 @@ import type {
   AuthPasswordCredentialsTable,
   AuthUsersTable,
 } from './identity-columns.ts';
-import type { ApiKeysTable, ColumnType, Schema } from './schema.generated.ts';
+import type { ApiKeysTable, ColumnType, Schema, SsoIdentitiesTable } from './schema.generated.ts';
+import type {
+  AuthSsoConnectionsTable,
+  AuthSsoDomainsTable,
+  AuthSsoIdentitiesTable,
+  AuthSsoStatesTable,
+} from './sso-columns.ts';
 
 // Only the named tables, so a table outside the list is not even a name the transaction can
 // type.
@@ -42,7 +48,15 @@ export type AuthSchema = WithColumns<
   AuthUsersTable,
   AuthPasswordCredentialsTable,
   AuthKnownDevicesTable
-> & { api_keys: AuthApiKeysTable };
+> & {
+  api_keys: AuthApiKeysTable;
+  // Tenant tables the sign in role reaches by column, kept apart from AuthTableName for the
+  // same reason as api_keys.
+  sso_connections: AuthSsoConnectionsTable;
+  sso_domains: AuthSsoDomainsTable;
+  sso_identities: AuthSsoIdentitiesTable;
+  sso_states: AuthSsoStatesTable;
+};
 
 // Every column readable and none insertable or updatable. The policies already refuse the
 // write; this keeps it from compiling.
@@ -60,7 +74,8 @@ type WithFactorColumns<S> = Omit<S, 'totp_credentials' | 'recovery_codes' | 'fac
   factor_challenges: AppFactorChallengesTable;
 };
 
-// The signed in person's own rows, and the organizations they belong to, read only.
+// The signed in person's own rows, and the organizations they belong to, read only. Their
+// SSO links are read only too: only sign in writes one.
 export type UserSchema = ReadOnlyTables<
   WithFactorColumns<
     WithColumns<
@@ -71,7 +86,7 @@ export type UserSchema = ReadOnlyTables<
     >
   >,
   MemberTableName
->;
+> & { sso_identities: ReadOnlyTable<SsoIdentitiesTable> };
 
 // The one table the API key failure limiter writes, before any key or organization is proved.
 export type ApiKeyLimiterSchema = NamedTables<Schema, 'api_key_failures'>;

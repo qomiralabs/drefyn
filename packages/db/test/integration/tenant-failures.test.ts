@@ -18,6 +18,7 @@ import { until } from './support/process.ts';
 import { query } from './support/sql.ts';
 import { superuser } from './support/stack.ts';
 import {
+  FIXTURE_ALLOW_LISTS,
   appConfig,
   backendsOf,
   catalogProblems,
@@ -194,6 +195,7 @@ describe('more catalog rules', () => {
           ...allow.publishedTables,
           { name: 'app.fixture_published', reason: 'test fixture, never shipped' },
         ],
+        organizationTables: FIXTURE_ALLOW_LISTS.organizationTables,
       };
       return catalogProblems(db.owner, fixtureAllow);
     };

@@ -144,6 +144,9 @@ describe('type tests', () => {
       | 'crd'
       | 'ses'
       | 'inv'
+      | 'ssc'
+      | 'ssd'
+      | 'ssi'
     >();
     expectTypeOf<CacheScope>().toEqualTypeOf<
       'page' | 'nav' | 'search' | 'retrieval' | 'render' | 'asset'

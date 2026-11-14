@@ -155,3 +155,36 @@ describe('public ID codec for session and invitation ids (property)', () => {
     },
   );
 });
+
+// SSO connection, domain and identity ids appear in start URLs and audit events, so a
+// connection id must never pass where a domain or identity id is expected.
+const SSO_KINDS = ['ssc', 'ssd', 'ssi'] as const;
+const ssoKind = fc.constantFrom(...SSO_KINDS);
+
+describe('public ID codec for SSO ids (property)', () => {
+  it('round trips every UUID and matches the public pattern', () => {
+    fc.assert(
+      fc.property(ssoKind, anyUuid, (kind, uuid) => {
+        const encoded = toPublicId(kind, idOf(kind, uuid));
+        expect(encoded).toMatch(new RegExp(`^${kind}_[0-9a-hjkmnp-tv-z]{26}$`));
+        expect(encoded).toBe(`${kind}_${oracleBody(uuid)}`);
+        expect(parsePublicId(kind, encoded)).toBe(uuid);
+      }),
+      runs,
+    );
+  });
+
+  it('refuses a valid id of any other kind with ID_WRONG_TYPE, both ways', () => {
+    const other = fc.constantFrom(...PREFIXES);
+    fc.assert(
+      fc.property(ssoKind, other, anyUuid, (kind, otherKind, uuid) => {
+        fc.pre(kind !== otherKind);
+        const ours = toPublicId(kind, idOf(kind, uuid));
+        const theirs = toPublicId(otherKind, idOf(otherKind, uuid));
+        expect(codeOf(() => parsePublicId(otherKind, ours))).toBe('ID_WRONG_TYPE');
+        expect(codeOf(() => parsePublicId(kind, theirs))).toBe('ID_WRONG_TYPE');
+      }),
+      runs,
+    );
+  });
+});
