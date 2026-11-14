@@ -105,11 +105,14 @@ for (const theme of THEMES) {
   }) => {
     await slowEffects(page);
     await openStory(page, 'components-toast--undo', theme);
+    // The story shows its toast from an effect, after the page is ready. F6 before then has
+    // no region to reach, as for a person who presses it before anything was announced.
+    const toast = card(page, 'Archived Pricing');
+    await expect(toast).toBeVisible();
     const back = page.getByRole('button', { name: 'Edit page' });
     await back.focus();
     await page.keyboard.press('F6');
     await expect(region(page)).toBeFocused();
-    const toast = card(page, 'Archived Pricing');
     await page.keyboard.press(tabKey(browserName));
     await expect(toast).toBeFocused();
     await page.keyboard.press(tabKey(browserName));
