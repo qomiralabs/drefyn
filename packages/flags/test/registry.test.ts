@@ -18,6 +18,18 @@ describe('the registry', () => {
     }
   });
 
+  it('holds auth.team_sso exactly as accepted, off unless someone turns it on', () => {
+    expect(flags.find((flag) => flag.name === 'auth.team_sso')).toEqual({
+      name: 'auth.team_sso',
+      kind: 'release',
+      owner: 'Divine572',
+      description: 'Continue with SSO on sign in, and SSO settings for organizations.',
+      created: '2026-11-14',
+      removeBy: '2027-06-30',
+      safeValue: false,
+    });
+  });
+
   it('gives every flag an owner, a description and a removal date after it was created', () => {
     for (const flag of flags) {
       expect(flag.owner.trim(), flag.name).not.toBe('');

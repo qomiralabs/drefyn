@@ -41,6 +41,7 @@ describe('flag names', () => {
       | 'email.smtp_delivery'
       | 'engine.writes'
       | 'engine.chunk_at_write'
+      | 'auth.team_sso'
     >();
   });
 
