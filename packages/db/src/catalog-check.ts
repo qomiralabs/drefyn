@@ -119,19 +119,26 @@ function columnGrantUnsafe(
 }
 
 // Reaching tenant rows is the one thing the sign in role is otherwise never allowed, so the
-// only shapes on offer are reading a named column and deleting: nothing that writes a row, and
-// never a whole table to read.
-// Never update: a sign in role that could rewrite a tenant row could move it to another
-// organization or person.
-const AUTH_COLUMN_PRIVILEGES = new Set(['SELECT', 'INSERT']);
+// only shapes on offer are reading a named column, inserting one, updating one that names no
+// owner, and deleting. Never a whole table to read, and never an update of an id: a sign in
+// role that could rewrite one could move a tenant row to another organization or person.
+const AUTH_COLUMN_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE']);
+
+const namesOwner = (column: string) => column === 'id' || column.endsWith('_id');
 
 function authTenantGrantUnsafe(entry: ColumnGrantEntry): string | undefined {
   if (entry.grantee !== AUTH_ROLE) return `is to ${entry.grantee}, not ${AUTH_ROLE}`;
-  const column = entry.name.split('.').length === 3;
-  if (column ? AUTH_COLUMN_PRIVILEGES.has(entry.privilege) : entry.privilege === 'DELETE') {
+  const parts = entry.name.split('.');
+  const column = parts.length === 3 ? (parts[2] ?? '') : null;
+  if (column !== null && entry.privilege === 'UPDATE' && namesOwner(column)) {
+    return `is for UPDATE of ${column}, which names an owner; only columns that name none update`;
+  }
+  if (
+    column === null ? entry.privilege === 'DELETE' : AUTH_COLUMN_PRIVILEGES.has(entry.privilege)
+  ) {
     return undefined;
   }
-  return `is for ${entry.privilege}; only SELECT or INSERT on a column or DELETE on a table are allowed`;
+  return `is for ${entry.privilege}; only SELECT, INSERT or UPDATE on a column or DELETE on a table are allowed`;
 }
 
 function policyUnsafe(entry: PolicyEntry): string | undefined {

@@ -394,7 +394,7 @@ const INVITER_GRANTS_ROLE =
 // member the database can see invited: a live invitation of this organization, named by the
 // row, with the same role. Kept exact, as pg_get_expr prints it.
 const MEMBERSHIP_ORIGIN =
-  "((user_id = app.current_actor_id()) AND (((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))))";
+  "((user_id = app.current_actor_id()) AND (((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now()))))) OR (EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now())))) OR ((role = 'member'::text) AND (invitation_id IS NULL) AND (EXISTS ( SELECT\n   FROM (app.sso_identities si\n     JOIN app.sso_connections c ON (((c.organization_id = si.organization_id) AND (c.id = si.connection_id))))\n  WHERE ((si.organization_id = memberships.organization_id) AND (si.user_id = memberships.user_id) AND (c.status = 'active'::text) AND c.jit_enabled AND (NOT (c.jit_default_project_role IS DISTINCT FROM memberships.default_project_role))))))))";
 
 const KEY_CREATOR =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = api_keys.organization_id) AND (m.id = api_keys.created_by) AND (m.user_id = app.current_actor_id()) AND (m.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
@@ -463,7 +463,7 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     using: null,
     withCheck: MEMBERSHIP_ORIGIN,
     reason:
-      'a membership is born only for the person acting, as the first owner of a new organization or from a live invitation with the same role; any other source needs its own arm',
+      'a membership is born only for the person acting, as the first owner of a new organization, from a live invitation with the same role, or as a member through an identity the sign in role linked on an active just in time connection with its project role; any other source needs its own arm',
   },
   {
     name: 'app.memberships.membership_update_actor',

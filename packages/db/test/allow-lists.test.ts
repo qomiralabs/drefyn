@@ -277,6 +277,8 @@ describe('allow lists', () => {
         'method',
         'return_to',
         'secret_hash',
+        'sso_connection_id',
+        'sso_organization_id',
         'user_id',
       ]);
     });
@@ -350,7 +352,7 @@ describe('allow lists', () => {
       );
     });
 
-    it('reads and links identities, and consumes states, but updates nothing', () => {
+    it('reads and links identities, and consumes states, and updates only when a link was used', () => {
       expect(on('sso_identities', 'INSERT').sort()).toEqual([
         'connection_id',
         'email_normalized',
@@ -364,7 +366,9 @@ describe('allow lists', () => {
       expect(
         AUTH_TENANT_GRANTS.filter((g) => g.name === 'app.sso_states').map((g) => g.privilege),
       ).toEqual(['DELETE']);
-      expect(AUTH_TENANT_GRANTS.filter((g) => g.privilege === 'UPDATE')).toEqual([]);
+      expect(AUTH_TENANT_GRANTS.filter((g) => g.privilege === 'UPDATE').map((g) => g.name)).toEqual(
+        ['app.sso_identities.last_used_at'],
+      );
     });
   });
 
@@ -413,8 +417,8 @@ describe('allow lists', () => {
       }),
     ],
     [
-      'an auth tenant grant that can write a row',
-      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.revoked_at', 'UPDATE')] }),
+      'an auth tenant grant that can move a row',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.organization_id', 'UPDATE')] }),
     ],
     [
       'an auth tenant grant to insert',
@@ -697,7 +701,9 @@ const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
 const INVITATION_ARM =
   '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
-const ORIGIN = `((user_id = app.current_actor_id()) AND (${OWNER_ARM} OR ${INVITATION_ARM}))`;
+const JIT_ARM =
+  "((role = 'member'::text) AND (invitation_id IS NULL) AND (EXISTS ( SELECT\n   FROM (app.sso_identities si\n     JOIN app.sso_connections c ON (((c.organization_id = si.organization_id) AND (c.id = si.connection_id))))\n  WHERE ((si.organization_id = memberships.organization_id) AND (si.user_id = memberships.user_id) AND (c.status = 'active'::text) AND c.jit_enabled AND (NOT (c.jit_default_project_role IS DISTINCT FROM memberships.default_project_role))))))";
+const ORIGIN = `((user_id = app.current_actor_id()) AND (${OWNER_ARM} OR ${INVITATION_ARM} OR ${JIT_ARM}))`;
 const INVITER =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND (m.user_id = app.current_actor_id()) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
@@ -808,8 +814,22 @@ describe('restrictive policies', () => {
   });
 
   it('give the owner arm no way in for an admin or a member', () => {
-    const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
-    expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+    expect(OWNER_ARM).not.toMatch(/'(admin|member)'/);
+  });
+
+  // Only sign in writes an identity, so organization work cannot use this arm to add anyone.
+  it('let the just in time arm make a member only, through an active just in time connection', () => {
+    for (const part of [
+      "(role = 'member'::text)",
+      '(invitation_id IS NULL)',
+      '(si.user_id = memberships.user_id)',
+      "(c.status = 'active'::text)",
+      'c.jit_enabled',
+      '(NOT (c.jit_default_project_role IS DISTINCT FROM memberships.default_project_role))',
+    ]) {
+      expect(JIT_ARM, part).toContain(part);
+    }
+    expect(JIT_ARM).not.toMatch(/'(owner|admin)'/);
   });
 
   it('let only an owner or admin membership of the same organization create a key', () => {

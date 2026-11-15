@@ -23,6 +23,7 @@ import {
   type SessionInfo,
   type SessionMethod,
   type SessionStore,
+  type SsoScope,
   type StepUpMethod,
 } from './session-support.ts';
 import { stepUps, type AuthMailer, type PasswordVerifier, type StepUps } from './step-up.ts';
@@ -32,6 +33,7 @@ export type {
   SessionInfo,
   SessionMethod,
   SessionStore,
+  SsoScope,
   StepUpMethod,
 } from './session-support.ts';
 import {
@@ -101,6 +103,8 @@ export interface StartSessionInput {
   // so a reset or change after the check leaves no session. A mismatch throws
   // AUTH_CREDENTIALS_INVALID.
   readonly credential?: CheckedCredential;
+  // Required with the sso method and refused with any other.
+  readonly sso?: SsoScope;
 }
 
 export interface Sessions extends StepUps {
@@ -362,6 +366,10 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     ...steps,
 
     async startSession(b, input) {
+      const sso = input.sso !== undefined;
+      if ((input.method === 'sso') !== sso || (sso && input.credential !== undefined)) {
+        throw new AuthError('AUTH_INPUT_INVALID');
+      }
       const old = parseSessionToken(sessionCookieValue(config, b.cookies));
       if (old !== null) await retire(old);
       const secret = random(SECRET_BYTES);
@@ -380,6 +388,8 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
                   .insertInto('sessions')
                   .values({
                     ...values,
+                    sso_connection_id: input.sso?.connectionId ?? null,
+                    sso_organization_id: input.sso?.organizationId ?? null,
                     authenticated_at: sql<Date>`now()`,
                     last_seen_at: sql<Date>`now()`,
                     expires_at: sql<Date>`now() + make_interval(days => ${absoluteDays})`,

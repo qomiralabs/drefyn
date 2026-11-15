@@ -1,5 +1,5 @@
 import { toPublicId } from '@drefyn/tenancy';
-import { organizationId } from '@drefyn/tenancy';
+import { idOf, organizationId } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthError,
@@ -292,6 +292,45 @@ describe('startSession', () => {
     const cookie = started.setCookies.find((c) => c.name === config.cookies.session);
     expect(cookie?.maxAgeSeconds).toBe(30 * DAY);
     expect(cookie?.value).toBe(tokenFor(OTHER_USER, OTHER_SESSION, Buffer.alloc(32, 5)));
+  });
+
+  it('writes both SSO columns for an SSO session and neither for any other', async () => {
+    const scope = {
+      organizationId: organizationId(UUID_A),
+      connectionId: idOf('ssc', '01a14984-4476-77ce-9335-1280000009c1'),
+    };
+    const { sessions, scripted } = setup(startResponder([]));
+    await sessions.startSession(browser(), { userId: OTHER_USER, method: 'sso', sso: scope });
+    const insert = scripted.statements().find(isInsert);
+    expect(insert?.sql).toMatch(/"sso_connection_id", "sso_organization_id"/);
+    expect(insert?.parameters).toEqual(
+      expect.arrayContaining(['sso', scope.connectionId, scope.organizationId]),
+    );
+    scripted.clear();
+    await sessions.startSession(browser(), { userId: OTHER_USER, method: 'email' });
+    const plain = scripted.statements().find(isInsert);
+    expect(plain?.parameters.filter((p) => p === null)).toHaveLength(2);
+  });
+
+  it.each([
+    ['sso without a scope', { method: 'sso' as const }],
+    ['a scope on another method', { method: 'google' as const, sso: true }],
+    ['a password credential on sso', { method: 'sso' as const, sso: true, credential: true }],
+  ])('refuses %s before any statement', async (_label, shape) => {
+    const scope = {
+      organizationId: organizationId(UUID_A),
+      connectionId: idOf('ssc', '01a14984-4476-77ce-9335-1280000009c1'),
+    };
+    const { sessions, scripted } = setup(startResponder([]));
+    await expect(
+      sessions.startSession(browser(), {
+        userId: OTHER_USER,
+        method: shape.method,
+        ...('sso' in shape ? { sso: scope } : {}),
+        ...('credential' in shape ? { credential: { phc: 'x' } } : {}),
+      }),
+    ).rejects.toMatchObject({ code: 'AUTH_INPUT_INVALID' });
+    expect(scripted.statements()).toEqual([]);
   });
 
   it('clears the pre sign in cookies so nothing chosen before sign in survives it', async () => {

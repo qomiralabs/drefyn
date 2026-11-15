@@ -121,6 +121,8 @@ const CHALLENGE_ALL = [
   'attempts',
   'expires_at',
   'created_at',
+  'sso_connection_id',
+  'sso_organization_id',
 ] as const;
 
 // Only attempts moves, so a new challenge is a delete then an insert and a racing second

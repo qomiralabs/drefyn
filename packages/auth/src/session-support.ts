@@ -1,6 +1,13 @@
 import type { Result } from '@drefyn/address';
 import type { AuthSchema, UserSchema } from '@drefyn/db';
-import { idOf, toPublicId, type IdKind, type IdOf, type UserId } from '@drefyn/tenancy';
+import {
+  idOf,
+  toPublicId,
+  type IdKind,
+  type IdOf,
+  type OrganizationId,
+  type UserId,
+} from '@drefyn/tenancy';
 import type { Transaction } from 'kysely';
 import { AuthError } from './errors.ts';
 import type { AuthLogger } from './rate-limiter.ts';
@@ -13,6 +20,13 @@ export type SessionMethod = 'email' | 'password' | 'github' | 'google' | 'cli_li
 // factor can roll back to one that still reads its sessions.
 export type StepUpMethod =
   'email' | 'password' | 'google' | 'github_session' | 'totp' | 'recovery_code';
+
+// The organization and connection an SSO session came through. Set exactly when the method
+// is sso, which the database holds to as well.
+export interface SsoScope {
+  readonly organizationId: OrganizationId;
+  readonly connectionId: IdOf<'ssc'>;
+}
 
 export interface SessionInfo {
   readonly sessionId: SessionId;

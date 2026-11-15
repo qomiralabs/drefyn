@@ -3,7 +3,7 @@
 import type {
   AuthSecurityNotice,
   InvitationSend,
-  OAuthProvider,
+  LinkProvider as AuthLinkProvider,
   SignInCodePurpose,
 } from '@drefyn/auth';
 import type {
@@ -69,7 +69,7 @@ describe('auth and mail agree', () => {
   });
 
   it('on every provider', () => {
-    expectTypeOf<OAuthProvider>().toEqualTypeOf<LinkProvider>();
+    expectTypeOf<AuthLinkProvider>().toEqualTypeOf<LinkProvider>();
   });
 
   it('on every invitation field, so none is dropped', () => {

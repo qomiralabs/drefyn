@@ -1,6 +1,7 @@
 import type { AuthNoticeMailer, AuthSecurityNotice } from './email-change.ts';
 import type { AuthInvitationMailer, InvitationSend } from './invitations.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
+import type { LinkProvider } from './oauth-types.ts';
 
 // The test transport behind AuthMailer. Real delivery is @drefyn/email's job; this one
 // records what auth asked for, and can be slowed or failed to prove the response never
@@ -12,7 +13,7 @@ export interface SentCode {
   readonly link: URL;
   readonly purpose: SignInCodePurpose;
   readonly challengeId: string;
-  readonly linking?: { readonly provider: 'github' | 'google'; readonly account: string };
+  readonly linking?: { readonly provider: LinkProvider; readonly account: string };
 }
 
 export interface SentNotice {

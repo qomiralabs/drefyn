@@ -38,7 +38,12 @@ export type AuthErrorCode =
   | 'AUTH_SSO_DISABLED'
   | 'AUTH_SSO_DOMAIN_TAKEN'
   | 'AUTH_SSO_DOMAIN_REFUSED'
-  | 'AUTH_SSO_DOMAIN_UNVERIFIED';
+  | 'AUTH_SSO_DOMAIN_UNVERIFIED'
+  | 'AUTH_FACTOR_REQUIRED'
+  | 'AUTH_SSO_EMAIL_OUTSIDE_DOMAIN'
+  | 'AUTH_SSO_SEAT_LIMIT'
+  | 'AUTH_SSO_NOT_PROVISIONED'
+  | 'AUTH_SSO_SIGNUP_CLOSED';
 
 // Fixed text per code. Callers pass untrusted values and secrets around this class, so
 // nothing they hand in ever becomes part of a message.
@@ -80,6 +85,11 @@ const MESSAGES: Readonly<Record<AuthErrorCode, string>> = {
   AUTH_SSO_DOMAIN_TAKEN: 'another organization has verified this domain',
   AUTH_SSO_DOMAIN_REFUSED: 'this domain cannot be claimed',
   AUTH_SSO_DOMAIN_UNVERIFIED: 'the domain is not verified',
+  AUTH_FACTOR_REQUIRED: 'the second factor is required',
+  AUTH_SSO_EMAIL_OUTSIDE_DOMAIN: 'address is outside the verified domains',
+  AUTH_SSO_SEAT_LIMIT: 'seat limit reached',
+  AUTH_SSO_NOT_PROVISIONED: 'no access to this organization yet',
+  AUTH_SSO_SIGNUP_CLOSED: 'sign up is closed',
 };
 
 export interface AuthErrorDetail {
