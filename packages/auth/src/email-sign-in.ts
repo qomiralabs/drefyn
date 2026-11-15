@@ -25,12 +25,14 @@ import {
 } from './rate-limiter.ts';
 import { safeReturnTo } from './return-to.ts';
 import {
+  asId,
   fail,
   ok,
   unavailable,
   type SessionInfo,
   type SessionMethod,
   type SessionStore,
+  type SsoScope,
 } from './session-support.ts';
 import { createSessions, type StartedSession } from './sessions.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
@@ -80,12 +82,36 @@ export function heldInvitation(config: AuthConfig, b: BrowserContext): string | 
   return b.cookies.get(config.cookies.invite) ?? null;
 }
 
-export interface Linking {
-  readonly provider: 'github' | 'google';
-  // Shown in the mail so the person knows which account they are linking.
-  readonly account: string;
-  // Stored on the challenge, never mailed.
+export type Linking =
+  | {
+      readonly provider: 'github' | 'google';
+      // Shown in the mail so the person knows which account they are linking.
+      readonly account: string;
+      // Stored on the challenge, never mailed.
+      readonly subject: string;
+    }
+  | {
+      readonly provider: 'sso';
+      // The connection's name, such as Okta.
+      readonly account: string;
+      readonly subject: string;
+      // Where the link will be written once the code is proved.
+      readonly sso: SsoScope;
+    };
+
+// An SSO link whose code was just proved in the browser that asked for it.
+export interface PendingSsoLink {
+  readonly userId: UserId;
+  readonly email: string;
   readonly subject: string;
+  readonly sso: SsoScope;
+  readonly returnTo: string;
+}
+
+// Writes the link and signs the person in, under the same rules as any SSO sign in. Built by
+// SSO sign in; without it an SSO link code links nothing.
+export interface SsoLinkFinisher {
+  finishLink(b: BrowserContext, link: PendingSsoLink): Promise<Result<SignedIn, AuthError>>;
 }
 
 export interface IssueInput {
@@ -195,6 +221,12 @@ export function createCodeIssuer(config: AuthConfig, deps: CodeIssuerDeps): Code
               browser_hash: binding,
               pending_provider: input.linking?.provider ?? null,
               pending_subject: input.linking?.subject ?? null,
+              ...(input.linking?.provider === 'sso'
+                ? {
+                    pending_sso_organization_id: input.linking.sso.organizationId,
+                    pending_sso_connection_id: input.linking.sso.connectionId,
+                  }
+                : {}),
               return_to: safeReturnTo(input.returnTo, config.appOrigin),
               expires_at: sql<Date>`now() + interval '10 minutes'`,
             })
@@ -263,6 +295,7 @@ export interface EmailSignInDeps {
   readonly random?: (bytes: number) => Uint8Array;
   // Lets the link in an email change mail finish the change from the verify page.
   readonly emailChange?: Pick<EmailChange, 'completeEmailChange'>;
+  readonly ssoLinks?: SsoLinkFinisher;
 }
 
 export type LinkVerified =
@@ -332,6 +365,8 @@ interface Challenge {
   readonly user_id: string | null;
   readonly pending_provider: string | null;
   readonly pending_subject: string | null;
+  readonly pending_sso_organization_id: string | null;
+  readonly pending_sso_connection_id: string | null;
   readonly browser_hash: Buffer;
   readonly return_to: string | null;
   readonly live: boolean;
@@ -517,6 +552,8 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
             'user_id',
             'pending_provider',
             'pending_subject',
+            'pending_sso_organization_id',
+            'pending_sso_connection_id',
             'browser_hash',
             'return_to',
             sql<boolean>`expires_at > now() and attempts < ${MAX_ATTEMPTS}`.as('live'),
@@ -576,6 +613,13 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         return consumed === undefined ? ('AUTH_CODE_INVALID' as const) : ('proved' as const);
       });
       if (outcome !== 'proved') return refused(outcome, address, binding);
+      if (purpose === LINK && challenge.pending_provider === 'sso') {
+        const pending = ssoLinkOf(challenge);
+        if (pending === null || deps.ssoLinks === undefined) {
+          return refused('AUTH_CODE_INVALID', address, binding);
+        }
+        return await deps.ssoLinks.finishLink(b, pending);
+      }
       if (purpose === LINK) {
         // The same answer as a wrong code, so it says nothing about who holds the identity.
         const linked = await linkPending(challenge);
@@ -747,6 +791,24 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
       }
     },
   } satisfies EmailSignIn);
+}
+
+// The link an SSO code carries, or null when the row is not a whole one.
+function ssoLinkOf(challenge: Challenge): PendingSsoLink | null {
+  const userId = asId('usr', challenge.user_id);
+  const organizationId = asId('org', challenge.pending_sso_organization_id);
+  const connectionId = asId('ssc', challenge.pending_sso_connection_id);
+  const subject = challenge.pending_subject;
+  if (userId === null || organizationId === null || connectionId === null || subject === null) {
+    return null;
+  }
+  return {
+    userId,
+    email: challenge.email_normalized,
+    subject,
+    sso: { organizationId, connectionId },
+    returnTo: challenge.return_to ?? '/',
+  };
 }
 
 function missing(): never {

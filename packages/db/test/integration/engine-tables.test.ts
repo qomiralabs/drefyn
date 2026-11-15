@@ -1166,11 +1166,18 @@ describeWithStack('the engine tables', () => {
       expect(counts.trim()).toBe('');
       const versions = await superuser(`select count(*) from app.node_versions;`, fresh.name);
       expect(versions.trim()).toBe('3');
-      // The down also reverts the later SSO tables, whose grants the check would miss.
+      // The down also reverts the later SSO tables, whose grants the check would miss, and
+      // the just in time arm of the membership insert policy, which ends both arms before it.
+      const jitArm = " OR ((role = 'member'::text)";
       const beforeSso = {
         ...ALLOW_LISTS,
         authTenantGrants: ALLOW_LISTS.authTenantGrants.filter(
           (g) => !g.name.startsWith('app.sso_'),
+        ),
+        restrictivePolicies: ALLOW_LISTS.restrictivePolicies.map((p) =>
+          p.name === 'app.memberships.membership_insert_origin' && p.withCheck !== null
+            ? { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(jitArm))}))` }
+            : p,
         ),
       };
       expect(await catalogProblems(fresh.owner, beforeSso)).toEqual([]);

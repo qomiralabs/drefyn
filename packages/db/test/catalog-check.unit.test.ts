@@ -325,14 +325,29 @@ describe('auth tenant grant entries', () => {
     expect(problemsFor(entry('app.t.subject', 'INSERT'))).toEqual([]);
   });
 
+  // Sign in marks when an SSO link was last used.
+  it('accept update on a named column that names no owner', () => {
+    expect(problemsFor(entry('app.t.last_used_at', 'UPDATE'))).toEqual([]);
+  });
+
+  // An update of an id could move a tenant row to another organization or person.
+  it.each(['id', 'organization_id', 'user_id', 'connection_id'])(
+    'refuse update of %s',
+    (column) => {
+      expect(problemsFor(entry(`app.t.${column}`, 'UPDATE'))).toEqual([
+        `auth tenant grant entry app.t.${column} is for UPDATE of ${column}, which names an owner; only columns that name none update`,
+      ]);
+    },
+  );
+
   it.each([
     ['insert on a whole table', 'app.t', 'INSERT'],
-    ['update on a column', 'app.t.subject', 'UPDATE'],
+    ['update on a whole table', 'app.t', 'UPDATE'],
     ['select on a whole table', 'app.t', 'SELECT'],
     ['delete on a column', 'app.t.subject', 'DELETE'],
   ])('refuse %s', (_label, name, privilege) => {
     expect(problemsFor(entry(name, privilege))).toEqual([
-      `auth tenant grant entry ${name} is for ${privilege}; only SELECT or INSERT on a column or DELETE on a table are allowed`,
+      `auth tenant grant entry ${name} is for ${privilege}; only SELECT, INSERT or UPDATE on a column or DELETE on a table are allowed`,
     ]);
   });
 });
