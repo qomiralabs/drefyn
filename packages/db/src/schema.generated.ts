@@ -122,6 +122,8 @@ export interface EmailChallengesTable {
   expires_at: Date;
   consumed_at: Date | null;
   created_at: Generated<Date>;
+  pending_sso_organization_id: string | null;
+  pending_sso_connection_id: string | null;
 }
 
 // app.engine_outbox
@@ -145,6 +147,8 @@ export interface FactorChallengesTable {
   attempts: Generated<number>;
   expires_at: Date;
   created_at: Generated<Date>;
+  sso_connection_id: string | null;
+  sso_organization_id: string | null;
 }
 
 // app.filter_backfills

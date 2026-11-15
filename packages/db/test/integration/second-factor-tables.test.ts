@@ -308,6 +308,8 @@ describeWithStack('second factor tables', () => {
       return_to: "'/'",
       attempts: '1',
       expires_at: 'now()',
+      sso_connection_id: 'null',
+      sso_organization_id: 'null',
     };
 
     it.each(TABLES)('lets drefyn_app update only the listed columns of %s', async (table) => {

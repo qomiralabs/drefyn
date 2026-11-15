@@ -7,6 +7,7 @@ import type { AuthConfig } from './config.ts';
 import type { BrowserContext } from './cookies.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { lengthPrefixed, sha256 } from './keys.ts';
+import type { LinkProvider } from './oauth-types.ts';
 import { PASSWORD_RAW_MAX_BYTES } from './password-input.ts';
 import type { AuthLogger, RateLimiter } from './rate-limiter.ts';
 import {
@@ -34,7 +35,7 @@ export interface AuthMailer {
     purpose: SignInCodePurpose,
     // The idempotency key for this mail, so a retry of one code is never sent twice.
     challengeId: string,
-    linking?: { readonly provider: 'github' | 'google'; readonly account: string },
+    linking?: { readonly provider: LinkProvider; readonly account: string },
   ): Promise<void>;
 }
 
