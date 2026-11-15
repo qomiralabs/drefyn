@@ -9,6 +9,7 @@ import type { BrowserContext, CookieSpec } from './cookies.ts';
 import { createCodeIssuer } from './email-sign-in.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
+import type { LinkProvider } from './oauth-types.ts';
 import {
   createRateLimiter,
   type AuthLogger,
@@ -41,7 +42,7 @@ export type AuthSecurityNotice =
   // To the account's address, on every provider link and unlink.
   | {
       readonly kind: 'identity_linked' | 'identity_unlinked';
-      readonly provider: 'github' | 'google';
+      readonly provider: LinkProvider;
       // The provider address the identity was linked with.
       readonly account: string;
       readonly at: Date;

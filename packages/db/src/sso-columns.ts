@@ -54,6 +54,11 @@ export const SSO_IDENTITY_AUTH_INSERT = [
   'last_used_at',
 ] as const satisfies readonly (keyof SsoIdentitiesTable)[];
 
+// Sign in marks when a link was last used. Nothing else about a link ever changes.
+export const SSO_IDENTITY_AUTH_UPDATE = [
+  'last_used_at',
+] as const satisfies readonly (keyof SsoIdentitiesTable)[];
+
 export const SSO_STATE_AUTH_SELECT = [
   'state_hash',
   'organization_id',
@@ -83,7 +88,7 @@ export const SSO_STATE_AUTH_INSERT = [
 
 export interface SsoAuthGrant {
   readonly name: string;
-  readonly privilege: 'SELECT' | 'INSERT' | 'DELETE';
+  readonly privilege: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
   readonly reason: string;
 }
 
@@ -97,7 +102,7 @@ const STATE_REASON =
 
 const columns = (
   table: string,
-  privilege: 'SELECT' | 'INSERT',
+  privilege: 'SELECT' | 'INSERT' | 'UPDATE',
   list: readonly string[],
   reason: string,
 ): SsoAuthGrant[] => list.map((column) => ({ name: `app.${table}.${column}`, privilege, reason }));
@@ -107,6 +112,12 @@ export const SSO_AUTH_GRANTS: readonly SsoAuthGrant[] = [
   ...columns('sso_domains', 'SELECT', SSO_DOMAIN_AUTH_SELECT, DOMAIN_REASON),
   ...columns('sso_identities', 'SELECT', SSO_IDENTITY_AUTH_SELECT, IDENTITY_REASON),
   ...columns('sso_identities', 'INSERT', SSO_IDENTITY_AUTH_INSERT, IDENTITY_REASON),
+  ...columns(
+    'sso_identities',
+    'UPDATE',
+    SSO_IDENTITY_AUTH_UPDATE,
+    'sign in marks when a link was last used',
+  ),
   ...columns('sso_states', 'SELECT', SSO_STATE_AUTH_SELECT, STATE_REASON),
   ...columns('sso_states', 'INSERT', SSO_STATE_AUTH_INSERT, STATE_REASON),
   // A state is consumed by delete ... returning, and the expiry cleanup deletes by ctid.
@@ -116,15 +127,21 @@ export const SSO_AUTH_GRANTS: readonly SsoAuthGrant[] = [
 
 type SelectOf<C> = C extends ColumnType<infer S, unknown, unknown> ? S : C;
 type InsertOf<C> = C extends ColumnType<unknown, infer I, unknown> ? I : C;
+type UpdateOf<C> = C extends ColumnType<unknown, unknown, infer U> ? U : C;
 
 type Listed<L, K> = L extends readonly (infer E)[] ? (K extends E ? true : false) : false;
 
-// Readable and insertable only as granted, never updatable.
-type AuthColumns<T, S extends readonly (keyof T)[], I extends readonly (keyof T)[]> = {
-  [K in S[number] | I[number]]: ColumnType<
+// Readable, insertable and updatable only as granted.
+type AuthColumns<
+  T,
+  S extends readonly (keyof T)[],
+  I extends readonly (keyof T)[],
+  U extends readonly (keyof T)[] = readonly [],
+> = {
+  [K in S[number] | I[number] | U[number]]: ColumnType<
     Listed<S, K> extends true ? SelectOf<T[K]> : never,
     Listed<I, K> extends true ? InsertOf<T[K]> : never,
-    never
+    Listed<U, K> extends true ? UpdateOf<T[K]> : never
   >;
 };
 
@@ -141,7 +158,8 @@ export type AuthSsoDomainsTable = AuthColumns<
 export type AuthSsoIdentitiesTable = AuthColumns<
   SsoIdentitiesTable,
   typeof SSO_IDENTITY_AUTH_SELECT,
-  typeof SSO_IDENTITY_AUTH_INSERT
+  typeof SSO_IDENTITY_AUTH_INSERT,
+  typeof SSO_IDENTITY_AUTH_UPDATE
 >;
 export type AuthSsoStatesTable = AuthColumns<
   SsoStatesTable,

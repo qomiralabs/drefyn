@@ -48,8 +48,8 @@ describe('sso schema types', () => {
     expectTypeOf<keyof Selectable<AuthSchema['sso_domains']>>().toEqualTypeOf<
       'domain' | 'organization_id' | 'connection_id' | 'verified_at'
     >();
-    // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty is the point: nothing is updatable
-    expectTypeOf<keyof Updateable<AuthSchema['sso_identities']>>().toEqualTypeOf<never>();
+    // Sign in marks when a link was used, and moves nothing that says whose it is.
+    expectTypeOf<keyof Updateable<AuthSchema['sso_identities']>>().toEqualTypeOf<'last_used_at'>();
     // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty is the point: nothing is updatable
     expectTypeOf<keyof Updateable<AuthSchema['sso_states']>>().toEqualTypeOf<never>();
   });
