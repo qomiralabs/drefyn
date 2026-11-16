@@ -33,6 +33,12 @@ export const SECURITY_NOTICE_KINDS = Object.freeze([
   'sso_domain_claimed',
   'sso_domain_verified',
   'sso_domain_unverified',
+  'second_factor_added',
+  'second_factor_removed',
+  'recovery_code_used',
+  'recovery_codes_replaced',
+  'second_factor_failures',
+  'second_factor_disabled',
 ] as const);
 export type SecurityNoticeKind = (typeof SECURITY_NOTICE_KINDS)[number];
 
@@ -57,7 +63,17 @@ export type SecurityNoticeMail =
         | 'password_changed'
         | 'password_removed'
         | 'password_reset'
-        | 'new_device_sign_in';
+        | 'new_device_sign_in'
+        | 'second_factor_added'
+        | 'second_factor_removed'
+        | 'recovery_codes_replaced'
+        | 'second_factor_failures'
+        | 'second_factor_disabled';
+    })
+  | (NoticeFacts & {
+      readonly kind: 'recovery_code_used';
+      // How many unused codes the person still holds, 0 to 10.
+      readonly codesLeft: number;
     })
   | (NoticeFacts & {
       readonly kind: 'api_key_created' | 'api_key_revoked';

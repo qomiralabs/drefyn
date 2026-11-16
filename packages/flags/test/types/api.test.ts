@@ -42,6 +42,7 @@ describe('flag names', () => {
       | 'engine.writes'
       | 'engine.chunk_at_write'
       | 'auth.team_sso'
+      | 'auth.totp'
     >();
   });
 

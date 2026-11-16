@@ -76,6 +76,12 @@ const EVERY_NOTICE: { readonly [K in AuthSecurityNotice['kind']]: Notice<K> } = 
   member_removed: { ...memberNotice, kind: 'member_removed', revokedKeys: 0, at: AT },
   member_keys_revoked: { ...memberNotice, kind: 'member_keys_revoked', revokedKeys: 2, at: AT },
   owner_added: { ...memberNotice, kind: 'owner_added', at: AT },
+  second_factor_added: { kind: 'second_factor_added', at: AT },
+  second_factor_removed: { kind: 'second_factor_removed', at: AT },
+  recovery_code_used: { kind: 'recovery_code_used', codesLeft: 4, at: AT },
+  recovery_codes_replaced: { kind: 'recovery_codes_replaced', at: AT },
+  second_factor_failures: { kind: 'second_factor_failures', at: AT },
+  second_factor_disabled: { kind: 'second_factor_disabled', at: AT },
 };
 
 // A mailer that answers the way the real one does: anything the guard refuses never sends.
