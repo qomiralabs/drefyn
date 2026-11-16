@@ -1,0 +1,40 @@
+import express from 'express';
+
+/**
+ * Adds two numbers.
+ */
+export function add(a, b = 1) {
+  return a + b;
+}
+
+export class Counter {
+  /** Starts at zero. */
+  constructor() {
+    this.value = 0;
+  }
+
+  increment(by = 1) {
+    this.value += by;
+  }
+
+  #reset() {
+    this.value = 0;
+  }
+
+  get current() {
+    return this.value;
+  }
+}
+
+export const VERSION = '1.2.0';
+
+let mutable = 1;
+
+const app = express();
+
+/** Doubles. */
+const double = (n) => n * 2;
+
+export { double as twice };
+
+module.exports = { add };

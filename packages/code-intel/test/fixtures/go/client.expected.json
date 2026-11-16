@@ -1,0 +1,117 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "DefaultTimeout",
+      "kind": "const",
+      "exported": true,
+      "signature": "const DefaultTimeout",
+      "doc": "DefaultTimeout is how long a call waits.",
+      "startLine": 10
+    },
+    {
+      "name": "MaxRetries",
+      "kind": "const",
+      "exported": true,
+      "signature": "const MaxRetries int",
+      "doc": "MaxRetries caps retries.",
+      "startLine": 14
+    },
+    {
+      "name": "minBackoff",
+      "kind": "const",
+      "exported": false,
+      "signature": "const minBackoff",
+      "doc": null,
+      "startLine": 15
+    },
+    {
+      "name": "Client",
+      "kind": "struct",
+      "exported": true,
+      "signature": "type Client struct",
+      "doc": "Client talks to the API.\nIt is safe for concurrent use.",
+      "startLine": 20
+    },
+    {
+      "name": "Doer",
+      "kind": "interface",
+      "exported": true,
+      "signature": "type Doer interface",
+      "doc": "Doer sends requests.",
+      "startLine": 25
+    },
+    {
+      "name": "ID",
+      "kind": "type",
+      "exported": true,
+      "signature": "type ID = string",
+      "doc": null,
+      "startLine": 29
+    },
+    {
+      "name": "Status",
+      "kind": "type",
+      "exported": true,
+      "signature": "type Status int",
+      "doc": "Status is a call state.",
+      "startLine": 33
+    },
+    {
+      "name": "page",
+      "kind": "struct",
+      "exported": false,
+      "signature": "type page[T any] struct",
+      "doc": null,
+      "startLine": 34
+    },
+    {
+      "name": "NewClient",
+      "kind": "function",
+      "exported": true,
+      "signature": "func NewClient(base string, opts ...Option) (*Client, error)",
+      "doc": "NewClient builds a client.",
+      "startLine": 38
+    },
+    {
+      "name": "Client.List",
+      "kind": "method",
+      "exported": true,
+      "signature": "func (c *Client) List(ctx context.Context, limit int) ([]ID, error)",
+      "doc": "List lists items.",
+      "startLine": 43
+    },
+    {
+      "name": "Client.sign",
+      "kind": "method",
+      "exported": false,
+      "signature": "func (c *Client) sign(body []byte) []byte",
+      "doc": null,
+      "startLine": 50
+    },
+    {
+      "name": "page.Len",
+      "kind": "method",
+      "exported": false,
+      "signature": "func (p page[T]) Len() int",
+      "doc": null,
+      "startLine": 52
+    },
+    {
+      "name": "helper",
+      "kind": "function",
+      "exported": false,
+      "signature": "func helper()",
+      "doc": null,
+      "startLine": 54
+    },
+    {
+      "name": "Option",
+      "kind": "type",
+      "exported": true,
+      "signature": "type Option func(*Client)",
+      "doc": null,
+      "startLine": 58
+    }
+  ]
+}

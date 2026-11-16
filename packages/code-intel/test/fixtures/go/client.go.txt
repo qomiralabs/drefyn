@@ -1,0 +1,60 @@
+// Package acme talks to the Acme API.
+package acme
+
+import (
+	"context"
+	"net/http"
+)
+
+// DefaultTimeout is how long a call waits.
+const DefaultTimeout = 5
+
+const (
+	// MaxRetries caps retries.
+	MaxRetries int = 3
+	minBackoff     = 1
+)
+
+// Client talks to the API.
+// It is safe for concurrent use.
+type Client struct {
+	http *http.Client
+}
+
+// Doer sends requests.
+type Doer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type ID = string
+
+type (
+	// Status is a call state.
+	Status int
+	page[T any] struct{ items []T }
+)
+
+// NewClient builds a client.
+func NewClient(base string, opts ...Option) (*Client, error) {
+	return &Client{}, nil
+}
+
+// List lists items.
+func (c *Client) List(
+	ctx context.Context,
+	limit int,
+) ([]ID, error) {
+	return nil, nil
+}
+
+func (c *Client) sign(body []byte) []byte { return body }
+
+func (p page[T]) Len() int { return len(p.items) }
+
+func helper() {}
+
+// Option configures a client.
+
+type Option func(*Client)
+
+var Default = &Client{}
