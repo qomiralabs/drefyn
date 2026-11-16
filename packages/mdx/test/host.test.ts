@@ -181,10 +181,17 @@ describe('the parse host', () => {
   it(
     'carries three honest trees at the size limit across the wire',
     async () => {
+      // This is about the caps and held bytes for three full trees, as the test above is for one.
+      // A merge at this size prints and reparses more than once, and under coverage on a shared
+      // runner it passed a 20 s kill twice, so the kill here is wide. Time is proved on the thread.
       const { url } = start([hostMain], {
         DREFYN_PARSE_PORT: '0',
         DREFYN_PARSE_TIMEOUT_MS: '20000',
-        DREFYN_PARSE_PRINT_TIMEOUT_MS: '20000',
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: '90000',
+        // A budget has to cover the kill, or the host refuses to start.
+        DREFYN_PARSE_PROJECT_BUDGET_MS: '120000',
+        DREFYN_PARSE_ORG_BUDGET_MS: '120000',
+        DREFYN_PARSE_WINDOW_MS: '180000',
       });
       const client = createParseClient({ ...CLIENT, url: await url });
       const first = await client.parse(page(honestPage('md')));
