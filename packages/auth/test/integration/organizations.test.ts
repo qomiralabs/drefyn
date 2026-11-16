@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import { newId, withOrganization } from '@drefyn/db';
 import { TIERS } from '@drefyn/entitlements';
@@ -29,7 +30,12 @@ async function signIn() {
   const sessions = h.sessions();
   const user = await h.user();
   const started = await sessions.startSession(browser(), { userId: user, method: 'email' });
-  return { sessions, user, session: started.session, cookie: cookieOf(started.setCookies) };
+  return {
+    sessions,
+    user,
+    session: asSignedIn(started).session,
+    cookie: cookieOf(started.setCookies),
+  };
 }
 
 const count = (table: string, where: string) =>

@@ -70,6 +70,7 @@ describe('verify for an address with no account at send time', () => {
     expect(sessions.startSession).toHaveBeenCalledWith(expect.anything(), {
       userId: USER,
       method: 'email',
+      returnTo: '/',
     });
   });
 

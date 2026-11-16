@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   decodeSecret,
   encodeSecret,
+  factorRequired,
   formBindingField,
   lastMethodCookie,
   parseLastMethod,
@@ -9,6 +10,7 @@ import {
   PRE_MAX_AGE_SECONDS,
   safeReturnTo,
   type CookieSpec,
+  type FactorRequired,
   type SessionInfo,
 } from '@drefyn/auth';
 import { cookies } from 'next/headers';
@@ -80,6 +82,20 @@ export async function finishSignIn(done: Finished): Promise<never> {
       ? safeReturnTo(done.returnTo, appOrigin())
       : await arrival(session, done.returnTo),
   );
+}
+
+// Where a sign in waits on the second factor. No session exists yet, so nothing is marked
+// as the last method and nothing is mailed; the challenge page finishes through finishSignIn.
+export const FACTOR_PAGE = '/sign-in/factor';
+
+export async function toFactor(done: FactorRequired): Promise<never> {
+  await applyCookies(done.setCookies);
+  redirect(FACTOR_PAGE);
+}
+
+// A sign in result, whichever way it ended. Throws the redirect.
+export function finishOrFactor(done: Finished | FactorRequired): Promise<never> {
+  return factorRequired(done) ? toFactor(done) : finishSignIn(done);
 }
 
 // The form field for this browser. A page cannot set a cookie, so a browser with no pre

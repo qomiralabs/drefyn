@@ -105,6 +105,7 @@ export function recordingLogger() {
 export const fakeSessions = () => ({
   startSession: vi.fn(() =>
     Promise.resolve({
+      kind: 'session' as const,
       session,
       setCookies: [{ name: config.cookies.session, value: 'v1.x', maxAgeSeconds: 60 }],
     }),

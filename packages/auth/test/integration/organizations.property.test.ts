@@ -1,8 +1,9 @@
+import { asSignedIn } from '../support.ts';
 import { withUser } from '@drefyn/db';
 import type { OrganizationId, UserId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { beforeAll, expect, it } from 'vitest';
-import type { CookieSpec, RateLimiter } from '../../src/index.ts';
+import type { CookieSpec, RateLimiter, SessionInfo } from '../../src/index.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
 
 const fresh = harness();
@@ -20,7 +21,7 @@ const browser = {
 interface Person {
   readonly user: UserId;
   readonly cookie: string;
-  readonly session: Awaited<ReturnType<ReturnType<Harness['sessions']>['startSession']>>['session'];
+  readonly session: SessionInfo;
 }
 
 const cookieOf = (cookies: readonly CookieSpec[]) =>
@@ -57,7 +58,11 @@ describeWithStack('cross tenant reads under a user context', () => {
         for (let i = 0; i < people; i += 1) {
           const user = await h.user();
           const started = await sessions.startSession(browser, { userId: user, method: 'email' });
-          persons.push({ user, session: started.session, cookie: cookieOf(started.setCookies) });
+          persons.push({
+            user,
+            session: asSignedIn(started).session,
+            cookie: cookieOf(started.setCookies),
+          });
         }
         const made: { id: OrganizationId; slug: string; members: Set<number> }[] = [];
         for (const [index, org] of plan.entries()) {
