@@ -59,6 +59,27 @@ test('probe the rail focus order', async ({ browser, browserName }) => {
         }
       }
     }).observe(document, { childList: true, subtree: true });
+    for (const name of ['focus', 'blur'] as const) {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- applied with this below
+      const real: (...args: never[]) => unknown = HTMLElement.prototype[name];
+      HTMLElement.prototype[name] = function (this: HTMLElement, ...args: never[]) {
+        const stack = (new Error().stack ?? '')
+          .split('\n')
+          .slice(2, 7)
+          .join(' < ')
+          .replace(/https?:[^ )]*\/chunks\//g, '');
+        w.log.push(`${at()} call ${name} on ${d(this)} from ${stack}`);
+        Reflect.apply(real, this, args);
+      };
+    }
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.name.endsWith('.js'))
+          w.log.push(
+            `${at()} script done ${entry.name.split('/').pop() ?? ''} at ${String(Math.round(entry.startTime + entry.duration - t0))}`,
+          );
+      }
+    }).observe({ type: 'resource' });
     document.addEventListener('readystatechange', () => {
       w.log.push(`${at()} ready ${document.readyState}`);
     });
