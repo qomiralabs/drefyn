@@ -100,8 +100,10 @@ create table app.published_chunk_terms (
   tf integer not null check (tf > 0),
   -- Copied so scoring never joins the chunk row.
   chunk_length integer not null check (chunk_length > 0),
+  -- Covering, so scoring reads postings with index only scans and never visits the heap.
   constraint published_chunk_terms_pkey
-    primary key (organization_id, project_id, version_label, lexeme, chunk_id),
+    primary key (organization_id, project_id, version_label, lexeme, chunk_id)
+    include (tf, chunk_length),
   -- The only foreign key: a page writes thousands of postings, each key costs a check per row,
   -- and the chunk already ties the posting to its project.
   constraint published_chunk_terms_chunk_fkey foreign key (organization_id, project_id, chunk_id)
@@ -110,7 +112,8 @@ create table app.published_chunk_terms (
 
 -- Candidate generation reads a lexeme's postings highest term frequency first.
 create index published_chunk_terms_impact
-  on app.published_chunk_terms (organization_id, project_id, version_label, lexeme, tf desc, chunk_id);
+  on app.published_chunk_terms (organization_id, project_id, version_label, lexeme, tf desc, chunk_id)
+  include (chunk_length);
 
 -- Without it every chunk a retention delete removes would scan the postings for its cascade.
 create index published_chunk_terms_chunk

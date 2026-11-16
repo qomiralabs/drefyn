@@ -139,12 +139,12 @@ describeWithStack('the published chunks migration', () => {
     ]);
   });
 
-  it('has the indexes retrieval and publish read, each led by the tenant columns', async () => {
+  it('has the indexes retrieval and publish read, each led by the tenant columns, postings covering', async () => {
     const db = await dbs.fresh('migrated');
     expect(await indexes(db)).toEqual([
       'CREATE INDEX published_chunk_terms_chunk ON app.published_chunk_terms USING btree (organization_id, project_id, chunk_id)',
-      'CREATE INDEX published_chunk_terms_impact ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, tf DESC, chunk_id)',
-      'CREATE UNIQUE INDEX published_chunk_terms_pkey ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, chunk_id)',
+      'CREATE INDEX published_chunk_terms_impact ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, tf DESC, chunk_id) INCLUDE (chunk_length)',
+      'CREATE UNIQUE INDEX published_chunk_terms_pkey ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, chunk_id) INCLUDE (tf, chunk_length)',
       'CREATE INDEX published_chunks_current ON app.published_chunks USING btree (organization_id, project_id, page_path, ord) WHERE is_current',
       'CREATE INDEX published_chunks_hash ON app.published_chunks USING btree (organization_id, project_id, body_sha256)',
       'CREATE INDEX published_chunks_node ON app.published_chunks USING btree (organization_id, project_id, node_id) WHERE is_current',
