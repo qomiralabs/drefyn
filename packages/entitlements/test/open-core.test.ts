@@ -34,6 +34,16 @@ describe('open core boundary', () => {
     }
   });
 
+  // Model names, which ones are premium and what they cost live in the rate table.
+  it('names no model, currency or pack size in its source', () => {
+    for (const file of sourceFiles(join(root, 'src'))) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, file).not.toMatch(/claude|haiku|sonnet|opus|gpt-|gemini|llama|mistral/i);
+      expect(text, file).not.toMatch(/\b(usd|eur|gbp|dollars?|euros?|cents?)\b/i);
+      expect(text, file).not.toMatch(/[\u20AC\u00A3]/);
+    }
+  });
+
   it('exports no price or billing helpers', () => {
     for (const name of Object.keys(api)) {
       expect(name, name).not.toMatch(/price|stripe|invoice|billing|cents/i);
