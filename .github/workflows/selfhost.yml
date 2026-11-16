@@ -4,18 +4,32 @@ on:
   pull_request:
     paths:
       - deploy/**
+      - apps/api/**
+      - packages/address/src/**
+      - packages/auth/src/**
+      - packages/db/src/**
+      - packages/entitlements/src/**
+      - packages/flags/src/**
       - packages/mdx/src/**
       - packages/mdx/test/**
       - packages/tenancy/src/**
+      - pnpm-lock.yaml
       - scripts/selfhost*.sh
       - .github/workflows/selfhost.yml
   push:
     branches: [development, staging, main]
     paths:
       - deploy/**
+      - apps/api/**
+      - packages/address/src/**
+      - packages/auth/src/**
+      - packages/db/src/**
+      - packages/entitlements/src/**
+      - packages/flags/src/**
       - packages/mdx/src/**
       - packages/mdx/test/**
       - packages/tenancy/src/**
+      - pnpm-lock.yaml
       - scripts/selfhost*.sh
       - .github/workflows/selfhost.yml
 
@@ -56,29 +70,29 @@ jobs:
         run: bash scripts/selfhost-password-test.sh
       - name: The installer generates the auth keys once and prints none
         run: bash scripts/selfhost-env-test.sh
-      # Built ahead, so the wait below measures startup and not an install. The placeholder ID
-      # only lets compose read the file; nothing is created here.
-      - name: Build the parse host image
+      # Built on their own, so the minute below measures startup and not the image builds. The
+      # placeholder ID only lets compose read the file; nothing is created here.
+      - name: Build the API and parse host images
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
           DREFYN_STACK_ID: build-only
-        run: docker compose -f deploy/compose.yaml build parse-host
-      # The same commands a self hoster runs, from a clean runner with no volume, with the
-      # parse host on. The wait matches the promise that a clean start is healthy within a
-      # minute.
+        run: docker compose -f deploy/compose.yaml build api parse-host
+      # The same commands a self hoster runs, from a clean runner with no volume, with the API
+      # and parse host profiles on. The wait matches the promise that a clean start is healthy
+      # within a minute.
       - name: Start
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
           DREFYN_SELFHOST_WAIT_SECONDS: 60
         run: bash scripts/selfhost.sh up
       # --faults also kills, floods and starves a parse host of its own, never the stack's.
       - name: Smoke check, with the parse host's faults
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
         run: bash scripts/selfhost-smoke.sh --faults
       - name: Restart keeps the data and the roles
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
           DREFYN_SELFHOST_WAIT_SECONDS: 60
         run: |
           bash scripts/selfhost.sh restart
@@ -96,7 +110,7 @@ jobs:
           "${mailpit[@]}" rm --stop --force mailpit
       - name: Tear down
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove
       # those stacks themselves. This covers the main stack. The placeholder ID always wins
@@ -104,6 +118,6 @@ jobs:
       - name: Logs
         if: failure()
         env:
-          COMPOSE_PROFILES: parse
+          COMPOSE_PROFILES: api,parse
           DREFYN_STACK_ID: logs-only
         run: docker compose -f deploy/compose.yaml logs --no-color --timestamps

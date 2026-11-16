@@ -283,8 +283,8 @@ esac
 case "$1" in
   up)
     warn_env_mode
-    # Pull first so the healthy time measures startup, not the network. The parse host is built
-    # here, not pulled.
+    # Pull first so the healthy time measures startup, not the network. Images this checkout
+    # builds, the API and the parse host under their profiles, are built by up instead.
     "${compose[@]}" pull --quiet --ignore-buildable
     wait_healthy
     ;;
