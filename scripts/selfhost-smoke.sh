@@ -487,6 +487,91 @@ if jq -e '.services | has("api")' <<<"$config" >/dev/null; then
   fi
 fi
 
+# Search, when its profile is on (COMPOSE_PROFILES=search). It must come up with nothing paid,
+# keep its admin key out of docker inspect and the command line, refuse requests without a key,
+# and hand out scoped keys that hold: a scoped search returns only its own tenant's document,
+# even when the request asks for another's by id through pinned_hits.
+if jq -e '.services | has("typesense")' <<<"$config" >/dev/null; then
+  ts="$("${compose[@]}" ps -q typesense 2>/dev/null || true)"
+  if [ -z "$ts" ]; then
+    fail "typesense container is running" "the search profile is on but project $project has no typesense container"
+  else
+    ts_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$ts")"
+    if [ "$ts_health" = "healthy" ]; then
+      pass "typesense is healthy"
+    else
+      fail "typesense is healthy" "health is $ts_health: $(health_output "$ts")"
+    fi
+    ts_box="$(docker inspect --format '{{.HostConfig.CapDrop}} {{.HostConfig.PidsLimit}} {{.HostConfig.Memory}}' "$ts")"
+    read -r ts_caps ts_pids ts_memory <<<"$ts_box"
+    if [ "$ts_caps" = "[ALL]" ] && [ "${ts_pids:-0}" -gt 0 ] && [ "${ts_memory:-0}" -gt 0 ]; then
+      pass "typesense drops every capability and has a process and a memory limit"
+    else
+      fail "typesense drops every capability and has a process and a memory limit" "$ts_box"
+    fi
+    # Names only from the environment; the command line is checked for the key's value below.
+    ts_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$ts" | cut -d= -f1)"
+    if ! grep -q '^TYPESENSE_API_KEY$' <<<"$ts_env"; then
+      pass "typesense has no admin key in its container environment"
+    else
+      fail "typesense has no admin key in its container environment"
+    fi
+    admin="$(sed -n 's/^DREFYN_SEARCH_ADMIN_KEY=//p' "$selfhost_root/deploy/.env" | tail -n 1)"
+    ts_args="$(docker inspect --format '{{.Path}} {{json .Args}}' "$ts")"
+    ts_proc="$("${compose[@]}" exec -T typesense sh -c 'tr "\0" " " </proc/1/cmdline' 2>/dev/null || true)"
+    if [ -n "$admin" ] && [[ "$ts_args$ts_proc" != *"$admin"* ]] && [ -n "$ts_proc" ]; then
+      pass "typesense's admin key is not on its command line"
+    else
+      fail "typesense's admin key is not on its command line"
+    fi
+    ts_port="$("${compose[@]}" port typesense 8108 | sed 's/.*://')"
+    ts_url="http://127.0.0.1:$ts_port"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$ts_url/health" || true)"
+    expect_rows "typesense answers /health with 200" "200" "$code"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$ts_url/collections" || true)"
+    expect_rows "typesense refuses a request with no key" "401" "$code"
+
+    # The admin key goes to curl in a header file, never as an argument.
+    ts_scratch="$(mktemp -d)"
+    chmod 700 "$ts_scratch"
+    printf 'x-typesense-api-key: %s\n' "$admin" >"$ts_scratch/admin"
+    ts_call() {
+      local method="$1" path="$2" headers="$3" body="${4:-}"
+      if [ -n "$body" ]; then
+        curl -s --max-time 10 -X "$method" -H "@$headers" -H 'content-type: application/json' \
+          --data-binary "$body" "$ts_url$path" || true
+      else
+        curl -s --max-time 10 -X "$method" -H "@$headers" "$ts_url$path" || true
+      fi
+    }
+    hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
+    collection="docs_pub_$(hex 16)"
+    parent="$(hex 24)"
+    ts_call POST /collections "$ts_scratch/admin" \
+      "{\"name\":\"$collection\",\"fields\":[{\"name\":\"organization_id\",\"type\":\"string\"},{\"name\":\"body\",\"type\":\"string\"}]}" >/dev/null
+    for doc in a b; do
+      ts_call POST "/collections/$collection/documents" "$ts_scratch/admin" \
+        "{\"id\":\"$doc\",\"organization_id\":\"org-$doc\",\"body\":\"smoke canary\"}" >/dev/null
+    done
+    key_id="$(ts_call POST /keys "$ts_scratch/admin" \
+      "{\"description\":\"smoke\",\"actions\":[\"documents:search\"],\"collections\":[\"$collection\"],\"value\":\"$parent\"}" |
+      jq -r '.id // empty' 2>/dev/null || true)"
+    params="{\"filter_by\":\"organization_id:=\`org-a\`\",\"expires_at\":$(($(date +%s) + 60)),\"filter_curated_hits\":true,\"enable_overrides\":false}"
+    digest="$(printf '%s' "$params" | openssl dgst -sha256 -hmac "$parent" -binary | base64)"
+    scoped="$(printf '%s%s%s' "$digest" "${parent:0:4}" "$params" | base64 | tr -d '\n')"
+    printf 'x-typesense-api-key: %s\n' "$scoped" >"$ts_scratch/scoped"
+    found="$(ts_call GET "/collections/$collection/documents/search?q=canary&query_by=body" "$ts_scratch/scoped" |
+      jq -r '[.hits[]?.document.id] | sort | join(",")' 2>/dev/null || true)"
+    expect_rows "a scoped key finds its own tenant's document" "a" "$found"
+    found="$(ts_call GET "/collections/$collection/documents/search?q=*&query_by=body&pinned_hits=b:1&filter_curated_hits=false&filter_by=organization_id:=org-b" "$ts_scratch/scoped" |
+      jq -r '[.hits[]?.document.id] | sort | join(",")' 2>/dev/null || true)"
+    expect_rows "a scoped key cannot be widened with pinned_hits or filter_by" "" "$found"
+    if [ -n "$key_id" ]; then ts_call DELETE "/keys/$key_id" "$ts_scratch/admin" >/dev/null; fi
+    ts_call DELETE "/collections/$collection" "$ts_scratch/admin" >/dev/null
+    rm -rf "$ts_scratch"
+  fi
+fi
+
 # The parse host, when its profile is on. Everything here only looks; the checks that kill or
 # flood a host run on one of their own.
 if jq -e '.services["parse-host"]' <<<"$config" >/dev/null; then

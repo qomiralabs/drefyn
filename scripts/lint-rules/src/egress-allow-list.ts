@@ -55,6 +55,18 @@ export const egressAllowList = [
       'loopback test server that counts connections from a sealed parse thread; it binds 127.0.0.1 and never opens a connection',
   },
   {
+    path: 'packages/search/src/client.ts',
+    reason:
+      'calls Typesense on the private network; the origin is deployment config, never customer input, and paths are built from validated ids, with a deadline, no redirects and a size cap on the answer',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'packages/search/test/integration/route.e2e.test.ts',
+    reason:
+      'stands up a loopback site host on 127.0.0.1 and calls it to prove the search route over HTTP; never customer input',
+    only: [{ module: 'node:http', imports: ['createServer'] }, { global: 'fetch' }],
+  },
+  {
     path: 'packages/auth/src/oauth/fetch.ts',
     reason:
       'OAuth token, user and JWKS calls to four provider hosts fixed in code; https only, no redirects, 5 s and 1 MiB caps; no customer input reaches the URL',

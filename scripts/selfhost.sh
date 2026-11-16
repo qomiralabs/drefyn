@@ -38,7 +38,8 @@ random_key() {
 # DREFYN_AUTH_SECRET: blocks are stored as an HMAC under it, so a new one lifts them all.
 # The second factor keyring is a list of <id>:<key>, so it starts as one entry. Its id only
 # has to differ from the ids an operator adds later, and random hex does.
-KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS'
+# The search admin key is Typesense's own and has the same shape as the auth keys.
+KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS|DREFYN_SEARCH_ADMIN_KEY'
 
 # The app tier sends the token and the parse host keeps only its hash, so a taken host holds
 # nothing a stranger could use. Both go in deploy/.env; compose hands the host the hash alone.
@@ -115,9 +116,9 @@ ensure_env() {
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
     [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
-    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ] ||
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 5 ] ||
     ! grep -q "^$PARSE_TOKEN=." "$env_tmp" || ! grep -q "^$PARSE_HASH=." "$env_tmp"; then
-    say <<<"selfhost: $example does not list the stack ID, the five passwords, the four auth keys and the parse host token and hash; nothing was written."
+    say <<<"selfhost: $example does not list the stack ID, the five passwords, the five generated keys and the parse host token and hash; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
