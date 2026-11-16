@@ -497,6 +497,31 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  packages/status:
+    dependencies:
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@drefyn/test-watchdog':
+        specifier: workspace:*
+        version: link:../../scripts/test-watchdog
+      '@stryker-mutator/core':
+        specifier: 10.1.1
+        version: 10.1.1(@types/node@24.19.1)
+      '@stryker-mutator/vitest-runner':
+        specifier: 10.1.1
+        version: 10.1.1(@stryker-mutator/core@10.1.1(@types/node@24.19.1))(vitest@5.0.3)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(@vitest/coverage-v8@5.0.3)(happy-dom@21.0.4)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
   packages/tenancy:
     devDependencies:
       fast-check:
@@ -4443,12 +4468,12 @@ snapshots:
   '@babel/core@8.0.10':
     dependencies:
       '@babel/code-frame': 8.0.6
-      '@babel/generator': 8.0.10
+      '@babel/generator': 8.1.0
       '@babel/helper-compilation-targets': 8.0.7
       '@babel/helpers': 8.1.0
-      '@babel/parser': 8.0.10
+      '@babel/parser': 8.1.0
       '@babel/template': 8.0.0
-      '@babel/traverse': 8.0.10
+      '@babel/traverse': 8.1.0
       '@babel/types': 8.1.0
       '@types/gensync': 1.0.5
       convert-source-map: 2.0.0
@@ -4469,7 +4494,7 @@ snapshots:
 
   '@babel/generator@8.0.10':
     dependencies:
-      '@babel/parser': 8.0.10
+      '@babel/parser': 8.1.0
       '@babel/types': 8.1.0
       '@jridgewell/gen-mapping': 0.4.0-beta.0
       '@jridgewell/trace-mapping': 0.3.31
@@ -4513,7 +4538,7 @@ snapshots:
       '@babel/helper-optimise-call-expression': 8.0.0
       '@babel/helper-replace-supers': 8.0.1(@babel/core@8.0.10)
       '@babel/helper-skip-transparent-expression-wrappers': 8.1.0
-      '@babel/traverse': 8.0.10
+      '@babel/traverse': 8.1.0
       verkit: 0.5.0
 
   '@babel/helper-globals@7.29.7': {}
@@ -4522,7 +4547,7 @@ snapshots:
 
   '@babel/helper-member-expression-to-functions@8.0.5':
     dependencies:
-      '@babel/traverse': 8.0.10
+      '@babel/traverse': 8.1.0
       '@babel/types': 8.1.0
 
   '@babel/helper-module-imports@7.29.7':
@@ -4534,7 +4559,7 @@ snapshots:
 
   '@babel/helper-module-imports@8.0.0':
     dependencies:
-      '@babel/traverse': 8.0.10
+      '@babel/traverse': 8.1.0
       '@babel/types': 8.1.0
 
   '@babel/helper-module-transforms@7.29.7(@babel/core@7.29.7)':
@@ -4566,7 +4591,7 @@ snapshots:
       '@babel/core': 8.0.10
       '@babel/helper-member-expression-to-functions': 8.0.5
       '@babel/helper-optimise-call-expression': 8.0.0
-      '@babel/traverse': 8.0.10
+      '@babel/traverse': 8.1.0
 
   '@babel/helper-skip-transparent-expression-wrappers@8.1.0':
     dependencies:
@@ -4709,7 +4734,7 @@ snapshots:
   '@babel/template@8.0.0':
     dependencies:
       '@babel/code-frame': 8.0.6
-      '@babel/parser': 8.0.10
+      '@babel/parser': 8.1.0
       '@babel/types': 8.1.0
 
   '@babel/traverse@7.29.10':
@@ -4727,9 +4752,9 @@ snapshots:
   '@babel/traverse@8.0.10':
     dependencies:
       '@babel/code-frame': 8.0.6
-      '@babel/generator': 8.0.10
+      '@babel/generator': 8.1.0
       '@babel/helper-globals': 8.0.6
-      '@babel/parser': 8.0.10
+      '@babel/parser': 8.1.0
       '@babel/template': 8.0.0
       '@babel/types': 8.1.0
       obug: 3.0.0
