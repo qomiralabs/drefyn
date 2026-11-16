@@ -31,6 +31,7 @@
     "@drefyn/email": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
+    "@drefyn/seal": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "@drefyn/ui": "workspace:*",
     "motion": "14.4.0",

@@ -29,8 +29,8 @@ public.
 - `engine.publish(input)`, `engine.approve(input)`: the publish gate, below.
 - `PUBLISH_ERROR_CODES`, `PUBLISH_ROLES`, `APPROVE_ROLES`, `PUBLISH_SCOPES`, `STRICT_WORKFLOW`:
   what the gate answers and checks.
-- `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
-  and options give the same chunks in the same order.
+- `chunkNode(reader, options)`: splits the reader text the parse host gave for a page into unit
+  aligned chunks. Pure: the same reader text and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -159,16 +159,22 @@ page with no text gets no outbox row. Chunks belong to a version and are not rep
 A failed read of that flag refuses the write with `engine.unavailable` and logs
 `engine.flag_read_failed`, as counting it as off would commit a version with no chunks.
 
-A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
-cannot move text in another. It closes before it passes the target. A block over the target splits
-at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
-on a save, and under the lock on a rollback, where a replay must not pay for it.
+Chunk text is the text a reader gets. With chunks on, the save asks the parse host for it beside
+the print (`reader: true`), and the host takes it from the sanitized tree of the render itself, so
+frontmatter, comments, raw HTML the render drops, unknown components, orphan footnotes, attributes,
+alt text and link targets stay out by construction. Nothing in the engine decides what is visible.
+A page the render refuses, `render.too_complex` for one, saves with no chunks and no outbox row,
+and the result says `readerState: 'not_renderable'` so an editor can say so. It cannot publish
+either. A rollback asks the host for the stored tree's reader text before it takes the row lock;
+a busy host refuses it as `engine.unavailable`, and a tree the host can no longer print rolls back
+with no chunks. Each chunk row records `render_policy_version`, the policy its text was made under.
 
-Chunk text is read off the tree through a closed list of node types, so frontmatter, comments,
-imports, expressions, link targets and component props stay out. This is a stopgap, and it is not
-yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
-footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
-the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
+A chunk is made of whole units, the top level elements of the rendered page, and starts again at
+every heading, so a word edited in one section cannot move text in another. An element with no
+text keeps its unit number, so a word added to it renumbers nothing. A chunk closes before it
+passes the target. A unit over the target splits at line ends, and a line over the cap is cut at
+the cap. `chunkNode` is linear in the reader text and runs before the transaction, on a save and on
+a rollback alike. Heading text is capped at 200 characters and heading paths share a budget of 262,144
 characters a page, split evenly across its headings. Past its share a chunk has an empty path, so
 one save cannot grow by repeating a long path on every row. An edit inside a section leaves the
 paths of the others alone, but adding or removing a heading changes every section's share, so it

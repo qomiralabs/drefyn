@@ -50,11 +50,13 @@ const heads = new Map(input.nodes.map(([node, version]) => [node, version]));
 const ids = input.nodes.map(([node]) => node);
 
 const parse = {
-  print: (request: { readonly root: MdxRoot }) => {
+  print: (request: { readonly root: MdxRoot; readonly reader?: boolean }) => {
     const text = [...texts.values()].find(
       (candidate) => candidate.length === sourceLength(request.root),
     );
-    return Promise.resolve({ ok: true, value: { ast: request.root, text } });
+    // Lists are what this measures, so a save makes no chunks.
+    const reader = request.reader === true ? { reader: { state: 'ok', units: [] } } : {};
+    return Promise.resolve({ ok: true, value: { ast: request.root, text, ...reader } });
   },
 } as unknown as EngineDeps['parse'];
 
