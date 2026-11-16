@@ -1,26 +1,38 @@
 import { DbError } from '@drefyn/db';
+import type { Result } from '@drefyn/mdx';
 import { idOf, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import type { z } from 'zod';
 import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
 import type { NodeContent } from './content.ts';
-import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
+import { Refusal, engineError, refuse, type EngineIssue, type EngineResult } from './errors.ts';
 import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
 import {
+  approveSchema,
   backfillInput,
   createNodeSchema,
   declareSchemaInput,
   issuesOf,
   moveNodeSchema,
   pageSchema,
+  publishSchema,
   querySchema,
   readSchema,
   rollbackSchema,
   saveDraftSchema,
 } from './input.ts';
 import { actorFields } from './actor.ts';
+import {
+  approveVersion,
+  publishSettled,
+  publishVersion,
+  refusePublish,
+  type PublishError,
+  type PublishResult,
+} from './publish.ts';
+import { approverOf } from './publish-rules.ts';
 import { backfillStep } from './backfill.ts';
 import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
@@ -37,6 +49,8 @@ import type { EngineStore, EngineTx } from './store.ts';
 import { busyIssue, PoolBusy } from './pool-gate.ts';
 import { assertRoomUnder, lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
+  ApprovalReceipt,
+  ApproveInput,
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
@@ -49,6 +63,8 @@ import type {
   NodeRef,
   Page,
   PageArgs,
+  PublishInput,
+  PublishReceipt,
   RollbackInput,
   SaveDraftInput,
   VersionRef,
@@ -82,6 +98,11 @@ export interface Engine {
   declareSchema(input: DeclareSchemaInput): Promise<EngineResult<DeclaredSchema>>;
   // One batch. runFilterBackfill paces these.
   backfillFilters(tenant: TenantRef): Promise<EngineResult<BackfillState>>;
+  // The only writer of the published tables. Role, workflow and actor are checked here and
+  // not in any UI, so no caller can skip them.
+  publish(input: PublishInput): Promise<PublishResult<PublishReceipt>>;
+  // Records that a person approved one version, which a project that requires review needs.
+  approve(input: ApproveInput): Promise<PublishResult<ApprovalReceipt>>;
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
@@ -204,12 +225,12 @@ export function createEngine(deps: EngineDeps): Engine {
   };
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
-  const logged = async <T>(
+  const logged = async <T, E extends { readonly code: string }>(
     event: string,
     fields: LogFields,
-    work: () => Promise<EngineResult<T>>,
+    work: () => Promise<Result<T, E>>,
     details: (value: T) => LogFields,
-  ): Promise<EngineResult<T>> => {
+  ): Promise<Result<T, E>> => {
     const started = performance.now();
     const result = await tracer.span(event, fields, work);
     const duration_ms = Math.round(performance.now() - started);
@@ -567,5 +588,56 @@ export function createEngine(deps: EngineDeps): Engine {
         (state) => ({ state }),
       );
     },
+
+    async publish(raw) {
+      const input = parsedOrRefused(publishSchema, raw);
+      if (!input.ok) return publishInvalid(input.error.issues);
+      const { tenant, nodeId, versionId, actor } = input.value;
+      if (!(await writesOn(tenant))) return refusePublish('publish.forbidden');
+      return logged(
+        'engine.publish',
+        { ...tenantFields(tenant), node_id: nodeId, version_id: versionId, ...actorFields(actor) },
+        () =>
+          publishSettled(() =>
+            writing(tenant, (tx) =>
+              publishVersion(tx, tenant, input.value, deps.parsePolicy.version),
+            ),
+          ),
+        (value) => ({
+          previous_version_id: value.previousVersionId ?? 'none',
+          render_policy_version: value.renderPolicyVersion,
+        }),
+      );
+    },
+
+    async approve(raw) {
+      const input = parsedOrRefused(approveSchema, raw);
+      if (!input.ok) return publishInvalid(input.error.issues);
+      const { tenant, nodeId, versionId, actor } = input.value;
+      const fields = {
+        ...tenantFields(tenant),
+        node_id: nodeId,
+        version_id: versionId,
+        ...actorFields(actor),
+      };
+      const approver = approverOf(actor);
+      if (approver.ok && !(await writesOn(tenant))) return refusePublish('publish.forbidden');
+      return logged(
+        'engine.approve',
+        fields,
+        () =>
+          approver.ok
+            ? publishSettled(() =>
+                writing(tenant, (tx) => approveVersion(tx, tenant, input.value, approver.value)),
+              )
+            : Promise.resolve(refusePublish<ApprovalReceipt>(approver.code)),
+        () => ({}),
+      );
+    },
   };
 }
+
+const publishInvalid = (issues: readonly EngineIssue[]): PublishResult<never> => ({
+  ok: false,
+  error: { code: 'publish.validation_failed', retryable: false, issues } satisfies PublishError,
+});
