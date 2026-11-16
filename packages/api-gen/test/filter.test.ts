@@ -72,10 +72,10 @@ describe('parseFilterParam', () => {
     const under = `${'{"not":'.repeat(1500)}{"field":"title","op":"exists"}${'}'.repeat(1500)}`;
     expect(under.length).toBeLessThanOrEqual(MAX_FILTER_PARAM_LENGTH);
     expect(parse(under)).toEqual(refused('', 'filter.too_large'));
-    const arrays = `${'['.repeat(5000)}${']'.repeat(5000)}`;
-    expect(parse({ and: [JSON.parse(arrays) as unknown] })).toEqual(
-      refused('and.0', 'filter.malformed'),
-    );
+    // Built as text: JSON.stringify recurses, and a smaller stack in CI overflows on it.
+    const arrays = `{"and":[${'['.repeat(8000)}${']'.repeat(8000)}]}`;
+    expect(arrays.length).toBeLessThanOrEqual(MAX_FILTER_PARAM_LENGTH);
+    expect(parse(arrays)).toEqual(refused('and.0', 'filter.malformed'));
   });
 
   it('refuses too many nodes', () => {
