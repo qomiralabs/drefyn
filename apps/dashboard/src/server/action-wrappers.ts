@@ -110,6 +110,19 @@ function everyMinute(now: () => number): (write: () => void) => void {
   };
 }
 
+// Node stops reading at Content-Length, so a checked length bounds the read below. A body
+// with none is chunked, and no browser form is. A signed in route that takes a form reads it
+// here too, since the wrapper leaves its body alone.
+export async function readForm(request: Request): Promise<FormData | Refusal> {
+  const length = Number(request.headers.get('content-length') ?? Number.NaN);
+  if (!Number.isSafeInteger(length) || length > PUBLIC_FORM_MAX_BYTES) return TOO_LARGE;
+  try {
+    return await request.formData();
+  } catch {
+    return BINDING_REFUSED;
+  }
+}
+
 // The only way to write a mutation. Actions answer a refusal as a value, because a Server
 // Action cannot set its response status; routes answer the same refusal as a status. A
 // handler runs only after every check above it passed.
@@ -150,18 +163,6 @@ export function createWrappers(deps: WrapperDeps) {
     headers: request.headers,
     cookies: new Map(request.cookies.getAll().map(({ name, value }) => [name, value])),
   });
-
-  // Node stops reading at Content-Length, so a checked length bounds the read below. A body
-  // with none is chunked, and no browser form is.
-  async function readForm(request: RouteRequest): Promise<FormData | Refusal> {
-    const length = Number(request.headers.get('content-length') ?? Number.NaN);
-    if (!Number.isSafeInteger(length) || length > PUBLIC_FORM_MAX_BYTES) return TOO_LARGE;
-    try {
-      return await request.formData();
-    } catch {
-      return BINDING_REFUSED;
-    }
-  }
 
   // A plain form action gets (form). useActionState gets (state, form), and it is the only
   // way a refusal reaches the page with scripts off. The state is the client's, so it is

@@ -1,4 +1,4 @@
-import type { TeamSsoFlag } from '@drefyn/auth';
+import type { TeamSsoFlag, TotpFlag } from '@drefyn/auth';
 import { createFlagClient, loadFlagConfig, type FlagClient } from '@drefyn/flags';
 import { mailDelivery, teamSso, VISITOR_FLAG_ORGANIZATION } from '../shell/release.ts';
 import { logWarn } from './log.ts';
@@ -50,4 +50,14 @@ export async function teamSsoForServer(): Promise<boolean> {
 export const teamSsoFlag: TeamSsoFlag = Object.freeze({
   isOn: async (name: 'auth.team_sso', ctx: Parameters<TeamSsoFlag['isOn']>[1]) =>
     (await flagClient()).isOn(name, ctx),
+});
+
+// Enrolment is about a person, who may belong to no organization, so the person is the
+// only context that tells one answer from another. Auth treats a throw as off.
+export const totpFlag: TotpFlag = Object.freeze({
+  isOn: async (name: 'auth.totp', ctx: Parameters<TotpFlag['isOn']>[1]) =>
+    (await flagClient()).isOn(name, {
+      organizationId: VISITOR_FLAG_ORGANIZATION,
+      userId: ctx.userId,
+    }),
 });

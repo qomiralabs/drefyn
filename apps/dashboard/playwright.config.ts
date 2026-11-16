@@ -132,12 +132,12 @@ export default defineConfig({
     {
       name: 'shell-chromium',
       testMatch:
-        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out|incident-mode)\.spec\.ts$/,
+        /(shell|states|keyboard|responsive|theme|headers|loading|guard|sign-out|incident-mode|factor-csp)\.spec\.ts$/,
       use: { ...chromium },
     },
     {
       name: 'shell-firefox',
-      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out|factor-csp)\.spec\.ts$/,
       use: {
         ...devices['Desktop Firefox'],
         // Typing an address this profile has sent before opens Firefox's form history popup a
@@ -149,7 +149,7 @@ export default defineConfig({
     },
     {
       name: 'shell-webkit',
-      testMatch: /(keyboard|headers|loading|sign-out)\.spec\.ts$/,
+      testMatch: /(keyboard|headers|loading|sign-out|factor-csp)\.spec\.ts$/,
       use: { ...devices['Desktop Safari'] },
     },
     {
