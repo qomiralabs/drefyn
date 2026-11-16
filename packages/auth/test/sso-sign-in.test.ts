@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import { randomUUID } from 'node:crypto';
 import { idOf, organizationId, toPublicId, type UserId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
@@ -61,8 +62,22 @@ function world(options: WorldOptions = {}) {
       domains: ['example.com'],
     });
   const started: StartSessionInput[] = [];
+  // Sign ins the factor gate turned into a challenge, as startSession does for an enrolled
+  // person.
+  const gated: StartSessionInput[] = [];
   const sessions = {
-    startSession(_b: BrowserContext, input: StartSessionInput) {
+    async startSession(_b: BrowserContext, input: StartSessionInput) {
+      const enrolledNow =
+        options.factor === undefined
+          ? fake.tables.enrolled.has(input.userId)
+          : await options.factor.required(input.userId);
+      if (enrolledNow) {
+        gated.push(input);
+        return {
+          kind: 'factor_required' as const,
+          setCookies: [{ name: '__Host-drefyn_factor', value: 'c', maxAgeSeconds: 600 }],
+        };
+      }
       started.push(input);
       const user = fake.tables.users.find((u) => u['id'] === input.userId);
       const session: SessionInfo = {
@@ -73,10 +88,11 @@ function world(options: WorldOptions = {}) {
         expiresAt: new Date(Date.now() + 86_400_000),
         method: input.method,
       };
-      return Promise.resolve({
+      return {
+        kind: 'session' as const,
         session,
         setCookies: [{ name: config.cookies.session, value: 'token', maxAgeSeconds: 60 }],
-      });
+      };
     },
   };
   const { logs, logger } = logRecorder();
@@ -89,7 +105,7 @@ function world(options: WorldOptions = {}) {
     limiter,
     ...(options.factor === undefined ? {} : { factor: options.factor }),
   });
-  return { config, fake, started, logs, mail, sso };
+  return { config, fake, started, gated, logs, mail, sso };
 }
 
 type World = ReturnType<typeof world>;
@@ -153,8 +169,6 @@ const userIdOf = (w: World, email: string) =>
 
 const enrolled = (ids: () => readonly string[]): FactorRule => ({
   required: (userId) => Promise.resolve(ids().includes(userId)),
-  challenge: () =>
-    Promise.resolve([{ name: '__Host-drefyn_factor', value: 'c', maxAgeSeconds: 600 }]),
 });
 
 describe('signInWithVerifiedIdentity, the decision table', () => {
@@ -165,7 +179,7 @@ describe('signInWithVerifiedIdentity, the decision table', () => {
     member(w, userId);
     const done = await signIn(w);
     expect(done).toMatchObject({ kind: 'signed_in', returnTo: '/acme/docs' });
-    expect(w.started).toEqual([{ userId, method: 'sso', sso: SCOPE }]);
+    expect(w.started).toMatchObject([{ userId, method: 'sso', sso: SCOPE }]);
     expect(w.fake.tables.identities[0]?.['last_used_at']).toBeInstanceOf(Date);
     // Found by subject, never by the address the IdP sent this time.
     expect(w.fake.tables.users).toHaveLength(1);
@@ -354,7 +368,7 @@ describe('signInWithVerifiedIdentity, the decision table', () => {
       const { w, maker } = testing();
       link(w, maker);
       expect((await signIn(w)).kind).toBe('signed_in');
-      expect(w.started).toEqual([{ userId: maker, method: 'sso', sso: SCOPE }]);
+      expect(w.started).toMatchObject([{ userId: maker, method: 'sso', sso: SCOPE }]);
     });
 
     it('sends its creator a link code on the first sign in', async () => {
@@ -434,16 +448,16 @@ describe('signInWithVerifiedIdentity, the connection and the factor', () => {
     expect(w.started).toEqual([]);
   });
 
-  it('reads a confirmed factor by default and fails closed on it', async () => {
+  it('leaves the factor to startSession and keeps the SSO scope for the challenge', async () => {
     const w = world();
     const userId = addUser(w, ADDRESS);
     link(w, userId);
     member(w, userId);
     w.fake.tables.enrolled.add(userId);
-    expect(await signIn(w)).toEqual({ kind: 'factor_required', setCookies: [] });
-    const read = w.fake.scripted.statements().find((s) => s.sql.includes('"totp_credentials"'));
-    expect(read?.sql).toMatch(/"confirmed_at" is not null/);
-    expect(w.fake.scripted.events).toContainEqual({ kind: 'begin', scope: 'user', userId });
+    expect(await signIn(w)).toMatchObject({ kind: 'factor_required' });
+    expect(w.gated).toMatchObject([{ userId, method: 'sso', sso: SCOPE, returnTo: '/acme/docs' }]);
+    expect(w.started).toEqual([]);
+    expect(w.logs.map((l) => l.event)).toContain('auth.sso_factor_required');
   });
 
   it('owes a new device notice to a known person on a new browser', async () => {
@@ -630,8 +644,8 @@ describe('the link by code', () => {
     expect(w.fake.tables.identities).toMatchObject([
       { organization_id: ORG, connection_id: CONN, user_id: userId, subject: SUBJECT },
     ]);
-    expect(w.started).toEqual([{ userId, method: 'sso', sso: SCOPE }]);
-    if (verified.ok) await verified.value.send?.();
+    expect(w.started).toMatchObject([{ userId, method: 'sso', sso: SCOPE }]);
+    if (verified.ok) await asSignedIn(verified.value).send?.();
     expect(w.mail.notices).toContainEqual({
       to: ADDRESS,
       notice: expect.objectContaining({
@@ -671,16 +685,46 @@ describe('the link by code', () => {
     expect(w.fake.tables.identities).toEqual([]);
   });
 
-  it('requires an enrolled factor before the link is written', async () => {
+  it('drops the link for an enrolled person and hands the code to a factor challenge', async () => {
     const { w, factorUsers, userId, jar, sent, email } = await linkWorld();
     factorUsers.push(userId);
     const verified = await email.verifyEmailCode(jar.context(), {
       challenge: formatChallengeId(sent.challengeId),
       code: sent.code,
     });
-    expect(verified.ok ? null : verified.error.code).toBe('AUTH_FACTOR_REQUIRED');
+    expect(verified.ok && verified.value).toMatchObject({ kind: 'factor_required' });
     expect(w.fake.tables.identities).toEqual([]);
+    // An email sign in, so the session carries no SSO scope the identity never earned.
+    expect(w.gated).toEqual([{ userId, method: 'email', returnTo: '/acme/docs' }]);
     expect(w.started).toEqual([]);
+  });
+
+  it('reads a confirmed factor by default before it writes a link', async () => {
+    const { w, userId, jar, sent } = await linkWorld();
+    w.fake.tables.enrolled.add(userId);
+    const sso = createSsoSignIn(w.config, {
+      store: w.fake.store,
+      logger: logRecorder().logger,
+      mailer: w.mail.mailer,
+      sessions: {
+        startSession: () => Promise.resolve({ kind: 'factor_required', setCookies: [] }),
+      },
+      limiter,
+    });
+    const pending = w.fake.tables.email_challenges[0];
+    if (pending === undefined) throw new Error('no challenge');
+    const done = await sso.finishLink(jar.context(), {
+      userId,
+      email: ADDRESS,
+      subject: SUBJECT,
+      sso: SCOPE,
+      returnTo: '/',
+    });
+    expect(done).toEqual({ ok: true, value: { kind: 'factor_required', setCookies: [] } });
+    const read = w.fake.scripted.statements().find((s) => s.sql.includes('"totp_credentials"'));
+    expect(read?.sql).toMatch(/"confirmed_at" is not null/);
+    expect(w.fake.tables.identities).toEqual([]);
+    expect(sent.code).toMatch(/^[0-9]{8}$/);
   });
 
   it('refuses an SSO link code when nothing can finish it', async () => {
@@ -738,7 +782,9 @@ describe('the link by code', () => {
       challenge: formatChallengeId(sent.challengeId),
       code: sent.code,
     });
-    expect(verified.ok ? null : verified.error.code).toBe('AUTH_FACTOR_REQUIRED');
+    // Accepted: the link is written, but the gate still stops the session.
+    expect(verified.ok && verified.value).toMatchObject({ kind: 'factor_required' });
+    expect(w.fake.tables.identities).toHaveLength(1);
     expect(w.started).toEqual([]);
   });
 
@@ -750,7 +796,7 @@ describe('the link by code', () => {
     });
     if (!verified.ok) throw verified.error;
     w.mail.failNext();
-    await verified.value.send?.();
+    await asSignedIn(verified.value).send?.();
     expect(w.logs.map((l) => l.event)).toContain('auth.identity_notice_failed');
   });
 

@@ -31,7 +31,13 @@ import {
   type SessionInfo,
   type SessionStore,
 } from './session-support.ts';
-import { createSessions, type StartSessionInput, type StartedSession } from './sessions.ts';
+import {
+  createSessions,
+  factorRequired,
+  type FactorRequired,
+  type StartSessionInput,
+  type StartedSession,
+} from './sessions.ts';
 import { SECRET_BYTES, decodeSecret, encodeSecret } from './tokens.ts';
 
 // The hosted bot check. Unset in the open core, where the throttle stands alone.
@@ -45,7 +51,10 @@ export interface BotCheck {
 
 // What password sign in needs of sessions.
 export interface PasswordSessions {
-  startSession(b: BrowserContext, input: StartSessionInput): Promise<StartedSession>;
+  startSession(
+    b: BrowserContext,
+    input: StartSessionInput,
+  ): Promise<StartedSession | FactorRequired>;
   requireRecentAuth(s: SessionInfo): Promise<Result<void, AuthError>>;
 }
 
@@ -91,7 +100,7 @@ export interface PasswordSignIn {
   signInWithPassword(
     b: BrowserContext,
     input: PasswordSignInInput,
-  ): Promise<Result<SignedIn, AuthError>>;
+  ): Promise<Result<SignedIn | FactorRequired, AuthError>>;
   // A first password, after an email code or provider sign in. Changing one that is set is
   // the reset and change flow's job.
   // send mails the password set notice and never throws; run it after the response.
@@ -228,7 +237,8 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
     input: PasswordSignInInput,
     address: string,
     password: string,
-  ): Promise<Result<SignedIn, AuthError>> {
+  ): Promise<Result<SignedIn | FactorRequired, AuthError>> {
+    const returnTo = safeReturnTo(input.returnTo, config.appOrigin);
     for (let attempt = 1; ; attempt += 1) {
       const found = await stored(address);
       // Step 2, outside any transaction: no connection is held while the hash runs.
@@ -244,25 +254,28 @@ export function createPasswordSignIn(config: AuthConfig, deps: PasswordSignInDep
         return refused('AUTH_CREDENTIALS_INVALID', address);
       }
       const rehash = checked.rehash ? await hasher.hash(password) : undefined;
-      let started: StartedSession;
+      let started: StartedSession | FactorRequired;
       try {
         // Step 3: the session exists only if the hash checked is still the stored one.
         started = await sessions.startSession(b, {
           userId: found.userId,
           method: 'password',
           credential: rehash === undefined ? { phc: found.phc } : { phc: found.phc, rehash },
+          returnTo,
         });
       } catch (error) {
         if (!stale(error)) throw error;
         if (attempt < ATTEMPTS) continue;
         return refused('AUTH_CREDENTIALS_INVALID', address);
       }
+      // The device and its notice wait for the factor when there is one.
+      if (factorRequired(started)) return ok(started);
       const device = await recordDevice(config, devices, b, found.userId);
       const seen = device.newDevice;
       return ok({
         session: started.session,
         setCookies: [...started.setCookies, ...device.setCookies],
-        returnTo: safeReturnTo(input.returnTo, config.appOrigin),
+        returnTo,
         ...(seen === null
           ? {}
           : {

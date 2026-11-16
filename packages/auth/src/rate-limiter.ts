@@ -10,17 +10,24 @@ import {
 import { RATE_BUCKETS, type RateBucket } from './config-keys.ts';
 import type { ApiAuthConfig, RateLimit } from './config.ts';
 import { AuthError } from './errors.ts';
+import type { FactorOutcome } from './factor-verify.ts';
 import type { AuthKeys, MacPart } from './keys.ts';
+import type { FactorKind } from './totp.ts';
 
 export type AuthMetricName =
-  'auth.email_ceiling_hit' | 'auth.breach_check_unavailable' | 'auth.cli_link';
+  'auth.email_ceiling_hit' | 'auth.breach_check_unavailable' | 'auth.cli_link' | 'auth.factor';
 
 export type CliLinkOutcome =
   'redeemed' | 'malformed' | 'no_match' | 'rate_limited' | 'client_address' | 'unavailable';
 
 export interface AuthMetrics {
   // The label is a closed union, so nothing a caller sends can grow the series.
-  increment(name: AuthMetricName, labels?: { readonly outcome: CliLinkOutcome }): void;
+  increment(
+    name: AuthMetricName,
+    labels?:
+      | { readonly outcome: CliLinkOutcome }
+      | { readonly outcome: FactorOutcome; readonly kind: FactorKind },
+  ): void;
 }
 
 // Fields are ids, bucket names and hashed keys; never an address, an IP or a code.
