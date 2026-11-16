@@ -123,6 +123,8 @@ describe('published-reads-only', () => {
       expect(await on(linter, 'packages/engine/src/engine.ts')).toBeUndefined();
     });
 
+    // The rule alone reads each file's text: the root config would type check every file and
+    // take a CI runner past the timeout.
     it('holds every real docs site file to it, and each one passes', async () => {
       const linter = new ESLint({ cwd: repoRoot });
       const files = readdirSync(join(repoRoot, 'apps/docs-site/src'))
@@ -131,9 +133,11 @@ describe('published-reads-only', () => {
       expect(files.length).toBeGreaterThan(0);
       for (const file of files) {
         expect(await on(linter, file), file).toEqual([2]);
-        const found = reports(await linter.lintFiles([join(repoRoot, file)])).filter(
-          (r) => r.ruleId === RULE,
-        );
+        const found = reports(
+          await eslint.lintText(readFileSync(join(repoRoot, file), 'utf8'), {
+            filePath: join(root, file),
+          }),
+        ).filter((r) => r.ruleId === RULE);
         expect(found, file).toEqual([]);
       }
     });
