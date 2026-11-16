@@ -908,7 +908,11 @@ describe('chunks at write', () => {
           })
         : happy(statement);
     const { engine, statements } = build(replayed);
-    expect(await engine.saveDraft(save())).toMatchObject({ ok: true });
+    // Answers as the first save did, reader state included.
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: true,
+      value: { readerState: 'ok' },
+    });
     expect(chunkWrites(statements)).toEqual([]);
     expect(outboxWrites(statements)).toEqual([]);
   });

@@ -247,19 +247,18 @@ export function createEngine(deps: EngineDeps): Engine {
   });
   const renderPolicyVersion = deps.parsePolicy.version;
 
-  // Counted when written, so a replay does not report rows it never made, and only a version
-  // this call wrote says how its page rendered.
+  // Counted when written, so a replay does not report rows it never made. The reader state is
+  // the same on a replay, as the same content renders the same, so a retry answers as the first.
   const chunkWriter = (reader: ReaderPage | undefined) => {
-    const state = { written: 0, wrote: false };
+    const state = { written: 0 };
     const chunks = reader === undefined ? [] : chunkNode(reader, chunkOptions);
     return {
       chunksOf: () => {
-        state.wrote = true;
         state.written = chunks.length;
         return chunks;
       },
       settle: (result: EngineResult<VersionRef>): EngineResult<VersionRef> =>
-        result.ok && state.wrote && reader !== undefined
+        result.ok && reader !== undefined
           ? { ok: true, value: { ...result.value, readerState: reader.state } }
           : result,
       written: () => state.written,

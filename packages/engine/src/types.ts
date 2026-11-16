@@ -79,8 +79,8 @@ export interface VersionRef {
   readonly versionId: VersionId;
   readonly seq: number;
   readonly contentSha256: string;
-  // Set when this call wrote the version with chunks on. not_renderable means the render refused
-  // the page, so it has no chunks, and an editor should say so.
+  // Set when chunks are on, a replay included. not_renderable means the render refused the page,
+  // so it has no chunks, and an editor should say so.
   readonly readerState?: 'ok' | 'not_renderable';
 }
 
