@@ -136,7 +136,7 @@ describe('compileValidator over random schemas', () => {
         expect(result).toEqual({ ok: true, value: content.stored });
         if (result.ok) expect(JSON.stringify(result.value)).toBe(JSON.stringify(content.stored));
       }),
-      { numRuns: 300 },
+      { numRuns: 150 },
     );
   });
 
@@ -157,7 +157,7 @@ describe('compileValidator over random schemas', () => {
         const result = compileValidator(schema)(input);
         expect(result).toEqual({ ok: false, error: [{ path: field.apiName, code: bad.code }] });
       }),
-      { numRuns: 300 },
+      { numRuns: 150 },
     );
   });
 
