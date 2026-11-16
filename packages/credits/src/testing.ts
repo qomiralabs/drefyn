@@ -335,14 +335,7 @@ export function aiBudgetContract(make: AiBudgetFactory): void {
 
     it('refuses an operation that is not an AI operation and records nothing', async () => {
       const h = await funded(1_000);
-      for (const operation of [
-        'generation',
-        'incident_draft',
-        'translation_draft',
-        'Reader_answer',
-        '',
-        7,
-      ]) {
+      for (const operation of ['summary', 'stale-draft', 'GENERATION', 'Reader_answer', '', 7]) {
         expect(
           await codeOf(() =>
             h.budget.charge(h.tenant, {
@@ -359,7 +352,7 @@ export function aiBudgetContract(make: AiBudgetFactory): void {
       const h = await funded(1_000);
       expect(
         await codeOf(() =>
-          h.budget.charge(h.tenant, { idempotencyKey: '', operation: 'generation' as AiOperation }),
+          h.budget.charge(h.tenant, { idempotencyKey: '', operation: 'summary' as AiOperation }),
         ),
       ).toBe('CREDIT_KEY_INVALID');
       expect(
