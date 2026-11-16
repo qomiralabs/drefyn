@@ -65,6 +65,15 @@ describe('self_hosted', () => {
     'docs.reader_assistant',
     'docs.preview_deployments',
     'docs.instant_rollback',
+    'docs.pr_check',
+    'docs.style_guide',
+    'docs.pr_check_blocking',
+    'docs.style_tone_rules',
+    'docs.agent_context',
+    'docs.navigation',
+    'docs.page_templates',
+    'docs.content_gaps',
+    'docs.answer_checks',
     'status.remove_badge',
   ] as const)('has %s, which needs no hosted service', (feature) => {
     expect(hasFeature('self_hosted', feature)).toBe(true);
