@@ -9,6 +9,7 @@ import {
   captureLogger,
   DOMAINS,
   fakeDirectory,
+  type FakeDirectory,
   flagsOnFor,
   ORG_A,
   ORG_B,
@@ -38,7 +39,8 @@ function appWith(overrides: Partial<DocsSiteDeps> & { directory?: SiteDirectory 
       siteId: site.siteId,
     });
   });
-  return { app, directory, lines, asked: flags.asked };
+  const calls = 'calls' in directory ? (directory as FakeDirectory).calls : [];
+  return { app, calls, lines, asked: flags.asked };
 }
 
 const get = (
@@ -142,20 +144,20 @@ describe('forwarded host headers', () => {
   });
 
   it('cannot turn an unknown host into a site', async () => {
-    const { app, directory } = appWith();
+    const { app, calls } = appWith();
     const response = await get(app, 'gamma.drefyn.test', forged('alpha.drefyn.test'));
     expect(response.status).toBe(404);
-    expect(directory.calls).toEqual(['sub:gamma']);
+    expect(calls).toEqual(['sub:gamma']);
   });
 
   it('do not poison the cache for the next request', async () => {
-    const { app, directory } = appWith();
+    const { app, calls } = appWith();
     await get(app, 'alpha.drefyn.test', forged('docs.beta.example'));
     await get(app, 'docs.beta.example', forged('alpha.drefyn.test'));
     // Both answers now come from the cache, each still under its own Host.
     expect(await (await get(app, 'alpha.drefyn.test')).json()).toEqual(A);
     expect(await (await get(app, 'docs.beta.example')).json()).toEqual(B);
-    expect(directory.calls).toEqual(['sub:alpha', 'custom:docs.beta.example']);
+    expect(calls).toEqual(['sub:alpha', 'custom:docs.beta.example']);
   });
 });
 

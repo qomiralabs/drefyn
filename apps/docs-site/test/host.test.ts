@@ -40,7 +40,7 @@ const UNKNOWN = { kind: 'unknown' };
 describe('normalizeHost', () => {
   it.each([
     ['alpha.drefyn.test', 'alpha.drefyn.test'],
-    ['Alpha.Docs.TEST', 'alpha.drefyn.test'],
+    ['Alpha.Drefyn.TEST', 'alpha.drefyn.test'],
     ['alpha.drefyn.test:443', 'alpha.drefyn.test'],
     ['docs.alpha.example:8080', 'docs.alpha.example'],
     ['xn--bcher-kva.example', 'xn--bcher-kva.example'],

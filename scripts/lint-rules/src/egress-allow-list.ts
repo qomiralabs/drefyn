@@ -67,6 +67,12 @@ export const egressAllowList = [
     only: [{ module: 'node:dns/promises', imports: ['Resolver'] }],
   },
   {
+    path: 'apps/docs-site/test/start.test.ts',
+    reason:
+      'calls a docs site server the same test started on 127.0.0.1, through localhost, to prove forged forwarded headers are ignored; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
     path: 'apps/dashboard/server.ts',
     reason:
       'inbound server in front of the Next handler; it accepts connections and never opens one',

@@ -44,10 +44,8 @@ describe('startDocsSite', () => {
       const first = await call(site, 'localhost', forged);
       expect(first.status).toBe(200);
       expect(await first.json()).toEqual({
-        kind: 'site',
         tenant: { organizationId: ORG_A, projectId: PRJ_A },
         siteId: SITE_A,
-        access: 'public',
       });
 
       const unknown = await call(site, '127.0.0.1', { 'x-forwarded-host': 'localhost' });
@@ -55,7 +53,7 @@ describe('startDocsSite', () => {
 
       // The second request for localhost is answered from the cache, still as tenant A.
       const again = await call(site, 'localhost');
-      expect((await again.json()) as unknown).toMatchObject({ siteId: SITE_A });
+      expect(await again.json()).toMatchObject({ siteId: SITE_A });
       expect(directory.calls).toEqual(['custom:localhost']);
       expect(JSON.stringify(lines)).not.toContain('beta');
     } finally {

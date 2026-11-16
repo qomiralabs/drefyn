@@ -32,10 +32,10 @@ describe('createJsonLogger', () => {
   it('writes to stderr by default', () => {
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
+    process.stderr.write = (chunk: string) => {
       written.push(chunk);
       return true;
-    }) as typeof process.stderr.write;
+    };
     try {
       createJsonLogger().info('site.started', { port: 3002 });
     } finally {

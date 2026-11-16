@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
@@ -121,6 +121,21 @@ describe('published-reads-only', () => {
       expect(await on(linter, 'apps/api/src/server.ts')).toBeUndefined();
       expect(await on(linter, 'apps/dashboard/src/server/auth.ts')).toBeUndefined();
       expect(await on(linter, 'packages/engine/src/engine.ts')).toBeUndefined();
+    });
+
+    it('holds every real docs site file to it, and each one passes', async () => {
+      const linter = new ESLint({ cwd: repoRoot });
+      const files = readdirSync(join(repoRoot, 'apps/docs-site/src'))
+        .filter((name) => name.endsWith('.ts'))
+        .map((name) => `apps/docs-site/src/${name}`);
+      expect(files.length).toBeGreaterThan(0);
+      for (const file of files) {
+        expect(await on(linter, file), file).toEqual([2]);
+        const found = reports(await linter.lintFiles([join(repoRoot, file)])).filter(
+          (r) => r.ruleId === RULE,
+        );
+        expect(found, file).toEqual([]);
+      }
     });
   });
 });

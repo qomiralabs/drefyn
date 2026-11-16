@@ -30,6 +30,18 @@ describe('the registry', () => {
     });
   });
 
+  it('holds docs.site, off unless someone turns it on', () => {
+    expect(flags.find((flag) => flag.name === 'docs.site')).toEqual({
+      name: 'docs.site',
+      kind: 'release',
+      owner: 'Divine572',
+      description: 'Customer docs sites are served by host from the docs site app.',
+      created: '2026-11-16',
+      removeBy: '2027-06-30',
+      safeValue: false,
+    });
+  });
+
   it('gives every flag an owner, a description and a removal date after it was created', () => {
     for (const flag of flags) {
       expect(flag.owner.trim(), flag.name).not.toBe('');
