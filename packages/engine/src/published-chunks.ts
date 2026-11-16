@@ -124,6 +124,9 @@ async function copyVersion(
   return rows;
 }
 
+// Only public chunks reach the term tables, and the database refuses any other value there.
+const TERM_VISIBILITY = 'public';
+
 // One statement moves the postings and applies the document frequency change, so the counts
 // can never disagree with the postings. Upserts run in lexeme order. The caller holds the
 // project's term lock, so two publishes never interleave here at all.
@@ -140,9 +143,9 @@ async function moveTerms(tx: EngineTx, tenant: TenantRef, change: TermChange) {
     ),
     added as (
       insert into app.published_chunk_terms (organization_id, project_id, version_label, lexeme,
-          chunk_id, tf, chunk_length)
+          chunk_id, tf, chunk_length, visibility)
       select c.organization_id, c.project_id, ${LATEST_LABEL}, u.lexeme, c.id,
-             coalesce(cardinality(u.positions), 1), size.n
+             coalesce(cardinality(u.positions), 1), size.n, ${TERM_VISIBILITY}
         from app.published_chunks c
         cross join lateral (
           select coalesce(sum(coalesce(cardinality(p.positions), 1)), 0)::integer as n
@@ -162,8 +165,10 @@ async function moveTerms(tx: EngineTx, tenant: TenantRef, change: TermChange) {
     ),
     -- Every data modifying step runs whether or not the final select reads it.
     raised as (
-      insert into app.published_term_stats (organization_id, project_id, version_label, lexeme, df)
-      select ${org}, ${project}, ${LATEST_LABEL}, lexeme, n from delta where n > 0
+      insert into app.published_term_stats (organization_id, project_id, version_label, lexeme, df,
+          visibility)
+      select ${org}, ${project}, ${LATEST_LABEL}, lexeme, n, ${TERM_VISIBILITY} from delta
+       where n > 0
        order by lexeme
       on conflict on constraint published_term_stats_pkey do update
         set df = app.published_term_stats.df + excluded.df
@@ -234,8 +239,9 @@ export async function writePublishedChunks(
   await sql`select pg_advisory_xact_lock(hashtextextended(${lockName(tenant)}, 0))`.execute(tx);
   await sql`
     insert into app.published_project_term_totals (organization_id, project_id, version_label,
-        chunk_count, total_length)
-    values (${tenant.organizationId}::uuid, ${tenant.projectId}::uuid, ${LATEST_LABEL}, 0, 0)
+        chunk_count, total_length, visibility)
+    values (${tenant.organizationId}::uuid, ${tenant.projectId}::uuid, ${LATEST_LABEL}, 0, 0,
+            ${TERM_VISIBILITY})
     on conflict on constraint published_project_term_totals_pkey do nothing`.execute(tx);
   const moved = await moveTerms(tx, tenant, change);
   return {

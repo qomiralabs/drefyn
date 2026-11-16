@@ -9,6 +9,7 @@ import {
   type ProtectedReaderDatabase,
   type PublishedDatabase,
 } from '../../src/index.ts';
+import { PUBLISHED_TABLES } from '../../src/allow-lists.ts';
 import type { DbError } from '../../src/errors.ts';
 import { rejected } from '../support.ts';
 import { describeFailure, migrate, shippedMigrations } from './support/cli.ts';
@@ -293,6 +294,11 @@ const visibilityState = (db: TestDatabase) =>
     db.name,
   ).then((text) => text.trim().split('\n'));
 
+// Every table on the published allow list, without the schema. Later migrations add published
+// tables, and each must carry the same guard, so the expectations follow the list.
+const PUBLISHED = PUBLISHED_TABLES.map((entry) => entry.name.replace(/^app\./, '')).sort();
+const listOf = (text: string) => text.split(',').sort();
+
 describeWithStack('the published visibility migration', () => {
   const step = async (target: TestDatabase, args: readonly string[]) => {
     const result = await migrate(args, { url: target.owner });
@@ -301,8 +307,8 @@ describeWithStack('the published visibility migration', () => {
 
   it('grants the protected reader select on the published tables and nothing else', async () => {
     const fresh = await dbs.fresh('migrated');
-    expect(await grantsTo(fresh, 'drefyn_protected_reader')).toBe(
-      'published_filter_rows SELECT,published_versions SELECT',
+    expect(listOf(await grantsTo(fresh, 'drefyn_protected_reader'))).toEqual(
+      PUBLISHED.map((t) => `${t} SELECT`),
     );
   });
 
@@ -319,23 +325,21 @@ describeWithStack('the published visibility migration', () => {
     // Rows from before the column, written the way the tables allowed then.
     await superuser(seedAll(false), fresh.name);
     await step(fresh, ['migrate', 'up']);
-    expect(await visibilityState(fresh)).toEqual([
-      'nodes.visibility_override,published_filter_rows.visibility,published_versions.visibility',
-      [
-        'published_filter_rows protected_read',
-        'published_filter_rows published_public_only',
-        'published_versions protected_read',
-        'published_versions published_public_only',
-      ].join(','),
-    ]);
+    const [columns = '', guards = ''] = await visibilityState(fresh);
+    expect(listOf(columns)).toEqual(
+      ['nodes.visibility_override', ...PUBLISHED.map((t) => `${t}.visibility`)].sort(),
+    );
+    expect(listOf(guards)).toEqual(
+      PUBLISHED.flatMap((t) => [`${t} protected_read`, `${t} published_public_only`]).sort(),
+    );
     const kept = await superuser(
       `select string_agg(distinct visibility, ',') from app.published_versions;
        select string_agg(distinct visibility, ',') from app.published_filter_rows;`,
       fresh.name,
     );
     expect(kept.trim().split('\n')).toEqual(['public', 'public']);
-    expect(await grantsTo(fresh, 'drefyn_protected_reader')).toBe(
-      'published_filter_rows SELECT,published_versions SELECT',
+    expect(listOf(await grantsTo(fresh, 'drefyn_protected_reader'))).toEqual(
+      PUBLISHED.map((t) => `${t} SELECT`),
     );
   });
 });

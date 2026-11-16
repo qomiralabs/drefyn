@@ -3,9 +3,11 @@ import fc from 'fast-check';
 import { sql } from 'kysely';
 import { beforeAll, expect, it } from 'vitest';
 import {
+  withProtectedReader,
   withPublishedReader,
   withTenant,
   type Database,
+  type ProtectedReaderDatabase,
   type PublishedDatabase,
 } from '../../src/index.ts';
 import { databases, type TestDatabase } from './support/databases.ts';
@@ -18,7 +20,7 @@ import {
   type SeedTenant,
 } from './support/published-chunks.ts';
 import { superuser } from './support/stack.ts';
-import { pools, rawSession, rows } from './support/tenancy.ts';
+import { pools, protectedUrl, rawSession, rows } from './support/tenancy.ts';
 
 const dbs = databases();
 const open = pools();
@@ -42,12 +44,15 @@ function tenantRows(t: SeedTenant): string {
   return `
 ${chunkSql(t, { ord: 0, headingPath: [], body: `public ${label(t)}`, visibility: 'public' })}
 ${chunkSql(t, { ord: 1, headingPath: [], body: `protected ${label(t)}`, visibility: 'protected' })}
-insert into app.published_project_term_totals (organization_id, project_id, chunk_count, total_length)
-  values ('${t.org}', '${t.project}', 1, 2);
-insert into app.published_term_stats (organization_id, project_id, lexeme, df)
-  values ('${t.org}', '${t.project}', 'public', 1), ('${t.org}', '${t.project}', '${label(t)}', 1);
-insert into app.published_chunk_terms (organization_id, project_id, lexeme, chunk_id, tf, chunk_length)
-  select organization_id, project_id, lexeme, id, 1, 2
+insert into app.published_project_term_totals (organization_id, project_id, chunk_count,
+    total_length, visibility)
+  values ('${t.org}', '${t.project}', 1, 2, 'public');
+insert into app.published_term_stats (organization_id, project_id, lexeme, df, visibility)
+  values ('${t.org}', '${t.project}', 'public', 1, 'public'),
+         ('${t.org}', '${t.project}', '${label(t)}', 1, 'public');
+insert into app.published_chunk_terms (organization_id, project_id, lexeme, chunk_id, tf, chunk_length,
+    visibility)
+  select organization_id, project_id, lexeme, id, 1, 2, 'public'
     from app.published_chunks, unnest(array['public', '${label(t)}']) lexeme
    where project_id = '${t.project}' and visibility = 'public';`;
 }
@@ -60,6 +65,7 @@ const TERM_TABLES = [
 
 let db: TestDatabase;
 let reader: PublishedDatabase;
+let protectedReader: ProtectedReaderDatabase;
 let app: Database;
 
 const bodies = (handle: PublishedDatabase, tenant: TenantRef, where = sql`true`) =>
@@ -89,6 +95,7 @@ describeWithStack('published chunks and term tables under RLS', () => {
     db = await dbs.fresh('migrated');
     await seed(db.name, [seedTenantsSql(TENANTS), ...TENANTS.map(tenantRows)].join('\n'));
     reader = await open.reader(db.reader);
+    protectedReader = await open.protectedReader(protectedUrl(db));
     app = await open.app(db.app);
   });
 
@@ -138,6 +145,35 @@ describeWithStack('published chunks and term tables under RLS', () => {
     }
     const left = await superuser(`select count(*) from app.published_chunks;`, db.name);
     expect(left.trim()).toBe(String(TENANTS.length * 2));
+  });
+
+  it('shows the protected reader both chunks and the term rows of its own project only', async () => {
+    for (const t of TENANTS) {
+      const seen = await withProtectedReader(protectedReader, { tenant: ref(t) }, async (tx) => {
+        const chunks = await rows(
+          tx,
+          sql<{ body: string }>`select body from app.published_chunks order by body`,
+        );
+        const terms: Record<string, string[]> = {};
+        for (const table of TERM_TABLES) {
+          const found = await rows(
+            tx,
+            sql<{ project: string }>`select distinct project_id::text as project
+                                       from ${sql.table(`app.${table}`)} order by 1`,
+          );
+          terms[table] = found.map((r) => r.project);
+        }
+        return { chunks: chunks.map((r) => r.body), terms };
+      });
+      expect(seen).toEqual({
+        chunks: [`protected ${label(t)}`, `public ${label(t)}`],
+        terms: {
+          published_project_term_totals: [t.project],
+          published_term_stats: [t.project],
+          published_chunk_terms: [t.project],
+        },
+      });
+    }
   });
 
   it('shows drefyn_app nothing without tenant context', async () => {

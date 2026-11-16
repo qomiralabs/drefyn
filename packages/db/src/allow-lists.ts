@@ -132,8 +132,7 @@ export const PUBLISHED_TABLES: readonly AllowEntry[] = [
   },
   {
     name: 'app.published_chunks',
-    reason:
-      'chunk copies of published versions, written by the publish transaction; protected rows are hidden from the public reader by a restrictive policy',
+    reason: 'chunk copies of published versions, written by the publish transaction',
   },
   {
     name: 'app.published_project_term_totals',
@@ -448,15 +447,6 @@ const PROJECT_ROLE_ACTOR =
   "(EXISTS ( SELECT\n   FROM app.memberships a\n  WHERE ((a.organization_id = project_roles.organization_id) AND (a.user_id = app.current_actor_id()) AND (a.role = ANY (ARRAY['owner'::text, 'admin'::text])))))";
 
 export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
-  {
-    name: 'app.published_chunks.published_public_only',
-    command: 'select',
-    roles: ['drefyn_public_reader'],
-    using: "(visibility = 'public'::text)",
-    withCheck: null,
-    reason:
-      "the public reader sees public chunks only; permissive policies are OR'd, so only a restrictive one can keep protected text out of retrieval and MCP",
-  },
   {
     name: 'app.api_keys.api_key_insert_creator',
     command: 'insert',

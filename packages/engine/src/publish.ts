@@ -334,11 +334,10 @@ export async function publishVersion(
   await writeVersion(tx, tenant, node.typeId, input, renderPolicyVersion);
   await writeFilterRow(tx, tenant, node.typeId, input, facts);
   if (chunks.copyChunks) {
-    // TODO(#383): copy the effective visibility once publish computes it; every page is public
-    // until a node can be protected.
+    // The same visibility as the version row, so a chunk is never more public than its page.
     const copy = await writePublishedChunks(tx, tenant, input.nodeId, {
       versionId: input.versionId,
-      visibility: 'public',
+      visibility: PUBLISHED_VISIBILITY,
     });
     chunks.copied?.(copy);
   }

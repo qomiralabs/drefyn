@@ -4,7 +4,8 @@
 -- The three term tables hold what BM25 needs (chunk count, total length, document frequency
 -- and per chunk term frequency) for public current chunks only, so ranking reads a bounded
 -- set of postings instead of every tsvector in a project, and no count can reveal a word that
--- appears only on a protected page.
+-- appears only on a protected page. Like every published table, each carries the public guard
+-- for the public reader and a protected_read policy for the protected reader.
 
 -- Up Migration
 -- array_to_string is only stable, so Postgres 18 refuses it in a generated column. Its output
@@ -69,6 +70,10 @@ create table app.published_project_term_totals (
   project_id uuid not null,
   -- Named docs versions add labels later without a type change.
   version_label text not null default 'latest' check (char_length(version_label) between 1 and 100),
+  -- Every published table carries the public guard. These hold public chunks only, so the
+  -- column can say nothing else; no default, so a write still has to name it.
+  visibility text not null
+    constraint published_project_term_totals_visibility_check check (visibility = 'public'),
   chunk_count integer not null check (chunk_count >= 0),
   -- Sum of chunk lengths in lexeme positions, the BM25 average length numerator.
   total_length bigint not null check (total_length >= 0),
@@ -83,6 +88,9 @@ create table app.published_term_stats (
   project_id uuid not null,
   version_label text not null default 'latest' check (char_length(version_label) between 1 and 100),
   lexeme text not null,
+  -- Public chunks only, as on the totals.
+  visibility text not null
+    constraint published_term_stats_visibility_check check (visibility = 'public'),
   -- A lexeme no public chunk holds has no row, rather than a zero.
   df integer not null check (df > 0),
   constraint published_term_stats_pkey
@@ -97,13 +105,17 @@ create table app.published_chunk_terms (
   version_label text not null default 'latest' check (char_length(version_label) between 1 and 100),
   lexeme text not null,
   chunk_id uuid not null,
+  -- Public chunks only, as on the totals.
+  visibility text not null
+    constraint published_chunk_terms_visibility_check check (visibility = 'public'),
   tf integer not null check (tf > 0),
   -- Copied so scoring never joins the chunk row.
   chunk_length integer not null check (chunk_length > 0),
   -- Covering, so scoring reads postings with index only scans and never visits the heap.
+  -- visibility is in it because the public reader's restrictive policy reads it on every row.
   constraint published_chunk_terms_pkey
     primary key (organization_id, project_id, version_label, lexeme, chunk_id)
-    include (tf, chunk_length),
+    include (tf, chunk_length, visibility),
   -- The only foreign key: a page writes thousands of postings, each key costs a check per row,
   -- and the chunk already ties the posting to its project.
   constraint published_chunk_terms_chunk_fkey foreign key (organization_id, project_id, chunk_id)
@@ -113,7 +125,7 @@ create table app.published_chunk_terms (
 -- Candidate generation reads a lexeme's postings highest term frequency first.
 create index published_chunk_terms_impact
   on app.published_chunk_terms (organization_id, project_id, version_label, lexeme, tf desc, chunk_id)
-  include (chunk_length);
+  include (chunk_length, visibility);
 
 -- Without it every chunk a retention delete removes would scan the postings for its cascade.
 create index published_chunk_terms_chunk
@@ -138,6 +150,8 @@ create policy published_read on app.published_chunks for select to drefyn_public
 -- Permissive policies are OR'd, so only a restrictive one can keep protected rows out.
 create policy published_public_only on app.published_chunks as restrictive
   for select to drefyn_public_reader using (visibility = 'public');
+create policy protected_read on app.published_chunks for select to drefyn_protected_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());
 
 alter table app.published_project_term_totals enable row level security;
 alter table app.published_project_term_totals force row level security;
@@ -147,6 +161,11 @@ create policy tenant_isolation on app.published_project_term_totals to drefyn_ap
 create policy published_read on app.published_project_term_totals for select
   to drefyn_public_reader
   using (organization_id = app.current_org() and project_id = app.current_project());
+create policy published_public_only on app.published_project_term_totals as restrictive
+  for select to drefyn_public_reader using (visibility = 'public');
+create policy protected_read on app.published_project_term_totals for select
+  to drefyn_protected_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());
 
 alter table app.published_term_stats enable row level security;
 alter table app.published_term_stats force row level security;
@@ -154,6 +173,10 @@ create policy tenant_isolation on app.published_term_stats to drefyn_app
   using (organization_id = app.current_org() and project_id = app.current_project())
   with check (organization_id = app.current_org() and project_id = app.current_project());
 create policy published_read on app.published_term_stats for select to drefyn_public_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());
+create policy published_public_only on app.published_term_stats as restrictive
+  for select to drefyn_public_reader using (visibility = 'public');
+create policy protected_read on app.published_term_stats for select to drefyn_protected_reader
   using (organization_id = app.current_org() and project_id = app.current_project());
 
 alter table app.published_chunk_terms enable row level security;
@@ -163,13 +186,19 @@ create policy tenant_isolation on app.published_chunk_terms to drefyn_app
   with check (organization_id = app.current_org() and project_id = app.current_project());
 create policy published_read on app.published_chunk_terms for select to drefyn_public_reader
   using (organization_id = app.current_org() and project_id = app.current_project());
+create policy published_public_only on app.published_chunk_terms as restrictive
+  for select to drefyn_public_reader using (visibility = 'public');
+create policy protected_read on app.published_chunk_terms for select to drefyn_protected_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());
 
 grant select on app.published_chunks, app.published_project_term_totals,
-  app.published_term_stats, app.published_chunk_terms to drefyn_public_reader;
+  app.published_term_stats, app.published_chunk_terms
+  to drefyn_public_reader, drefyn_protected_reader;
 
 -- Down Migration
 revoke select on app.published_chunks, app.published_project_term_totals,
-  app.published_term_stats, app.published_chunk_terms from drefyn_public_reader;
+  app.published_term_stats, app.published_chunk_terms
+  from drefyn_public_reader, drefyn_protected_reader;
 
 drop table app.published_chunk_terms;
 

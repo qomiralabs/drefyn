@@ -737,7 +737,7 @@ describe('restrictive policies', () => {
     expect(ALLOW_LISTS.restrictivePolicies).toBe(RESTRICTIVE_POLICIES);
   });
 
-  it('list the insert and update guards, for drefyn_app, and the public chunk guard, with their exact text', () => {
+  it('list the insert and update guards, for drefyn_app, with their exact text', () => {
     expect(
       RESTRICTIVE_POLICIES.map(({ name, command, roles, using, withCheck }) => ({
         name,
@@ -747,13 +747,6 @@ describe('restrictive policies', () => {
         withCheck,
       })),
     ).toEqual([
-      {
-        name: 'app.published_chunks.published_public_only',
-        command: 'select',
-        roles: ['drefyn_public_reader'],
-        using: "(visibility = 'public'::text)",
-        withCheck: null,
-      },
       {
         name: 'app.api_keys.api_key_insert_creator',
         command: 'insert',

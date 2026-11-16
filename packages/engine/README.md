@@ -319,7 +319,9 @@ The same transaction keeps three ranking tables equal to the public current chun
 `published_project_term_totals` (chunk count and total length), `published_term_stats` (document
 frequency per lexeme) and `published_chunk_terms` (term frequency per lexeme and chunk). Only
 public current chunks have rows there, so tightening a page removes its postings in the
-transaction that flips it, and a word on a protected page never shows up in a count. Publishes
+transaction that flips it, and a word on a protected page never shows up in a count. Each of the
+three has a `visibility` column the database holds to `'public'`, so it carries the same public
+guard as every published table. Publishes
 that move public chunks in one project queue on a transaction lock, then apply the change in one
 statement, upserts in lexeme order. A chunk that stays public and current keeps its postings.
 The log line carries chunk, posting and lexeme counts, never text or lexemes.

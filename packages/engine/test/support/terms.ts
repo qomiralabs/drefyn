@@ -104,9 +104,9 @@ export async function writeVersionRow(
   if (versionId === null) return;
   await sql`
     insert into app.published_versions (organization_id, project_id, node_id, version_id, type_id,
-        content, fields, is_current, render_policy_version)
+        content, fields, is_current, render_policy_version, visibility)
     select v.organization_id, v.project_id, v.node_id, v.id, ${typeId}::uuid, v.content, v.fields,
-           true, 1
+           true, 1, 'public'
       from app.node_versions v
      where v.organization_id = ${tenant.organizationId}::uuid
        and v.project_id = ${tenant.projectId}::uuid and v.id = ${versionId}::uuid

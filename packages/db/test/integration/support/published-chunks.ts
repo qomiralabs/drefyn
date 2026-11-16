@@ -52,13 +52,13 @@ ${publishedVersionSql(t)}`,
   ].join('\n');
 }
 
-// Written in the columns every published_versions shape has, plus visibility once a migration
-// adds it.
+// The published chunks migration runs after the visibility one, so the column is always there.
 export function publishedVersionSql(t: SeedTenant): string {
   return `
 insert into app.published_versions (organization_id, project_id, node_id, version_id, type_id,
-    content, is_current, render_policy_version)
-  values ('${t.org}', '${t.project}', '${t.node}', '${t.version}', '${t.type}', '{}', true, 1);`;
+    content, is_current, render_policy_version, visibility)
+  values ('${t.org}', '${t.project}', '${t.node}', '${t.version}', '${t.type}', '{}', true, 1,
+    'public');`;
 }
 
 export interface ChunkSeed {

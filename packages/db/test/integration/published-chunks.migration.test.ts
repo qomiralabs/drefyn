@@ -55,7 +55,7 @@ const grants = (db: TestDatabase) =>
     `select grantee || ' ' || table_name || ' ' || privilege_type
        from information_schema.role_table_grants
       where table_schema = 'app' and table_name in (${TABLES.map((t) => `'${t}'`).join(', ')})
-        and grantee in ('drefyn_public_reader', 'drefyn_app')
+        and grantee in ('drefyn_public_reader', 'drefyn_protected_reader', 'drefyn_app')
       order by grantee, table_name, privilege_type;`,
     db.name,
   ).then(lines);
@@ -111,13 +111,15 @@ describeWithStack('the published chunks migration', () => {
     expect(stored.trim()).toBe('s');
   });
 
-  it('creates the three term tables keyed by version label', async () => {
+  it('creates the three term tables keyed by version label, each with a visibility to name', async () => {
     const db = await dbs.fresh('migrated');
     const label = "version_label text NO 'latest'::text NEVER";
+    const visibility = 'visibility text NO - NEVER';
     expect(await columns(db, 'published_project_term_totals')).toEqual([
       'organization_id uuid NO - NEVER',
       'project_id uuid NO - NEVER',
       label,
+      visibility,
       'chunk_count integer NO - NEVER',
       'total_length bigint NO - NEVER',
     ]);
@@ -126,6 +128,7 @@ describeWithStack('the published chunks migration', () => {
       'project_id uuid NO - NEVER',
       label,
       'lexeme text NO - NEVER',
+      visibility,
       'df integer NO - NEVER',
     ]);
     expect(await columns(db, 'published_chunk_terms')).toEqual([
@@ -134,6 +137,7 @@ describeWithStack('the published chunks migration', () => {
       label,
       'lexeme text NO - NEVER',
       'chunk_id uuid NO - NEVER',
+      visibility,
       'tf integer NO - NEVER',
       'chunk_length integer NO - NEVER',
     ]);
@@ -143,8 +147,8 @@ describeWithStack('the published chunks migration', () => {
     const db = await dbs.fresh('migrated');
     expect(await indexes(db)).toEqual([
       'CREATE INDEX published_chunk_terms_chunk ON app.published_chunk_terms USING btree (organization_id, project_id, chunk_id)',
-      'CREATE INDEX published_chunk_terms_impact ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, tf DESC, chunk_id) INCLUDE (chunk_length)',
-      'CREATE UNIQUE INDEX published_chunk_terms_pkey ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, chunk_id) INCLUDE (tf, chunk_length)',
+      'CREATE INDEX published_chunk_terms_impact ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, tf DESC, chunk_id) INCLUDE (chunk_length, visibility)',
+      'CREATE UNIQUE INDEX published_chunk_terms_pkey ON app.published_chunk_terms USING btree (organization_id, project_id, version_label, lexeme, chunk_id) INCLUDE (tf, chunk_length, visibility)',
       'CREATE INDEX published_chunks_current ON app.published_chunks USING btree (organization_id, project_id, page_path, ord) WHERE is_current',
       'CREATE INDEX published_chunks_hash ON app.published_chunks USING btree (organization_id, project_id, body_sha256)',
       'CREATE INDEX published_chunks_node ON app.published_chunks USING btree (organization_id, project_id, node_id) WHERE is_current',
@@ -168,7 +172,7 @@ describeWithStack('the published chunks migration', () => {
     ]);
   });
 
-  it('forces RLS, grants the reader select only, and keeps protected chunks behind a restrictive policy', async () => {
+  it('forces RLS, grants both readers select only, and keeps protected rows behind a restrictive policy', async () => {
     const db = await dbs.fresh('migrated');
     const forced = await superuser(
       `select relname || ' ' || relrowsecurity || ' ' || relforcerowsecurity from pg_class
@@ -180,20 +184,17 @@ describeWithStack('the published chunks migration', () => {
     const tenant =
       '((organization_id = app.current_org()) AND (project_id = app.current_project()))';
     const standard = (table: string) => [
+      `${table} protected_read PERMISSIVE SELECT drefyn_protected_reader ${tenant} -`,
+      `${table} published_public_only RESTRICTIVE SELECT drefyn_public_reader (visibility = 'public'::text) -`,
       `${table} published_read PERMISSIVE SELECT drefyn_public_reader ${tenant} -`,
       `${table} tenant_isolation PERMISSIVE ALL drefyn_app ${tenant} ${tenant}`,
     ];
-    expect(await policies(db)).toEqual([
-      ...standard('published_chunk_terms'),
-      `published_chunks published_public_only RESTRICTIVE SELECT drefyn_public_reader (visibility = 'public'::text) -`,
-      ...standard('published_chunks'),
-      ...standard('published_project_term_totals'),
-      ...standard('published_term_stats'),
-    ]);
+    expect(await policies(db)).toEqual(TABLES.flatMap(standard));
     expect(await grants(db)).toEqual([
       ...TABLES.flatMap((t) =>
         ['DELETE', 'INSERT', 'SELECT', 'UPDATE'].map((p) => `drefyn_app ${t} ${p}`),
       ),
+      ...TABLES.map((t) => `drefyn_protected_reader ${t} SELECT`),
       ...TABLES.map((t) => `drefyn_public_reader ${t} SELECT`),
     ]);
     expect(await catalogProblems(db.owner, ALLOW_LISTS)).toEqual([]);
@@ -275,8 +276,9 @@ describeWithStack('the published chunks migration', () => {
     await seed(
       db.name,
       `${chunkSql(TENANT, { ord: 0, headingPath: [], body: 'one two', visibility: 'public' })}
-insert into app.published_chunk_terms (organization_id, project_id, lexeme, chunk_id, tf, chunk_length)
-  select organization_id, project_id, 'one', id, 1, 2 from app.published_chunks;
+insert into app.published_chunk_terms (organization_id, project_id, lexeme, chunk_id, tf, chunk_length,
+    visibility)
+  select organization_id, project_id, 'one', id, 1, 2, 'public' from app.published_chunks;
 delete from app.published_versions;`,
     );
     const left = await superuser(
@@ -292,8 +294,8 @@ delete from app.published_versions;`,
     await seed(db.name, seedTenantsSql([TENANT]));
     await expect(
       superuser(
-        `insert into app.published_term_stats (organization_id, project_id, lexeme, df)
-           values ('${TENANT.org}', '${TENANT.project}', 'x', 0);`,
+        `insert into app.published_term_stats (organization_id, project_id, lexeme, df, visibility)
+           values ('${TENANT.org}', '${TENANT.project}', 'x', 0, 'public');`,
         db.name,
       ),
     ).rejects.toThrow(/published_term_stats_df_check/);
@@ -319,6 +321,40 @@ delete from app.published_versions;`,
     ).rejects.toThrow(/visibility/);
   });
 
+  it('refuses a protected or missing visibility on every term table', async () => {
+    const db = await dbs.fresh('migrated');
+    await seed(
+      db.name,
+      [
+        seedTenantsSql([TENANT]),
+        chunkSql(TENANT, { ord: 0, headingPath: [], body: 'x', visibility: 'public' }),
+      ].join('\n'),
+    );
+    const rowsFor = (visibility: string) => {
+      const column = visibility === '' ? '' : ', visibility';
+      const value = visibility === '' ? '' : `, '${visibility}'`;
+      const tenant = `'${TENANT.org}', '${TENANT.project}'`;
+      return {
+        published_project_term_totals: `insert into app.published_project_term_totals
+          (organization_id, project_id, chunk_count, total_length${column})
+          values (${tenant}, 1, 1${value});`,
+        published_term_stats: `insert into app.published_term_stats
+          (organization_id, project_id, lexeme, df${column}) values (${tenant}, 'x', 1${value});`,
+        published_chunk_terms: `insert into app.published_chunk_terms
+          (organization_id, project_id, lexeme, chunk_id, tf, chunk_length${column})
+          select ${tenant}, 'x', id, 1, 1${value} from app.published_chunks;`,
+      };
+    };
+    for (const [table, statement] of Object.entries(rowsFor('protected'))) {
+      await expect(superuser(statement, db.name)).rejects.toThrow(
+        new RegExp(`${table}_visibility_check`),
+      );
+    }
+    for (const statement of Object.values(rowsFor(''))) {
+      await expect(superuser(statement, db.name)).rejects.toThrow(/visibility/);
+    }
+  });
+
   it('reverts cleanly and applies again', async () => {
     const db = await dbs.fresh('migrated');
     await step(db, ['migrate', 'down', String(stepsBack())]);
@@ -331,7 +367,8 @@ delete from app.published_versions;`,
     expect(left.trim()).toBe('0 0');
     expect(await grants(db)).toEqual([]);
     await step(db, ['migrate', 'up']);
-    expect(await grants(db)).toHaveLength(TABLES.length * 5);
+    // Four for the app role and one for each reader.
+    expect(await grants(db)).toHaveLength(TABLES.length * 6);
     expect(await catalogProblems(db.owner, ALLOW_LISTS)).toEqual([]);
   });
 });

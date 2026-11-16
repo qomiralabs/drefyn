@@ -402,6 +402,7 @@ export interface PublishedChunkTermsTable {
   version_label: Generated<string>;
   lexeme: string;
   chunk_id: string;
+  visibility: string;
   tf: number;
   chunk_length: number;
 }
@@ -455,6 +456,7 @@ export interface PublishedProjectTermTotalsTable {
   organization_id: string;
   project_id: string;
   version_label: Generated<string>;
+  visibility: string;
   chunk_count: number;
   total_length: number;
 }
@@ -465,6 +467,7 @@ export interface PublishedTermStatsTable {
   project_id: string;
   version_label: Generated<string>;
   lexeme: string;
+  visibility: string;
   df: number;
 }
 
