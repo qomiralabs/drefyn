@@ -11,6 +11,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/db/package.json packages/db/
 COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/flags/package.json packages/flags/
+COPY packages/seal/package.json packages/seal/
 COPY packages/tenancy/package.json packages/tenancy/
 RUN corepack enable \
   && pnpm install --frozen-lockfile --prod --ignore-scripts --filter '@drefyn/api...'
@@ -37,6 +38,8 @@ COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/entitlements/src packages/entitlements/src
 COPY packages/flags/package.json packages/flags/
 COPY packages/flags/src packages/flags/src
+COPY packages/seal/package.json packages/seal/
+COPY packages/seal/src packages/seal/src
 COPY packages/tenancy/package.json packages/tenancy/
 COPY packages/tenancy/src packages/tenancy/src
 COPY deploy/api/entrypoint.sh deploy/api/entrypoint.sh

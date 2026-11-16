@@ -6,6 +6,7 @@ import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import type { BrowserContext } from './cookies.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
+import { hasConfirmedFactor, lockFactor } from './factor-rows.ts';
 import { lengthPrefixed, sha256 } from './keys.ts';
 import type { LinkProvider } from './oauth-types.ts';
 import { PASSWORD_RAW_MAX_BYTES } from './password-input.ts';
@@ -22,6 +23,14 @@ import {
   type StepUpMethod,
 } from './session-support.ts';
 import { formatChallengeId, formatVerifyFragment, parseChallengeId, parseCode } from './tokens.ts';
+import type { FactorKind } from './totp.ts';
+import type { Transaction } from 'kysely';
+import type { UserSchema } from '@drefyn/db';
+
+// Every way to step up but the factor itself. Once a person has a factor, none of these
+// counts: a stolen cookie plus a phished password or a read mailbox must not reach what a
+// step up guards.
+export type OtherStepUpMethod = Exclude<StepUpMethod, FactorKind>;
 
 export type SignInCodePurpose =
   'sign_in' | 'link_identity' | 'step_up' | 'password_reset' | 'email_change';
@@ -113,27 +122,51 @@ export async function checkRecentAuth(
   }
 }
 
-// Refreshes authenticated_at on the same session and records how it was proved. Only
-// for code in this package that has just proved a step up; never exported.
+// Refreshes authenticated_at on the same session and records how it was proved, inside a
+// transaction the caller holds. Only for code in this package that has just proved a step
+// up; never exported from it.
+export async function markStepUp(
+  tx: Transaction<UserSchema>,
+  s: SessionInfo,
+  method: StepUpMethod,
+): Promise<SessionInfo> {
+  const row = await tx
+    .updateTable('sessions')
+    .set({ authenticated_at: sql<Date>`now()`, step_up_method: method })
+    .where('id', '=', s.sessionId)
+    .where('user_id', '=', sql<string>`app.current_user_id()`)
+    .where('expires_at', '>', sql<Date>`now()`)
+    .returning('authenticated_at')
+    .executeTakeFirst();
+  if (row === undefined) throw new AuthError('AUTH_SESSION_INVALID');
+  return { ...s, authenticatedAt: row.authenticated_at, stepUpMethod: method };
+}
+
+// Records a step up by anything but the factor. The factor is read again under the shared
+// lock in the same transaction, so a step up begun before an enrolment cannot finish after
+// it.
 export async function recordStepUp(
   store: SessionStore,
   s: SessionInfo,
-  method: StepUpMethod,
+  method: OtherStepUpMethod,
   logger: AuthLogger,
 ): Promise<SessionInfo> {
-  const row = await store.user(s.userId, (tx) =>
-    tx
-      .updateTable('sessions')
-      .set({ authenticated_at: sql<Date>`now()`, step_up_method: method })
-      .where('id', '=', s.sessionId)
-      .where('user_id', '=', sql<string>`app.current_user_id()`)
-      .where('expires_at', '>', sql<Date>`now()`)
-      .returning('authenticated_at')
-      .executeTakeFirst(),
-  );
-  if (row === undefined) throw new AuthError('AUTH_SESSION_INVALID');
+  const stepped = await store.user(s.userId, async (tx) => {
+    await lockFactor(tx, s.userId, 'shared');
+    if (await hasConfirmedFactor(tx)) throw new AuthError('AUTH_FACTOR_REQUIRED');
+    return markStepUp(tx, s, method);
+  });
   quietInfo(logger, 'auth.step_up_passed', { method, ...stepUpIds(s) });
-  return { ...s, authenticatedAt: row.authenticated_at, stepUpMethod: method };
+  return stepped;
+}
+
+// The same refusal at the start of a step up, before anything is counted or mailed. A read
+// with no lock: the record above is what holds the line.
+export async function refuseOnceEnrolled(
+  store: Pick<SessionStore, 'user'>,
+  s: Pick<SessionInfo, 'userId'>,
+): Promise<void> {
+  if (await store.user(s.userId, hasConfirmedFactor)) throw new AuthError('AUTH_FACTOR_REQUIRED');
 }
 
 // After a takeover this is what shows who passed the check and who tried. Ids and codes only.
@@ -151,7 +184,7 @@ export function logStepUpFailed(
 
 export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
   const { store, limiter } = deps;
-  const mark = (s: SessionInfo, method: StepUpMethod) =>
+  const mark = (s: SessionInfo, method: OtherStepUpMethod) =>
     recordStepUp(store, s, method, deps.logger);
   const refused = <T>(s: SessionInfo, method: StepUpMethod, error: unknown) => {
     const result = fail<T>(error);
@@ -171,6 +204,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         if (Buffer.byteLength(input.password, 'utf8') > PASSWORD_RAW_MAX_BYTES) {
           throw new AuthError('AUTH_INPUT_INVALID');
         }
+        await refuseOnceEnrolled(store, s);
         const ipKey = rateKeyForIp(b.ip);
         // Counted before the hash and committed whatever follows, right or wrong.
         await limiter.reserve('password_fail', [address(s)]);
@@ -201,6 +235,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
       try {
         const mailer = deps.mailer;
         if (mailer === undefined) throw new AuthError('AUTH_UNAVAILABLE');
+        await refuseOnceEnrolled(store, s);
         const to = address(s);
         const ipKey = rateKeyForIp(b.ip);
         await limiter.reserve('email_send', [to, ipKey]);
@@ -257,6 +292,7 @@ export function stepUps(config: AuthConfig, deps: StepUpDeps): StepUps {
         return refused(s, 'email', new AuthError('AUTH_CODE_INVALID'));
       }
       try {
+        await refuseOnceEnrolled(store, s);
         const binding = bindingOf(s);
         await limiter.reserve('code_verify', [address(s), binding]);
         const proved = await store.auth(async (tx) => {

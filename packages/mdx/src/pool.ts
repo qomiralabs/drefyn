@@ -26,6 +26,7 @@ export interface ParseRequest {
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
   readonly priority?: ParsePriority;
+  readonly reader?: boolean;
 }
 
 export interface PrintRequest {
@@ -36,6 +37,7 @@ export interface PrintRequest {
   readonly tree: string;
   readonly policy: IsolatedPolicy;
   readonly priority?: ParsePriority;
+  readonly reader?: boolean;
 }
 
 export interface MergeRequest {
@@ -146,6 +148,9 @@ function withHostTimes(result: JobResult, waitedMs: number, threadMs: number): J
   if (!checked.success) return { ...result, value };
   return { ...result, value: { ...value, timing: { ...checked.data, waitedMs, threadMs } } };
 }
+
+// Only a request that asks pays for a render.
+const readerOf = ({ reader }: { readonly reader?: boolean }) => (reader === true ? { reader } : {});
 
 export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): ParsePool {
   const settings = poolConfigSchema.parse(config);
@@ -476,7 +481,7 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     const base = { organizationId, projectId, path, bytes };
     // Before the queue, so its length also bounds the bytes it can hold.
     if (bytes > policy.limits.maxBytes) return instant('mdx.too_large', base);
-    const job = { source, dialect, policy };
+    const job = { source, dialect, policy, ...readerOf(request) };
     return (await enqueue(job, source, tenant, base, request.priority)) as ParseResult;
   };
 
@@ -488,7 +493,8 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     const bytes = Buffer.byteLength(tree, 'utf8');
     const base = { organizationId, projectId, path, bytes };
     if (bytes > maxTreeBytes(policy.limits.maxBytes)) return instant('mdx.too_large', base);
-    return (await enqueue({ tree, policy }, tree, tenant, base, request.priority)) as PrintResult;
+    const job = { tree, policy, ...readerOf(request) };
+    return (await enqueue(job, tree, tenant, base, request.priority)) as PrintResult;
   };
 
   const merge = async (request: MergeRequest): Promise<MergeAnswer> => {

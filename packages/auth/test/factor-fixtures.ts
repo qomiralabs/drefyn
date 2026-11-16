@@ -31,6 +31,8 @@ export const PRE = Buffer.alloc(32, 6);
 export const STEP = 59_000_000;
 
 export const codeAt = (step: number) => totpCode(TOTP_SECRET, step);
+// Database time as the credential read reports it.
+export const FACTOR_NOW = new Date('2026-11-16T10:00:00.000Z');
 export const RECOVERY = newRecoveryCodes(USER);
 
 export function sealedRow(config: AuthConfig = factorConfig, user: UserId = USER) {
@@ -99,6 +101,7 @@ export function credentialRow(shape: CredentialShape = {}): Record<string, unkno
     failed_attempts: shape.failed ?? 0,
     confirmed: shape.confirmed ?? true,
     step: STEP,
+    now: FACTOR_NOW,
   };
 }
 

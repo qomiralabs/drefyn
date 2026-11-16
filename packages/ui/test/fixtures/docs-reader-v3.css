@@ -1,0 +1,43 @@
+/* The approved v3 reader palette, copied as it was signed off. The docs token family must
+   emit these values exactly; edit only when the owner approves a new palette. */
+:root {
+  --dr-surface-ground: #ECEEFB; --dr-surface-raised: #F8F9FE; --dr-surface-sunken: #E3E6F6; --dr-surface-hover: #E3E6F6; --dr-surface-overlay: #F8F9FE;
+  --dr-border-rule: #D4D7E8; --dr-border-rule-strong: #C2C6DC; --dr-border-control: #7D8196;
+  --dr-text-ink: #1C1E2B; --dr-text-body: #2E3040; --dr-text-secondary: #565A69; --dr-text-subtle: #565A69;
+  --dr-accent-ink: #5D5294; --dr-accent-press: #4A4178; --dr-accent-on: #FFFFFF; --dr-accent-wash: rgb(93 82 148 / 0.12);
+  --dr-focus-ring: #5D5294; --dr-overlay-scrim: rgb(28 30 43 / 0.32); --dr-skeleton-fill: #D4D7E8;
+  --dr-state-fresh-text: #116B3A; --dr-state-stale-text: #8F4A08; --dr-state-broken-text: #A61B1B; --dr-state-neutral-text: #565A69;
+  --dr-shadow-1: 0 1px 2px rgb(28 30 43 / 0.08), 0 12px 32px rgb(28 30 43 / 0.14); --dr-shadow-2: 0 24px 64px rgb(28 30 43 / 0.24);
+  --dr-docs-bar: 3.5rem; --dr-docs-side: 16rem; --dr-docs-right: 27rem; --dr-docs-toc: 14rem; --dr-docs-article: 46rem; --dr-docs-modal: 34rem; --dr-docs-console: 76rem; --dr-docs-console-h: 48rem; --dr-docs-pop: 22rem;
+  --dr-docs-r-card: 0.5rem; --dr-docs-r-frame: 0.75rem;
+  --dr-card: #F8F9FE; --dr-code-bg: #F8F9FE; --dr-code-text: #2E3040; --dr-code-key: #1D4ED8; --dr-code-str: #A61B1B; --dr-code-num: #116B3A; --dr-code-kw: #6D28D9; --dr-code-com: #565A69; --dr-code-flag: #1D4ED8; --dr-code-hit: rgb(93 82 148 / 0.14);
+  --dr-m-get: #116B3A; --dr-m-get-bg: #CFEBDB; --dr-m-post: #1D4ED8; --dr-m-post-bg: #D6E2FB; --dr-m-patch: #8F4A08; --dr-m-patch-bg: #F6E0C4; --dr-m-del: #A61B1B; --dr-m-del-bg: #F7D5D5; --dr-m-gql: #5D5294; --dr-m-gql-bg: #E1DDF6; --dr-on-fill: #FFFFFF;
+  --dr-req: #A61B1B; --dr-req-bg: #F7D5D5; --dr-name-bg: #F8F9FE;
+  --dr-info-bg: rgb(93 82 148 / 0.1); --dr-stale-bg: rgb(245 158 11 / 0.14);
+  --dr-font-cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  --dr-font-arabic: "SF Arabic", "Geeza Pro", "Segoe UI", "Noto Sans Arabic", "Noto Naskh Arabic", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --dr-dark: 1;
+  --dr-surface-ground: #161826; --dr-surface-raised: #1D1F2E; --dr-surface-sunken: #232532; --dr-surface-hover: #2A2C3B; --dr-surface-overlay: #232532;
+  --dr-border-rule: #2F3142; --dr-border-rule-strong: #3F424F; --dr-border-control: #7B7F93;
+  --dr-text-ink: #E9E9ED; --dr-text-body: #CFD1DC; --dr-text-secondary: #A4A7BA; --dr-text-subtle: #A4A7BA;
+  --dr-accent-ink: #B5ABFC; --dr-accent-press: #D2CEFD; --dr-accent-on: #12121A; --dr-accent-wash: rgb(181 171 252 / 0.14);
+  --dr-focus-ring: #B5ABFC; --dr-overlay-scrim: rgb(5 6 12 / 0.6); --dr-skeleton-fill: #2F3142;
+  --dr-state-fresh-text: #7DE3AB; --dr-state-stale-text: #FBBF24; --dr-state-broken-text: #FFB4B4; --dr-state-neutral-text: #A4A7BA;
+  --dr-shadow-1: 0 12px 32px rgb(0 0 0 / 0.4); --dr-shadow-2: 0 24px 64px rgb(0 0 0 / 0.55);
+  --dr-card: #232532; --dr-code-bg: #1D1F2E; --dr-code-text: #E9E9ED; --dr-code-key: #93C5FD; --dr-code-str: #F2B38A; --dr-code-num: #7DE3AB; --dr-code-kw: #C9B8FF; --dr-code-com: #A4A7BA; --dr-code-flag: #93C5FD; --dr-code-hit: rgb(181 171 252 / 0.16);
+  --dr-m-get: #7DE3AB; --dr-m-get-bg: #17382A; --dr-m-post: #A8C7FF; --dr-m-post-bg: #1E2F57; --dr-m-patch: #FBC770; --dr-m-patch-bg: #443113; --dr-m-del: #FFB4B4; --dr-m-del-bg: #4A2228; --dr-m-gql: #C9B8FF; --dr-m-gql-bg: #2F2A55; --dr-on-fill: #12121A;
+  --dr-req: #FFB4B4; --dr-req-bg: #3F2229; --dr-name-bg: #232532; --dr-info-bg: rgb(181 171 252 / 0.1); --dr-stale-bg: rgb(251 191 36 / 0.1);
+} }
+:root[data-theme="dark"] {
+  --dr-surface-ground: #161826; --dr-surface-raised: #1D1F2E; --dr-surface-sunken: #232532; --dr-surface-hover: #2A2C3B; --dr-surface-overlay: #232532;
+  --dr-border-rule: #2F3142; --dr-border-rule-strong: #3F424F; --dr-border-control: #7B7F93;
+  --dr-text-ink: #E9E9ED; --dr-text-body: #CFD1DC; --dr-text-secondary: #A4A7BA; --dr-text-subtle: #A4A7BA;
+  --dr-accent-ink: #B5ABFC; --dr-accent-press: #D2CEFD; --dr-accent-on: #12121A; --dr-accent-wash: rgb(181 171 252 / 0.14);
+  --dr-focus-ring: #B5ABFC; --dr-overlay-scrim: rgb(5 6 12 / 0.6); --dr-skeleton-fill: #2F3142;
+  --dr-state-fresh-text: #7DE3AB; --dr-state-stale-text: #FBBF24; --dr-state-broken-text: #FFB4B4; --dr-state-neutral-text: #A4A7BA;
+  --dr-shadow-1: 0 12px 32px rgb(0 0 0 / 0.4); --dr-shadow-2: 0 24px 64px rgb(0 0 0 / 0.55);
+  --dr-card: #232532; --dr-code-bg: #1D1F2E; --dr-code-text: #E9E9ED; --dr-code-key: #93C5FD; --dr-code-str: #F2B38A; --dr-code-num: #7DE3AB; --dr-code-kw: #C9B8FF; --dr-code-com: #A4A7BA; --dr-code-flag: #93C5FD; --dr-code-hit: rgb(181 171 252 / 0.16);
+  --dr-m-get: #7DE3AB; --dr-m-get-bg: #17382A; --dr-m-post: #A8C7FF; --dr-m-post-bg: #1E2F57; --dr-m-patch: #FBC770; --dr-m-patch-bg: #443113; --dr-m-del: #FFB4B4; --dr-m-del-bg: #4A2228; --dr-m-gql: #C9B8FF; --dr-m-gql-bg: #2F2A55; --dr-on-fill: #12121A;
+  --dr-req: #FFB4B4; --dr-req-bg: #3F2229; --dr-name-bg: #232532; --dr-info-bg: rgb(181 171 252 / 0.1); --dr-stale-bg: rgb(251 191 36 / 0.1);
+}

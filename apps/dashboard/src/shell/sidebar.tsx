@@ -3,10 +3,10 @@ import { IconCross, IconPage, IconPulse, IconSchema, useLandmark } from '@drefyn
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Component,
   createContext,
   useContext,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -69,43 +69,10 @@ const onTablet = () => window.matchMedia(TABLET).matches;
 type Tip = ComponentType<RailTipProps>;
 const TipContext = createContext<Tip | null>(null);
 
-// Each rail link in order, the same before and after the tooltips wrap them.
-const railLinks = (nav: HTMLElement | null) => [
-  ...(nav?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []),
-];
-
-function useRailTip(rail: boolean, nav: RefObject<HTMLElement | null>): Tip | null {
+function useRailTip(rail: boolean): Tip | null {
   const [tip, setTip] = useState<Tip | null>(null);
-  // The loaded tooltips wrap every link anew, so a link that holds focus when they render
-  // is replaced and focus falls to the page. Focus can reach a link at any point before
-  // that render, even after the code has arrived, so the rail keeps note of its focused
-  // link the whole time rather than looking once.
-  const held = useRef<{ link: HTMLAnchorElement; index: number } | null>(null);
   useEffect(() => {
-    const el = nav.current;
-    if (!rail || tip !== null || el === null) return;
-    const note = (target: EventTarget | null) => {
-      held.current =
-        target instanceof HTMLAnchorElement && el.contains(target)
-          ? { link: target, index: railLinks(el).indexOf(target) }
-          : null;
-    };
-    const onFocusIn = (event: FocusEvent) => {
-      note(event.target);
-    };
-    // Focus a person moved off the link is gone for good. Some engines say so for a link
-    // being replaced too, while it is still in the page, so the note is dropped only once
-    // that render is done and the link turns out to have stayed.
-    const onFocusOut = (event: FocusEvent) => {
-      const seen = held.current;
-      if (seen?.link !== event.target) return;
-      queueMicrotask(() => {
-        if (held.current === seen && seen.link.isConnected) held.current = null;
-      });
-    };
-    note(document.activeElement);
-    el.addEventListener('focusin', onFocusIn);
-    el.addEventListener('focusout', onFocusOut);
+    if (!rail || tip !== null) return;
     let live = true;
     import('./rail-tip.tsx')
       .then((mod) => {
@@ -114,21 +81,54 @@ function useRailTip(rail: boolean, nav: RefObject<HTMLElement | null>): Tip | nu
       .catch(() => undefined);
     return () => {
       live = false;
-      el.removeEventListener('focusin', onFocusIn);
-      el.removeEventListener('focusout', onFocusOut);
     };
-  }, [rail, tip, nav]);
-  useLayoutEffect(() => {
-    const seen = held.current;
-    if (tip === null || seen === null) return;
-    held.current = null;
-    // Only a link this render took out of the page while it held focus goes back.
-    if (seen.link.isConnected) return;
+  }, [rail, tip]);
+  return tip;
+}
+
+// Every link in the nav in page order. Wrapping them in tooltips keeps that order.
+const navLinks = (nav: HTMLElement | null): HTMLAnchorElement[] => [
+  ...(nav?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []),
+];
+
+interface HeldLink {
+  readonly index: number;
+  readonly href: string | null;
+}
+
+interface KeepFocusProps {
+  nav: RefObject<HTMLElement | null>;
+  tip: Tip | null;
+  children: ReactNode;
+}
+
+// The loaded tooltips wrap every link anew, so a link that holds focus in the commit that
+// brings them is replaced and focus falls to the page. Focus can reach a link at any moment
+// up to that commit, even while React renders it, so anything that watches for focus ahead
+// of time leaves a gap. A snapshot is read inside the commit, before React touches the page,
+// which is the one moment that sees the link that is about to go. Only a class has that hook.
+// The place is kept by position, since the hidden drawer repeats some hrefs ahead of the rail,
+// and the href confirms it is the same link.
+class KeepRailFocus extends Component<KeepFocusProps> {
+  override getSnapshotBeforeUpdate(before: KeepFocusProps): HeldLink | null {
+    if (before.tip === this.props.tip) return null;
+    const active = document.activeElement;
+    if (!(active instanceof HTMLAnchorElement)) return null;
+    const index = navLinks(this.props.nav.current).indexOf(active);
+    return index === -1 ? null : { index, href: active.getAttribute('href') };
+  }
+
+  override componentDidUpdate(_before: KeepFocusProps, _state: unknown, held: HeldLink | null) {
+    if (held === null) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
-    railLinks(nav.current)[seen.index]?.focus();
-  }, [tip, nav]);
-  return tip;
+    const link = navLinks(this.props.nav.current)[held.index];
+    if (link?.getAttribute('href') === held.href) link.focus();
+  }
+
+  override render(): ReactNode {
+    return this.props.children;
+  }
 }
 
 function RailTip(props: RailTipProps): ReactNode {
@@ -218,7 +218,7 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
   const phone = useSyncExternalStore(onPhoneChange, onPhone, () => false);
   const tablet = useSyncExternalStore(onTabletChange, onTablet, () => false);
   const cockpit = useIncident().view === 'cockpit';
-  const tip = useRailTip(tablet || cockpit, navRef);
+  const tip = useRailTip(tablet || cockpit);
   const landmark = useLandmark(navRef, {
     role: 'navigation',
     label,
@@ -258,125 +258,135 @@ export function Sidebar({ data }: { data: ShellData }): ReactNode {
 
   return (
     <TipContext value={tip}>
-      {drawerOpen ? (
-        <div
-          aria-hidden="true"
-          onClick={() => {
-            setDrawerOpen(false);
-          }}
-          className="fixed inset-0 z-overlay animate-fade-in bg-overlay-scrim sm:hidden"
-        />
-      ) : null}
-      {/* The column carries the hairline, so it runs the full height of a long page while the
+      <KeepRailFocus nav={navRef} tip={tip}>
+        {drawerOpen ? (
+          <div
+            aria-hidden="true"
+            onClick={() => {
+              setDrawerOpen(false);
+            }}
+            className="fixed inset-0 z-overlay animate-fade-in bg-overlay-scrim sm:hidden"
+          />
+        ) : null}
+        {/* The column carries the hairline, so it runs the full height of a long page while the
           nav inside stays under the bar. On phones the column steps aside for the drawer. */}
-      <div className="contents sm:block sm:shrink-0 sm:border-e sm:border-rule">
-        <nav
-          ref={navRef}
-          id="shell-nav"
-          data-region="nav"
-          {...landmark}
-          className={[
-            'flex-col gap-16 overflow-y-auto bg-ground px-8 py-12 outline-none focus-visible:focus-ring-inset',
-            'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav incident:md:w-shell-nav-collapsed incident:md:px-4',
-            drawerOpen
-              ? 'max-sm:fixed max-sm:inset-y-0 max-sm:start-0 max-sm:z-overlay max-sm:flex max-sm:w-shell-drawer max-sm:border-e max-sm:border-rule-strong max-sm:bg-overlay max-sm:shadow-2'
-              : 'hidden',
-          ].join(' ')}
-        >
-          <div className="flex flex-col gap-12 sm:hidden">
-            <div className="flex items-center justify-between">
-              <OrganizationMenu data={data} />
-              <button
-                ref={closeRef}
-                type="button"
-                aria-label="Close navigation"
-                onClick={() => {
-                  setDrawerOpen(false);
-                }}
-                className="inline-grid size-control-md cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring"
-              >
-                <IconCross />
-              </button>
+        <div className="contents sm:block sm:shrink-0 sm:border-e sm:border-rule">
+          <nav
+            ref={navRef}
+            id="shell-nav"
+            data-region="nav"
+            {...landmark}
+            className={[
+              'flex-col gap-16 overflow-y-auto bg-ground px-8 py-12 outline-none focus-visible:focus-ring-inset',
+              'sm:sticky sm:top-shell-bar sm:flex sm:h-shell-view sm:w-shell-nav-collapsed sm:shrink-0 sm:self-start sm:max-md:px-4 md:w-shell-nav incident:md:w-shell-nav-collapsed incident:md:px-4',
+              drawerOpen
+                ? 'max-sm:fixed max-sm:inset-y-0 max-sm:start-0 max-sm:z-overlay max-sm:flex max-sm:w-shell-drawer max-sm:border-e max-sm:border-rule-strong max-sm:bg-overlay max-sm:shadow-2'
+                : 'hidden',
+            ].join(' ')}
+          >
+            <div className="flex flex-col gap-12 sm:hidden">
+              <div className="flex items-center justify-between">
+                <OrganizationMenu data={data} />
+                <button
+                  ref={closeRef}
+                  type="button"
+                  aria-label="Close navigation"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                  }}
+                  className="inline-grid size-control-md cursor-pointer place-items-center rounded-sm text-secondary transition-colors duration-fast ease-enter hover:bg-hover hover:text-ink focus-visible:focus-ring"
+                >
+                  <IconCross />
+                </button>
+              </div>
+              <ProductsNav
+                org={org}
+                label="Products, in menu"
+                opens={data.opens}
+                variant="drawer"
+              />
             </div>
-            <ProductsNav org={org} label="Products, in menu" opens={data.opens} variant="drawer" />
-          </div>
 
-          {/* A plain link to the product's project list until the switcher popover exists. */}
-          {project === undefined || product === undefined ? null : (
-            <RailTip label={projectLabel} text={project.name}>
-              <Link
-                href={`/${org}/${product}`}
-                className="flex items-center gap-8 rounded-sm px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:px-0"
-              >
-                <span className="inline-flex text-secondary">{PRODUCT_ICON[product]({})}</span>
-                <span ref={projectLabel} className={`flex min-w-0 flex-1 flex-col ${RAIL_HIDDEN}`}>
-                  <span className="truncate font-medium text-ink">{project.name}</span>
-                  <span className="text-caption text-secondary">
-                    {productLabel} project
-                    <span className="sr-only">, all {productLabel} projects</span>
+            {/* A plain link to the product's project list until the switcher popover exists. */}
+            {project === undefined || product === undefined ? null : (
+              <RailTip label={projectLabel} text={project.name}>
+                <Link
+                  href={`/${org}/${product}`}
+                  className="flex items-center gap-8 rounded-sm px-8 py-4 transition-colors duration-fast ease-enter hover:bg-hover focus-visible:focus-ring sm:max-md:justify-center sm:max-md:px-0"
+                >
+                  <span className="inline-flex text-secondary">{PRODUCT_ICON[product]({})}</span>
+                  <span
+                    ref={projectLabel}
+                    className={`flex min-w-0 flex-1 flex-col ${RAIL_HIDDEN}`}
+                  >
+                    <span className="truncate font-medium text-ink">{project.name}</span>
+                    <span className="text-caption text-secondary">
+                      {productLabel} project
+                      <span className="sr-only">, all {productLabel} projects</span>
+                    </span>
                   </span>
-                </span>
-              </Link>
-            </RailTip>
-          )}
+                </Link>
+              </RailTip>
+            )}
 
-          {SETTINGS_PATH.test(pathname) ? (
+            {SETTINGS_PATH.test(pathname) ? (
+              <div className="flex flex-col gap-4">
+                <h2 className={`px-8 text-label text-secondary uppercase ${RAIL_HIDDEN}`}>
+                  Your account
+                </h2>
+                <ul className="flex flex-col gap-2">
+                  {ACCOUNT_SECTIONS.map((section) => {
+                    const href = `/${section.slug}`;
+                    return (
+                      <li key={href}>
+                        <NavLink
+                          item={{ href, label: section.label, icon: section.icon }}
+                          current={href === pathname}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+
             <div className="flex flex-col gap-4">
               <h2 className={`px-8 text-label text-secondary uppercase ${RAIL_HIDDEN}`}>
-                Your account
+                {productLabel ?? 'Organization'}
               </h2>
               <ul className="flex flex-col gap-2">
-                {ACCOUNT_SECTIONS.map((section) => {
-                  const href = `/${section.slug}`;
-                  return (
-                    <li key={href}>
-                      <NavLink
-                        item={{ href, label: section.label, icon: section.icon }}
-                        current={href === pathname}
-                      />
-                    </li>
-                  );
-                })}
+                {items.map((item) => (
+                  <li key={item.href}>
+                    <NavLink item={item} current={item.href === currentHref} />
+                  </li>
+                ))}
               </ul>
             </div>
-          ) : null}
 
-          <div className="flex flex-col gap-4">
-            <h2 className={`px-8 text-label text-secondary uppercase ${RAIL_HIDDEN}`}>
-              {productLabel ?? 'Organization'}
-            </h2>
-            <ul className="flex flex-col gap-2">
-              {items.map((item) => (
-                <li key={item.href}>
-                  <NavLink item={item} current={item.href === currentHref} />
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {project === undefined ? null : (
-            <div className="mt-auto flex flex-col gap-2 border-t border-rule pt-12">
-              <NavLink
-                item={{
-                  href: `/${org}/settings/plan`,
-                  label: 'Plan and usage',
-                  icon: 'card',
-                  meta: data.organization.plan,
-                }}
-                current={pathname === `/${org}/settings/plan`}
-              />
-              <NavLink
-                item={{
-                  href: `/${org}/settings`,
-                  label: 'Organization settings',
-                  icon: 'settings',
-                }}
-                current={pathname === `/${org}/settings`}
-              />
-            </div>
-          )}
-        </nav>
-      </div>
+            {project === undefined ? null : (
+              <div className="mt-auto flex flex-col gap-2 border-t border-rule pt-12">
+                <NavLink
+                  item={{
+                    href: `/${org}/settings/plan`,
+                    label: 'Plan and usage',
+                    icon: 'card',
+                    meta: data.organization.plan,
+                  }}
+                  current={pathname === `/${org}/settings/plan`}
+                />
+                <NavLink
+                  item={{
+                    href: `/${org}/settings`,
+                    label: 'Organization settings',
+                    icon: 'settings',
+                  }}
+                  current={pathname === `/${org}/settings`}
+                />
+              </div>
+            )}
+          </nav>
+        </div>
+      </KeepRailFocus>
     </TipContext>
   );
 }

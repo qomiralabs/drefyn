@@ -813,7 +813,12 @@ describe('step up by email code', () => {
     expect(statements.findIndex(isChallengeDelete)).toBeLessThan(
       statements.findIndex(isChallengeInsert),
     );
-    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'auth' });
+    // The factor read comes first, then the challenge is stored.
+    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
+    expect(scripted.events.filter((e) => e.kind === 'begin')[1]).toEqual({
+      kind: 'begin',
+      scope: 'auth',
+    });
     await started.value.send();
     expect(sent).toHaveLength(1);
     expect(sent[0]?.purpose).toBe('step_up');

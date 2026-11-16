@@ -21,6 +21,8 @@ export type {
   ParseResult,
   PrintResult,
   PrintTiming,
+  ReaderPage,
+  ReaderUnit,
   RenderPolicy,
   Result,
 } from './types.ts';
