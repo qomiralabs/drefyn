@@ -122,6 +122,19 @@ const api = parseApiAuthConfig(process.env); // API service
   `emailMac(organizationId, address)` is the stored form of a blocked address, and
   `linkTag(parts)` and `verifyLinkTag(parts, tag)` sign the block link. Neither key can be
   read back from the config.
+- `config.totp` holds the second factor keyring from `DREFYN_AUTH_TOTP_KEYS`, a comma list
+  of `<id>:<key>` (id 1 to 8 lowercase letters or digits, key at least 32 bytes in canonical
+  unpadded base64url, at most 8 entries, no repeated id). Unset, `available` is false,
+  `sealer` is null and startup succeeds. It is apart from `DREFYN_AUTH_SECRET` because a TOTP
+  secret has to be read back for as long as the factor exists, and that secret's rotation
+  drops the old value after a day. `issuer` is `DREFYN_AUTH_TOTP_ISSUER`, 1 to 64 printable
+  ASCII characters with no colon, default `Drefyn`.
+- `aesGcmSealer(keys)` is the open core `SecretSealer`. `seal(plain, { userId })` uses the
+  first key: AES-256-GCM under an HKDF-SHA256 subkey, a random 96 bit nonce per call, and
+  associated data of a version label, the user id and the key id, joined by
+  `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
+  length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
+  with nothing from the row on the error. Key material lives in closures.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
