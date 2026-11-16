@@ -10,6 +10,7 @@ import {
 } from '@drefyn/tenancy';
 import type { Transaction } from 'kysely';
 import { AuthError } from './errors.ts';
+import type { FactorKind } from './totp.ts';
 import type { AuthLogger } from './rate-limiter.ts';
 
 export type SessionId = IdOf<'ses'>;
@@ -18,8 +19,7 @@ export type SessionId = IdOf<'ses'>;
 export type SessionMethod = 'email' | 'password' | 'github' | 'google' | 'cli_link' | 'sso';
 // totp and recovery_code are read before anything writes them, so an image that ships the
 // factor can roll back to one that still reads its sessions.
-export type StepUpMethod =
-  'email' | 'password' | 'google' | 'github_session' | 'totp' | 'recovery_code';
+export type StepUpMethod = 'email' | 'password' | 'google' | 'github_session' | FactorKind;
 
 // The organization and connection an SSO session came through. Set exactly when the method
 // is sso, which the database holds to as well.

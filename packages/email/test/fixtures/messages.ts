@@ -56,6 +56,10 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
       case 'member_removed':
       case 'member_keys_revoked':
         return { at: AT, kind, organizationName: ORG, memberName: PERSON, revokedKeys: 2 };
+      case 'sso_domain_claimed':
+      case 'sso_domain_verified':
+      case 'sso_domain_unverified':
+        return { at: AT, kind, organizationName: ORG, domain: 'login.acme.example' };
       case 'password_set':
         return { at: AT, kind };
       default:

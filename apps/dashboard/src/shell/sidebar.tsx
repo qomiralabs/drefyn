@@ -76,29 +76,57 @@ const railLinks = (nav: HTMLElement | null) => [
 
 function useRailTip(rail: boolean, nav: RefObject<HTMLElement | null>): Tip | null {
   const [tip, setTip] = useState<Tip | null>(null);
-  // The loaded tooltips wrap every link anew, so a link focused while they loaded is
-  // replaced and focus falls to the page. It goes back to the same link, whose label then
-  // shows as it would have on the key press.
-  const refocus = useRef(-1);
+  // The loaded tooltips wrap every link anew, so a link that holds focus when they render
+  // is replaced and focus falls to the page. Focus can reach a link at any point before
+  // that render, even after the code has arrived, so the rail keeps note of its focused
+  // link the whole time rather than looking once.
+  const held = useRef<{ link: HTMLAnchorElement; index: number } | null>(null);
   useEffect(() => {
-    if (!rail || tip !== null) return;
+    const el = nav.current;
+    if (!rail || tip !== null || el === null) return;
+    const note = (target: EventTarget | null) => {
+      held.current =
+        target instanceof HTMLAnchorElement && el.contains(target)
+          ? { link: target, index: railLinks(el).indexOf(target) }
+          : null;
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      note(event.target);
+    };
+    // Focus a person moved off the link is gone for good. Some engines say so for a link
+    // being replaced too, while it is still in the page, so the note is dropped only once
+    // that render is done and the link turns out to have stayed.
+    const onFocusOut = (event: FocusEvent) => {
+      const seen = held.current;
+      if (seen?.link !== event.target) return;
+      queueMicrotask(() => {
+        if (held.current === seen && seen.link.isConnected) held.current = null;
+      });
+    };
+    note(document.activeElement);
+    el.addEventListener('focusin', onFocusIn);
+    el.addEventListener('focusout', onFocusOut);
+    let live = true;
     import('./rail-tip.tsx')
       .then((mod) => {
-        const active = document.activeElement;
-        refocus.current =
-          active instanceof HTMLAnchorElement ? railLinks(nav.current).indexOf(active) : -1;
-        setTip(() => mod.RailTip);
+        if (live) setTip(() => mod.RailTip);
       })
       .catch(() => undefined);
+    return () => {
+      live = false;
+      el.removeEventListener('focusin', onFocusIn);
+      el.removeEventListener('focusout', onFocusOut);
+    };
   }, [rail, tip, nav]);
   useLayoutEffect(() => {
-    const index = refocus.current;
-    refocus.current = -1;
-    if (tip === null || index < 0) return;
-    // Focus that moved on by itself stays where it went.
+    const seen = held.current;
+    if (tip === null || seen === null) return;
+    held.current = null;
+    // Only a link this render took out of the page while it held focus goes back.
+    if (seen.link.isConnected) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
-    railLinks(nav.current)[index]?.focus();
+    railLinks(nav.current)[seen.index]?.focus();
   }, [tip, nav]);
   return tip;
 }

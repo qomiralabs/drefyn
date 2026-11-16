@@ -4,6 +4,7 @@ import type {
   AuthSecurityNotice,
   LinkProvider as AuthLinkProvider,
   SignInCodePurpose,
+  SsoDomainNotice,
 } from '../../src/index.ts';
 import type {
   LinkProvider,
@@ -14,7 +15,9 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 describe('auth and mail agree', () => {
   it('on every notice kind', () => {
-    expectTypeOf<AuthSecurityNotice['kind']>().toEqualTypeOf<SecurityNoticeKind>();
+    expectTypeOf<
+      AuthSecurityNotice['kind'] | SsoDomainNotice['kind']
+    >().toEqualTypeOf<SecurityNoticeKind>();
   });
 
   it('on every sign in code purpose', () => {

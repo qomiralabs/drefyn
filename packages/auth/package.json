@@ -19,6 +19,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
+    "bench:factor": "node bench/second-factor.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts && UV_THREADPOOL_SIZE=16 vitest run --config vitest.integration.serial.config.ts"
   },
   "dependencies": {

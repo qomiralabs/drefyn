@@ -8,7 +8,7 @@ export interface StartCheck {
   readonly log: (event: string, context: Record<string, string>) => void;
 }
 
-const fieldsOf = (error: unknown): Record<string, string> => {
+export const configErrorFields = (error: unknown): Record<string, string> => {
   const { code, key, message } = (error ?? {}) as Record<string, unknown>;
   if (typeof code !== 'string') return { code: 'unknown' };
   // Database config errors name the key in fixed text and hold no value.
@@ -30,7 +30,7 @@ export function checkStart(check: StartCheck): void {
   try {
     check.checkConfig(check.env);
   } catch (error) {
-    check.log('dashboard.config_invalid', fieldsOf(error));
+    check.log('dashboard.config_invalid', configErrorFields(error));
     check.exit(1);
   }
 }
