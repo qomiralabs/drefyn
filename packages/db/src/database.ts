@@ -303,6 +303,56 @@ export async function closeDatabase(
   await state.closing;
 }
 
+// The longest a readiness probe may wait on its query. Past this the caller has already given up.
+const PING_TIMEOUT_MAX_MS = 10_000;
+
+// One round trip on a pooled connection, outside any transaction, for a readiness check. It
+// reads nothing, so it needs no tenant. The wait for a connection is the pool's own wait, and
+// the query gets its own timer: a peer that stopped answering never sends an error.
+export async function pingDatabase(
+  db: Database | PublishedDatabase,
+  timeoutMs = 1000,
+): Promise<void> {
+  // The types promise a handle; a cast can still hand in anything.
+  const handle: unknown = db;
+  const state =
+    typeof handle === 'object' && handle !== null
+      ? (POOLS.app.get(handle) ?? POOLS.reader.get(handle))
+      : undefined;
+  if (state === undefined) {
+    throw new DbError('DB_CONFIG_INVALID', 'pingDatabase needs an app or reader database');
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > PING_TIMEOUT_MAX_MS) {
+    throw new DbError(
+      'DB_CONFIG_INVALID',
+      `the ping timeout must be a whole number from 1 to ${String(PING_TIMEOUT_MAX_MS)} ms`,
+    );
+  }
+  if (state.closed) throw new DbError('DB_UNAVAILABLE', 'the database has been closed');
+  let client: pg.PoolClient;
+  try {
+    client = await state.pool.connect();
+  } catch (error) {
+    throw unavailable(error, state.kind);
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      client.connection.stream.destroy();
+      reject(new Error('ping timed out'));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([client.query('select 1'), expired]);
+  } catch (error) {
+    client.release(true);
+    throw unavailable(error, state.kind);
+  } finally {
+    clearTimeout(timer);
+  }
+  client.release();
+}
+
 // Errors and notices both carry the SQLSTATE in code; pg's notices are not Errors.
 const sqlState = (value: unknown): unknown => Reflect.get(Object(value), 'code');
 
