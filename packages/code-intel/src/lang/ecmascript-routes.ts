@@ -97,13 +97,31 @@ function fastifyRoute(options: Node | undefined, framework: string, out: Collect
   return true;
 }
 
+const ROUTE_FILES = new Set(['route.ts', 'route.tsx', 'route.js', 'route.jsx', 'route.mjs']);
+
+// The folders between the first `app` folder and route.ts, when every one of them is named.
+// A single pass over the path's segments: the path comes from the customer's repository, and a
+// pattern that retries from each `app/` costs quadratic time on a crafted one.
+function nextRouteFolders(path: string): string[] | undefined {
+  const parts = path.split('/');
+  const last = parts.length - 1;
+  if (!ROUTE_FILES.has(parts[last] ?? '')) return undefined;
+  let app = -1;
+  for (let index = 0; index < last; index += 1) {
+    const part = parts[index];
+    if (part === '') app = -1;
+    else if (part === 'app' && app === -1) app = index;
+  }
+  return app === -1 ? undefined : parts.slice(app + 1, last);
+}
+
+const isGroup = (segment: string): boolean => segment.startsWith('(') && segment.endsWith(')');
+
 // Next's app router: an exported GET in app/**/route.ts answers at the folder's path.
 function nextRoutes(out: Collector): void {
-  const match = /(?:^|\/)app\/((?:[^/]+\/)*)route\.(?:ts|tsx|js|jsx|mjs)$/.exec(out.path);
-  if (match === null) return;
-  const segments = (match[1] ?? '')
-    .split('/')
-    .filter((segment) => segment !== '' && !/^\(.*\)$/.test(segment) && !segment.startsWith('@'));
+  const folders = nextRouteFolders(out.path);
+  if (folders === undefined) return;
+  const segments = folders.filter((segment) => !isGroup(segment) && !segment.startsWith('@'));
   const route = `/${segments.join('/')}`;
   for (const symbol of [...out.symbols]) {
     if (symbol.exported && symbol.kind === 'function' && NEXT_METHODS.has(symbol.name)) {

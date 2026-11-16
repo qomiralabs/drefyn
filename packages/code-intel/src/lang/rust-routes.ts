@@ -17,7 +17,7 @@ const METHODS = new Set([
 function frameworks(root: Node): Set<string> {
   const found = new Set<string>();
   for (const use of root.descendantsOfType('use_declaration')) {
-    const crate = use.childForFieldName('argument')?.text.split('::')[0]?.replace(/\{.*$/, '');
+    const crate = use.childForFieldName('argument')?.text.split('::')[0]?.split('{')[0];
     if (crate === 'axum') found.add('axum');
     if (crate === 'actix_web') found.add('actix-web');
     if (crate === 'rocket') found.add('rocket');
