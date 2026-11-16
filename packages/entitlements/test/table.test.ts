@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   FEATURE_KEYS,
@@ -295,6 +296,51 @@ describe('Docs plan rows', () => {
   ] as const)('starts %s at %s, in the open core', (feature, since) => {
     expect(featureInfo(feature)).toEqual({ feature, scope: 'docs', since, openCore: true });
     expect(withFeature(feature)).toEqual(from(since));
+  });
+});
+
+describe('Docs checks, style, agent context, navigation and answer quality', () => {
+  const NEW_DOCS_FEATURES: readonly (readonly [FeatureKey, HostedTier])[] = [
+    ['docs.pr_check', 'free'],
+    ['docs.style_guide', 'starter'],
+    ['docs.pr_check_blocking', 'growth'],
+    ['docs.style_tone_rules', 'growth'],
+    ['docs.agent_context', 'free'],
+    ['docs.navigation', 'free'],
+    ['docs.page_templates', 'free'],
+    ['docs.content_gaps', 'growth'],
+    ['docs.answer_checks', 'scale'],
+  ];
+
+  it.each(NEW_DOCS_FEATURES)('starts %s at %s, in the open core', (feature, since) => {
+    expect(featureInfo(feature)).toEqual({ feature, scope: 'docs', since, openCore: true });
+    expect(withFeature(feature)).toEqual(from(since));
+    for (const tier of LADDER.slice(0, LADDER.indexOf(since))) {
+      expect(hasFeature(tier, feature), tier).toBe(false);
+    }
+    expect(hasFeature('self_hosted', feature)).toBe(true);
+  });
+
+  it('keeps tier order for every new key', () => {
+    const rung = fc.integer({ min: 0, max: LADDER.length - 1 });
+    fc.assert(
+      fc.property(fc.constantFrom(...NEW_DOCS_FEATURES), rung, rung, ([feature], a, b) => {
+        const [low, high] = a <= b ? [a, b] : [b, a];
+        const lowTier = LADDER[low];
+        const highTier = LADDER[high];
+        if (lowTier === undefined || highTier === undefined) throw new Error('rung out of range');
+        if (hasFeature(lowTier, feature)) expect(hasFeature(highTier, feature)).toBe(true);
+      }),
+    );
+  });
+
+  // Staleness in the check rides on the existing key, and the accuracy check has no key:
+  // it follows the draft it checks, Free generation included.
+  it('adds no separate key for check staleness or the accuracy check', () => {
+    expect(featureInfo('docs.staleness_basic').since).toBe('starter');
+    for (const key of FEATURE_KEYS) {
+      expect(key, key).not.toMatch(/accuracy|pr_check_staleness/);
+    }
   });
 });
 
