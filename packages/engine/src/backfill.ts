@@ -84,6 +84,22 @@ async function writeBatch(
       and f.type_id = n.type_id
       and f.node_id = n.id
       and ${sql.ref(`f.${column}`)} is distinct from ${value}`.execute(tx);
+  // Items published before the slot existed need it too, from the fields they went out with and
+  // not the draft's. The value reads n.head_fields, so the current copy stands in for n.
+  await sql`
+    update app.published_filter_rows f set ${target} = ${value}
+    from (select p.organization_id, p.project_id, p.type_id, p.node_id as id,
+                 p.fields as head_fields
+            from app.published_versions p
+           where p.organization_id = ${tenant.organizationId}::uuid
+             and p.project_id = ${tenant.projectId}::uuid
+             and p.node_id = any(${ids}::uuid[])
+             and p.is_current) n
+    where f.organization_id = n.organization_id
+      and f.project_id = n.project_id
+      and f.type_id = n.type_id
+      and f.node_id = n.id
+      and ${sql.ref(`f.${column}`)} is distinct from ${value}`.execute(tx);
 }
 
 // Only now does the field start using its slot, in one step with the end of the work.

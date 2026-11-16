@@ -26,6 +26,9 @@ public.
 - `parseEngineConfig(env)`: reads the caps below.
 - `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
   queued. A job calls this; the work resumes from the table.
+- `engine.publish(input)`, `engine.approve(input)`: the publish gate, below.
+- `PUBLISH_ERROR_CODES`, `PUBLISH_ROLES`, `APPROVE_ROLES`, `PUBLISH_SCOPES`, `STRICT_WORKFLOW`:
+  what the gate answers and checks.
 - `chunkNode(reader, options)`: splits the reader text the parse host gave for a page into unit
   aligned chunks. Pure: the same reader text and options give the same chunks in the same order.
 
@@ -266,8 +269,42 @@ yet. The reader has no grant on `content_types`, so the host passes `types`, usu
 `cachedTypes(types)` so a list is one reader transaction: 1,000 entries, 10 seconds, keyed by
 organization, project and type.
 
-Publish is the only writer of the two tables. Until it lands, `test/support/published.ts` writes
-them as the superuser for tests.
+Publish is the only writer of the two tables. `test/support/published.ts` still writes them as
+the superuser for the reader's own tests, which need rows publish would refuse to make.
+
+## Publishing
+
+`engine.publish(input)` is the one way content goes public, and the check lives here, not in a UI.
+It answers a `PublishResult`, whose codes are `PUBLISH_ERROR_CODES`, separate from the engine's.
+
+In one transaction, under the node's lock, it reads the idempotency key, then checks the actor,
+then the head, then the plan. Only then does it add a `publish_log` row, mark the previous
+`published_versions` row not current, copy the version in as current (inside the database, so the
+content never passes through this process), write the version's slot values to
+`published_filter_rows` and set the node's lifecycle. A crash at any point keeps none of it.
+
+| Actor     | Publishes when                                                                  |
+| --------- | ------------------------------------------------------------------------------- |
+| `user`    | It holds `admin` or `editor`; where review is required, the version is approved |
+| `api_key` | The project allows keys and the key holds the family's scope                    |
+| `git`     | The project allows pushes                                                       |
+| `system`  | Never                                                                           |
+
+Before any of that, content a model wrote (`origin: 'ai'`) and any version in a project that
+requires review answer `publish.human_required` for every actor that is not a person.
+
+A project's choices are a `publish_workflows` row. With no row, review is off and keys and
+pushes cannot publish. `engine.approve(input)` records an approval of one version; only a person
+with `admin` gives one, so an editor cannot approve their own work. The same person approving
+twice is one approval.
+
+The same key with the same input returns the first receipt; with other input it answers
+`publish.idempotency_conflict` and changes nothing. `publish_log` and `publish_approvals` are
+append only for the application role. A log row names its actor by kind and opaque id, never an
+address.
+
+A filter backfill also fills the published slot of items already live, from the fields they were
+published with, so a slot turning `ready` covers them.
 
 ## Configuration
 
