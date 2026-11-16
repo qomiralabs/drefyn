@@ -105,6 +105,9 @@ importers:
       '@drefyn/flags':
         specifier: workspace:*
         version: link:../../packages/flags
+      '@drefyn/seal':
+        specifier: workspace:*
+        version: link:../../packages/seal
       '@drefyn/tenancy':
         specifier: workspace:*
         version: link:../../packages/tenancy
@@ -190,6 +193,9 @@ importers:
       '@drefyn/entitlements':
         specifier: workspace:*
         version: link:../entitlements
+      '@drefyn/seal':
+        specifier: workspace:*
+        version: link:../seal
       '@drefyn/tenancy':
         specifier: workspace:*
         version: link:../tenancy
