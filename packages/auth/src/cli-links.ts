@@ -19,7 +19,12 @@ import {
   type RateLimiter,
 } from './rate-limiter.ts';
 import { fail, idFields, ok, quietInfo, unavailable } from './session-support.ts';
-import { createSessions, type Sessions, type StartedSession } from './sessions.ts';
+import {
+  createSessions,
+  type FactorRequired,
+  type Sessions,
+  type StartedSession,
+} from './sessions.ts';
 import { SECRET_BYTES, formatCliLinkToken, parseCliLinkToken } from './tokens.ts';
 
 // The single use sign in link an operator prints with drefyn auth link, so the first admin
@@ -69,7 +74,11 @@ export interface IssuedCliLink {
 
 export interface CliLinks {
   issue(input: CliLinkInput): Promise<Result<IssuedCliLink, AuthError>>;
-  redeem(b: BrowserContext, token: unknown): Promise<Result<StartedSession, AuthError>>;
+  // A person with a second factor meets the challenge next; the link is spent either way.
+  redeem(
+    b: BrowserContext,
+    token: unknown,
+  ): Promise<Result<StartedSession | FactorRequired, AuthError>>;
 }
 
 // Every rule the command can check without a database, so bad input never opens one.

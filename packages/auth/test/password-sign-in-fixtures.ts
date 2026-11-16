@@ -81,6 +81,7 @@ export function passwordResponder(user: StoredUser, reread?: StoredUser): Respon
 export const fakePasswordSessions = () => ({
   startSession: vi.fn<PasswordSessions['startSession']>(() =>
     Promise.resolve({
+      kind: 'session' as const,
       session: { ...session, method: 'password' as const },
       setCookies: [{ name: config.cookies.session, value: 'v1.x', maxAgeSeconds: 60 }],
     }),
