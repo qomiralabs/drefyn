@@ -5,6 +5,8 @@ import { MAX_GROWTH, growthOf } from './cost.ts';
 import { parsed, policy } from './helpers.ts';
 import { unseenWords } from './reader-helpers.ts';
 
+const LARGE_PAGE_TIMEOUT_MS = 60_000;
+
 const read = (source: string, dialect: Dialect = 'md', use: RenderPolicy = policy()) =>
   readerPage(parsed(source, dialect, use), use);
 
@@ -140,10 +142,16 @@ describe('reader text', () => {
     expect(read(`${notes}\n\n[^a]: n\n`)).toEqual({ state: 'not_renderable' });
   });
 
-  it('refuses the hostile open tag page at once instead of walking it', () => {
-    const page = `${'<a>\n\n'.repeat(24_000)}${'</b>\n\n'.repeat(24_000)}`;
-    expect(read(page)).toEqual({ state: 'not_renderable' });
-  });
+  // The parse of 48,000 blocks is most of the time here, and under coverage on a shared runner it
+  // passed the default 5 s once. The render's tag budget refuses before any walk.
+  it(
+    'refuses the hostile open tag page by its tag budget instead of walking it',
+    () => {
+      const page = `${'<a>\n\n'.repeat(24_000)}${'</b>\n\n'.repeat(24_000)}`;
+      expect(read(page)).toEqual({ state: 'not_renderable' });
+    },
+    LARGE_PAGE_TIMEOUT_MS,
+  );
 
   it('gives the same answer for the same tree', () => {
     const source = '# A\n\nText <b>bold</b>.\n\n| x |\n| - |\n| y |\n\nRef[^1].\n\n[^1]: n\n';
