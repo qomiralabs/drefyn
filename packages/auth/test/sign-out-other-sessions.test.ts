@@ -80,11 +80,13 @@ describe('signOutOtherSessions', () => {
     const { sessions, scripted } = setup(rotation([lockRow()]));
     await sessions.signOutEverywhere(sessionInfo());
     const kinds = scripted.events.map((e) => e.kind);
-    expect(kinds).toEqual(['begin', 'statement', 'statement', 'commit']);
-    const [, forget] = scripted.statements();
+    expect(kinds).toEqual(['begin', 'statement', 'statement', 'statement', 'commit']);
+    const [, forget, challenge] = scripted.statements();
     expect(forget?.sql).toMatch(
       /^delete from "known_devices" where "user_id" = app\.current_user_id\(\)$/,
     );
+    // A sign in waiting on the factor ends with the rest.
+    expect(challenge?.sql).toMatch(/^delete from "factor_challenges"/);
   });
 
   it('locks, inserts the new row, deletes every other row and commits, in one transaction', async () => {
@@ -100,10 +102,15 @@ describe('signOutOtherSessions', () => {
       'statement',
       'statement',
       'statement',
+      'statement',
+      'statement',
       'commit',
     ]);
     expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
-    const [lock, insert, del, forget, device] = scripted.statements();
+    const [factorLock, lock, insert, del, challenge, forget, device] = scripted.statements();
+    // The shared factor lock first, so an enrolment in flight finishes before any row is read.
+    expect(factorLock?.sql).toMatch(/^select pg_advisory_xact_lock_shared/);
+    expect(challenge?.sql).toMatch(/^delete from "factor_challenges"/);
     // Known devices are reset in the same transaction: all forgotten, this browser recorded.
     expect(forget?.sql).toMatch(
       /^delete from "known_devices" where "user_id" = app\.current_user_id\(\)$/,
@@ -184,7 +191,7 @@ describe('signOutOtherSessions', () => {
     expect(changes(scripted.statements())).toEqual([]);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     // The database clock decides, not the app's copy of authenticated_at.
-    expect(scripted.statements()[0]?.sql).toMatch(
+    expect(scripted.statements()[1]?.sql).toMatch(
       /authenticated_at > now\(\) - interval '15 minutes'/,
     );
   });
@@ -219,7 +226,7 @@ describe('signOutOtherSessions', () => {
     expect(!result.ok && result.error.code).toBe('AUTH_UNAVAILABLE');
     expect(
       scripted.statements().map((s) => (isInsert(s) ? 'insert' : isDelete(s) ? 'delete' : 'other')),
-    ).toEqual(['other', 'insert', 'delete']);
+    ).toEqual(['other', 'other', 'insert', 'delete']);
     expect(scripted.events.at(-1)).toEqual({ kind: 'rollback' });
     expect(scripted.events.some((e) => e.kind === 'commit')).toBe(false);
   });

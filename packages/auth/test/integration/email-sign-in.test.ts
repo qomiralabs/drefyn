@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import fc from 'fast-check';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { formatChallengeId, type AuthConfig, type CookieSpec } from '../../src/index.ts';
@@ -50,8 +51,8 @@ describeWithStack('email code sign in against Postgres', () => {
     if (mail === null) throw new Error('no mail for a known address');
     const result = await flow.signIn.verifyEmailCode(b.context(), mail);
     if (!result.ok) throw result.error;
-    expect(result.value.session.method).toBe('email');
-    expect(result.value.returnTo).toBe('/');
+    expect(asSignedIn(result.value).session.method).toBe('email');
+    expect(asSignedIn(result.value).returnTo).toBe('/');
     const cookie = sessionCookie(flow.config, result.value.setCookies);
     expect(await flow.sessions.resolveSession(cookie)).toMatchObject({ email });
     // The pre sign in cookie is cleared by the new session.
@@ -93,7 +94,7 @@ describeWithStack('email code sign in against Postgres', () => {
       if (sent === undefined) throw new Error('no mail');
       const result = await flow.signIn.verifyEmailCode(b.context(), { code: sent.code });
       if (!result.ok) throw result.error;
-      expect(result.value.returnTo).toBe(kept);
+      expect(asSignedIn(result.value).returnTo).toBe(kept);
     }
   });
 
@@ -351,12 +352,18 @@ describeWithStack('email code sign in against Postgres', () => {
         method: 'email',
       });
       b.apply(started.setCookies);
-      const issued = await flow.sessions.startStepUpCode(b.context(), started.session);
+      const issued = await flow.sessions.startStepUpCode(b.context(), asSignedIn(started).session);
       if (!issued.ok) throw issued.error;
       await issued.value.send();
       const sent = flow.mail.sent.at(-1);
       if (sent === undefined) throw new Error('no step up mail');
-      return { email, b, session: started.session, sent, challenge: issued.value.challenge };
+      return {
+        email,
+        b,
+        session: asSignedIn(started).session,
+        sent,
+        challenge: issued.value.challenge,
+      };
     }
 
     it('verifyEmailCode never creates a session from a step up code, and spends none of its attempts', async () => {

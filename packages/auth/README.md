@@ -58,9 +58,10 @@ Nothing else in `src/` is public.
   existing one, a live invitation for the address, or just in time as `member` with the
   connection's project role under the organization row lock and `checkLimit(tier,
 'org.seats', used + 1)` (`AUTH_SSO_SEAT_LIMIT`), else `AUTH_SSO_NOT_PROVISIONED`. A person
-  with a confirmed second factor gets `factor_required` and no session; until the factor gate
-  ships the challenge itself, that sign in cannot finish, and an SSO link code redeemed by such
-  a person answers `AUTH_FACTOR_REQUIRED` and links nothing. A `test` connection signs in only
+  with a confirmed second factor gets `factor_required` and no session: `startSession` writes
+  the challenge with the SSO scope on it, so the session the challenge ends in is still an SSO
+  one. An SSO link code redeemed by such a person links nothing and hands the proved code to a
+  factor challenge as an email sign in. A `test` connection signs in only
   the member who made it and never provisions anyone.
 - The user and the link are written in one transaction; membership in another, idempotent on
   (`organization_id`, `user_id`), so a failure there leaves a valid user with no organization,
@@ -166,6 +167,52 @@ Pure functions on `node:crypto`; nothing here reads the database or config.
 - `pendingTotpRow(userId, sealed)` is the row enrolment inserts, unconfirmed and unused.
 - `pnpm bench:factor` times open plus `matchTotp`, and a recovery match over 10 rows, and
   exits 1 if either p99 reaches 1 ms.
+
+## Second factor gate
+
+A confirmed `totp_credentials` row makes the factor required on every way in: email code,
+password, GitHub, Google, SSO, reset and CLI link. Only rows decide; no flag or key turns it
+off. API keys stay outside it.
+
+- `startSession` for such a person writes a `factor_challenges` row (one per person, replacing
+  any older one, 10 minutes, 5 attempts) holding `sha256(secret)`, the method, the safe return
+  path and the SSO scope, and sets `__Host-drefyn_factor` (`drefyn_factor` without secure
+  cookies) to `v1.<user>.<secret>` for 600 seconds. It clears the OAuth cookie, keeps the pre
+  sign in cookie for the challenge form, and leaves the browser's old session alone. Each flow
+  returns that `factor_required` before it records a device or owes a notice.
+- `createFactorChallenges(config, deps)` gives `readChallenge(browser)` (`live` or `gone`)
+  and `completeChallenge(browser, { kind, code, csrf })`. The order: form binding and the code
+  shape (no statement), the cookie shape (no statement), then one read of the challenge by
+  user id with the secret compared in process. A wrong secret or a missing, expired or used up
+  row ends there as `AUTH_FACTOR_CHALLENGE_EXPIRED` with no lock, reservation or write. Only
+  then the reservations from `factorVerifyLimits`, then one transaction: the shared lock, the
+  attempt counted only on the challenge proved, the credential read, the code checked. A TOTP
+  match moves `last_used_step` strictly forward (a replay is `AUTH_FACTOR_INVALID`) and resets
+  `failed_attempts`; a miss raises `failed_attempts` with `least(failed_attempts + 1, 100)` and
+  commits. At 100, TOTP answers `AUTH_FACTOR_DISABLED` until a recovery code succeeds. A
+  recovery code is spent with `used_at is null`, so two uses win once. On success the
+  challenge is deleted and the session inserted in the same transaction; then the old session
+  is retired, the device recorded and the new device notice owed, using the stored method.
+- With no key, or a row under a key no longer listed, TOTP answers `AUTH_UNAVAILABLE` and logs
+  `auth.totp_key_absent` or `auth.totp_key_unreadable`; recovery codes still work.
+- The session insert after a factor takes a proof that only the factor check mints, carrying
+  the user id and good once. It is not exported. Only `sessions.ts` inserts `sessions`.
+- `completePasswordReset` takes `factor?: { kind, code }`. For an enrolled person with none it
+  answers `AUTH_FACTOR_REQUIRED` once the email code matched, spending neither. With one: hash,
+  reserve, spend the factor, spend the email code, then the hash transaction takes the shared
+  lock, reads the credential again (a late enrolment is refused), writes the hash and deletes
+  sessions and the challenge.
+- A link code (GitHub, Google or SSO) for an enrolled person writes no identity: the proved
+  code becomes a plain email sign in that meets the challenge. If enrolment lands after that
+  read, the link is written but the gate still gives no session (accepted).
+- The challenge is deleted by a password change, reset or removal, an email change, a
+  provider unlink, sign out everywhere, sign out everywhere else and `revoke-sessions`.
+  `signOutOtherSessions` takes the shared lock first, so it cannot reissue a row an enrolment
+  did not see.
+- Metric `auth.factor` with `outcome` from `passed`, `matched_previous_step`, `invalid`,
+  `replayed`, `disabled`, `expired`, `rate_limited`, `unavailable`, and `kind`. Log
+  `auth.factor_refused` with the same reason and the person's public id. No code, secret or
+  cookie reaches either.
 
 ## Rate limits
 
@@ -285,10 +332,13 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
   `drefyn_session` and `Secure` is dropped; with them on, the bare name is never read.
   `serializeCookie(config, spec)` writes the header; callers choose only name, value and
   `Max-Age`.
-- `startSession(browser, { userId, method })` runs after a sign in was proved: it deletes the
-  session the browser's cookie proves, whoever it belongs to, inserts a new row with a fresh
-  secret (`secret_hash = sha256(secret)`) and database times (30 days absolute by default),
-  and clears the pre sign in and OAuth cookies.
+- `startSession(browser, { userId, method, returnTo? })` runs after a sign in was proved and
+  answers `StartedSession | FactorRequired`. Its transaction takes the shared factor lock
+  first, then reads the person's confirmed `totp_credentials` row. With none, it inserts a new
+  row with a fresh secret (`secret_hash = sha256(secret)`) and database times (30 days
+  absolute by default), clears the pre sign in and OAuth cookies, and then deletes the session
+  the browser's cookie proves, whoever it belongs to. With one, no session is written: see
+  "Second factor gate".
 - `resolve(cookie)` returns `{ session, touchDue }` or null; `resolveSession(cookie)` returns
   the session or null. The first statement selects only the session row by id; the hash is
   compared with `timingSafeEqual` in process (against a dummy on a miss); idle and absolute

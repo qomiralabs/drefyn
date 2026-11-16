@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import { idOf, type UserId } from '@drefyn/tenancy';
 import { randomUUID } from 'node:crypto';
 import { vi } from 'vitest';
@@ -99,6 +100,7 @@ export function fakeSessions(db: OAuthStore, config: AuthConfig) {
         const row = { id: randomUUID(), user_id: input.userId, method: input.method };
         db.tables.sessions.push(row);
         return Promise.resolve({
+          kind: 'session' as const,
           session: toInfo(row),
           setCookies: [
             { name: config.cookies.session, value: `s.${row.id}`, maxAgeSeconds: 60 },
@@ -193,7 +195,7 @@ export async function signedIn(t: Setup, userId: UserId, jar = new Jar()) {
     method: 'email',
   });
   jar.apply(started.setCookies);
-  return { jar, session: started.session };
+  return { jar, session: asSignedIn(started).session };
 }
 
 export async function begin(
