@@ -36,8 +36,9 @@ import {
   type SessionInfo,
   type SessionStore,
 } from './session-support.ts';
-import { createSessions, type Sessions } from './sessions.ts';
-import { logStepUpFailed, recordStepUp, type AuthMailer } from './step-up.ts';
+import { dropChallenge } from './factor-rows.ts';
+import { createSessions, factorRequired, type FactorRequired, type Sessions } from './sessions.ts';
+import { logStepUpFailed, recordStepUp, refuseOnceEnrolled, type AuthMailer } from './step-up.ts';
 import { SECRET_BYTES, decodeSecret, encodeSecret } from './tokens.ts';
 
 export type { OAuthProvider, OAuthPurpose } from './oauth-types.ts';
@@ -63,6 +64,8 @@ export interface OAuthDeps {
 }
 
 export type OAuthCompleted =
+  // The person has a second factor; the callback sends them to the challenge.
+  | FactorRequired
   | {
       readonly kind: 'signed_in';
       readonly session: SessionInfo;
@@ -259,7 +262,9 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     returnTo: string,
     created = false,
   ): Promise<OAuthCompleted> {
-    const started = await sessions.startSession(b, { userId, method: provider });
+    const started = await sessions.startSession(b, { userId, method: provider, returnTo });
+    // The device and its notice wait for the factor when there is one.
+    if (factorRequired(started)) return started;
     const device = await recordDevice(config, devices, b, userId);
     const seen = device.newDevice;
     // An account made by this very sign in has no device to tell apart from this one.
@@ -489,7 +494,15 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
       // GitHub cannot be made to ask again, so it proves only a live GitHub session.
       throw refuse('AUTH_FORBIDDEN');
     }
-    const stepped = await recordStepUp(store, session, method, deps.logger);
+    const stepped = await recordStepUp(store, session, method, deps.logger).catch(
+      (error: unknown) => {
+        // Enrolled while the person was away at the provider.
+        if (error instanceof AuthError && error.code === 'AUTH_FACTOR_REQUIRED') {
+          throw refuse(error.code);
+        }
+        throw error;
+      },
+    );
     return {
       kind: 'stepped_up',
       session: stepped,
@@ -551,8 +564,11 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
           const recent = await sessions.requireRecentAuth(session);
           if (!recent.ok) throw recent.error;
         }
-        if (purpose === 'step_up' && name === 'github' && session !== undefined) {
-          if (await hasOtherStepUp(session.userId)) throw new Refused('AUTH_FORBIDDEN');
+        if (purpose === 'step_up' && session !== undefined) {
+          await refuseOnceEnrolled(store, session);
+          if (name === 'github' && (await hasOtherStepUp(session.userId))) {
+            throw new Refused('AUTH_FORBIDDEN');
+          }
         }
         await limiter.reserve('oauth_start', [rateKeyForIp(b.ip)]);
         const state = encodeSecret(random(SECRET_BYTES));
@@ -664,6 +680,7 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
             .returning('id')
             .executeTakeFirst();
           if (gone === undefined) throw new Refused('AUTH_NOT_FOUND');
+          await dropChallenge(tx);
           return { account: target.provider_email_normalized, at: new Date() };
         });
         quietInfo(deps.logger, 'auth.identity_unlinked', {

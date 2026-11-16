@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import { toPublicId } from '@drefyn/tenancy';
 import { idOf, organizationId } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
@@ -284,7 +285,7 @@ describe('startSession', () => {
     expect(insert?.parameters).toContain('google');
     expect(insert?.parameters).toContain(30);
     expect(insert?.parameters).toContainEqual(sha(Buffer.alloc(32, 5)));
-    expect(started.session).toMatchObject({
+    expect(asSignedIn(started).session).toMatchObject({
       sessionId: OTHER_SESSION,
       userId: OTHER_USER,
       method: 'google',
@@ -346,15 +347,19 @@ describe('startSession', () => {
       userId: OTHER_USER,
       method: 'email',
     });
+    // The new session first, then the old one goes in the old user's own transaction, so
+    // a sign in that stops at a factor challenge never costs the browser its session.
     const begins = scripted.events.filter((e) => e.kind === 'begin');
-    expect(begins[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
+    expect(begins).toEqual([
+      { kind: 'begin', scope: 'user', userId: OTHER_USER },
+      { kind: 'begin', scope: 'user', userId: USER },
+    ]);
     const deletes = scripted.statements().filter(isDelete);
     expect(deletes).toHaveLength(1);
     expect(deletes[0]?.parameters).toEqual([SESSION]);
-    // The proof comes first, then the delete, in the old user's transaction.
-    const firstTwo = scripted.statements().slice(0, 2);
-    expect(firstTwo[0] !== undefined && isProof(firstTwo[0])).toBe(true);
-    expect(firstTwo[1] !== undefined && isDelete(firstTwo[1])).toBe(true);
+    const lastTwo = scripted.statements().slice(-2);
+    expect(lastTwo[0] !== undefined && isProof(lastTwo[0])).toBe(true);
+    expect(lastTwo[1] !== undefined && isDelete(lastTwo[1])).toBe(true);
   });
 
   it('replaces the previous row for the same user too', async () => {
@@ -433,7 +438,7 @@ describe('startSession', () => {
         method: 'password',
         credential: { phc: OLD },
       });
-      expect(started.session.method).toBe('password');
+      expect(asSignedIn(started).session.method).toBe('password');
       const statements = scripted.statements();
       const guarded = statements.filter(isGuarded);
       expect(guarded).toHaveLength(1);
@@ -808,7 +813,12 @@ describe('step up by email code', () => {
     expect(statements.findIndex(isChallengeDelete)).toBeLessThan(
       statements.findIndex(isChallengeInsert),
     );
-    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'auth' });
+    // The factor read comes first, then the challenge is stored.
+    expect(scripted.events[0]).toEqual({ kind: 'begin', scope: 'user', userId: USER });
+    expect(scripted.events.filter((e) => e.kind === 'begin')[1]).toEqual({
+      kind: 'begin',
+      scope: 'auth',
+    });
     await started.value.send();
     expect(sent).toHaveLength(1);
     expect(sent[0]?.purpose).toBe('step_up');

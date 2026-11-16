@@ -51,6 +51,23 @@ export {
 } from './factor-limits.ts';
 export { pendingTotpRow, type PendingTotpRow } from './totp-rows.ts';
 export {
+  createFactorChallenges,
+  type FactorChallengeView,
+  type FactorChallenges,
+  type FactorChallengesDeps,
+} from './factor-challenges.ts';
+export { type FactorCode, type FactorOutcome } from './factor-verify.ts';
+export {
+  createSecondFactors,
+  type ConfirmedEnrollment,
+  type EnrolledFactor,
+  type FactorStatus,
+  type SecondFactors,
+  type SecondFactorsDeps,
+  type TotpEnrollment,
+  type TotpFlag,
+} from './second-factors.ts';
+export {
   aesGcmSealer,
   type SealContext,
   type SealedRow,
@@ -91,7 +108,9 @@ export {
   type SsoScope,
   type StartSessionInput,
   type StartedSession,
+  type FactorRequired,
   type StepUpMethod,
+  factorRequired,
 } from './sessions.ts';
 export { type AccessContext, type AccessResult, type AccessView } from './access.ts';
 export {
@@ -222,6 +241,7 @@ export {
   formatApiKey,
   formatCliLinkToken,
   formatChallengeId,
+  formatFactorToken,
   formatInvitationToken,
   formatSessionToken,
   formatVerifyFragment,
@@ -230,10 +250,12 @@ export {
   parseChallengeId,
   parseCliLinkToken,
   parseCode,
+  parseFactorToken,
   parseInvitationToken,
   parseSessionToken,
   parseVerifyFragment,
   type ApiKeyParts,
+  type FactorToken,
   type InvitationToken,
   type SessionToken,
   type SessionTokenInput,

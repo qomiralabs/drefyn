@@ -2,6 +2,9 @@ name: E2E
 
 on:
   pull_request:
+  # The merge queue waits for the required checks on its own commit, so they run there too.
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [development, staging, main]
 
@@ -51,6 +54,9 @@ jobs:
         run: pnpm --filter @drefyn/auth test:integration
       - name: Engine integration tests
         run: pnpm --filter @drefyn/engine test:integration
+      # Key checks, tenancy, readiness and graceful stop, with real keys on databases of their own.
+      - name: API integration tests
+        run: pnpm --filter @drefyn/api test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the

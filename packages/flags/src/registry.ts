@@ -74,6 +74,15 @@ export const flags = defineFlags([
     safeValue: false,
   },
   {
+    name: 'auth.totp',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'People can turn on two step sign in with an authenticator app.',
+    created: '2026-11-16',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
+  {
     name: 'docs.site',
     kind: 'release',
     owner: 'Divine572',

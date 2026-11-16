@@ -71,7 +71,7 @@ describe('package layout', () => {
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
   // breached list lookup and its build command, which is the only writer, and by the SSO
   // domain lists. DNS is asked only by the TXT resolver.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke, SSO domains and the command, files only from the breached list and the SSO domain lists, DNS only from the TXT resolver, and no other network', () => {
+  it('reaches the database only from the limiter, sessions, the second factor, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke, SSO domains and the command, files only from the breached list and the SSO domain lists, DNS only from the TXT resolver, and no other network', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -95,6 +95,11 @@ describe('package layout', () => {
       'api-key-verifier.ts': database,
       'cli-links.ts': database,
       'operator-sessions.ts': database,
+      'factor-challenges.ts': database,
+      'factor-rows.ts': database,
+      'factor-verify.ts': database,
+      'factor-notices.ts': database,
+      'second-factors.ts': database,
       'command.ts': database,
       'breached-file.ts': files,
       'password-list.ts': files,
@@ -133,6 +138,7 @@ describe('the main entry', () => {
         'TOTP_SECRET_BYTES',
         'base32Encode',
         'factorNoticeLimit',
+        'factorRequired',
         'factorVerifyLimits',
         'matchRecoveryCode',
         'matchTotp',
@@ -201,6 +207,8 @@ describe('the main entry', () => {
         'createCliLinks',
         'createEmailChange',
         'createEmailSignIn',
+        'createFactorChallenges',
+        'createSecondFactors',
         'createInvitations',
         'createMembers',
         'createOrganizations',
@@ -217,6 +225,7 @@ describe('the main entry', () => {
         'encodeSecret',
         'formatApiKey',
         'formatChallengeId',
+        'formatFactorToken',
         'formatCliLinkToken',
         'formatInvitationToken',
         'formBindingField',
@@ -232,6 +241,7 @@ describe('the main entry', () => {
         'parseBearer',
         'parseChallengeId',
         'parseCode',
+        'parseFactorToken',
         'parseCliLinkToken',
         'parseInvitationToken',
         'parseLastMethod',

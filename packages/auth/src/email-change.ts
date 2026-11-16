@@ -7,6 +7,7 @@ import { rateKeyForIp } from './client-ip.ts';
 import type { AuthConfig } from './config.ts';
 import type { BrowserContext, CookieSpec } from './cookies.ts';
 import { createCodeIssuer } from './email-sign-in.ts';
+import { dropChallenge } from './factor-rows.ts';
 import { AuthError, type AuthErrorCode } from './errors.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import type { LinkProvider } from './oauth-types.ts';
@@ -80,6 +81,23 @@ export type AuthSecurityNotice =
       readonly membershipId: IdOf<'mem'>;
       readonly memberName: string;
       readonly revokedKeys: number;
+      readonly at: Date;
+    }
+  // To the account's address when the second factor changes or is under attack. at is
+  // database time. None of these carries a code, a secret or how many tries were made.
+  | {
+      readonly kind:
+        | 'second_factor_added'
+        | 'second_factor_removed'
+        | 'recovery_codes_replaced'
+        | 'second_factor_failures'
+        | 'second_factor_disabled';
+      readonly at: Date;
+    }
+  | {
+      readonly kind: 'recovery_code_used';
+      // Unused codes left after this one, so the person knows when to make more.
+      readonly codesLeft: number;
       readonly at: Date;
     }
   | {
@@ -190,14 +208,17 @@ export function createEmailChange(config: AuthConfig, deps: EmailChangeDeps): Em
   // would only tell the person it had not.
   async function endOtherSessions(s: SessionInfo): Promise<number> {
     try {
-      const gone = await store.user(s.userId, (tx) =>
-        tx
+      const gone = await store.user(s.userId, async (tx) => {
+        const rows = await tx
           .deleteFrom('sessions')
           .where('user_id', '=', sql<string>`app.current_user_id()`)
           .where('id', '<>', s.sessionId)
           .returning('id')
-          .execute(),
-      );
+          .execute();
+        // A sign in waiting on the factor was started under the old address.
+        await dropChallenge(tx);
+        return rows;
+      });
       return gone.length;
     } catch {
       quietWarn(deps.logger, 'auth.email_change_sessions_kept', ids(s));

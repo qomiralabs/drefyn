@@ -249,6 +249,7 @@ describe('operator session revoke', () => {
     expect(scripted.writes().map((w) => w.sql.split(' ').slice(0, 3).join(' '))).toEqual([
       'delete from "sessions"',
       'delete from "known_devices"',
+      'delete from "factor_challenges"',
     ]);
   });
 
