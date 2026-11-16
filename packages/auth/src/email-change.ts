@@ -83,6 +83,23 @@ export type AuthSecurityNotice =
       readonly revokedKeys: number;
       readonly at: Date;
     }
+  // To the account's address when the second factor changes or is under attack. at is
+  // database time. None of these carries a code, a secret or how many tries were made.
+  | {
+      readonly kind:
+        | 'second_factor_added'
+        | 'second_factor_removed'
+        | 'recovery_codes_replaced'
+        | 'second_factor_failures'
+        | 'second_factor_disabled';
+      readonly at: Date;
+    }
+  | {
+      readonly kind: 'recovery_code_used';
+      // Unused codes left after this one, so the person knows when to make more.
+      readonly codesLeft: number;
+      readonly at: Date;
+    }
   | {
       readonly kind: 'owner_added';
       readonly organizationId: OrganizationId;
