@@ -31,10 +31,20 @@ export {
   type TypeCacheOptions,
   type VersionPin,
 } from './published.ts';
+export type { PublishError, PublishResult } from './publish.ts';
+export {
+  APPROVE_ROLES,
+  PUBLISH_ROLES,
+  PUBLISH_SCOPES,
+  STRICT_WORKFLOW,
+  type PublishWorkflow,
+} from './publish-rules.ts';
 export type { SystemJob } from './actor.ts';
 export { databaseStore, type EngineStore } from './store.ts';
 export type {
   Actor,
+  ApprovalReceipt,
+  ApproveInput,
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
@@ -50,6 +60,8 @@ export type {
   NodeSummary,
   Page,
   PageArgs,
+  PublishInput,
+  PublishReceipt,
   RollbackInput,
   SaveDraftInput,
   SortDirection,
@@ -62,8 +74,10 @@ export {
   NODE_FAMILIES,
   NODE_LIFECYCLES,
   ORIGINS,
+  PUBLISH_ERROR_CODES,
   type EngineErrorCode,
   type NodeFamily,
   type NodeLifecycle,
   type Origin,
+  type PublishErrorCode,
 } from './vocabulary.ts';
