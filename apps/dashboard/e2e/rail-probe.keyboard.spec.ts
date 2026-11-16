@@ -1,13 +1,13 @@
 import { expect } from '@playwright/test';
 import { test } from './csp.ts';
-import { ROUTES, TABLET } from './fixtures.ts';
+import { ON_ORIGIN, ROUTES, TABLET } from './fixtures.ts';
+import { MAYA, stateFile } from './people.ts';
 
 // A temporary probe for #543: the focus and key order around F6, F6, Tab on the tablet rail.
-test('probe the rail focus order', async ({ page, browserName }) => {
+test('probe the rail focus order', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', 'chromium is where it failed');
   test.setTimeout(600_000);
-  await page.setViewportSize(TABLET);
-  await page.addInitScript(() => {
+  const script = () => {
     const w = window as unknown as { log: string[] };
     w.log = [];
     const t0 = performance.now();
@@ -62,9 +62,17 @@ test('probe the rail focus order', async ({ page, browserName }) => {
     document.addEventListener('readystatechange', () => {
       w.log.push(`${at()} ready ${document.readyState}`);
     });
-  });
+  };
   const failures: string[] = [];
   for (let run = 0; run < 60; run += 1) {
+    // A fresh context each time, so the tooltip code is fetched again as on a first visit.
+    const context = await browser.newContext({
+      baseURL: ON_ORIGIN,
+      storageState: stateFile(MAYA),
+      viewport: TABLET,
+    });
+    const page = await context.newPage();
+    await page.addInitScript(script);
     await page.goto(ROUTES.project);
     await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
     await page.evaluate(() => {
@@ -92,6 +100,7 @@ test('probe the rail focus order', async ({ page, browserName }) => {
         `run ${String(run)} focusedAtOnce=${String(ok)} tip=${String(tip)} focusedLater=${String(focusedLater)}\n${log.join('\n')}`,
       );
     }
+    await context.close();
   }
   console.log(`PROBE ${String(failures.length)} of 60\n${failures.join('\n=====\n')}`);
   expect(failures).toEqual([]);
