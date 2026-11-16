@@ -37,6 +37,7 @@ describe('parseAuthConfig defaults', () => {
       invite: '__Host-drefyn_invite',
       device: '__Host-drefyn_device',
       lastMethod: '__Host-drefyn_last_method',
+      factor: '__Host-drefyn_factor',
     });
     expect(config.trustedProxyHops).toBe(0);
     expect(config.clientIpHeader).toBeNull();
@@ -66,6 +67,14 @@ describe('parseAuthConfig defaults', () => {
       password_fail_ip: [{ count: 30, windowSeconds: 600 }],
       cli_link_verify: [{ count: 20, windowSeconds: 900 }],
       sso_domain_verify: [{ count: 20, windowSeconds: 3600 }],
+      totp_verify: [
+        { count: 5, windowSeconds: 300 },
+        { count: 20, windowSeconds: 3600 },
+        { count: 50, windowSeconds: 86_400 },
+      ],
+      recovery_code_verify: [{ count: 10, windowSeconds: 3600 }],
+      recovery_code_verify_ip: [{ count: 30, windowSeconds: 3600 }],
+      second_factor_notice: [{ count: 1, windowSeconds: 21_600 }],
     });
     expect(Object.keys(config.rateLimits)).toEqual([...RATE_BUCKETS]);
     expect(config.sso).toEqual({ dnsTimeoutMs: 3000, freeMailDomainsFile: null });
@@ -166,6 +175,7 @@ describe('parseAuthConfig defaults', () => {
         invite: 'drefyn_invite',
         device: 'drefyn_device',
         lastMethod: 'drefyn_last_method',
+        factor: 'drefyn_factor',
       });
     }
   });

@@ -67,9 +67,27 @@ export const egressAllowList = [
     only: [{ module: 'node:dns/promises', imports: ['Resolver'] }],
   },
   {
+    path: 'apps/api/test/start.test.ts',
+    reason:
+      'calls an API server the same test started on 127.0.0.1 to prove start, drain and stop; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'apps/api/test/integration/drain.test.ts',
+    reason:
+      'calls an API server the same test started on 127.0.0.1 to prove a graceful stop on SIGTERM; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
     path: 'apps/dashboard/server.ts',
     reason:
       'inbound server in front of the Next handler; it accepts connections and never opens one',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
+    path: 'packages/site/gates/server.ts',
+    reason:
+      'loopback static host for the public page gates; it serves rendered fixture pages on 127.0.0.1 and never opens a connection',
     only: [{ module: 'node:http', imports: ['createServer'] }],
   },
   {

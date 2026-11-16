@@ -16,7 +16,7 @@ const idSchema = <K extends IdKind>(kind: K) =>
 const nodeId = idSchema('nod');
 const versionId = idSchema('ver');
 
-const tenant = z.strictObject({
+export const tenant = z.strictObject({
   organizationId: idSchema('org'),
   projectId: idSchema('prj'),
 });
@@ -141,6 +141,15 @@ export const querySchema = z.strictObject({
     limit: z.int().min(1).max(MAX_PAGE).default(50),
     cursor: z.string().min(1).max(MAX_CURSOR_CHARS).optional(),
   }),
+});
+
+// The same list a draft query takes, so a public list cannot be shaped any differently.
+export const publishedQuerySchema = querySchema;
+
+export const publishedGetSchema = z.strictObject({
+  tenant,
+  nodeId,
+  pin: z.strictObject({ versionId }).optional(),
 });
 
 export const declareSchemaInput = z.strictObject({

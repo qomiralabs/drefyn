@@ -34,7 +34,13 @@ import {
   type SessionStore,
   type SsoScope,
 } from './session-support.ts';
-import { createSessions, type StartedSession } from './sessions.ts';
+import { hasConfirmedFactor } from './factor-rows.ts';
+import {
+  createSessions,
+  factorRequired,
+  type FactorRequired,
+  type StartedSession,
+} from './sessions.ts';
 import type { AuthMailer, SignInCodePurpose } from './step-up.ts';
 import type { AuthNoticeMailer, EmailChange } from './email-change.ts';
 import { parseOAuthProvider, type OAuthProvider } from './oauth-types.ts';
@@ -111,7 +117,10 @@ export interface PendingSsoLink {
 // Writes the link and signs the person in, under the same rules as any SSO sign in. Built by
 // SSO sign in; without it an SSO link code links nothing.
 export interface SsoLinkFinisher {
-  finishLink(b: BrowserContext, link: PendingSsoLink): Promise<Result<SignedIn, AuthError>>;
+  finishLink(
+    b: BrowserContext,
+    link: PendingSsoLink,
+  ): Promise<Result<SignedIn | FactorRequired, AuthError>>;
 }
 
 export interface IssueInput {
@@ -272,8 +281,12 @@ export function createCodeIssuer(config: AuthConfig, deps: CodeIssuerDeps): Code
 export interface EmailSessions {
   startSession(
     b: BrowserContext,
-    input: { readonly userId: UserId; readonly method: SessionMethod },
-  ): Promise<StartedSession>;
+    input: {
+      readonly userId: UserId;
+      readonly method: SessionMethod;
+      readonly returnTo?: string;
+    },
+  ): Promise<StartedSession | FactorRequired>;
   verifyStepUpCode?(
     b: BrowserContext,
     s: SessionInfo,
@@ -300,6 +313,8 @@ export interface EmailSignInDeps {
 
 export type LinkVerified =
   | { readonly kind: 'signed_in'; readonly signedIn: SignedIn }
+  // The person has a second factor: the code is proved, and the factor comes next.
+  | FactorRequired
   | { readonly kind: 'stepped_up'; readonly session: SessionInfo }
   // send mails the security notice to the old address; run it after the response.
   | { readonly kind: 'email_changed'; readonly send: () => Promise<void> }
@@ -341,7 +356,7 @@ export interface EmailSignIn {
   verifyEmailCode(
     b: BrowserContext,
     input: { readonly challenge?: string; readonly code: string },
-  ): Promise<Result<SignedIn, AuthError>>;
+  ): Promise<Result<SignedIn | FactorRequired, AuthError>>;
   // The verify link carries no purpose. A step up or email change code goes to the session
   // it belongs to; anything else is a sign in.
   verifyLinkCode(
@@ -516,6 +531,29 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
     return made === undefined ? null : { userId, provider, at: made.created_at };
   }
 
+  // The session, then the device and its notice. A factor challenge stops before both, so
+  // no notice claims a sign in that has not happened.
+  async function started(
+    b: BrowserContext,
+    userId: UserId,
+    method: SessionMethod,
+    returnTo: string,
+    created: boolean,
+    linked?: () => Promise<void>,
+  ): Promise<SignedIn | FactorRequired> {
+    const done = await sessions.startSession(b, { userId, method, returnTo });
+    if (factorRequired(done)) return done;
+    const device = await recordDevice(config, devices, b, userId);
+    // An account made by this very sign in has no device to tell apart from this one.
+    const send = sendBoth(linked, created ? undefined : deviceSend(device, done.session, method));
+    return {
+      session: done.session,
+      setCookies: [...done.setCookies, ...device.setCookies],
+      returnTo,
+      ...(send === undefined ? {} : { send }),
+    };
+  }
+
   function linkNotice(to: string, provider: OAuthProvider, at: Date) {
     return async () => {
       try {
@@ -528,10 +566,15 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
     };
   }
 
+  // A separate read under the person's own context, since the sign in role has no grant on
+  // the factor tables. An enrolment can land just after it; the gate in startSession still
+  // runs, so that race links an identity but starts no session.
+  const enrolled = (userId: UserId) => store.user(userId, hasConfirmedFactor);
+
   async function verify(
     b: BrowserContext,
     input: { readonly challenge?: string; readonly code: string },
-  ): Promise<Result<SignedIn, AuthError>> {
+  ): Promise<Result<SignedIn | FactorRequired, AuthError>> {
     const code = parseCode(input.code.replace(TYPED_GAPS, ''));
     const id = input.challenge === undefined ? null : parseChallengeId(input.challenge);
     if (code === null || (input.challenge !== undefined && id === null)) {
@@ -620,39 +663,32 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
         }
         return await deps.ssoLinks.finishLink(b, pending);
       }
+      const returnTo = challenge.return_to ?? '/';
       if (purpose === LINK) {
+        // An enrolled person adds no credential before the factor: the link is dropped,
+        // the proved code becomes a plain email sign in, and linking waits for settings.
+        if (challenge.user_id !== null && (await enrolled(idOf('usr', challenge.user_id)))) {
+          info(deps.logger, 'auth.link_dropped_for_factor', { outcome: 'factor_required' });
+          return ok(await started(b, idOf('usr', challenge.user_id), 'email', returnTo, false));
+        }
         // The same answer as a wrong code, so it says nothing about who holds the identity.
         const linked = await linkPending(challenge);
         if (linked === null) return refused('AUTH_CODE_INVALID', address, binding);
-        const started = await sessions.startSession(b, {
-          userId: linked.userId,
-          method: linked.provider,
-        });
-        const device = await recordDevice(config, devices, b, linked.userId);
-        const send = sendBoth(
-          linkNotice(address, linked.provider, linked.at),
-          deviceSend(device, started.session, linked.provider),
+        return ok(
+          await started(
+            b,
+            linked.userId,
+            linked.provider,
+            returnTo,
+            false,
+            linkNotice(address, linked.provider, linked.at),
+          ),
         );
-        return ok({
-          session: started.session,
-          setCookies: [...started.setCookies, ...device.setCookies],
-          returnTo: challenge.return_to ?? '/',
-          ...(send === undefined ? {} : { send }),
-        });
       }
       // Proved: only now may the answer say that sign up is closed.
       const found = await userFor(b, challenge);
       if (found === null) return refused('AUTH_SIGNUP_CLOSED', address, binding);
-      const started = await sessions.startSession(b, { userId: found.userId, method: 'email' });
-      const device = await recordDevice(config, devices, b, found.userId);
-      // An account made by this very sign in has no device to tell apart from this one.
-      const send = found.created ? undefined : deviceSend(device, started.session, 'email');
-      return ok({
-        session: started.session,
-        setCookies: [...started.setCookies, ...device.setCookies],
-        returnTo: challenge.return_to ?? '/',
-        ...(send === undefined ? {} : { send }),
-      });
+      return ok(await started(b, found.userId, 'email', returnTo, found.created));
     } catch (error) {
       return fail(error);
     }
@@ -785,7 +821,9 @@ export function createEmailSignIn(config: AuthConfig, deps: EmailSignInDeps): Em
           return changed.ok ? ok({ kind: 'email_changed', send: changed.value.send }) : changed;
         }
         const signedIn = await verify(b, input);
-        return signedIn.ok ? ok({ kind: 'signed_in', signedIn: signedIn.value }) : signedIn;
+        if (!signedIn.ok) return signedIn;
+        const { value } = signedIn;
+        return ok(factorRequired(value) ? value : { kind: 'signed_in', signedIn: value });
       } catch (error) {
         return fail(error);
       }

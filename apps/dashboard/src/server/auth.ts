@@ -5,6 +5,7 @@ import {
   createCliLinks,
   createEmailChange,
   createEmailSignIn,
+  createFactorChallenges,
   createInvitations,
   createMembers,
   createOAuth,
@@ -21,8 +22,8 @@ import {
   type Account,
   type ApiKeys,
   type AuthConfig,
-  type AuthLogger,
   type CliLinks,
+  type FactorChallenges,
   type EmailChange,
   type EmailSignIn,
   type Env,
@@ -40,15 +41,13 @@ import {
   createDatabase,
   parseAuthDatabaseConfig,
   parseDatabaseConfig,
-  withOrganization,
-  type Database,
 } from '@drefyn/db';
 import { parseEmailConfig } from '@drefyn/email/config';
 import { signInMethods, type SignInMethods } from '../auth/outcomes.ts';
-import { mailableOrganizationName } from './organization-name.ts';
-import { dashboardMail, noteEmailOff, type OrganizationName } from './auth-mailer.ts';
+import { authLogger } from './auth-logger.ts';
+import { mailableOrganizationName, organizationNames } from './organization-name.ts';
+import { dashboardMail, noteEmailOff } from './auth-mailer.ts';
 import { mailDeliveryEnabled } from './gate.ts';
-import { logInfo, logWarn, type LogContext } from './log.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
 // wiring that no test reaches, and ensureOrganizationFor, which takes a bare user id, stays
@@ -92,31 +91,14 @@ export interface DashboardAuth {
     | 'seatUsage'
   >;
   readonly cliLinks: Pick<CliLinks, 'redeem'>;
+  readonly factorChallenges: FactorChallenges;
   readonly members: Members;
   readonly roles: Pick<Roles, 'changeRole' | 'removeMember' | 'setProjectRole'>;
   readonly apiKeys: Pick<ApiKeys, 'createApiKey' | 'revokeApiKey' | 'listApiKeys'>;
   readonly methods: SignInMethods;
 }
 
-// Auth passes ids and outcome codes; a value of any other shape stays out of the log.
-function plainFields(fields: Readonly<Record<string, unknown>>): LogContext {
-  const kept: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (['string', 'number', 'boolean'].includes(typeof value)) {
-      kept[key] = value as string | number | boolean;
-    }
-  }
-  return kept;
-}
-
-const logger: AuthLogger = {
-  info: (event, fields) => {
-    logInfo(event, plainFields(fields));
-  },
-  warn: (event, fields) => {
-    logWarn(event, plainFields(fields));
-  },
-};
+const logger = authLogger;
 
 let config: AuthConfig | undefined;
 
@@ -127,19 +109,6 @@ export function authConfig(): AuthConfig {
 
 export function sessionCookieName(): string {
   return authConfig().cookies.session;
-}
-
-function organizationNames(db: Database): OrganizationName {
-  return async (organizationId) => {
-    const row = await withOrganization(db, { organizationId }, (tx) =>
-      tx
-        .selectFrom('organizations')
-        .select('name')
-        .where('organization_id', '=', organizationId)
-        .executeTakeFirstOrThrow(),
-    );
-    return row.name;
-  };
 }
 
 async function compose(): Promise<DashboardAuth> {
@@ -206,6 +175,7 @@ async function compose(): Promise<DashboardAuth> {
   });
   const passwordAccount = createPasswordAccount(parsed, { ...shared, hasher, breachedPasswords });
   const oauth = createOAuth(parsed, { ...shared, invitations });
+  const factorChallenges = createFactorChallenges(parsed, { db, authDb, logger, mailer, limiter });
   const cliLinks = createCliLinks(parsed, {
     db,
     authDb,
@@ -265,6 +235,7 @@ async function compose(): Promise<DashboardAuth> {
       seatUsage: (access) => invitations.seatUsage(access),
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
+    factorChallenges,
     members,
     roles: {
       changeRole: (access, member, role) => roles.changeRole(access, member, role),

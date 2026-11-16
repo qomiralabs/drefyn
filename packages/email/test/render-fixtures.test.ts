@@ -13,7 +13,7 @@ describe('pinned HTML', () => {
     expect(readdirSync(dir).sort()).toEqual(
       FIXTURE_MESSAGES.map(([name]) => `${name}.html.txt`).sort(),
     );
-    expect(FIXTURE_MESSAGES).toHaveLength(19);
+    expect(FIXTURE_MESSAGES).toHaveLength(28);
   });
 
   it.each(FIXTURE_MESSAGES)('%s', async (name, message) => {

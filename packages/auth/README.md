@@ -58,9 +58,10 @@ Nothing else in `src/` is public.
   existing one, a live invitation for the address, or just in time as `member` with the
   connection's project role under the organization row lock and `checkLimit(tier,
 'org.seats', used + 1)` (`AUTH_SSO_SEAT_LIMIT`), else `AUTH_SSO_NOT_PROVISIONED`. A person
-  with a confirmed second factor gets `factor_required` and no session; until the factor gate
-  ships the challenge itself, that sign in cannot finish, and an SSO link code redeemed by such
-  a person answers `AUTH_FACTOR_REQUIRED` and links nothing. A `test` connection signs in only
+  with a confirmed second factor gets `factor_required` and no session: `startSession` writes
+  the challenge with the SSO scope on it, so the session the challenge ends in is still an SSO
+  one. An SSO link code redeemed by such a person links nothing and hands the proved code to a
+  factor challenge as an email sign in. A `test` connection signs in only
   the member who made it and never provisions anyone.
 - The user and the link are written in one transaction; membership in another, idempotent on
   (`organization_id`, `user_id`), so a failure there leaves a valid user with no organization,
@@ -122,9 +123,140 @@ const api = parseApiAuthConfig(process.env); // API service
   `emailMac(organizationId, address)` is the stored form of a blocked address, and
   `linkTag(parts)` and `verifyLinkTag(parts, tag)` sign the block link. Neither key can be
   read back from the config.
+- `config.totp` holds the second factor keyring from `DREFYN_AUTH_TOTP_KEYS`, a comma list
+  of `<id>:<key>` (id 1 to 8 lowercase letters or digits, key at least 32 bytes in canonical
+  unpadded base64url, at most 8 entries, no repeated id). Unset, `available` is false,
+  `sealer` is null and startup succeeds. It is apart from `DREFYN_AUTH_SECRET` because a TOTP
+  secret has to be read back for as long as the factor exists, and that secret's rotation
+  drops the old value after a day. `issuer` is `DREFYN_AUTH_TOTP_ISSUER`, 1 to 64 printable
+  ASCII characters with no colon, default `Drefyn`.
+- `aesGcmSealer(keys)` is the open core `SecretSealer`. `seal(plain, { userId })` uses the
+  first key: AES-256-GCM under an HKDF-SHA256 subkey, a random 96 bit nonce per call, and
+  associated data of a version label, the user id and the key id, joined by
+  `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
+  length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
+  with nothing from the row on the error. Key material lives in closures.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
+
+## Second factor core
+
+Pure functions on `node:crypto`; nothing here reads the database or config.
+
+- `totpCode(secret, step)`: RFC 6238 HMAC-SHA1, 6 digits, 30 second steps, for the 160 bit
+  secret `newTotpSecret()` makes. `matchTotp(secret, typed, currentStep)` accepts the steps in
+  `ACCEPTED_TOTP_STEPS`, the current one and the one before, and returns the step that
+  matched or null; the higher one when both match. Both are always computed and compared
+  with `constantTimeEqual`. Typed spaces are dropped; anything but six ASCII digits is
+  refused. The step set is a constant and no setting reaches it. A code is accepted for up
+  to 60 seconds, a recorded deviation from ASVS 6.5.5; the replay guard (`last_used_step`)
+  is the compensating control.
+- `base32Encode(bytes)` is RFC 4648 base32, upper case and unpadded.
+  `otpauthUri({ issuer, account, secret })` builds the key URI with each label part escaped.
+  The URI holds the secret and the address: never log, store or link it.
+- `newRecoveryCodes(userId)` makes `RECOVERY_CODE_COUNT` (10) codes of 15 random bytes,
+  shown as 24 lowercase Crockford characters in four groups of six, each with its SHA-256
+  hash over a version label, the user id and the code. `recoveryCodeHash(userId, typed)`
+  drops hyphens and gaps and lowercases first. `matchRecoveryCode(userId, typed, rows)`
+  compares every row, with no early exit, and returns the matching row id.
+- `factorVerifyLimits(kind, { userId, ip })` lists the reservations one attempt makes:
+  `totp_verify` on the person, or `recovery_code_verify` on the person and network plus
+  `recovery_code_verify_ip`. Recovery codes have no person wide ceiling, so nobody elsewhere
+  can fill the owner's budget. `factorNoticeLimit(userId)` is the `second_factor_notice` cap.
+- `pendingTotpRow(userId, sealed)` is the row enrolment inserts, unconfirmed and unused.
+- `pnpm bench:factor` times open plus `matchTotp`, and a recovery match over 10 rows, and
+  exits 1 if either p99 reaches 1 ms.
+
+## Second factor gate
+
+A confirmed `totp_credentials` row makes the factor required on every way in: email code,
+password, GitHub, Google, SSO, reset and CLI link. Only rows decide; no flag or key turns it
+off. API keys stay outside it.
+
+- `startSession` for such a person writes a `factor_challenges` row (one per person, replacing
+  any older one, 10 minutes, 5 attempts) holding `sha256(secret)`, the method, the safe return
+  path and the SSO scope, and sets `__Host-drefyn_factor` (`drefyn_factor` without secure
+  cookies) to `v1.<user>.<secret>` for 600 seconds. It clears the OAuth cookie, keeps the pre
+  sign in cookie for the challenge form, and leaves the browser's old session alone. Each flow
+  returns that `factor_required` before it records a device or owes a notice.
+- `createFactorChallenges(config, deps)` gives `readChallenge(browser)` (`live` or `gone`)
+  and `completeChallenge(browser, { kind, code, csrf })`. The order: form binding and the code
+  shape (no statement), the cookie shape (no statement), then one read of the challenge by
+  user id with the secret compared in process. A wrong secret or a missing, expired or used up
+  row ends there as `AUTH_FACTOR_CHALLENGE_EXPIRED` with no lock, reservation or write. Only
+  then the reservations from `factorVerifyLimits`, then one transaction: the shared lock, the
+  attempt counted only on the challenge proved, the credential read, the code checked. A TOTP
+  match moves `last_used_step` strictly forward (a replay is `AUTH_FACTOR_INVALID`) and resets
+  `failed_attempts`; a miss raises `failed_attempts` with `least(failed_attempts + 1, 100)` and
+  commits. At 100, TOTP answers `AUTH_FACTOR_DISABLED` until a recovery code succeeds. A
+  recovery code is spent with `used_at is null`, so two uses win once. On success the
+  challenge is deleted and the session inserted in the same transaction; then the old session
+  is retired, the device recorded and the new device notice owed, using the stored method.
+- With no key, or a row under a key no longer listed, TOTP answers `AUTH_UNAVAILABLE` and logs
+  `auth.totp_key_absent` or `auth.totp_key_unreadable`; recovery codes still work.
+- The session insert after a factor takes a proof that only the factor check mints, carrying
+  the user id and good once. It is not exported. Only `sessions.ts` inserts `sessions`.
+- `completePasswordReset` takes `factor?: { kind, code }`. For an enrolled person with none it
+  answers `AUTH_FACTOR_REQUIRED` once the email code matched, spending neither. With one: hash,
+  reserve, spend the factor, spend the email code, then the hash transaction takes the shared
+  lock, reads the credential again (a late enrolment is refused), writes the hash and deletes
+  sessions and the challenge.
+- A link code (GitHub, Google or SSO) for an enrolled person writes no identity: the proved
+  code becomes a plain email sign in that meets the challenge. If enrolment lands after that
+  read, the link is written but the gate still gives no session (accepted).
+- The challenge is deleted by a password change, reset or removal, an email change, a
+  provider unlink, sign out everywhere, sign out everywhere else and `revoke-sessions`.
+  `signOutOtherSessions` takes the shared lock first, so it cannot reissue a row an enrolment
+  did not see.
+- Metric `auth.factor` with `outcome` from `passed`, `matched_previous_step`, `invalid`,
+  `replayed`, `disabled`, `expired`, `rate_limited`, `unavailable`, and `kind`. Log
+  `auth.factor_refused` with the same reason and the person's public id. No code, secret or
+  cookie reaches either.
+
+## Second factor enrolment and step up
+
+`createSecondFactors(config, deps)` takes the usual `db` and `authDb` (or a store and
+limiter), a notice mailer, a `TotpFlag` (`isOn('auth.totp', { userId })`) and an optional
+`later` hook for notices that must not hold up a refusal.
+
+- `status(session)` gives `available` (a key and the flag), `enrolled` and
+  `recoveryCodesLeft`.
+- `startEnrollment(browser, session)` and `confirmEnrollment(browser, session, { code })`
+  answer `AUTH_NOT_FOUND` with `auth.totp` off. Both need a step up within 5 minutes:
+  `step_up_method` set and `authenticated_at` fresh, read with the session row. A `password`
+  step up counts only once `password_credentials.updated_at` is 24 hours old, because a
+  session can set or change its own password with recent auth alone. A failure is
+  `AUTH_RECENT_AUTH_REQUIRED`.
+- Start upserts exactly `pendingTotpRow` with `where confirmed_at is null`, so a confirmed row
+  is never overwritten (`AUTH_FACTOR_ALREADY_ENROLLED`), and returns `otpauthUri` and
+  `manualKey`. The QR is drawn by the caller from the URI. A pending row lives 15 minutes from
+  its seal.
+- Confirm reserves `totp_verify`, takes the factor lock exclusive and checks the step up
+  again. A wrong code answers `{ kind: 'mistyped', enrollment }` with the same secret, counts
+  the failure and mails nobody. A right one writes `confirmed_at`, `last_used_step` (so the
+  confirming code cannot sign in again) and `failed_attempts = 0`, writes 10 new recovery
+  codes, ends every other session, resets known devices and deletes the challenge, then
+  answers `{ kind: 'enrolled', recoveryCodes, setCookies, send }`. A repeat confirm is
+  `AUTH_FACTOR_ALREADY_ENROLLED` and shows no codes.
+- `removeFactor` and `replaceRecoveryCodes` need a code of either kind in the same request,
+  checked by the shared `verifyFactor` under the exclusive lock. Removal deletes the factor
+  and codes and ends the other sessions; replacement swaps every code in one transaction.
+  Both delete the challenge. Neither is gated by the flag.
+- `stepUpWithFactor(browser, session, { kind, code })` is the only step up once enrolled.
+  `stepUpWithPassword`, `startStepUpCode`, `verifyStepUpCode` and the OAuth step up answer
+  `AUTH_FACTOR_REQUIRED` at start, and again at verify under the shared lock, so one begun
+  before enrolment cannot finish after it. `changePassword` with `currentPassword` is refused
+  the same way; recent auth still works.
+- Notices: `second_factor_added`, `second_factor_removed` and `recovery_codes_replaced` come
+  back as `send`. `recovery_code_used` (with the count left) follows a recovery code at sign
+  in, reset and step up. `second_factor_failures` goes out when `failed_attempts` reaches 3
+  and on a failed recovery code, at most once per `second_factor_notice` window;
+  `second_factor_disabled` goes out at 100, outside the cap. Typos on a pending row never
+  mail. A failed send logs `auth.factor_notice_failed` and changes nothing.
+- Logs: `auth.totp_enrolled`, `auth.totp_removed` (`scope: self`),
+  `auth.recovery_codes_replaced` and `auth.factor_action_refused`, with public ids and closed
+  codes only.
 
 ## Rate limits
 
@@ -244,10 +376,13 @@ SameSite=Lax; Path=/`). With secure cookies off (loopback only) the name is
   `drefyn_session` and `Secure` is dropped; with them on, the bare name is never read.
   `serializeCookie(config, spec)` writes the header; callers choose only name, value and
   `Max-Age`.
-- `startSession(browser, { userId, method })` runs after a sign in was proved: it deletes the
-  session the browser's cookie proves, whoever it belongs to, inserts a new row with a fresh
-  secret (`secret_hash = sha256(secret)`) and database times (30 days absolute by default),
-  and clears the pre sign in and OAuth cookies.
+- `startSession(browser, { userId, method, returnTo? })` runs after a sign in was proved and
+  answers `StartedSession | FactorRequired`. Its transaction takes the shared factor lock
+  first, then reads the person's confirmed `totp_credentials` row. With none, it inserts a new
+  row with a fresh secret (`secret_hash = sha256(secret)`) and database times (30 days
+  absolute by default), clears the pre sign in and OAuth cookies, and then deletes the session
+  the browser's cookie proves, whoever it belongs to. With one, no session is written: see
+  "Second factor gate".
 - `resolve(cookie)` returns `{ session, touchDue }` or null; `resolveSession(cookie)` returns
   the session or null. The first statement selects only the session row by id; the hash is
   compared with `timingSafeEqual` in process (against a dummy on a miss); idle and absolute

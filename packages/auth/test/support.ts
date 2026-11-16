@@ -103,3 +103,12 @@ export function expectAuthError(work: () => unknown, code: AuthErrorCode, key?: 
 // Fixed ids for example based tests.
 export const UUID_A = '01890a5d-ac96-774b-bcce-b302099a8057';
 export const UUID_B = '01890a5d-ac96-774b-bcce-b302099a8058';
+
+// A sign in result where the test expects a session, not a factor challenge. Everyone in
+// these suites signs in without a second factor, so a challenge here is a failure.
+export function asSignedIn<T extends object>(value: T): Exclude<T, { kind: 'factor_required' }> {
+  if ('kind' in value && value.kind === 'factor_required') {
+    throw new Error('expected a session, got a factor challenge');
+  }
+  return value as Exclude<T, { kind: 'factor_required' }>;
+}

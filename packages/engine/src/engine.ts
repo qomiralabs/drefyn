@@ -90,7 +90,7 @@ const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE
 
 // A refusal becomes a result, and a busy database a retryable one. Anything else is a bug and
 // stays a throw, after the store has rolled the transaction back.
-async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
+export async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
   try {
     return { ok: true, value: await work() };
   } catch (error) {
@@ -102,7 +102,7 @@ async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
   }
 }
 
-function parsedOrRefused<S extends z.ZodType>(
+export function parsedOrRefused<S extends z.ZodType>(
   schema: S,
   value: unknown,
 ): EngineResult<z.output<S>> {
@@ -112,7 +112,7 @@ function parsedOrRefused<S extends z.ZodType>(
     : { ok: false, error: engineError('engine.validation_failed', issuesOf(parsed.error)) };
 }
 
-const tenantFields = (tenant: TenantRef): LogFields => ({
+export const tenantFields = (tenant: TenantRef): LogFields => ({
   organization_id: tenant.organizationId,
   project_id: tenant.projectId,
 });

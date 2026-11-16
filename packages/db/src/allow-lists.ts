@@ -119,7 +119,18 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
 
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
 
-export const PUBLISHED_TABLES: readonly AllowEntry[] = [];
+export const PUBLISHED_TABLES: readonly AllowEntry[] = [
+  {
+    name: 'app.published_versions',
+    reason:
+      'copies of published versions only, written by the publish transaction; no draft is ever here',
+  },
+  {
+    name: 'app.published_filter_rows',
+    reason:
+      'filter slots of the current published version only, so a public list never reads node_filter_rows',
+  },
+];
 
 export const READER_FUNCTIONS: readonly AllowEntry[] = [
   { name: 'app.current_org()', reason: 'reads the transaction setting the reader policies need' },
@@ -479,9 +490,10 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     command: 'insert',
     roles: ['drefyn_app'],
     using: null,
-    withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+    withCheck:
+      "((plan_tier = app.install_tier()) AND (read_only_since IS NULL) AND (sso_enforcement = 'off'::text) AND (sso_enforcement_since IS NULL))",
     reason:
-      'a new organization starts on the install tier and writable; only billing changes either later',
+      'a new organization starts on the install tier, writable and without SSO enforcement; only billing changes the first two and only the settings flow the third',
   },
   {
     name: 'app.project_roles.project_role_delete_actor',
@@ -606,7 +618,7 @@ export const ALLOW_LISTS: AllowLists = {
 };
 
 // Published table names as the reader's transaction type sees them, without the schema.
-export type PublishedTableName = never;
+export type PublishedTableName = 'published_versions' | 'published_filter_rows';
 
 // The tables AuthSchema and UserSchema name, without the schema.
 export type AuthTableName =

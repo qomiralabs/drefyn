@@ -1,4 +1,9 @@
-import { isLinkShaped, isNormalizedEmailAddress, isPlainAddress } from '@drefyn/address';
+import {
+  isLinkShaped,
+  isNormalizedEmailAddress,
+  isPlainAddress,
+  normalizeEmailAddress,
+} from '@drefyn/address';
 import { z } from 'zod';
 import { invalidInput } from './errors.ts';
 import { CONTROL } from './headers.ts';
@@ -66,6 +71,17 @@ const person = shown(100, (value) => plainText(value) || isPlainAddress(value));
 // Holds an address on purpose.
 const account = shown(254, () => true);
 
+// A domain is link shaped by nature, so the name guard would refuse it. It passes only as
+// one host name already in the form the address rule gives it: lower case, punycode, no
+// scheme, path, port, space or invisible character. A last label of digits alone is an IP
+// address, not a domain.
+const host = z.string().refine((value) => {
+  if (!value.includes('.') || value.includes('@')) return false;
+  const normalized = normalizeEmailAddress(`a@${value}`);
+  if (!normalized.ok || normalized.value !== `a@${value}`) return false;
+  return !/^[0-9]+$/.test(value.slice(value.lastIndexOf('.') + 1));
+});
+
 // A copy is checked and rendered, never the caller's object: rendering awaits, so the
 // caller could edit the original after the check, and a subclass could lie about its
 // origin. The copy is a plain URL built from the serialised form.
@@ -100,7 +116,18 @@ const notice = z.discriminatedUnion('kind', [
       'password_removed',
       'password_reset',
       'new_device_sign_in',
+      'second_factor_added',
+      'second_factor_removed',
+      'recovery_codes_replaced',
+      'second_factor_failures',
+      'second_factor_disabled',
     ]),
+  }),
+  z.object({
+    ...facts,
+    kind: z.literal('recovery_code_used'),
+    // A person never holds more than ten.
+    codesLeft: z.number().int().min(0).max(10),
   }),
   z.object({
     ...facts,
@@ -121,6 +148,12 @@ const notice = z.discriminatedUnion('kind', [
     organizationName: name(100),
     memberName: person,
     revokedKeys: z.number().int().min(0).max(1_000_000),
+  }),
+  z.object({
+    ...facts,
+    kind: z.enum(['sso_domain_claimed', 'sso_domain_verified', 'sso_domain_unverified']),
+    organizationName: name(100),
+    domain: host,
   }),
 ]);
 

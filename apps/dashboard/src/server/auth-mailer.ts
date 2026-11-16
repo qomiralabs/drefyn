@@ -7,6 +7,8 @@ import type {
   AuthNoticeMailer,
   AuthSecurityNotice,
   SessionMethod,
+  SsoDomainNotice,
+  SsoDomainNoticeMailer,
 } from '@drefyn/auth';
 import type {
   EmailDeps,
@@ -68,7 +70,10 @@ function canonical(value: unknown): unknown {
 
 // Stable across a retry of one notice to one person, and different for any other person or
 // event. Auth's ports stay as they are, so the key comes from the notice itself.
-function noticeKey(notice: AuthSecurityNotice, to: NormalizedEmailAddress): string {
+function noticeKey(
+  notice: AuthSecurityNotice | SsoDomainNotice,
+  to: NormalizedEmailAddress,
+): string {
   const scope = 'organizationId' in notice ? notice.organizationId : 'user';
   return `notice:${scope}:${digest(JSON.stringify(canonical(notice)))}:${digest(to)}`;
 }
@@ -121,10 +126,15 @@ async function noticeMail(
   }
 }
 
+export type DashboardAuthMailer = AuthMailer &
+  AuthNoticeMailer &
+  AuthInvitationMailer &
+  SsoDomainNoticeMailer;
+
 export function createAuthMailer(
   mailer: Mailer,
   organizationName: OrganizationName,
-): AuthMailer & AuthNoticeMailer & AuthInvitationMailer {
+): DashboardAuthMailer {
   return {
     async sendSignInCode(to, code, link, purpose, challengeId, linking) {
       const fields = {
@@ -154,6 +164,19 @@ export function createAuthMailer(
         ...('organizationId' in notice
           ? { tenant: { organizationId: notice.organizationId } }
           : {}),
+      });
+    },
+    // The domain is named on purpose: owners must know which one changed. The mail guard
+    // takes it only as one host name and renders it as text.
+    async sendSsoDomainNotice(to, notice) {
+      const { kind, at, organizationId, domain } = notice;
+      const message: MailMessage = {
+        template: 'security_notice',
+        notice: { kind, at, domain, organizationName: await organizationName(organizationId) },
+      };
+      await deliver(mailer, to, message, {
+        idempotencyKey: noticeKey(notice, address(to)),
+        tenant: { organizationId },
       });
     },
     async sendInvitation(to, invitation) {
@@ -248,7 +271,7 @@ export function warmMailer(deps: MailerDeps): Promise<Mailer | null> {
 }
 
 export interface DashboardMail {
-  readonly auth: AuthMailer & AuthNoticeMailer & AuthInvitationMailer;
+  readonly auth: DashboardAuthMailer;
   // False with the flag off, no transport, or a failed load.
   readonly configured: boolean;
 }

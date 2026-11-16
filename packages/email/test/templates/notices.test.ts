@@ -186,6 +186,148 @@ describe('facts per kind', () => {
   });
 });
 
+describe('SSO domain notices', () => {
+  const KINDS = ['sso_domain_claimed', 'sso_domain_verified', 'sso_domain_unverified'] as const;
+  const sso = (kind: (typeof KINDS)[number], domain = 'login.acme.example') =>
+    notice({ kind, at: AT, organizationName: 'Acme', domain });
+
+  it.each(KINDS)('%s names the organization and the domain as facts', async (kind) => {
+    const mail = await rendered(sso(kind));
+    expect(mail.text).toMatch(/^Organization: +Acme$/m);
+    expect(mail.text).toMatch(/^Domain: +login\.acme\.example$/m);
+    expect(mail.text).toContain('You get this because you are an owner');
+    expect(mail.subject).not.toContain('acme');
+    expect(mail.preheader).not.toContain('acme');
+  });
+
+  // The domain is the one value here a client could link. It stays text in a fact cell: no
+  // anchor, no href, no scheme, and the head still tells Apple and others not to detect links.
+  it.each(KINDS)('%s keeps the domain plain text in both parts', async (kind) => {
+    const mail = await rendered(sso(kind));
+    const cell = /<td class="dr-body dr-rule"[^>]*>([^<]*)<\/td>/g;
+    const cells = [...mail.html.matchAll(cell)].map((m) => m[1]);
+    expect(cells).toContain('login.acme.example');
+    for (const anchor of mail.html.matchAll(/<a\b[^>]*>(.*?)<\/a>/gs)) {
+      expect(anchor[0]).not.toContain('acme.example');
+    }
+    expect(mail.html).not.toMatch(/href="[^"]*acme\.example/);
+    expect(mail.html).not.toMatch(/https?:\/\/[^"\s<]*acme\.example/);
+    expect(mail.text).not.toMatch(/https?:\/\/\S*acme\.example/);
+    expect(mail.html).toContain('content="telephone=no,date=no,address=no,email=no,url=no"');
+  });
+
+  // The cell takes its colour from the dark rules like every other fact, so the domain reads
+  // in a dark client as well as a light one.
+  it.each(KINDS)('%s carries the light and the dark palette for the domain', async (kind) => {
+    const mail = await rendered(sso(kind));
+    expect(mail.html).toContain('<meta name="color-scheme" content="light dark"/>');
+    expect(mail.html).toMatch(
+      /@media \(prefers-color-scheme:dark\)\{(?:[^{}]*\{[^{}]*\})*?\.dr-body\{color:#[0-9A-Fa-f]{6}!important\}/,
+    );
+    expect(mail.html).toMatch(/<td class="dr-body dr-rule"[^>]*>login\.acme\.example<\/td>/);
+  });
+
+  it('gives each of the three its own subject and lead', async () => {
+    const mails = await Promise.all(KINDS.map(async (kind) => rendered(sso(kind))));
+    expect(new Set(mails.map((m) => m.subject)).size).toBe(3);
+    expect(mails[0]?.text).toContain('Nothing changes until');
+    expect(mails[1]?.text).toContain('can now be sent to');
+    expect(mails[2]?.text).toContain('no longer verified');
+  });
+
+  it('takes an internationalized domain in its punycode form', async () => {
+    const mail = await rendered(sso('sso_domain_verified', 'xn--bcher-kva.example'));
+    expect(mail.text).toMatch(/^Domain: +xn--bcher-kva\.example$/m);
+  });
+
+  it.each([
+    'https://acme.example',
+    'acme.example/login',
+    'Acme.example',
+    'acme example',
+    ' acme.example',
+    'acme.example.',
+    'acme',
+    '192.0.2.1',
+    'ada@acme.example',
+    'b\u00fccher.example',
+    'acme\u200b.example',
+    `${'a'.repeat(64)}.example`,
+    '',
+  ])('refuses a domain that is not one normalized host name: %j', async (domain) => {
+    const result = await renderMail(sso('sso_domain_claimed', domain), { linkOrigin: ORIGIN });
+    expect(result.ok ? null : result.error.field).toBe('notice.domain');
+  });
+
+  it('still refuses an organization name shaped like a link', async () => {
+    const result = await renderMail(
+      notice({
+        kind: 'sso_domain_verified',
+        at: AT,
+        organizationName: 'acme.example',
+        domain: 'acme.example',
+      }),
+      { linkOrigin: ORIGIN },
+    );
+    expect(result.ok ? null : result.error.field).toBe('notice.organizationName');
+  });
+});
+
+describe('second factor notices', () => {
+  // Plain text wraps at the measure, so phrases are matched across line breaks.
+  const flat = (text: string) => text.replace(/\s+/g, ' ');
+
+  it('second_factor_added says API keys keep working and other sessions ended', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_added', at: AT }));
+    expect(mail.subject).toBe('Two step sign in was turned on for your Drefyn account');
+    expect(flat(mail.text)).toContain('Existing API keys keep working.');
+    expect(flat(mail.text)).toContain('Your other sessions were signed out.');
+    expect(flat(mail.html)).toContain('Existing API keys keep working.');
+  });
+
+  it('second_factor_removed says the code is no longer asked for', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_removed', at: AT }));
+    expect(mail.subject).toBe('Two step sign in was turned off for your Drefyn account');
+    expect(flat(mail.text)).toContain('no longer asks for a code');
+  });
+
+  it('recovery_code_used shows how many codes are left and says to re-enroll', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_code_used', at: AT, codesLeft: 3 }));
+    expect(mail.subject).toBe('A recovery code was used on your Drefyn account');
+    expect(mail.text).toMatch(/^Codes left: +3$/m);
+    expect(flat(mail.text)).toContain('set up your authenticator app again');
+  });
+
+  it('recovery_code_used says plainly when none are left', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_code_used', at: AT, codesLeft: 0 }));
+    expect(mail.text).toMatch(/^Codes left: +None$/m);
+  });
+
+  it.each([-1, 11, 1.5, Number.NaN])('refuses a codes left count of %s', async (codesLeft) => {
+    const result = await renderMail(notice({ kind: 'recovery_code_used', at: AT, codesLeft }), {
+      linkOrigin: ORIGIN,
+    });
+    expect(result.ok ? null : result.error.field).toBe('notice.codesLeft');
+  });
+
+  it('recovery_codes_replaced says the old codes stopped working', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_codes_replaced', at: AT }));
+    expect(flat(mail.text)).toContain('Your old recovery codes no longer work.');
+  });
+
+  it('second_factor_failures says the first step passed and to change the password', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_failures', at: AT }));
+    expect(mail.subject).toBe('Wrong two step sign in codes on your Drefyn account');
+    expect(flat(mail.text)).toContain('got past the first step');
+    expect(flat(mail.text)).toContain('change your password');
+  });
+
+  it('second_factor_disabled says only a recovery code works now', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_disabled', at: AT }));
+    expect(flat(mail.text)).toContain('Only a recovery code can sign in now');
+  });
+});
+
 describe('invitation', () => {
   it('shows who invited whom as facts, with the expiry named', async () => {
     const mail = await rendered(invitation());

@@ -22,6 +22,7 @@ const auth = {
   passwordSignIn: { signInWithPassword: vi.fn() },
   passwordAccount: { startPasswordReset: vi.fn(), completePasswordReset: vi.fn() },
   cliLinks: { redeem: vi.fn() },
+  factorChallenges: { completeChallenge: vi.fn(), readChallenge: vi.fn() },
   invitations: {
     readInvitation: vi.fn(),
     holdInvitation: vi.fn(),
@@ -564,5 +565,110 @@ describe('the last method', () => {
     });
     await expect(call['redeemCliLink']?.(form({ token: 't' }))).rejects.toThrow(REDIRECT);
     expect(written()).toEqual([]);
+  });
+});
+
+describe('the second factor', () => {
+  const FACTOR = {
+    ok: true,
+    value: {
+      kind: 'factor_required',
+      setCookies: [{ name: 'factor', value: 'v1.x', maxAgeSeconds: 600 }],
+    },
+  };
+  const names = () => jar.set.mock.calls.map(([cookie]) => (cookie as { name: string }).name);
+
+  it.each([
+    [
+      'an email code',
+      () => {
+        auth.emailSignIn.verifyEmailCode.mockResolvedValue(FACTOR);
+        return call['verifyCode']?.(form({ code: '12345678' }));
+      },
+    ],
+    [
+      'Continue from the mail',
+      () => {
+        auth.emailSignIn.verifyLinkCode.mockResolvedValue(FACTOR);
+        return call['finishLink']?.(form({ challenge: PUBLIC, code: '12345678' }));
+      },
+    ],
+    [
+      'a password',
+      () => {
+        auth.passwordSignIn.signInWithPassword.mockResolvedValue(FACTOR);
+        return call['signInPassword']?.(form({ email: 'a@example.com', password: 'x', csrf: 'c' }));
+      },
+    ],
+    [
+      'a reset',
+      () => {
+        auth.passwordAccount.completePasswordReset.mockResolvedValue(FACTOR);
+        return call['resetStep']?.(form({ step: 'save', code: '1', challenge: '', password: 'p' }));
+      },
+    ],
+    [
+      'a CLI link',
+      () => {
+        auth.cliLinks.redeem.mockResolvedValue(FACTOR);
+        return call['redeemCliLink']?.(form({ token: 't' }));
+      },
+    ],
+  ] as const)(
+    'sends %s on to the challenge with no session and no last method',
+    async (_n, run) => {
+      await expect(run()).rejects.toThrow(`${REDIRECT} /sign-in/factor`);
+      expect(names()).toEqual(['factor']);
+      expect(after).not.toHaveBeenCalled();
+    },
+  );
+
+  it('finishes a passed challenge like any sign in, marking the method', async () => {
+    auth.factorChallenges.completeChallenge.mockResolvedValue({
+      ok: true,
+      value: { ...SIGNED, session: { method: 'password' } },
+    });
+    await expect(
+      call['completeFactor']?.(form({ kind: 'totp', code: '123456', csrf: 'c' })),
+    ).rejects.toThrow(`${REDIRECT} /acme`);
+    expect(auth.factorChallenges.completeChallenge).toHaveBeenCalledWith(BROWSER, {
+      kind: 'totp',
+      code: '123456',
+      csrf: 'c',
+    });
+    expect(names()).toContain('last');
+  });
+
+  it('keeps an invitation’s fresh form binding through the challenge', async () => {
+    auth.factorChallenges.completeChallenge.mockResolvedValue({
+      ok: true,
+      value: { setCookies: [], returnTo: '/invite' },
+    });
+    await expect(
+      call['completeFactor']?.(form({ kind: 'recovery_code', code: 'x', csrf: 'c' })),
+    ).rejects.toThrow(`${REDIRECT} /invite`);
+    expect(names()).toContain('pre');
+  });
+
+  it.each([
+    ['AUTH_FACTOR_INVALID', { problem: 'wrong', kind: 'totp' }],
+    ['AUTH_FACTOR_DISABLED', { problem: 'disabled', kind: 'totp' }],
+    ['AUTH_FACTOR_CHALLENGE_EXPIRED', { problem: 'expired', kind: 'totp' }],
+  ] as const)('reads %s for the person and never echoes the code', async (code, state) => {
+    auth.factorChallenges.completeChallenge.mockResolvedValue(refused(code));
+    const result = await call['completeFactor']?.(
+      form({ kind: 'totp', code: '654321', csrf: 'c' }),
+    );
+    expect(result).toEqual(state);
+    expect(JSON.stringify(result)).not.toContain('654321');
+  });
+
+  it('gives a reference for our own failure, without the code', async () => {
+    auth.factorChallenges.completeChallenge.mockResolvedValue(refused('AUTH_UNAVAILABLE'));
+    const result = await call['completeFactor']?.(
+      form({ kind: 'recovery_code', code: 'abcdef-abcdef', csrf: 'c' }),
+    );
+    expect(result).toMatchObject({ kind: 'recovery_code', notice: { kind: 'unavailable' } });
+    expect(JSON.stringify(result)).not.toContain('abcdef');
   });
 });

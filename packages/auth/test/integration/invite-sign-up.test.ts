@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { closeDatabase, createDatabase, parseDatabaseConfig, type Database } from '@drefyn/db';
 import { beforeAll, expect, it } from 'vitest';
 import {
@@ -129,7 +130,7 @@ describeWithStack('invite_only sign up by the invitation this browser holds', ()
     if (mail === null) throw new Error('no mail');
     const signedIn = await flow.signIn.verifyEmailCode(b.context(), mail);
     if (!signedIn.ok) throw signedIn.error;
-    const accepted = await invitations.acceptInvitation(signedIn.value.session, token);
+    const accepted = await invitations.acceptInvitation(asSignedIn(signedIn.value).session, token);
     if (!accepted.ok) throw accepted.error;
     // Acceptance clears the cookie, and the token no longer names a live invitation.
     b.apply(accepted.value.setCookies);
@@ -195,11 +196,13 @@ describeWithStack('invite_only sign up by the invitation this browser holds', ()
     if (firstMail === null || secondMail === null) throw new Error('no mail');
     const winner = await flow.signIn.verifyEmailCode(second.context(), secondMail);
     if (!winner.ok) throw winner.error;
-    const accepted = await invitations.acceptInvitation(winner.value.session, token);
+    const accepted = await invitations.acceptInvitation(asSignedIn(winner.value).session, token);
     expect(accepted.ok).toBe(true);
     const late = await flow.signIn.verifyEmailCode(first.context(), firstMail);
     // The address is a person now, so the late browser signs in to them; nobody new is made.
-    expect(late.ok && late.value.session.userId).toBe(winner.value.session.userId);
+    expect(late.ok && asSignedIn(late.value).session.userId).toBe(
+      asSignedIn(winner.value).session.userId,
+    );
     expect(await usersNamed(email)).toBe('1');
   });
 

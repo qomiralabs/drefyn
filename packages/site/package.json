@@ -14,7 +14,10 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "bench": "NODE_ENV=production vitest run --config bench/vitest.config.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:gates": "playwright test -c playwright.gates.config.ts",
+    "test:gates:controls": "node gates/controls.ts",
+    "test:gates:update": "node gates/in-image.ts node_modules/@playwright/test/cli.js test -c playwright.gates.config.ts --project=visual-chromium --project=visual-firefox --project=visual-webkit --update-snapshots"
   },
   "dependencies": {
     "@drefyn/tenancy": "workspace:*",
@@ -24,11 +27,13 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "fast-check": "4.10.2",
     "happy-dom": "21.0.4",
+    "lighthouse": "13.6.0",
     "typescript": "6.0.3"
   }
 }

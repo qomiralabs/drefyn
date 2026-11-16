@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import fc from 'fast-check';
 import { beforeAll, expect, it } from 'vitest';
@@ -35,7 +36,7 @@ describeWithStack('the SQL seat count', () => {
           .startSession(browser, { userId: owner, method: 'email' });
         const made = await h
           .organizations({ limiter: unlimited })
-          .createOrganization(started.session, { name: 'Seat Co' });
+          .createOrganization(asSignedIn(started).session, { name: 'Seat Co' });
         if (!made.ok) throw made.error;
         const org = made.value.access.organizationId;
         const holders: SeatHolder[] = [{ kind: 'member', userId: owner }];

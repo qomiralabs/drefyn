@@ -496,6 +496,76 @@ describeWithStack('organization tables', () => {
       expect(code).toBe('42501');
     });
 
+    // Turning enforcement on needs a working connection and a recent sign in through it, so a
+    // new organization must not be born with it on. Every mode, with and without a start
+    // time, has to be refused by the policy itself, before the pairing check can answer.
+    it.each([
+      ['verified_domains', 'now()'],
+      ['everyone', 'now()'],
+      ['verified_domains', 'null'],
+      ['everyone', 'null'],
+      ['off', 'now()'],
+    ])('refuses an organization born with enforcement %s since %s', async (mode, since) => {
+      const app = await as('app');
+      const code = await within(app, { org: ORG_FRESH }, () =>
+        sqlState(
+          app.query(
+            `insert into app.organizations
+               (organization_id, name, plan_tier, sso_enforcement, sso_enforcement_since)
+             values ($1, 'x', app.install_tier(), $2, ${since})`,
+            [ORG_FRESH, mode],
+          ),
+        ),
+      );
+      expect(code).toBe('42501');
+    });
+
+    it('makes an organization with enforcement off when the insert names neither column', async () => {
+      const app = await as('app');
+      const made = await within(app, { org: ORG_FRESH }, async () => {
+        const result = await app.query<{
+          sso_enforcement: string;
+          sso_enforcement_since: Date | null;
+        }>(
+          `insert into app.organizations (organization_id, name, plan_tier)
+           values ($1, 'x', app.install_tier())
+           returning sso_enforcement, sso_enforcement_since`,
+          [ORG_FRESH],
+        );
+        return result.rows;
+      });
+      expect(made).toEqual([{ sso_enforcement: 'off', sso_enforcement_since: null }]);
+    });
+
+    it('makes an organization that names enforcement off outright', async () => {
+      const app = await as('app');
+      const count = await within(app, { org: ORG_FRESH }, async () => {
+        const result = await app.query(
+          `insert into app.organizations
+             (organization_id, name, plan_tier, sso_enforcement, sso_enforcement_since)
+           values ($1, 'x', app.install_tier(), 'off', null)`,
+          [ORG_FRESH],
+        );
+        return result.rowCount;
+      });
+      expect(count).toBe(1);
+    });
+
+    // The guard names drefyn_app, so it covers every insert only while no other login role
+    // that obeys row level security can insert here.
+    it('leaves drefyn_app the only login role that can insert an organization', async () => {
+      const out = await superuser(
+        `select r.rolname from pg_roles r
+          where r.rolcanlogin and not r.rolsuper and not r.rolbypassrls
+            and r.oid <> (select c.relowner from pg_class c
+                           where c.oid = 'app.organizations'::regclass)
+            and has_table_privilege(r.oid, 'app.organizations', 'insert')
+          order by 1;`,
+        db.name,
+      );
+      expect(out.trim().split('\n')).toEqual(['drefyn_app']);
+    });
+
     it('takes self_hosted as the install tier, which drefyn_app reads but cannot replace', async () => {
       const app = await as('app');
       const tier = await within(app, { org: ORG_FRESH }, async () => {
