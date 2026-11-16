@@ -263,8 +263,6 @@ export function createFactorChallenges(
         }
         const { check } = outcome;
         report(kind, check.previousStep ? 'matched_previous_step' : 'passed', userId);
-        // Deliberate 10 ms stall to show the timing test catches a slower challenge.
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         const done = await signedIn(b, outcome.session, secret, proved);
         if (check.codesLeft === null) return ok(done);
         // A recovery code at sign in usually means a lost phone, so the person hears it
