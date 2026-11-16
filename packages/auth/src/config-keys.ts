@@ -13,6 +13,10 @@ export const RATE_BUCKETS = Object.freeze([
   'password_fail_ip',
   'cli_link_verify',
   'sso_domain_verify',
+  'totp_verify',
+  'recovery_code_verify',
+  'recovery_code_verify_ip',
+  'second_factor_notice',
 ] as const);
 
 export type RateBucket = (typeof RATE_BUCKETS)[number];
