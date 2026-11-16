@@ -38,7 +38,9 @@ async function codeOf(run: () => Promise<unknown>): Promise<Outcome> {
 }
 
 function signed(entry: CreditEntry): number {
-  return entry.kind === 'grant' || entry.kind === 'reversal' ? entry.amount : 0 - entry.amount;
+  return entry.kind === 'grant' || entry.kind === 'reversal' || entry.kind === 'settlement'
+    ? entry.amount
+    : 0 - entry.amount;
 }
 
 function spendsWithKey(entries: readonly CreditEntry[], key: string): CreditEntry[] {
