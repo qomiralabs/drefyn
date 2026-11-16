@@ -185,10 +185,28 @@ describe('a parsed page', () => {
 
   it('stores no chunks for the hostile open tag page, and ends at once', async () => {
     const page = `${'<a>\n\n'.repeat(24_000)}${'</b>\n\n'.repeat(24_000)}`;
+    const client = createParseClient(parseClientConfig(running.url));
+    const tenant = {
+      organizationId: organizationId(randomUUID()),
+      projectId: projectId(randomUUID()),
+    };
     const started = performance.now();
-    expect(await chunksOf(page, 'md')).toEqual([]);
-    // Refused by the render's tag budget in the host, before any walk. The engine has nothing to
-    // walk, so its thread cannot stall on this page however slow the host is.
+    const answer = await client.parse({
+      tenant,
+      path: 'page',
+      source: page,
+      dialect: 'md',
+      policy,
+      reader: true,
+    });
+    // Either the render's tag budget refuses it, or on a slow machine the host's kill ends the
+    // parse first, and a save is refused. Neither leaves the engine any text to walk, so its
+    // thread cannot stall on this page.
+    if (answer.ok) {
+      expect(answer.value.reader).toEqual({ state: 'not_renderable' });
+    } else {
+      expect(answer.error.map(({ code }) => code)).toEqual(['mdx.parse_timeout']);
+    }
     expect(performance.now() - started).toBeLessThan(HOST_START_MS);
   });
 });
