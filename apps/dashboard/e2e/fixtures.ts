@@ -92,8 +92,14 @@ export async function useTheme(page: Page, theme: Theme): Promise<void> {
 }
 
 // Waits for the client to take over, so keyboard handlers are attached before a key press.
-export async function openShell(page: Page, path: string): Promise<void> {
-  await page.goto(path);
+// A test that holds a chunk the page asks for while it loads passes `domcontentloaded`: the
+// load event waits on that chunk, and so would the navigation.
+export async function openShell(
+  page: Page,
+  path: string,
+  waitUntil: 'load' | 'domcontentloaded' = 'load',
+): Promise<void> {
+  await page.goto(path, { waitUntil });
   await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
 }
 
@@ -161,11 +167,13 @@ export async function routeCommandBar(
   return routeChunk(page, COMMAND_BAR_MARK, mode);
 }
 
-// The same for any lazy chunk, found by text only it carries.
+// The same for any lazy chunk, found by text only it carries. `after` is script appended to
+// the chunk, which runs as the chunk does, so a test can act at a point no key press can hit.
 export async function routeChunk(
   page: Page,
   mark: string,
   mode: 'hold' | 'fail',
+  after = '',
 ): Promise<{ release: () => void; requested: () => number }> {
   let release: () => void = () => undefined;
   const released = new Promise<void>((resolve) => {
@@ -185,12 +193,34 @@ export async function routeChunk(
       return;
     }
     await released;
-    await route.fulfill({ response, body });
+    await route.fulfill({ response, body: `${body}\n${after}` });
   };
   // A test can end while a script is still in flight or the chunk is still held; its page is
   // gone by then, and so is anything to answer.
   await page.route('**/_next/static/**/*.js', (route) => handle(route).catch(() => undefined));
   return { release, requested: () => seen };
+}
+
+// Keeps the page's load event waiting, by an image no one sees, until `until` holds. A lazy
+// chunk then is surely asked for while the page still loads, as a fast client may do.
+export async function holdLoad(page: Page, until: () => boolean): Promise<void> {
+  const PIXEL = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'base64',
+  );
+  await page.route('**/__hold-load.png', async (route) => {
+    await expect.poll(until, { message: 'the load event was held for' }).toBe(true);
+    await route.fulfill({ contentType: 'image/png', body: PIXEL }).catch(() => undefined);
+  });
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.hidden = true;
+      img.src = '/__hold-load.png';
+      document.body.append(img);
+    });
+  });
 }
 
 export const inbox = (page: Page): Locator => page.getByRole('dialog', { name: 'Inbox' });
