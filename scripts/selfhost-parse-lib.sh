@@ -170,10 +170,10 @@ parse_boundary_checks() {
     if [ "${#machine[@]}" -gt 0 ]; then break; fi
     sleep 1
   done
-  # With inhibit_ipv4 the network may have no gateway at all, and an empty host would mean
-  # loopback inside the container.
+  # With inhibit_ipv4 the network may have no gateway at all. Docker then prints nothing or
+  # "invalid IP", and either would be a connect that fails for the wrong reason.
   targets=(${machine[@]+"${machine[@]}"})
-  if [ -n "$gateway" ]; then targets+=("$gateway"); fi
+  if [[ "$gateway" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then targets+=("$gateway"); fi
   reached=""
   if [ "${#machine[@]}" = 0 ]; then
     fail "control: the host network answers from the default bridge"
