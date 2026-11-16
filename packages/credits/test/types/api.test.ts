@@ -4,7 +4,12 @@ import type { IdOf, OrganizationId, OrganizationRef, ProjectId, TenantRef } from
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   credits,
+  createLedgerBudget,
   createMemoryLedger,
+  unmeteredBudget,
+  type AiBudget,
+  type AiCharge,
+  type AiOperation,
   type CreditEntry,
   type CreditEntryId,
   type CreditErrorCode,
@@ -145,6 +150,27 @@ async function compileOnly(): Promise<void> {
   // @ts-expect-error codes are a closed union
   const madeUpCode: CreditErrorCode = 'CREDIT_OOPS';
   use(madeUpCode);
+
+  // The budget is charged per project, from the organization pool.
+  const budget: AiBudget = unmeteredBudget();
+  await budget.charge(tenant, { idempotencyKey: 'k', operation: 'reader_answer' });
+  await budget.charge(tenant, { idempotencyKey: 'k', operation: 'stale_draft', floor: amount });
+  // @ts-expect-error an organization ref alone has no project to log against
+  await budget.charge(orgRef, { idempotencyKey: 'k', operation: 'reader_answer' });
+  // @ts-expect-error generation has its own call site, not the AI budget
+  await budget.charge(tenant, { idempotencyKey: 'k', operation: 'generation' });
+  // @ts-expect-error a floor is Credits, never a raw number
+  await budget.charge(tenant, { idempotencyKey: 'k', operation: 'reader_answer', floor: 5 });
+  // @ts-expect-error a charge needs a key
+  await budget.charge(tenant, { operation: 'reader_answer' });
+  await budget.refund(tenant, { idempotencyKey: 'k', entryId });
+  // @ts-expect-error a refund names the entry the charge returned
+  await budget.refund(tenant, { idempotencyKey: 'k', entryId: plainString });
+  createLedgerBudget({ ledger, creditsFor: () => amount });
+  // @ts-expect-error a cost is Credits, never a raw number
+  createLedgerBudget({ ledger, creditsFor: () => 5 });
+  // @ts-expect-error a ledger budget needs its costs from the host
+  createLedgerBudget({ ledger });
 }
 
 describe('type level API', () => {
@@ -154,9 +180,19 @@ describe('type level API', () => {
     expectTypeOf<CreditEntryId>().toEqualTypeOf<IdOf<'crd'>>();
     expectTypeOf<EntryKind>().toEqualTypeOf<'grant' | 'spend' | 'reversal' | 'expiry'>();
     expectTypeOf<SpendReason>().toEqualTypeOf<
-      'generation' | 'translation_draft' | 'incident_draft'
+      'generation' | 'translation_draft' | 'incident_draft' | 'stale_draft' | 'reader_answer'
     >();
     expectTypeOf<CreditOutcome['status']>().toEqualTypeOf<'applied' | 'insufficient'>();
+    expectTypeOf<AiOperation>().toEqualTypeOf<'stale_draft' | 'reader_answer'>();
+    expectTypeOf<AiCharge>().toEqualTypeOf<
+      | { readonly status: 'charged'; readonly entryId: CreditEntryId }
+      | { readonly status: 'unmetered' }
+      | { readonly status: 'refused' }
+    >();
+    expectTypeOf<AiBudget['charge']>().returns.toEqualTypeOf<Promise<AiCharge>>();
+    expectTypeOf<AiBudget['refund']>().returns.toEqualTypeOf<Promise<void>>();
+    expectTypeOf(unmeteredBudget).returns.toEqualTypeOf<AiBudget>();
+    expectTypeOf(createLedgerBudget).returns.toEqualTypeOf<AiBudget>();
     expectTypeOf<CreditLedger['balance']>().parameters.toEqualTypeOf<[OrganizationRef]>();
     expectTypeOf<CreditLedger['balance']>().returns.toEqualTypeOf<Promise<Credits>>();
     expectTypeOf<CreditErrorCode>().toEqualTypeOf<
