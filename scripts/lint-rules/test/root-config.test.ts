@@ -385,6 +385,11 @@ describe('the dashboard handle rule', () => {
     expect(await lint(job, engine)).toEqual([
       expect.stringMatching(/^error no-restricted-imports: .*engine-holder/),
     ]);
+    const whoami = 'apps/dashboard/src/app/settings-states/whoami/route.ts';
+    expect(await lint(whoami, handle)).toEqual([]);
+    expect(await lint(whoami, store)).toEqual([
+      expect.stringMatching(/^error no-restricted-imports: .*engine-holder/),
+    ]);
   });
 
   it('keeps the engine out of anything that is not a server module', async () => {

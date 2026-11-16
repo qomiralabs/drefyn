@@ -38,11 +38,13 @@ const handleBuilders = {
   message: holderMessage,
 };
 const DASHBOARD_HOLDER = 'apps/dashboard/src/server/engine-holder.ts';
-// Scheduled jobs that open one connection pools of their own, so a slow run never takes a
-// connection from a request. Neither builds a store or an engine.
-const DASHBOARD_JOBS = [
+// Pools of their own, built no store or engine: two scheduled jobs with one connection each,
+// so a slow run never takes one from a request, and the test states' stand in for the API,
+// whose key verifier must run on a handle its own copy of the packages opened.
+const DASHBOARD_OWN_POOLS = [
   'apps/dashboard/src/server/expiry-job.ts',
   'apps/dashboard/src/server/sso-domain-recheck.ts',
+  'apps/dashboard/src/app/settings-states/whoami/route.ts',
 ];
 
 const urlMessage =
@@ -214,7 +216,7 @@ export default tseslint.config(
   {
     // Pages and components reach the engine through server modules only.
     files: ['apps/dashboard/src/**', 'apps/dashboard/server.ts'],
-    ignores: ['apps/dashboard/src/server/**'],
+    ignores: ['apps/dashboard/src/server/**', ...DASHBOARD_OWN_POOLS],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -229,11 +231,11 @@ export default tseslint.config(
   },
   {
     files: ['apps/dashboard/src/server/**'],
-    ignores: [DASHBOARD_HOLDER, ...DASHBOARD_JOBS],
+    ignores: [DASHBOARD_HOLDER, ...DASHBOARD_OWN_POOLS],
     rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders, handleBuilders] }] },
   },
   {
-    files: DASHBOARD_JOBS,
+    files: DASHBOARD_OWN_POOLS,
     rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders] }] },
   },
   {

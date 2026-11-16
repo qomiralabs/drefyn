@@ -294,6 +294,22 @@ describe('API keys', () => {
     });
   });
 
+  // Auth is composed in one server layer and this action may run in another, with its own
+  // copy of the auth package, so the error's class is not the one imported here.
+  it('says a replay from another copy of the auth package just as plainly', async () => {
+    class ApiKeyReplayError extends Error {
+      readonly code = 'AUTH_IDEMPOTENCY_REPLAY';
+    }
+    auth.apiKeys.createApiKey.mockResolvedValue({
+      ok: false,
+      error: new ApiKeyReplayError() as never,
+    });
+    expect(await actions.createKey('acme', input)).toEqual({
+      ok: false,
+      problem: { kind: 'refused', code: 'AUTH_IDEMPOTENCY_REPLAY' },
+    });
+  });
+
   it('reads a second revoke as plain success', async () => {
     const quiet = vi.fn(() => Promise.resolve());
     auth.apiKeys.revokeApiKey.mockResolvedValue(yes({ alreadyRevoked: true, send: quiet }));

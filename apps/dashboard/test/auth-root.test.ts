@@ -144,6 +144,7 @@ describe('the composition root', () => {
     const { dashboardAuth } = await load();
     expect((await dashboardAuth()).methods.email).toBe(true);
     vi.resetModules();
+    (await import('../src/server/engine-holder.ts')).forgetDashboardData();
     dashboardMail.mockResolvedValueOnce({ auth: {}, configured: false });
     expect((await (await load()).dashboardAuth()).methods.email).toBe(false);
   });
@@ -161,7 +162,7 @@ describe('the composition root', () => {
     expect(auth.organizations.listMyOrganizations({} as never)).toBe(7);
   });
 
-  it('takes both handles from the engine holder, so auth and the engine share them', async () => {
+  it("is composed once per process over the holder's handles, shared with the engine", async () => {
     const appDb = { app: true };
     const authDb = { auth: true };
     createDatabase.mockResolvedValueOnce(appDb);
@@ -173,7 +174,8 @@ describe('the composition root', () => {
     expect(deps.authDb).toBe(authDb);
     expect(databaseStore.mock.calls[0]?.[0]).toBe(appDb);
     vi.resetModules();
-    await (await load()).dashboardAuth();
+    const again = await (await load()).dashboardAuth();
+    expect(again).toBe(await dashboardAuth());
     expect(createDatabase).toHaveBeenCalledTimes(1);
     expect(createAuthDatabase).toHaveBeenCalledTimes(1);
   });

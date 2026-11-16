@@ -15,6 +15,7 @@ import {
   type EngineDeps,
   type EngineStore,
 } from '@drefyn/engine';
+import { composeAuth, type DashboardAuth } from './auth-compose.ts';
 import { logInfo, logWarn } from './log.ts';
 
 export interface DashboardData {
@@ -24,11 +25,14 @@ export interface DashboardData {
   readonly authDb: AuthDatabase;
   readonly store: EngineStore;
   readonly engine: Engine;
+  readonly auth: DashboardAuth;
 }
 
 // A global under a registered symbol, because server.ts and each Next layer load separate
 // copies of this module. The engine's gate counts per handle, so a handle per copy would give
-// each layer its own count and the ceiling would multiply with no sign.
+// each layer its own count and the ceiling would multiply with no sign. A handle also works
+// only with the copy of @drefyn/db that opened it, so auth is composed here too, in the same
+// build, and other layers only ever call into what this build made.
 const HOLDER = Symbol.for('drefyn.engine');
 
 interface Holder {
@@ -90,7 +94,8 @@ async function build(): Promise<DashboardData> {
         },
       },
     });
-    return { appDb, authDb, store, engine };
+    const auth = await composeAuth(appDb, authDb);
+    return { appDb, authDb, store, engine, auth };
   } catch (error) {
     await closeDatabase(appDb);
     if (authDb !== undefined) await closeDatabase(authDb);

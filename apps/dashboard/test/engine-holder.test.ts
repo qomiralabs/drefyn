@@ -18,6 +18,8 @@ const fake = vi.hoisted(() => {
     parseEngineConfig: vi.fn(() => config),
     databaseStore: vi.fn(),
     createEngine: vi.fn(),
+    auth: { name: 'the auth' },
+    composeAuth: vi.fn(),
   };
 });
 
@@ -28,6 +30,7 @@ vi.mock('@drefyn/db', () => ({
   parseDatabaseConfig: fake.parseDatabaseConfig,
   parseAuthDatabaseConfig: fake.parseAuthDatabaseConfig,
 }));
+vi.mock('../src/server/auth-compose.ts', () => ({ composeAuth: fake.composeAuth }));
 vi.mock('@drefyn/engine', () => ({
   parseEngineConfig: fake.parseEngineConfig,
   databaseStore: fake.databaseStore,
@@ -47,6 +50,7 @@ beforeEach(async () => {
   fake.createAuthDatabase.mockResolvedValue(fake.authDb);
   fake.databaseStore.mockImplementation(() => ({ gate: fake.gate, tenant: vi.fn() }));
   fake.createEngine.mockReturnValue(fake.engine);
+  fake.composeAuth.mockResolvedValue(fake.auth);
   info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
   (await load()).forgetDashboardData();
 });
@@ -78,6 +82,23 @@ describe('the engine holder', () => {
     expect(fake.createAuthDatabase).toHaveBeenCalledTimes(1);
     expect(fake.databaseStore).toHaveBeenCalledTimes(1);
     expect(fake.createEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it('composes auth once per process, over the same two handles, in the same build', async () => {
+    const first = await (await load()).dashboardData();
+    const second = await (await load()).dashboardData();
+    expect(second.auth).toBe(first.auth);
+    expect(fake.composeAuth).toHaveBeenCalledTimes(1);
+    expect(fake.composeAuth).toHaveBeenCalledWith(fake.appDb, fake.authDb);
+  });
+
+  it('drops the whole build when auth cannot be composed, closing both handles', async () => {
+    fake.composeAuth.mockRejectedValueOnce(new Error('breached list'));
+    const holder = await load();
+    await expect(holder.dashboardData()).rejects.toThrow('breached list');
+    expect(fake.closeDatabase).toHaveBeenCalledWith(fake.appDb);
+    expect(fake.closeDatabase).toHaveBeenCalledWith(fake.authDb);
+    await expect(holder.dashboardData()).resolves.toMatchObject({ auth: fake.auth });
   });
 
   it('builds once when the first callers arrive together', async () => {
