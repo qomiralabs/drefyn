@@ -48,6 +48,11 @@ function cleaned(typed: string): string | null {
   return SIX_DIGITS.test(digits) ? digits : null;
 }
 
+// Whether the input could be a code at all, so a bad shape is refused before anything runs.
+export function isTotpShape(typed: string): boolean {
+  return cleaned(typed) !== null;
+}
+
 // The step that matched, or null. Both steps are computed and compared every time, so
 // timing says nothing about which one matched or how far the input got. When both match,
 // the higher one wins, so the replay guard moves as far as it can.

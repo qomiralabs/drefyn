@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import { newId, withAuth, withUser } from '@drefyn/db';
 import { sql } from 'kysely';
@@ -43,7 +44,7 @@ async function signedIn(email = address('person')) {
   const b = newBrowser();
   const started = await flow.sessions.startSession(b.context(), { userId: user, method: 'email' });
   b.apply(started.setCookies);
-  return { user, b, email, session: started.session, cookie: cookieOf(b) };
+  return { user, b, email, session: asSignedIn(started).session, cookie: cookieOf(b) };
 }
 
 type Person = Awaited<ReturnType<typeof signedIn>>;
@@ -108,7 +109,7 @@ describeWithStack('email change against Postgres', () => {
     const code = await requestCode(flow, other, next);
     if (code === null) throw new Error('no sign in code for the new address');
     const signed = await flow.signIn.verifyEmailCode(other.context(), code);
-    expect(signed.ok && signed.value.session.userId).toBe(p.user);
+    expect(signed.ok && asSignedIn(signed.value).session.userId).toBe(p.user);
     // The old address now belongs to nobody, so in this mode it gets no code.
     expect(await requestCode(flow, newBrowser(), p.email)).toBeNull();
     const logged = JSON.stringify(h.logs);
@@ -276,7 +277,7 @@ describeWithStack('email change against Postgres', () => {
     const oldInbox = newBrowser();
     const signIn = await requestCode(flow, oldInbox, p.email);
     expect(signIn).not.toBeNull();
-    const elsewhere = await change.startEmailChange(laptop.context(), second.session, {
+    const elsewhere = await change.startEmailChange(laptop.context(), asSignedIn(second).session, {
       newEmail: address('elsewhere'),
     });
     expect(elsewhere.ok).toBe(true);

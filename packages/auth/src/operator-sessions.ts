@@ -5,6 +5,7 @@ import { sql } from 'kysely';
 import { normalizeAddress } from './address.ts';
 import { forgetDevices } from './devices.ts';
 import { AuthError } from './errors.ts';
+import { dropChallenge } from './factor-rows.ts';
 import type { AuthLogger } from './rate-limiter.ts';
 import {
   fail,
@@ -48,6 +49,7 @@ export function createOperatorSessions(deps: OperatorSessionsDeps): OperatorSess
         .execute();
       // A copied device cookie must not keep its rate limit exemption either.
       await forgetDevices(tx);
+      await dropChallenge(tx);
       return rows.length;
     });
     quietInfo(deps.logger, 'auth.sessions_revoked', {

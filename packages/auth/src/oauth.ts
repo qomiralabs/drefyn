@@ -36,7 +36,8 @@ import {
   type SessionInfo,
   type SessionStore,
 } from './session-support.ts';
-import { createSessions, type Sessions } from './sessions.ts';
+import { dropChallenge } from './factor-rows.ts';
+import { createSessions, factorRequired, type FactorRequired, type Sessions } from './sessions.ts';
 import { logStepUpFailed, recordStepUp, type AuthMailer } from './step-up.ts';
 import { SECRET_BYTES, decodeSecret, encodeSecret } from './tokens.ts';
 
@@ -63,6 +64,8 @@ export interface OAuthDeps {
 }
 
 export type OAuthCompleted =
+  // The person has a second factor; the callback sends them to the challenge.
+  | FactorRequired
   | {
       readonly kind: 'signed_in';
       readonly session: SessionInfo;
@@ -259,7 +262,9 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
     returnTo: string,
     created = false,
   ): Promise<OAuthCompleted> {
-    const started = await sessions.startSession(b, { userId, method: provider });
+    const started = await sessions.startSession(b, { userId, method: provider, returnTo });
+    // The device and its notice wait for the factor when there is one.
+    if (factorRequired(started)) return started;
     const device = await recordDevice(config, devices, b, userId);
     const seen = device.newDevice;
     // An account made by this very sign in has no device to tell apart from this one.
@@ -664,6 +669,7 @@ export function createOAuth(config: AuthConfig, deps: OAuthDeps): OAuth {
             .returning('id')
             .executeTakeFirst();
           if (gone === undefined) throw new Refused('AUTH_NOT_FOUND');
+          await dropChallenge(tx);
           return { account: target.provider_email_normalized, at: new Date() };
         });
         quietInfo(deps.logger, 'auth.identity_unlinked', {
