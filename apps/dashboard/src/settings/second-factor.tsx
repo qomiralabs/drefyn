@@ -1,6 +1,6 @@
 'use client';
 import { Button, Dialog, IconAlert, IconKey, TextField, toast } from '@drefyn/ui/react';
-import { useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { useCallback, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { removeSecondFactor } from '../server/settings-actions.ts';
 import {
   FACTOR_PAUSED,
@@ -202,6 +202,11 @@ export function SecondFactorSection({
   const [shown, setShown] = useState<FactorNotice | null>(notice);
   const [gone, setGone] = useState(false);
   const start = useRef<HTMLFormElement>(null);
+  // Stable, so the notice takes focus when it appears and not again on every render, which
+  // would pull focus out of an open dialog.
+  const focusNotice = useCallback((node: HTMLDivElement | null) => {
+    node?.focus();
+  }, []);
   if (facts === null) return null;
   const current: FactorFacts =
     gone && facts !== 'failed' ? { ...facts, enrolled: false, recoveryCodesLeft: 0 } : facts;
@@ -223,13 +228,7 @@ export function SecondFactorSection({
     <section aria-labelledby="factor-head" className="flex flex-col gap-8">
       <SectionHead id="factor-head">Two step sign in</SectionHead>
       {shown === null ? null : (
-        <PageNotice
-          icon={<IconAlert />}
-          title={title}
-          focusRef={(node) => {
-            node?.focus();
-          }}
-        >
+        <PageNotice icon={<IconAlert />} title={title} focusRef={focusNotice}>
           {detail}
         </PageNotice>
       )}
