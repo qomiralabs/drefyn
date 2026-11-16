@@ -186,6 +186,93 @@ describe('facts per kind', () => {
   });
 });
 
+describe('SSO domain notices', () => {
+  const KINDS = ['sso_domain_claimed', 'sso_domain_verified', 'sso_domain_unverified'] as const;
+  const sso = (kind: (typeof KINDS)[number], domain = 'login.acme.example') =>
+    notice({ kind, at: AT, organizationName: 'Acme', domain });
+
+  it.each(KINDS)('%s names the organization and the domain as facts', async (kind) => {
+    const mail = await rendered(sso(kind));
+    expect(mail.text).toMatch(/^Organization: +Acme$/m);
+    expect(mail.text).toMatch(/^Domain: +login\.acme\.example$/m);
+    expect(mail.text).toContain('You get this because you are an owner');
+    expect(mail.subject).not.toContain('acme');
+    expect(mail.preheader).not.toContain('acme');
+  });
+
+  // The domain is the one value here a client could link. It stays text in a fact cell: no
+  // anchor, no href, no scheme, and the head still tells Apple and others not to detect links.
+  it.each(KINDS)('%s keeps the domain plain text in both parts', async (kind) => {
+    const mail = await rendered(sso(kind));
+    const cell = /<td class="dr-body dr-rule"[^>]*>([^<]*)<\/td>/g;
+    const cells = [...mail.html.matchAll(cell)].map((m) => m[1]);
+    expect(cells).toContain('login.acme.example');
+    for (const anchor of mail.html.matchAll(/<a\b[^>]*>(.*?)<\/a>/gs)) {
+      expect(anchor[0]).not.toContain('acme.example');
+    }
+    expect(mail.html).not.toMatch(/href="[^"]*acme\.example/);
+    expect(mail.html).not.toMatch(/https?:\/\/[^"\s<]*acme\.example/);
+    expect(mail.text).not.toMatch(/https?:\/\/\S*acme\.example/);
+    expect(mail.html).toContain('content="telephone=no,date=no,address=no,email=no,url=no"');
+  });
+
+  // The cell takes its colour from the dark rules like every other fact, so the domain reads
+  // in a dark client as well as a light one.
+  it.each(KINDS)('%s carries the light and the dark palette for the domain', async (kind) => {
+    const mail = await rendered(sso(kind));
+    expect(mail.html).toContain('<meta name="color-scheme" content="light dark"/>');
+    expect(mail.html).toMatch(
+      /@media \(prefers-color-scheme:dark\)\{(?:[^{}]*\{[^{}]*\})*?\.dr-body\{color:#[0-9A-Fa-f]{6}!important\}/,
+    );
+    expect(mail.html).toMatch(/<td class="dr-body dr-rule"[^>]*>login\.acme\.example<\/td>/);
+  });
+
+  it('gives each of the three its own subject and lead', async () => {
+    const mails = await Promise.all(KINDS.map(async (kind) => rendered(sso(kind))));
+    expect(new Set(mails.map((m) => m.subject)).size).toBe(3);
+    expect(mails[0]?.text).toContain('Nothing changes until');
+    expect(mails[1]?.text).toContain('can now be sent to');
+    expect(mails[2]?.text).toContain('no longer verified');
+  });
+
+  it('takes an internationalized domain in its punycode form', async () => {
+    const mail = await rendered(sso('sso_domain_verified', 'xn--bcher-kva.example'));
+    expect(mail.text).toMatch(/^Domain: +xn--bcher-kva\.example$/m);
+  });
+
+  it.each([
+    'https://acme.example',
+    'acme.example/login',
+    'Acme.example',
+    'acme example',
+    ' acme.example',
+    'acme.example.',
+    'acme',
+    '192.0.2.1',
+    'ada@acme.example',
+    'b\u00fccher.example',
+    'acme\u200b.example',
+    `${'a'.repeat(64)}.example`,
+    '',
+  ])('refuses a domain that is not one normalized host name: %j', async (domain) => {
+    const result = await renderMail(sso('sso_domain_claimed', domain), { linkOrigin: ORIGIN });
+    expect(result.ok ? null : result.error.field).toBe('notice.domain');
+  });
+
+  it('still refuses an organization name shaped like a link', async () => {
+    const result = await renderMail(
+      notice({
+        kind: 'sso_domain_verified',
+        at: AT,
+        organizationName: 'acme.example',
+        domain: 'acme.example',
+      }),
+      { linkOrigin: ORIGIN },
+    );
+    expect(result.ok ? null : result.error.field).toBe('notice.organizationName');
+  });
+});
+
 describe('invitation', () => {
   it('shows who invited whom as facts, with the expiry named', async () => {
     const mail = await rendered(invitation());
