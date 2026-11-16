@@ -20,6 +20,37 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  ACCEPTED_TOTP_STEPS,
+  TOTP_DIGITS,
+  TOTP_PERIOD_SECONDS,
+  TOTP_SECRET_BYTES,
+  base32Encode,
+  matchTotp,
+  newTotpSecret,
+  otpauthUri,
+  totpCode,
+  type FactorKind,
+  type OtpauthInput,
+} from './totp.ts';
+export {
+  RECOVERY_CODE_COUNT,
+  matchRecoveryCode,
+  newRecoveryCodes,
+  recoveryCodeHash,
+  type NewRecoveryCode,
+  type RecoveryCodeRow,
+} from './recovery-codes.ts';
+export {
+  FACTOR_RATE_SCOPES,
+  factorNoticeLimit,
+  factorVerifyLimits,
+  type FactorAttempt,
+  type FactorBucket,
+  type FactorRateScope,
+  type RateReservation,
+} from './factor-limits.ts';
+export { pendingTotpRow, type PendingTotpRow } from './totp-rows.ts';
+export {
   aesGcmSealer,
   type SealContext,
   type SealedRow,

@@ -139,6 +139,34 @@ const api = parseApiAuthConfig(process.env); // API service
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
 
+## Second factor core
+
+Pure functions on `node:crypto`; nothing here reads the database or config.
+
+- `totpCode(secret, step)`: RFC 6238 HMAC-SHA1, 6 digits, 30 second steps, for the 160 bit
+  secret `newTotpSecret()` makes. `matchTotp(secret, typed, currentStep)` accepts the steps in
+  `ACCEPTED_TOTP_STEPS`, the current one and the one before, and returns the step that
+  matched or null; the higher one when both match. Both are always computed and compared
+  with `constantTimeEqual`. Typed spaces are dropped; anything but six ASCII digits is
+  refused. The step set is a constant and no setting reaches it. A code is accepted for up
+  to 60 seconds, a recorded deviation from ASVS 6.5.5; the replay guard (`last_used_step`)
+  is the compensating control.
+- `base32Encode(bytes)` is RFC 4648 base32, upper case and unpadded.
+  `otpauthUri({ issuer, account, secret })` builds the key URI with each label part escaped.
+  The URI holds the secret and the address: never log, store or link it.
+- `newRecoveryCodes(userId)` makes `RECOVERY_CODE_COUNT` (10) codes of 15 random bytes,
+  shown as 24 lowercase Crockford characters in four groups of six, each with its SHA-256
+  hash over a version label, the user id and the code. `recoveryCodeHash(userId, typed)`
+  drops hyphens and gaps and lowercases first. `matchRecoveryCode(userId, typed, rows)`
+  compares every row, with no early exit, and returns the matching row id.
+- `factorVerifyLimits(kind, { userId, ip })` lists the reservations one attempt makes:
+  `totp_verify` on the person, or `recovery_code_verify` on the person and network plus
+  `recovery_code_verify_ip`. Recovery codes have no person wide ceiling, so nobody elsewhere
+  can fill the owner's budget. `factorNoticeLimit(userId)` is the `second_factor_notice` cap.
+- `pendingTotpRow(userId, sealed)` is the row enrolment inserts, unconfirmed and unused.
+- `pnpm bench:factor` times open plus `matchTotp`, and a recovery match over 10 rows, and
+  exits 1 if either p99 reaches 1 ms.
+
 ## Rate limits
 
 - `rateKeyForIp(ip)` gives the value a per IP bucket is keyed by: `ip4:a.b.c.d`, or the /64 of
