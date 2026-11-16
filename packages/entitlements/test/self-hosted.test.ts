@@ -75,6 +75,9 @@ describe('self_hosted', () => {
     'docs.content_gaps',
     'docs.answer_checks',
     'status.remove_badge',
+    'org.ai_model_picker',
+    'org.ai_premium_models',
+    'org.ai_byom',
   ] as const)('has %s, which needs no hosted service', (feature) => {
     expect(hasFeature('self_hosted', feature)).toBe(true);
     expect(featureInfo(feature).openCore).toBe(true);
@@ -84,9 +87,17 @@ describe('self_hosted', () => {
     'docs.mcp_requests_per_month',
     'docs.feedback_items_per_month',
     'docs.assistant_questions_per_month',
+    'org.ai_credits_monthly',
   ] as const)('is unlimited on %s while hosted waits for calibration', (key) => {
     expect(limitFor('self_hosted', key)).toBe(UNLIMITED);
     expect(checkLimit('self_hosted', key, Number.MAX_SAFE_INTEGER).status).toBe('allowed');
+  });
+
+  // Top up packs are sold by the hosted service; a self host brings its own key instead.
+  it('has its own model keys but no credit packs', () => {
+    expect(hasFeature('self_hosted', 'org.ai_byom')).toBe(true);
+    expect(hasFeature('self_hosted', 'org.ai_credit_packs')).toBe(false);
+    expect(featureInfo('org.ai_credit_packs').openCore).toBe(false);
   });
 
   it('only lacks features that the hosted service runs', () => {

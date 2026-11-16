@@ -41,6 +41,18 @@ const loadCommandBar = () => import('./command-bar.tsx').then((mod) => mod.Comma
 // Nor is the shortcuts sheet, which most visits never open.
 const loadShortcutsSheet = () => import('./shortcuts-sheet.tsx').then((mod) => mod.ShortcutsSheet);
 
+// The control a person used to open something: a menu item counts as the button that opened
+// its menu, which is where focus goes when the menu closes.
+function openedFrom(active: Element | null): HTMLElement | null {
+  const menu = active?.closest('[role="menu"]');
+  const trigger =
+    menu?.id === undefined || menu.id === ''
+      ? null
+      : document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menu.id)}"]`);
+  if (trigger !== null) return trigger;
+  return active instanceof HTMLElement && active !== document.body ? active : null;
+}
+
 export function ShellFrame({
   org,
   orgName,
@@ -103,7 +115,12 @@ export function ShellFrame({
 
   const [Sheet, setSheet] = useState<ComponentType<ShortcutsSheetProps> | null>(null);
   const sheetLoaded = useRef(false);
+  // React Aria hands focus back to whatever held it as the sheet mounted. When the sheet's code
+  // lands before a closing menu has given focus back to its button, that is the page itself,
+  // and Escape would leave focus nowhere. So the sheet remembers where it was opened from.
+  const shortcutsFrom = useRef<HTMLElement | null>(null);
   const openShortcuts = useCallback(() => {
+    shortcutsFrom.current = openedFrom(document.activeElement);
     if (sheetLoaded.current) {
       setShortcutsOpen(true);
       return;
@@ -118,6 +135,22 @@ export function ShellFrame({
         toast({ title: 'Could not open the shortcuts. Try again.', tone: 'error' });
       });
   }, []);
+
+  // After React Aria's own return, which it makes in the frame after the close; this effect
+  // runs later in the same commit, so its frame comes after that one.
+  useEffect(() => {
+    if (shortcutsOpen) return undefined;
+    const from = shortcutsFrom.current;
+    if (from === null) return undefined;
+    shortcutsFrom.current = null;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if ((active === null || active === document.body) && from.isConnected) from.focus();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [shortcutsOpen]);
 
   useEffect(() => {
     document.documentElement.dataset['shell'] = 'ready';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createDatabase, parseDatabaseConfig, type Database } from '@drefyn/db';
-import { type MdxRoot } from '@drefyn/mdx';
+import { type MdxRoot, type ReaderPage } from '@drefyn/mdx';
 import { createParseClient, type ParseClient } from '@drefyn/mdx/client';
 import { idOf, organizationId, projectId, type TenantRef } from '@drefyn/tenancy';
 import { inject } from 'vitest';
@@ -116,6 +116,24 @@ export async function tree(parse: ParseClient, seeded: Seeded, text: string): Pr
 }
 
 const LIMITS = { maxBytes: 1_048_576, maxDepth: 64, maxNodes: 50_000 };
+
+// What the host says a reader of this page gets, under the engine's own policy.
+export async function readerText(
+  parse: ParseClient,
+  seeded: Seeded,
+  text: string,
+): Promise<ReaderPage> {
+  const answer = await parse.parse({
+    tenant: seeded.tenant,
+    path: 'test',
+    source: text,
+    dialect: 'mdx',
+    policy: { ...PARSE_POLICY, components: new Set(PARSE_POLICY.components), limits: LIMITS },
+    reader: true,
+  });
+  if (!answer.ok || answer.value.reader === undefined) throw new Error('no reader text');
+  return answer.value.reader;
+}
 
 export async function newNode(engine: Engine, seeded: Seeded): Promise<NodeId> {
   const made = await engine.createNode({

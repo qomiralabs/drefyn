@@ -4,6 +4,7 @@ import { test } from './csp.ts';
 import {
   commandBar,
   DESKTOP,
+  FACTOR_PAGES,
   inbox,
   MOBILE,
   openShell,
@@ -57,6 +58,25 @@ for (const [name, path] of settingsStatePaths()) {
         await openShell(page, path);
         await page.evaluate(() => document.fonts.ready);
         await expect(page).toHaveScreenshot(`settings-${name}_${size}-${theme}.png`, {
+          fullPage: true,
+        });
+      });
+    }
+  }
+}
+
+// The pages the enrolment routes answer with: plain HTML, no shell and no script, so the
+// system setting alone picks light or dark.
+for (const state of FACTOR_PAGES) {
+  for (const theme of THEMES) {
+    for (const [size, viewport] of Object.entries(SIZES)) {
+      test(`factor ${state} ${theme} ${size}`, async ({ page }) => {
+        expect(process.env['DREFYN_PLAYWRIGHT_IMAGE'], 'run inside the pinned image').toBe(PINNED);
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({ colorScheme: theme });
+        await page.goto(`/settings-states/factor/${state}`);
+        await page.evaluate(() => document.fonts.ready);
+        await expect(page).toHaveScreenshot(`factor-${state}_${size}-${theme}.png`, {
           fullPage: true,
         });
       });

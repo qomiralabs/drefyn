@@ -338,3 +338,10 @@ describe('email.smtp_delivery', () => {
     expect(flag).toMatchObject({ kind: 'release', owner: 'Divine572', safeValue: false });
   });
 });
+
+describe('auth.totp', () => {
+  it('is a release flag that is off until someone turns it on', () => {
+    const flag = flags.find((f) => f.name === 'auth.totp');
+    expect(flag).toMatchObject({ kind: 'release', owner: 'Divine572', safeValue: false });
+  });
+});

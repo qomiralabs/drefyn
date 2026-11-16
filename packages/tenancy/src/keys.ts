@@ -14,6 +14,7 @@ const CACHE_SCOPES = Object.freeze([
   'retrieval',
   'render',
   'asset',
+  'schema',
 ] as const);
 
 export type CacheScope = (typeof CACHE_SCOPES)[number];

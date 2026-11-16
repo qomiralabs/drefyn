@@ -58,6 +58,16 @@ export {
 } from './factor-challenges.ts';
 export { type FactorCode, type FactorOutcome } from './factor-verify.ts';
 export {
+  createSecondFactors,
+  type ConfirmedEnrollment,
+  type EnrolledFactor,
+  type FactorStatus,
+  type SecondFactors,
+  type SecondFactorsDeps,
+  type TotpEnrollment,
+  type TotpFlag,
+} from './second-factors.ts';
+export {
   aesGcmSealer,
   type SealContext,
   type SealedRow,

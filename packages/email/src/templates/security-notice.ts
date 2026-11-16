@@ -34,6 +34,9 @@ const CHECK_MEMBERS =
 const CHECK_SSO =
   'If you did not expect this, review single sign on in your organization settings.';
 
+const CHECK_SUPPORT =
+  'If this was not you, contact your administrator or Drefyn support straight away.';
+
 const noRows = () => [];
 
 const domainRows = (
@@ -223,6 +226,66 @@ export const NOTICE_TEMPLATES: NoticeTemplates = {
     rows: domainRows,
     next: 'If you still use this domain, publish its DNS record again and verify it in your organization settings.',
     fineprint: OWNER_FINEPRINT,
+  },
+  second_factor_added: {
+    subject: 'Two step sign in was turned on for your Drefyn account',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'Two step sign in is on',
+    lead: () =>
+      'Signing in to your Drefyn account now needs a code from an authenticator app. Your other sessions were signed out. Existing API keys keep working.',
+    rows: noRows,
+    next: `${CHECK_SUPPORT} Whoever turned it on holds the recovery codes.`,
+    fineprint: ACCOUNT_FINEPRINT,
+  },
+  second_factor_removed: {
+    subject: 'Two step sign in was turned off for your Drefyn account',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'Two step sign in is off',
+    lead: () =>
+      'Signing in to your Drefyn account no longer asks for a code from an authenticator app. Your other sessions were signed out.',
+    rows: noRows,
+    next: `${CHECK_SUPPORT} Then change your password if you use one.`,
+    fineprint: ACCOUNT_FINEPRINT,
+  },
+  recovery_code_used: {
+    subject: 'A recovery code was used on your Drefyn account',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'A recovery code was used',
+    lead: () =>
+      'A recovery code was used in place of your authenticator app. Each code works once. If your phone is gone, set up your authenticator app again from your account settings.',
+    rows: (n) => [{ label: 'Codes left', value: n.codesLeft === 0 ? 'None' : String(n.codesLeft) }],
+    next: CHECK_PASSWORD,
+    fineprint: ACCOUNT_FINEPRINT,
+  },
+  recovery_codes_replaced: {
+    subject: 'Your Drefyn recovery codes were replaced',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'Your recovery codes were replaced',
+    lead: () =>
+      'A new set of recovery codes was made for your Drefyn account. Your old recovery codes no longer work.',
+    rows: noRows,
+    next: CHECK_PASSWORD,
+    fineprint: ACCOUNT_FINEPRINT,
+  },
+  second_factor_failures: {
+    subject: 'Wrong two step sign in codes on your Drefyn account',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'Wrong codes were tried',
+    lead: () =>
+      'Someone got past the first step of signing in to your Drefyn account, then entered wrong codes for the second step.',
+    rows: noRows,
+    next: 'If this was not you, change your password or how you sign in straight away, and review your sessions.',
+    fineprint: ACCOUNT_FINEPRINT,
+  },
+  second_factor_disabled: {
+    subject: 'Codes from your authenticator app stopped working for your Drefyn account',
+    preheader: ACCOUNT_PREHEADER,
+    heading: 'Authenticator codes are blocked',
+    lead: () =>
+      'Too many wrong codes were tried, so codes from your authenticator app no longer sign in. Only a recovery code can sign in now, and using one turns the app codes back on.',
+    rows: noRows,
+    next: 'If this was not you, someone knows how to pass the first step. Change your password or how you sign in straight away.',
+    fineprint: ACCOUNT_FINEPRINT,
   },
 };
 

@@ -25,3 +25,21 @@ Nodemailer by Andris Reinman and contributors (https://github.com/nodemailer/nod
 used as the SMTP client of `@drefyn/email`. MIT No Attribution: it may be used, changed and
 shipped without keeping a notice. Listed here because the licence policy names every
 shipped package outside its allow list.
+
+## lean-qr
+
+Licence: MIT
+
+lean-qr 2.7.4 by David Evans (https://github.com/davidje13/lean-qr). Copyright (c) 2021-2025
+David Evans. MIT is on the allow list, so no entry is required; it is listed because the
+dashboard draws authenticator QR codes with it on the server. It has no dependencies, and
+nothing from it is sent to browsers: the dashboard writes the matrix into its own SVG path.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions: The above copyright
+notice and this permission notice shall be included in all copies or substantial portions of
+the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED.

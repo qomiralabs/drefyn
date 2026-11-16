@@ -15,6 +15,7 @@ const policy = z.object({
 
 // Bulk unless a caller says a person is waiting: a frame that says nothing earns nothing.
 const priority = z.enum(['interactive', 'bulk']).default('bulk');
+const reader = z.boolean().default(false);
 
 export const wireRequestSchema = z.object({
   tenant,
@@ -23,6 +24,7 @@ export const wireRequestSchema = z.object({
   dialect: z.enum(['mdx', 'md']),
   policy,
   priority,
+  reader,
 });
 
 export const wirePrintSchema = z.object({
@@ -31,6 +33,7 @@ export const wirePrintSchema = z.object({
   tree: z.string(),
   policy,
   priority,
+  reader,
 });
 
 export type WireRequest = z.infer<typeof wireRequestSchema>;

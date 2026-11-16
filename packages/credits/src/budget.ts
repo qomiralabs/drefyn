@@ -10,7 +10,13 @@ import {
 } from './ledger.ts';
 
 // Each operation is also the spend reason it records, so the ledger shows what paid for what.
-export const AI_OPERATIONS = Object.freeze(['stale_draft', 'reader_answer'] as const);
+export const AI_OPERATIONS = Object.freeze([
+  'stale_draft',
+  'reader_answer',
+  'translation_draft',
+  'incident_draft',
+  'generation',
+] as const);
 
 export type AiOperation = (typeof AI_OPERATIONS)[number];
 
