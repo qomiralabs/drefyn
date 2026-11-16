@@ -18,8 +18,9 @@ import {
 
 type Applied = Extract<CreditOutcome, { status: 'applied' }>;
 
-// What makes two requests under one key the same request. A reversal is identified by the
-// entry it resolved to, so a retry naming the same spend replays instead of conflicting.
+// What makes two requests under one key the same request. A reversal or settlement is
+// identified by the entry it resolved to, so a retry naming the same spend replays instead
+// of conflicting.
 interface Identity {
   readonly kind: EntryKind;
   readonly amount: number | undefined;
@@ -33,7 +34,8 @@ interface Pool {
   view: readonly CreditEntry[] | undefined;
   readonly byKey: Map<string, { readonly identity: Identity; readonly outcome: Applied }>;
   readonly byId: Map<CreditEntryId, CreditEntry>;
-  readonly reversed: Set<CreditEntryId>;
+  // Spends already reversed or settled. Either closes the spend for good.
+  readonly closed: Set<CreditEntryId>;
 }
 
 const EMPTY: readonly CreditEntry[] = Object.freeze([]);
@@ -51,7 +53,7 @@ function fitsUnderLimit(balance: number, amount: number): boolean {
 
 // A throw inside the executor becomes a rejection, so callers always get a promise and a
 // bad argument never escapes as a synchronous throw.
-function settle<T>(run: () => T): Promise<T> {
+function promised<T>(run: () => T): Promise<T> {
   return new Promise<T>((resolve) => {
     resolve(run());
   });
@@ -72,7 +74,7 @@ export function createMemoryLedger(): CreditLedger {
         view: undefined,
         byKey: new Map(),
         byId: new Map(),
-        reversed: new Set(),
+        closed: new Set(),
       };
       pools.set(organizationId, pool);
     }
@@ -143,11 +145,11 @@ export function createMemoryLedger(): CreditLedger {
 
   return {
     balance(ref: OrganizationRef): Promise<Credits> {
-      return settle(() => credits(pools.get(organizationOf(ref))?.balance ?? 0));
+      return promised(() => credits(pools.get(organizationOf(ref))?.balance ?? 0));
     },
 
     entries(ref: OrganizationRef): Promise<readonly CreditEntry[]> {
-      return settle(() => {
+      return promised(() => {
         const pool = pools.get(organizationOf(ref));
         if (pool === undefined) return EMPTY;
         pool.view ??= Object.freeze([...pool.entries]);
@@ -156,7 +158,7 @@ export function createMemoryLedger(): CreditLedger {
     },
 
     grant(ref, raw) {
-      return settle(() => {
+      return promised(() => {
         const organizationId = organizationOf(ref);
         const { request, key } = keyOf(raw);
         const amount = amountOf(request);
@@ -172,15 +174,15 @@ export function createMemoryLedger(): CreditLedger {
     },
 
     spend(ref, raw) {
-      return settle(() => debit(ref, raw, 'spend'));
+      return promised(() => debit(ref, raw, 'spend'));
     },
 
     expire(ref, raw) {
-      return settle(() => debit(ref, raw, 'expiry'));
+      return promised(() => debit(ref, raw, 'expiry'));
     },
 
     reverse(ref, raw) {
-      return settle(() => {
+      return promised(() => {
         const organizationId = organizationOf(ref);
         const { request, key } = keyOf(raw);
         const pool = pools.get(organizationId);
@@ -199,16 +201,52 @@ export function createMemoryLedger(): CreditLedger {
         if (pool === undefined || target === undefined) {
           throw new CreditError('CREDIT_ENTRY_NOT_FOUND');
         }
-        if (target.kind !== 'spend' || pool.reversed.has(target.id)) {
+        if (target.kind !== 'spend' || pool.closed.has(target.id)) {
           throw new CreditError('CREDIT_NOT_REVERSIBLE');
         }
         if (!fitsUnderLimit(pool.balance, target.amount)) {
           throw new CreditError('CREDIT_BALANCE_OVERFLOW');
         }
-        pool.reversed.add(target.id);
+        pool.closed.add(target.id);
         return append(organizationId, key, identity, target.amount, target.amount, {
           kind: 'reversal',
           reverses: target.id,
+        });
+      });
+    },
+
+    settle(ref, raw) {
+      return promised(() => {
+        const organizationId = organizationOf(ref);
+        const { request, key } = keyOf(raw);
+        const amount = amountOf(request);
+        const pool = pools.get(organizationId);
+        const requested = entryIdOf(request);
+        const target = requested === undefined ? undefined : pool?.byId.get(requested);
+        const identity: Identity = {
+          kind: 'settlement',
+          amount,
+          reason: undefined,
+          target: target?.id,
+        };
+        const original = replay(pool, key, identity);
+        if (original !== undefined) return original;
+        if (pool === undefined || target === undefined) {
+          throw new CreditError('CREDIT_ENTRY_NOT_FOUND');
+        }
+        if (target.kind !== 'spend' || pool.closed.has(target.id)) {
+          throw new CreditError('CREDIT_NOT_REVERSIBLE');
+        }
+        // Returning the whole spend is a reversal, and returning more would mint credits.
+        if (amount >= target.amount) throw new CreditError('CREDIT_AMOUNT_INVALID');
+        // Later grants can fill the pool after the spend, so even a partial return can overflow.
+        if (!fitsUnderLimit(pool.balance, amount)) {
+          throw new CreditError('CREDIT_BALANCE_OVERFLOW');
+        }
+        pool.closed.add(target.id);
+        return append(organizationId, key, identity, amount, amount, {
+          kind: 'settlement',
+          settles: target.id,
         });
       });
     },

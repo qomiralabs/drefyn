@@ -19,7 +19,7 @@ const MESSAGES: Readonly<Record<CreditErrorCode, string>> = {
   CREDIT_ORGANIZATION_INVALID: 'organization ref must carry an own canonical organization id',
   CREDIT_IDEMPOTENCY_CONFLICT: 'idempotency key was already used with a different request',
   CREDIT_ENTRY_NOT_FOUND: 'credit entry not found in this organization',
-  CREDIT_NOT_REVERSIBLE: 'credit entry is not a spend, or was already reversed',
+  CREDIT_NOT_REVERSIBLE: 'credit entry is not a spend, or was already reversed or settled',
   CREDIT_BALANCE_OVERFLOW: 'credit balance would exceed the safe integer range',
 };
 

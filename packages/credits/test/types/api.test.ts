@@ -91,6 +91,17 @@ async function compileOnly(): Promise<void> {
   // @ts-expect-error a plain string is not a CreditEntryId
   await ledger.reverse(orgRef, { idempotencyKey: 'k', entryId: plainString });
   await ledger.reverse(orgRef, { idempotencyKey: 'k', entryId });
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId, amount });
+  // @ts-expect-error a settlement names the spend it settles
+  await ledger.settle(orgRef, { idempotencyKey: 'k', amount });
+  // @ts-expect-error a settlement returns a stated amount, never the whole spend implicitly
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId });
+  // @ts-expect-error a settlement amount is Credits, never a raw number
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId, amount: 5 });
+  // @ts-expect-error a settlement needs a key
+  await ledger.settle(orgRef, { entryId, amount });
+  // @ts-expect-error a plain string is not a CreditEntryId
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId: plainString, amount });
 
   // Outcomes: a grant or reversal is applied or throws; a spend or expiry may be refused.
   const granted = await ledger.grant(orgRef, { idempotencyKey: 'k', amount });
@@ -115,6 +126,9 @@ async function compileOnly(): Promise<void> {
       use(reason);
     }
     if (first.kind === 'reversal') takesEntryId(first.reverses);
+    if (first.kind === 'settlement') takesEntryId(first.settles);
+    // @ts-expect-error only a settlement points at what it settles
+    if (first.kind === 'reversal') use(first.settles);
     // @ts-expect-error only a spend has a reason
     if (first.kind === 'grant') use(first.reason);
   }
@@ -178,7 +192,12 @@ describe('type level API', () => {
     expectTypeOf(credits).returns.toEqualTypeOf<Credits>();
     expectTypeOf(createMemoryLedger).returns.toEqualTypeOf<CreditLedger>();
     expectTypeOf<CreditEntryId>().toEqualTypeOf<IdOf<'crd'>>();
-    expectTypeOf<EntryKind>().toEqualTypeOf<'grant' | 'spend' | 'reversal' | 'expiry'>();
+    expectTypeOf<EntryKind>().toEqualTypeOf<
+      'grant' | 'spend' | 'reversal' | 'expiry' | 'settlement'
+    >();
+    expectTypeOf<CreditLedger['settle']>().returns.toEqualTypeOf<
+      Promise<{ readonly status: 'applied'; readonly entry: CreditEntry }>
+    >();
     expectTypeOf<SpendReason>().toEqualTypeOf<
       'generation' | 'translation_draft' | 'incident_draft' | 'stale_draft' | 'reader_answer'
     >();

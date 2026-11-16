@@ -36,11 +36,18 @@ is public.
     The caller computes how much is left to expire; the ledger keeps no dates or lots.
   - `reverse(ref, { idempotencyKey, entryId })` returns a whole spend, once. Use it when a
     model call fails before producing output.
+  - `settle(ref, { idempotencyKey, entryId, amount })` returns part of a spend, once, after
+    the real cost is known: the spend was the hold and the settlement gives back the unused
+    part. `amount` must be at least 1 and less than the spend (returning all of it is a
+    reversal), otherwise `CREDIT_AMOUNT_INVALID` and nothing is written. A spend closes
+    once: a second settlement, a settlement after a reversal and a reversal after a
+    settlement each throw `CREDIT_NOT_REVERSIBLE`. It never needs balance, so it is never
+    refused for one. If the real cost is the whole hold or more, write nothing.
 - `CreditEntry` is one frozen ledger row: `id`, `organizationId`, `kind`, `amount`,
-  `idempotencyKey`, plus `reason` on a spend and `reverses` on a reversal. Entries never
-  carry a project id because the pool belongs to the organization.
+  `idempotencyKey`, plus `reason` on a spend, `reverses` on a reversal and `settles` on a
+  settlement. Entries never carry a project id because the pool belongs to the organization.
 - `CreditOutcome` is `applied` with the entry, or `insufficient`.
-- `ENTRY_KINDS` (`grant`, `spend`, `reversal`, `expiry`) and `SPEND_REASONS`
+- `ENTRY_KINDS` (`grant`, `spend`, `reversal`, `expiry`, `settlement`) and `SPEND_REASONS`
   (`generation`, `translation_draft`, `incident_draft`, `stale_draft`, `reader_answer`)
   are frozen lists.
 - `AiBudget`, `AI_OPERATIONS`, `unmeteredBudget()` and `createLedgerBudget()`: see below.
@@ -101,7 +108,7 @@ without NUL, compared exactly and scoped per organization.
 - A key admits at most one applied entry per organization.
 - Repeating an applied request with the same key returns the original outcome and changes
   nothing, even if the balance could no longer cover it.
-- Reusing a key with a different request (another kind, amount, reason or reversal target)
+- Reusing a key with a different request (another kind, amount, reason or target entry)
   throws `CREDIT_IDEMPOTENCY_CONFLICT` and changes nothing. The conflict check runs before
   the balance and overflow checks.
 - A refused or invalid request records nothing, so the same key may be retried, for
@@ -111,17 +118,18 @@ without NUL, compared exactly and scoped per organization.
 
 | Code                          | Meaning                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `CREDIT_AMOUNT_INVALID`       | Not a non negative safe integer, or zero on an entry.                                      |
+| `CREDIT_AMOUNT_INVALID`       | Not a non negative safe integer, zero on an entry, or a settlement not below its spend.    |
 | `CREDIT_KEY_INVALID`          | Key missing, not an own string, empty, over 200 code points, ill formed or containing NUL. |
 | `CREDIT_REASON_INVALID`       | Spend reason is not one of `SPEND_REASONS`.                                                |
 | `CREDIT_ORGANIZATION_INVALID` | Ref is not an object with an own canonical organization id.                                |
 | `CREDIT_IDEMPOTENCY_CONFLICT` | Key already used in this organization with a different request.                            |
-| `CREDIT_ENTRY_NOT_FOUND`      | Reversal target is unknown, malformed or another organization's.                           |
-| `CREDIT_NOT_REVERSIBLE`       | Reversal target is not a spend, or was already reversed.                                   |
-| `CREDIT_BALANCE_OVERFLOW`     | A grant or reversal would push the balance past `2^53 - 1`.                                |
+| `CREDIT_ENTRY_NOT_FOUND`      | Reversal or settlement target is unknown, malformed or another organization's.             |
+| `CREDIT_NOT_REVERSIBLE`       | Reversal or settlement target is not a spend, or was already reversed or settled.          |
+| `CREDIT_BALANCE_OVERFLOW`     | A grant, reversal or settlement would push the balance past `2^53 - 1`.                    |
 
 Checks run in this order: organization ref, key, then the body (amount or entry id, then
-reason). Only own properties are read, each once.
+reason). A settlement checks its amount, then its target, then whether the target is still
+open, then the amount against the spend. Only own properties are read, each once.
 
 ## Testing
 
