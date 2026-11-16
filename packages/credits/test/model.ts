@@ -13,7 +13,13 @@ import {
 import { ORG_A, ORG_B, ORG_C, SAFE_MAX, asyncCodeOf } from './support.ts';
 
 export const ORGS: readonly OrganizationRef[] = [ORG_A, ORG_B, ORG_C];
-const REASONS: readonly SpendReason[] = ['generation', 'translation_draft', 'incident_draft'];
+const REASONS: readonly SpendReason[] = [
+  'generation',
+  'translation_draft',
+  'incident_draft',
+  'stale_draft',
+  'reader_answer',
+];
 const UNKNOWN_ENTRY = '00000000-0000-0000-0000-000000000000' as CreditEntryId;
 
 export type Op =
