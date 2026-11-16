@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { withUser } from '@drefyn/db';
 import { beforeAll, expect, it } from 'vitest';
 import type { AuthMailer, CookieSpec, PasswordVerifier } from '../../src/index.ts';
@@ -35,7 +36,7 @@ async function signedIn(extra: Parameters<Harness['sessions']>[0] = {}) {
   const started = await sessions.startSession(browser(), { userId: user, method: 'email' });
   const cookie =
     started.setCookies.find((c: CookieSpec) => c.name === h.config.cookies.session)?.value ?? '';
-  return { sessions, user, session: started.session, cookie };
+  return { sessions, user, session: asSignedIn(started).session, cookie };
 }
 
 const age = (sessionId: string, minutes: number) =>
@@ -166,7 +167,7 @@ describeWithStack('step up against Postgres', () => {
     const started = await a.sessions.startStepUpCode(browser(), a.session);
     if (!started.ok) throw started.error;
     await started.value.send();
-    const result = await a.sessions.verifyStepUpCode(browser(), other.session, {
+    const result = await a.sessions.verifyStepUpCode(browser(), asSignedIn(other).session, {
       challenge: started.value.challenge,
       code: sent[0]?.code ?? '',
     });

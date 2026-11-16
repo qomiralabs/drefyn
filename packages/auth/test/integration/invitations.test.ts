@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import { limitFor } from '@drefyn/entitlements';
 import { beforeAll, expect, it } from 'vitest';
@@ -33,7 +34,12 @@ const cookieOf = (cookies: readonly CookieSpec[]) =>
 async function person(email = address()) {
   const user = await h.user(email);
   const started = await h.sessions().startSession(browser(), { userId: user, method: 'email' });
-  return { user, email, session: started.session, cookie: cookieOf(started.setCookies) };
+  return {
+    user,
+    email,
+    session: asSignedIn(started).session,
+    cookie: cookieOf(started.setCookies),
+  };
 }
 
 async function organization(tier = 'self_hosted') {

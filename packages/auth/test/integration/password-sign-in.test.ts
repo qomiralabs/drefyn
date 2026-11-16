@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { withAuth, withUser } from '@drefyn/db';
 import { sql } from 'kysely';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -38,7 +39,7 @@ describeWithStack('password sign in against Postgres', () => {
     const b = newBrowser();
     const result = await signInFrom(flow, b, email, PASSWORD);
     if (!result.ok) throw result.error;
-    expect(result.value.session.method).toBe('password');
+    expect(asSignedIn(result.value).session.method).toBe('password');
     expect(await sessionsOf(h, email)).toBe('1');
     const devices = await h.sql(
       `select count(*) || '|' || min(d.user_agent_family) from app.known_devices d join app.users u on u.id = d.user_id where u.email_normalized = '${email}';`,
@@ -332,8 +333,12 @@ describeWithStack('password sign in against Postgres', () => {
       method: 'email',
     });
     const [a, b] = await Promise.all([
-      flow.signIn.setPassword(started.session, { newPassword: 'first tab sentence here' }),
-      flow.signIn.setPassword(started.session, { newPassword: 'second tab sentence here' }),
+      flow.signIn.setPassword(asSignedIn(started).session, {
+        newPassword: 'first tab sentence here',
+      }),
+      flow.signIn.setPassword(asSignedIn(started).session, {
+        newPassword: 'second tab sentence here',
+      }),
     ]);
     expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
   });

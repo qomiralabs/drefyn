@@ -9,6 +9,8 @@ export interface CookieNames {
   readonly device: string;
   // Only which way this browser last signed in. Survives sign out, like device.
   readonly lastMethod: string;
+  // A sign in waiting on the second factor. No session exists while it is set.
+  readonly factor: string;
 }
 
 // Browsers refuse the __Host- prefix without Secure, so the plain http loopback setup
@@ -22,6 +24,7 @@ export function cookieNames(secure: boolean): CookieNames {
     invite: `${prefix}drefyn_invite`,
     device: `${prefix}drefyn_device`,
     lastMethod: `${prefix}drefyn_last_method`,
+    factor: `${prefix}drefyn_factor`,
   });
 }
 
@@ -31,6 +34,9 @@ export const PRE_MAX_AGE_SECONDS = 15 * 60;
 // Holds an opened invitation while a newcomer signs up. Short, since it carries the secret;
 // the invitation itself lasts a week and the link can be opened again.
 export const INVITE_MAX_AGE_SECONDS = 60 * 60;
+
+// The factor challenge: ten minutes to find the phone, the same as the row it points at.
+export const FACTOR_MAX_AGE_SECONDS = 10 * 60;
 
 // Auth decides the flags, so a caller can only say which cookie, what value and how long.
 export interface CookieSpec {
