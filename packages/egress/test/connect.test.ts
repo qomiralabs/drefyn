@@ -12,7 +12,9 @@ const servers: Server[] = [];
 
 async function tcpServer(onSocket: (socket: Socket) => void = (s) => s.end('hi')): Promise<number> {
   // Reading drains the request, so the server sees the client close and can shut down.
+  // A test that destroys its end early resets the server's end; that is expected here.
   const server = createServer((socket) => {
+    socket.on('error', () => undefined);
     socket.resume();
     onSocket(socket);
   });

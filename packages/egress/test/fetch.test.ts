@@ -574,6 +574,8 @@ describe('guardedFetch over HTTPS', () => {
     // Accepts the TCP connection and never answers the TLS hello.
     const held: Socket[] = [];
     const server = createNetServer((socket) => {
+      // The guard gives up and destroys its end, which can reset this one.
+      socket.on('error', () => undefined);
       socket.resume();
       held.push(socket);
     });
