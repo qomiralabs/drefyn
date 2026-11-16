@@ -28,7 +28,7 @@ Shown words <!-- inline-comment-secret --> and <span title="attr-secret">span sh
 
 <!-- block-comment-secret -->
 
-<div hidden>raw-html-secret</div>
+<div hidden>hidden attribute shown</div>
 
 <script>script-secret()</script>
 
@@ -77,8 +77,9 @@ const SHOWN = {
     'Guide',
     'Shown words',
     'span shown',
+    // The sanitizer drops the attribute, so a reader sees this text and so does a chunk.
+    'hidden attribute shown',
     'link shown',
-    'image shown',
     'reference shown',
     'code shown',
     'list shown',
@@ -90,6 +91,35 @@ const SHOWN = {
   mdx: ['Guide', 'Shown words', 'note shown'],
 } as const;
 
+const AFTER = '\n\nSECRET\n\nafter\n';
+
+const HIDDEN_BY_THE_RENDER: readonly (readonly [string, Dialect, string])[] = [
+  ['inline script', 'md', 'Shown <script>SECRET_inline_script()</script> end.\n'],
+  ['inline style', 'md', 'Shown <style>.SECRET-style{}</style> end.\n'],
+  ['textarea', 'md', 'Shown <textarea>SECRET-textarea</textarea> end.\n'],
+  ['template split', 'md', '<template>\n\nSECRET-template\n\n</template>\n'],
+  ['noscript split', 'md', '<noscript>\n\nSECRET-noscript\n\n</noscript>\n'],
+  ['mdx script', 'mdx', '<script>SECRET-mdx-script</script>\n'],
+  ['mdx hidden', 'mdx', '<div hidden>SECRET-mdx-hidden</div>\n'],
+  ['mdx span', 'mdx', 'a <span hidden>SECRET-mdx-span</span> b\n'],
+  ['mdx template', 'mdx', '<template>SECRET-tpl</template>\n'],
+  ['unknown component', 'mdx', '<Foo>SECRET-unknown</Foo>\n'],
+  ['fragment', 'mdx', '<>SECRET-frag</>\n'],
+  ['orphan footnote', 'md', 'Words.\n\n[^9]: SECRET-orphan\n'],
+  ['orphan footnote mdx', 'mdx', 'Words.\n\n[^9]: SECRET-orphan\n'],
+  ['quote as attribute name, script', 'md', `<div '><script>'></div>${AFTER}`],
+  ['quote as attribute name, template', 'md', `<div '><template>'></div>${AFTER}`],
+  ['object scope', 'md', `<object><table></object>${AFTER}`],
+  ['script double escape', 'md', `<script><!--<script></script>${AFTER}`],
+  ['script double escape spaced', 'md', `<script><!-- <script> </script> x${AFTER}`],
+  [
+    'footnote first in a component',
+    'mdx',
+    'Ref[^a].\n\n<Foo>\n\n[^a]: shown\n\n</Foo>\n\n[^a]: SECRET\n',
+  ],
+  ['footnote first nested', 'md', 'Ref[^a].\n\n[^b]: x\n\n    [^a]: shown\n\n[^a]: SECRET\n'],
+];
+
 describe('a parsed page', () => {
   let running: RunningHost;
 
@@ -99,9 +129,18 @@ describe('a parsed page', () => {
       organizationId: organizationId(randomUUID()),
       projectId: projectId(randomUUID()),
     };
-    const answer = await client.parse({ tenant, path: 'page', source, dialect, policy });
+    const answer = await client.parse({
+      tenant,
+      path: 'page',
+      source,
+      dialect,
+      policy,
+      reader: true,
+    });
     if (!answer.ok) throw new Error(answer.error.map(({ code }) => code).join(' '));
-    return chunkNode(answer.value.ast, options);
+    const { reader } = answer.value;
+    if (reader === undefined) throw new Error('no reader text');
+    return chunkNode(reader, options);
   };
 
   // The first page loads the parser into a new thread, which is the host's start and not the
@@ -132,5 +171,42 @@ describe('a parsed page', () => {
   it('keeps a comment in a heading out of the heading path', async () => {
     const [chunk] = await chunksOf('# Guide <!-- secret -->\n\nWords.\n', 'md');
     expect(chunk?.headingPath).toEqual(['Guide ']);
+  });
+
+  // Every page from both security reviews of the chunk walker that the render does not show,
+  // through the real host. The render's own tests prove reader text is a subset of it.
+  it.each(HIDDEN_BY_THE_RENDER)(
+    'keeps out what the render hides: %s',
+    async (_name, dialect, source) => {
+      const stored = JSON.stringify(await chunksOf(source, dialect));
+      expect(stored).not.toContain('SECRET');
+    },
+  );
+
+  it('stores no chunks for the hostile open tag page, and ends at once', async () => {
+    const page = `${'<a>\n\n'.repeat(24_000)}${'</b>\n\n'.repeat(24_000)}`;
+    const client = createParseClient(parseClientConfig(running.url));
+    const tenant = {
+      organizationId: organizationId(randomUUID()),
+      projectId: projectId(randomUUID()),
+    };
+    const started = performance.now();
+    const answer = await client.parse({
+      tenant,
+      path: 'page',
+      source: page,
+      dialect: 'md',
+      policy,
+      reader: true,
+    });
+    // Either the render's tag budget refuses it, or on a slow machine the host's kill ends the
+    // parse first, and a save is refused. Neither leaves the engine any text to walk, so its
+    // thread cannot stall on this page.
+    if (answer.ok) {
+      expect(answer.value.reader).toEqual({ state: 'not_renderable' });
+    } else {
+      expect(answer.error.map(({ code }) => code)).toEqual(['mdx.parse_timeout']);
+    }
+    expect(performance.now() - started).toBeLessThan(HOST_START_MS);
   });
 });

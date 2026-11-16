@@ -299,6 +299,13 @@ describe('sign in methods', () => {
       'email',
     ]);
   });
+
+  // Once enrolled, every other way is refused, so offering one would only waste a try.
+  it('offers only the factor to someone enrolled', () => {
+    expect(
+      stepUpWays({ password: true, email: true, google: true, github: true, factor: true }),
+    ).toEqual(['factor']);
+  });
 });
 
 describe('sessions', () => {

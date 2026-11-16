@@ -1,0 +1,115 @@
+# Trust model
+#
+# Staging and main require this workflow through an organization ruleset. The ruleset
+# names this file on development at a pinned commit, so for every PR into staging or main
+# GitHub runs that copy, whatever the PR itself changes. A branch can still edit
+# review-gate.yml or add a workflow that posts a `review-gate` status, but neither is the
+# run the ruleset waits for.
+#
+# - The gate script, path rules and reviewer allow list are checked out at the commit this
+#   file came from (github.workflow_sha), not from the PR or its base. Changing how the
+#   gate judges, or who may sign for a reviewer, needs a new pin in the ruleset, which only
+#   an org owner can set.
+# - The job result is the check. Nothing posts a status, so the job holds read scopes only
+#   and a fork PR is judged the same way as a branch in this repository.
+# - When this file runs as an ordinary workflow from a PR, GitHub takes it from the PR
+#   merge commit and workflow_sha points there. The first step refuses any run whose file
+#   did not come from development, so PR code never runs as the gate.
+# - Reviews do not start required workflows. After the last approval, re-run the failed
+#   job, or add and remove a label, to judge the PR again.
+#
+# Keep the evaluate steps in step with review-gate.yml when either changes.
+
+name: Review gate (required)
+
+on:
+  pull_request:
+    branches: [staging, main]
+    # edited covers a change of base branch, which changes the rules and the carry check.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: review-gate-required-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: trusted review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out the gate script
+      pull-requests: read # PR head, labels, files and reviews
+    steps:
+      - name: Refuse a copy of this file that did not come from development
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          echo "workflow file: ${WORKFLOW_REF} at ${WORKFLOW_SHA}"
+          case "$WORKFLOW_REF" in
+            qomiralabs/drefyn/.github/workflows/review-gate-required.yml@refs/heads/development) ;;
+            *)
+              echo "::error::the gate only counts when the organization ruleset runs it from development"
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::no workflow commit to check out"
+            exit 1
+          fi
+      - name: Check out the gate at the workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          # Full history and every branch, so carry-over can walk merges and find the
+          # base branch tip.
+          fetch-depth: 0
+      - name: Check for the gate script at the workflow commit
+        run: |
+          if [ ! -f scripts/review-gate/src/cli.ts ]; then
+            echo "::error::the gate script is missing at the workflow commit; refusing to evaluate"
+            exit 1
+          fi
+      # Objects only: nothing from the PR is checked out or run. If the fetch fails, the
+      # gate finds no head commit and simply carries no approvals over.
+      - name: Fetch the PR head objects
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::no PR number to fetch"
+            exit 1
+          fi
+          git fetch --no-tags --no-recurse-submodules --quiet origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/review-gate/head" ||
+            echo "::warning::could not fetch the PR head; approvals will not carry over merges"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Evaluate
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_GATE_GIT_DIR: ${{ github.workspace }}
+        run: >-
+          node scripts/review-gate/src/cli.ts github
+          --repo "$REPO" --pr "$PR_NUMBER"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+      # The gate reads the current head from the API. A pass for a newer push says nothing
+      # about the commit this check is attached to.
+      - name: Check the gate judged this commit
+        env:
+          GATE_SHA: ${{ steps.gate.outputs.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GATE_SHA" != "$EVENT_HEAD_SHA" ]; then
+            echo "::error::the gate judged ${GATE_SHA:-nothing}, but this run is for ${EVENT_HEAD_SHA}"
+            exit 1
+          fi

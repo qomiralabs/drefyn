@@ -6,7 +6,14 @@ import {
   credits,
   createLedgerBudget,
   createMemoryLedger,
+  creditsForUsage,
+  estimateCredits,
+  estimateMonthlyRuns,
+  parseRateTable,
   unmeteredBudget,
+  type RateTableError,
+  type Millicredits,
+  type RateTable,
   type AiBudget,
   type AiCharge,
   type AiOperation,
@@ -30,6 +37,7 @@ declare const entryId: CreditEntryId;
 declare const plainNumber: number;
 declare const plainString: string;
 declare const ledger: CreditLedger;
+declare const rates: RateTable;
 
 function takesCredits(value: Credits): Credits {
   return value;
@@ -91,6 +99,17 @@ async function compileOnly(): Promise<void> {
   // @ts-expect-error a plain string is not a CreditEntryId
   await ledger.reverse(orgRef, { idempotencyKey: 'k', entryId: plainString });
   await ledger.reverse(orgRef, { idempotencyKey: 'k', entryId });
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId, amount });
+  // @ts-expect-error a settlement names the spend it settles
+  await ledger.settle(orgRef, { idempotencyKey: 'k', amount });
+  // @ts-expect-error a settlement returns a stated amount, never the whole spend implicitly
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId });
+  // @ts-expect-error a settlement amount is Credits, never a raw number
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId, amount: 5 });
+  // @ts-expect-error a settlement needs a key
+  await ledger.settle(orgRef, { entryId, amount });
+  // @ts-expect-error a plain string is not a CreditEntryId
+  await ledger.settle(orgRef, { idempotencyKey: 'k', entryId: plainString, amount });
 
   // Outcomes: a grant or reversal is applied or throws; a spend or expiry may be refused.
   const granted = await ledger.grant(orgRef, { idempotencyKey: 'k', amount });
@@ -115,6 +134,9 @@ async function compileOnly(): Promise<void> {
       use(reason);
     }
     if (first.kind === 'reversal') takesEntryId(first.reverses);
+    if (first.kind === 'settlement') takesEntryId(first.settles);
+    // @ts-expect-error only a settlement points at what it settles
+    if (first.kind === 'reversal') use(first.settles);
     // @ts-expect-error only a spend has a reason
     if (first.kind === 'grant') use(first.reason);
   }
@@ -151,14 +173,41 @@ async function compileOnly(): Promise<void> {
   const madeUpCode: CreditErrorCode = 'CREDIT_OOPS';
   use(madeUpCode);
 
+  // Rates come only from a parsed table, so a raw number never stands in for one.
+  // @ts-expect-error a plain number is not Millicredits
+  const rawRate: Millicredits = plainNumber;
+  use(rawRate);
+  const parsedRate: number = rates.models[0]?.bands[0].input ?? 0;
+  use(parsedRate);
+  // @ts-expect-error a parsed table is read only
+  rates.checkModel = plainString;
+  // @ts-expect-error a band has only its bound and the five token class rates
+  use(rates.models[0]?.bands[0].total);
+  // @ts-expect-error monthly credits are Credits, never a raw number
+  estimateMonthlyRuns(rates, 5, 'generation', plainString);
+  // @ts-expect-error sends have no reference run
+  estimateMonthlyRuns(rates, amount, 'sms', plainString);
+  creditsForUsage(rates, [
+    {
+      modelId: plainString,
+      usage: { input: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1 },
+    },
+  ]);
+  // @ts-expect-error usage names every token class
+  creditsForUsage(rates, [{ modelId: plainString, usage: { input: 1, output: 1 } }]);
+  estimateCredits(rates, [{ modelId: plainString, maxPromptTokens: 1, maxOutputTokens: 1 }]);
+  // @ts-expect-error a planned call needs its output cap
+  estimateCredits(rates, [{ modelId: plainString, maxPromptTokens: 1 }]);
+
   // The budget is charged per project, from the organization pool.
   const budget: AiBudget = unmeteredBudget();
   await budget.charge(tenant, { idempotencyKey: 'k', operation: 'reader_answer' });
   await budget.charge(tenant, { idempotencyKey: 'k', operation: 'stale_draft', floor: amount });
   // @ts-expect-error an organization ref alone has no project to log against
   await budget.charge(orgRef, { idempotencyKey: 'k', operation: 'reader_answer' });
-  // @ts-expect-error generation has its own call site, not the AI budget
   await budget.charge(tenant, { idempotencyKey: 'k', operation: 'generation' });
+  // @ts-expect-error sends are never an AI operation
+  await budget.charge(tenant, { idempotencyKey: 'k', operation: 'sms' });
   // @ts-expect-error a floor is Credits, never a raw number
   await budget.charge(tenant, { idempotencyKey: 'k', operation: 'reader_answer', floor: 5 });
   // @ts-expect-error a charge needs a key
@@ -178,12 +227,26 @@ describe('type level API', () => {
     expectTypeOf(credits).returns.toEqualTypeOf<Credits>();
     expectTypeOf(createMemoryLedger).returns.toEqualTypeOf<CreditLedger>();
     expectTypeOf<CreditEntryId>().toEqualTypeOf<IdOf<'crd'>>();
-    expectTypeOf<EntryKind>().toEqualTypeOf<'grant' | 'spend' | 'reversal' | 'expiry'>();
+    expectTypeOf<EntryKind>().toEqualTypeOf<
+      'grant' | 'spend' | 'reversal' | 'expiry' | 'settlement'
+    >();
+    expectTypeOf<CreditLedger['settle']>().returns.toEqualTypeOf<
+      Promise<{ readonly status: 'applied'; readonly entry: CreditEntry }>
+    >();
     expectTypeOf<SpendReason>().toEqualTypeOf<
       'generation' | 'translation_draft' | 'incident_draft' | 'stale_draft' | 'reader_answer'
     >();
     expectTypeOf<CreditOutcome['status']>().toEqualTypeOf<'applied' | 'insufficient'>();
-    expectTypeOf<AiOperation>().toEqualTypeOf<'stale_draft' | 'reader_answer'>();
+    expectTypeOf<AiOperation>().toEqualTypeOf<
+      'stale_draft' | 'reader_answer' | 'translation_draft' | 'incident_draft' | 'generation'
+    >();
+    expectTypeOf(parseRateTable).returns.toEqualTypeOf<RateTable>();
+    expectTypeOf(estimateCredits).returns.toEqualTypeOf<Credits>();
+    expectTypeOf(creditsForUsage).returns.toEqualTypeOf<Credits>();
+    expectTypeOf(estimateMonthlyRuns).returns.toEqualTypeOf<number | undefined>();
+    expectTypeOf<RateTableError['code']>().toEqualTypeOf<
+      'RATE_TABLE_INVALID' | 'RATE_MODEL_UNKNOWN' | 'RATE_USAGE_INVALID'
+    >();
     expectTypeOf<AiCharge>().toEqualTypeOf<
       | { readonly status: 'charged'; readonly entryId: CreditEntryId }
       | { readonly status: 'unmetered' }

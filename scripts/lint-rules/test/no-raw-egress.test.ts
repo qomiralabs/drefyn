@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fixture, makeEslint, reports, tempWorkspace, type TempWorkspace } from './helpers.ts';
+import { egressAllowList } from '../src/index.ts';
+import {
+  fixture,
+  makeEslint,
+  reports,
+  repoRoot,
+  tempWorkspace,
+  type TempWorkspace,
+} from './helpers.ts';
 
 const RULE = 'drefyn/no-raw-egress';
 const root = fixture('egress');
@@ -657,4 +665,29 @@ describe('the allow list path schema', () => {
       bad.lintText(RAW_FETCH, { filePath: join(root, 'packages/web/src/a.ts') }),
     ).rejects.toThrow(/allow|path|pattern/i);
   });
+});
+
+describe('no-raw-egress in this repository', () => {
+  // The real tree and the real allow list: the guard package is the one way out, and a
+  // package next to it that opens a socket or calls fetch fails.
+  const real = makeEslint(repoRoot, { [RULE]: ['error', { allow: egressAllowList }] });
+  const code = [
+    "import { request } from 'node:http';",
+    "import { connect } from 'node:net';",
+    "import { lookup } from 'node:dns/promises';",
+    "export const a = [request, connect, lookup, fetch('https://example.com')];",
+  ].join('\n');
+  const lintReal = async (path: string) =>
+    reports(await real.lintText(code, { filePath: join(repoRoot, path) })).map((r) => r.line);
+
+  it('allows raw network calls inside packages/egress', async () => {
+    expect(await lintReal('packages/egress/src/raw.ts')).toEqual([]);
+  });
+
+  it.each(['packages/address/src/raw.ts', 'packages/mdx/src/raw.ts', 'apps/api/src/raw.ts'])(
+    'fails each raw call in %s',
+    async (path) => {
+      expect(await lintReal(path)).toEqual([1, 2, 3, 4]);
+    },
+  );
 });

@@ -14,6 +14,7 @@ const config: NextConfig = {
     '@drefyn/flags',
     '@drefyn/mdx',
     '@drefyn/schema',
+    '@drefyn/seal',
     '@drefyn/tenancy',
     '@drefyn/ui',
   ],

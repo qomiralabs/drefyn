@@ -84,7 +84,7 @@ export const PREFIXES = [
   'ssi',
 ] as const;
 
-export const SCOPES = ['page', 'nav', 'search', 'retrieval', 'render', 'asset'] as const;
+export const SCOPES = ['page', 'nav', 'search', 'retrieval', 'render', 'asset', 'schema'] as const;
 
 function hex128(value: bigint): string {
   const h = value.toString(16).padStart(32, '0');

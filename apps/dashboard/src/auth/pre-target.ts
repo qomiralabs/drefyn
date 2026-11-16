@@ -8,6 +8,7 @@ const PAGES: ReadonlySet<string> = new Set([
   '/sign-in/reset',
   '/sign-in/link',
   '/sign-in/cli',
+  '/sign-in/factor',
   '/invite',
   '/invite/block',
 ]);

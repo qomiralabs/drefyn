@@ -1,6 +1,7 @@
 'use client';
 import { startTransition, useEffect, useRef, type ReactNode } from 'react';
 import {
+  completeFactor,
   finishLink,
   inspectLink,
   joinInvitation,
@@ -14,6 +15,7 @@ import {
   verifyCode,
 } from '../server/sign-in-actions.ts';
 import { useFocusOnChange } from './controls.tsx';
+import { FactorScreen, type FactorKind } from './factor-screen.tsx';
 import { isRefusal } from './outcomes.ts';
 import { BlockScreen, CliScreen, Failed, InviteScreen } from './outcome-screens.tsx';
 import { AuthFrame } from './parts.tsx';
@@ -34,6 +36,7 @@ import {
 import type {
   BlockState,
   CliState,
+  FactorState,
   InviteState,
   LinkState,
   PasswordState,
@@ -321,5 +324,29 @@ export function BlockForm({ site, csrf }: Shared): ReactNode {
       notice={notice}
       action={view.kind === 'reading' ? action : stopAction}
     />
+  );
+}
+
+interface FactorFormProps extends Shared {
+  readonly kind: FactorKind;
+}
+
+// The state never holds the typed code, so a refusal shows an empty field and no copy of it
+// reaches the page payload.
+export function FactorForm({ site, csrf, kind }: FactorFormProps): ReactNode {
+  const [state, action] = useForm<FactorState>(completeFactor, {});
+  const { view, notice } = noticed(state, {});
+  const focus = useFocusOnChange(state);
+  return (
+    <div ref={focus} className="contents">
+      <FactorScreen
+        site={site}
+        csrf={csrf}
+        action={action}
+        kind={view.kind ?? kind}
+        problem={view.problem}
+        notice={notice ?? view.notice}
+      />
+    </div>
   );
 }

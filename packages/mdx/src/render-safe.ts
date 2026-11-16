@@ -215,7 +215,7 @@ function clean(tree: Nodes, policy: RenderPolicy): Nodes {
   return sanitize(tree, schemaFor(policy));
 }
 
-function transform(root: MdxRoot, policy: RenderPolicy): ReactElement {
+function safeTree(root: MdxRoot, policy: RenderPolicy): Nodes {
   holdConversion(root);
   let tree = toHastTree(root, policy);
   const census = censusOf(tree);
@@ -225,14 +225,25 @@ function transform(root: MdxRoot, policy: RenderPolicy): ReactElement {
     // would rebuild. A second parse settles the tree before the sanitizer has the last word.
     tree = raw(clean(raw(tree), policy));
   }
-  // Nothing may follow this but the conversion to elements. In particular that conversion's
-  // own table cell option would add back a style attribute.
-  return toJsxRuntime(clean(tree, policy), {
-    Fragment,
-    jsx: jsx as Jsx,
-    jsxs: jsxs as Jsx,
-    tableCellAlignToStyle: false,
-  }) as ReactElement;
+  return clean(tree, policy);
+}
+
+// Everything a render does up to the elements, so reader text comes from the same tree a reader
+// gets. It throws RenderRefused, and never answers in part.
+export function safeHast(ast: MdxRoot, policy: RenderPolicy): Nodes {
+  const checked = policySchema.safeParse(policy);
+  if (!checked.success) throw new RenderRefused('render.invalid_policy');
+  const limits = { ...checked.data.limits, maxBytes: CEILING.maxBytes };
+  const tree = validateTree(ast, limits);
+  if (!tree.ok) throw new RenderRefused('render.invalid_tree');
+  try {
+    return safeTree(tree.value, policy);
+  } catch (error) {
+    if (error instanceof RenderRefused) throw error;
+    // The libraries below recurse, and the HTML parser has crashed on stitched raw nodes. What
+    // they say is not kept, as it can quote the page.
+    throw new RenderRefused('render.failed');
+  }
 }
 
 // The only function that turns customer content into output. It takes a stored tree and trusts
@@ -240,17 +251,17 @@ function transform(root: MdxRoot, policy: RenderPolicy): ReactElement {
 // it, and the stored form is many times its source, so maxBytes here is the ceiling of a tree
 // and not the policy's limit on source. It throws RenderRefused, and never renders in part.
 export function renderSafe(ast: MdxRoot, policy: RenderPolicy): ReactElement {
-  const checked = policySchema.safeParse(policy);
-  if (!checked.success) throw new RenderRefused('render.invalid_policy');
-  const limits = { ...checked.data.limits, maxBytes: CEILING.maxBytes };
-  const tree = validateTree(ast, limits);
-  if (!tree.ok) throw new RenderRefused('render.invalid_tree');
+  const tree = safeHast(ast, policy);
   try {
-    return transform(tree.value, policy);
-  } catch (error) {
-    if (error instanceof RenderRefused) throw error;
-    // The libraries below recurse, and the HTML parser has crashed on stitched raw nodes. What
-    // they say is not kept, as it can quote the page.
+    // Nothing may follow the sanitizer but this. In particular its own table cell option would
+    // add back a style attribute.
+    return toJsxRuntime(tree, {
+      Fragment,
+      jsx: jsx as Jsx,
+      jsxs: jsxs as Jsx,
+      tableCellAlignToStyle: false,
+    }) as ReactElement;
+  } catch {
     throw new RenderRefused('render.failed');
   }
 }

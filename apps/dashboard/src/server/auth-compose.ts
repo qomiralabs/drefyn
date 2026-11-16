@@ -16,6 +16,7 @@ import {
   createRateLimiter,
   createRoles,
   createScopeRegistry,
+  createSecondFactors,
   createSessions,
   loadBreachedPasswords,
   type Account,
@@ -31,6 +32,7 @@ import {
   type PasswordAccount,
   type PasswordSignIn,
   type Roles,
+  type SecondFactors,
   type Sessions,
 } from '@drefyn/auth';
 import type { AuthDatabase, Database } from '@drefyn/db';
@@ -39,7 +41,9 @@ import { authLogger } from './auth-logger.ts';
 import { mailableOrganizationName, organizationNames } from './organization-name.ts';
 import { dashboardMail, noteEmailOff } from './auth-mailer.ts';
 import { authConfig } from './auth-config.ts';
+import { totpFlag } from './flags.ts';
 import { mailDeliveryEnabled } from './gate.ts';
+import { afterResponse } from './later.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
 // wiring that no test reaches, and ensureOrganizationFor, which takes a bare user id, stays
@@ -84,6 +88,7 @@ export interface DashboardAuth {
   >;
   readonly cliLinks: Pick<CliLinks, 'redeem'>;
   readonly factorChallenges: FactorChallenges;
+  readonly secondFactors: SecondFactors;
   readonly members: Members;
   readonly roles: Pick<Roles, 'changeRole' | 'removeMember' | 'setProjectRole'>;
   readonly apiKeys: Pick<ApiKeys, 'createApiKey' | 'revokeApiKey' | 'listApiKeys'>;
@@ -155,9 +160,16 @@ export async function composeAuth(db: Database, authDb: AuthDatabase): Promise<D
     hasher,
     breachedPasswords,
   });
-  const passwordAccount = createPasswordAccount(parsed, { ...shared, hasher, breachedPasswords });
+  const passwordAccount = createPasswordAccount(parsed, {
+    ...shared,
+    hasher,
+    breachedPasswords,
+    later: afterResponse,
+  });
   const oauth = createOAuth(parsed, { ...shared, invitations });
-  const factorChallenges = createFactorChallenges(parsed, { db, authDb, logger, mailer, limiter });
+  const factors = { db, authDb, logger, mailer, limiter, later: afterResponse };
+  const factorChallenges = createFactorChallenges(parsed, factors);
+  const secondFactors = createSecondFactors(parsed, { ...factors, flag: totpFlag });
   const cliLinks = createCliLinks(parsed, {
     db,
     authDb,
@@ -218,6 +230,7 @@ export async function composeAuth(db: Database, authDb: AuthDatabase): Promise<D
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
     factorChallenges,
+    secondFactors,
     members,
     roles: {
       changeRole: (access, member, role) => roles.changeRole(access, member, role),

@@ -19,10 +19,12 @@ import {
   savePassword,
   unlinkProvider,
 } from '../server/settings-actions.ts';
+import type { FactorFacts, FactorNotice } from './factor-words.ts';
 import { dayWords, methodsFrom, plural, type MethodFacts } from './models.ts';
 import { Fine, PageHead, PageNotice, Row, Rows, SectionHead, SettingsPage } from './parts.tsx';
 import { useSettings, wasCancelled } from './provider.tsx';
 import { problemWords } from './results.ts';
+import { SecondFactorSection, type FactorDialog } from './second-factor.tsx';
 import { EverywhereDialog } from './sessions.tsx';
 
 type Provider = 'github' | 'google';
@@ -37,6 +39,8 @@ export interface MethodsFacts extends MethodFacts {
   readonly passwordsOn: boolean;
   readonly configured: readonly Provider[];
   readonly others: readonly { readonly id: string; readonly browser: string }[];
+  // Null when the second factor is neither offered nor held.
+  readonly factor?: FactorFacts | null;
 }
 
 type Dialogs = 'none' | 'password' | 'remove';
@@ -247,12 +251,16 @@ export function MethodsScreen({
   removed: removedAt = null,
   providerFailed = false,
   addOpen = false,
+  factorNotice = null,
+  factorOpen = 'none',
 }: {
   facts: MethodsFacts;
   open?: Dialogs;
   removed?: string | null;
   providerFailed?: boolean;
   addOpen?: boolean;
+  factorNotice?: FactorNotice | null;
+  factorOpen?: FactorDialog;
 }): ReactNode {
   const { act, complain, refresh } = useSettings();
   const [dialog, setDialog] = useState<Dialogs>(open);
@@ -466,6 +474,7 @@ export function MethodsScreen({
           </Fine>
         ) : null}
       </section>
+      <SecondFactorSection facts={facts.factor ?? null} notice={factorNotice} open={factorOpen} />
       <Fine>
         Linking, unlinking and changing a password ask you to confirm it is you if your last sign in
         was more than 15 minutes ago. Each one emails a notice to your address.

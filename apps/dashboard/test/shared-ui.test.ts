@@ -29,8 +29,10 @@ describe('shared ui in the dashboard', () => {
     expect(existsSync(join(SRC, 'shell', 'icons.tsx'))).toBe(false);
   });
 
+  // The QR code is data drawn as one path, not an icon, and it lives on a page with no
+  // React at all, where the package's icons cannot reach.
   it('draws no svg of its own', () => {
-    expect(matching(/<svg[\s>]/)).toEqual([]);
+    expect(matching(/<svg[\s>]/).filter((file) => file !== 'server/factor-page.ts')).toEqual([]);
   });
 
   it('builds no toast on React Aria directly', () => {

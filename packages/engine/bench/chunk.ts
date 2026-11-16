@@ -22,6 +22,7 @@ const parsed = await createParseClient(parseClientConfig(running.url)).parse({
   path: 'bench',
   source,
   dialect: 'md',
+  reader: true,
   policy: {
     version: 1,
     components: new Set<string>(),
@@ -33,7 +34,8 @@ const parsed = await createParseClient(parseClientConfig(running.url)).parse({
 });
 running.host.kill('SIGKILL');
 if (!parsed.ok) throw new Error(`refused: ${parsed.error.map((e) => e.code).join(' ')}`);
-const root = parsed.value.ast;
+const { reader } = parsed.value;
+if (reader === undefined) throw new Error('the host sent no reader text');
 const options = {
   targetChars: DEFAULT_ENGINE_CONFIG.chunkTargetChars,
   maxChars: DEFAULT_ENGINE_CONFIG.chunkMaxChars,
@@ -43,7 +45,7 @@ const samples: number[] = [];
 let chunks = 0;
 for (let round = 0; round < WARM_UP + SAMPLES; round += 1) {
   const started = performance.now();
-  chunks = chunkNode(root, options).length;
+  chunks = chunkNode(reader, options).length;
   if (round >= WARM_UP) samples.push(performance.now() - started);
 }
 const p99 = percentile(samples, 0.99);
