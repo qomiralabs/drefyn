@@ -199,7 +199,10 @@ describe('the parse host', () => {
         ours: ast,
         theirs: ast,
       });
-      expect(merged).toMatchObject({ ok: true, value: { outcome: { kind: 'clean' } } });
+      // The code, not the object, so a refusal says which limit it met.
+      expect(merged.ok ? merged.value.outcome.kind : merged.error.map(({ code }) => code)).toBe(
+        'clean',
+      );
     },
     FULL_PAGE_TIMEOUT_MS,
   );

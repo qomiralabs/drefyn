@@ -138,6 +138,31 @@ describe('merge3 scenarios', () => {
     ]);
   });
 
+  // The side that deleted the block cannot say whether its insert was above or below it, so the
+  // two inserts have no order a person agreed to.
+  it('inserts either side of a block one side deleted: a conflict, in both directions', () => {
+    const second = 'Second paragraph with several other words here.';
+    const deleted = replaced(`${second}\n\n`, 'New THEIRS block.\n\n');
+    const below = replaced(second, `${second}\n\nNew OURS block.`);
+    for (const [ours, theirs] of [
+      [below, deleted],
+      [deleted, below],
+    ] as const) {
+      const list = conflicts(outcomeOf(BASE, ours, theirs));
+      expect(list.map(({ reason }) => reason)).toEqual(['both_inserted']);
+      expect(list.map(({ baseIndex }) => baseIndex)).toEqual([1]);
+    }
+  });
+
+  it('inserts either side of a block nobody deleted: both land, in order', () => {
+    const second = 'Second paragraph with several other words here.';
+    const above = replaced(second, `New THEIRS block.\n\n${second}`);
+    const below = replaced(second, `${second}\n\nNew OURS block.`);
+    expect(clean(outcomeOf(BASE, below, above))).toBe(
+      replaced(second, `New THEIRS block.\n\n${second}\n\nNew OURS block.`),
+    );
+  });
+
   it('both insert the same block at one spot: one copy, no conflict', () => {
     const edit = replaced('Second paragraph', 'New SAME block.\n\nSecond paragraph');
     expect(clean(outcomeOf(BASE, edit, edit))).toBe(edit);

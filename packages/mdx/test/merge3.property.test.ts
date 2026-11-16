@@ -360,6 +360,21 @@ describe('merge3 over generated edits', () => {
     TIMEOUT_MS,
   );
 
+  // Found by the gate on a fresh seed, -1790702688, shrunk.
+  it('keeps the order of an insert beside a split, a delete and an append', () => {
+    const input = {
+      page: { seed: 27674311 },
+      crlf: false,
+      ours: [{ kind: 'insert', at: 749942, choice: 731419 }],
+      theirs: [
+        { kind: 'split', at: 463248, choice: 112125 },
+        { kind: 'delete', at: 657338, choice: 0 },
+        { kind: 'append', at: 0, choice: 0 },
+      ],
+    } as unknown as MergeCase;
+    expect(failureIn(input)).toBeUndefined();
+  });
+
   // The worst case has its own run: one side deletes a block, the other changes its kind and a word.
   it(
     'never lets a delete pass a block the other side retyped',

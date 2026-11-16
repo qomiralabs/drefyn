@@ -269,6 +269,44 @@ export function mergeSequence(
 
   if (top) crossingConflicts(base, ours, theirs, conflict);
 
+  // A side that deleted a block cannot say whether its insert beside it went above or below, so
+  // its inserts anywhere along a run of its deletes hold one place. A plain insert by the other
+  // side at another spot of that run then has no order against them that both sides agreed to.
+  // When that insert also sits beside a block its own side removed, the two replace different
+  // blocks and the base order of those blocks orders them. Inserts at one spot are settled where
+  // they are placed.
+  const straddled = (deleter: Alignment, other: Alignment, pairs: Set<string>) => {
+    const deletes = (side: Alignment, slot: number) => side.slots[slot]?.state === 'deleted';
+    const replaces = (side: Alignment, spot: number) =>
+      deletes(side, spot - 1) || deletes(side, spot);
+    for (let spot = 0; spot <= base.length; spot += 1) {
+      if (open(at(deleter.after, spot)).length === 0) continue;
+      let low = spot;
+      let high = spot;
+      while (low > 0 && deletes(deleter, low - 1)) low -= 1;
+      while (high < base.length && deletes(deleter, high)) high += 1;
+      for (let near = low; near <= high; near += 1) {
+        if (near === spot || open(at(other.after, near)).length === 0) continue;
+        if (replaces(other, near)) continue;
+        pairs.add(
+          deleter === ours ? `${String(spot)} ${String(near)}` : `${String(near)} ${String(spot)}`,
+        );
+      }
+    }
+  };
+  const pairs = new Set<string>();
+  straddled(ours, theirs, pairs);
+  straddled(theirs, ours, pairs);
+  for (const pair of pairs) {
+    const [oursSpot = 0, theirsSpot = 0] = pair.split(' ').map(Number);
+    const a = open(at(ours.after, oursSpot));
+    const c = open(at(theirs.after, theirsSpot));
+    const spot = Math.min(oursSpot, theirsSpot);
+    for (let index = 0; index < Math.max(a.length, c.length); index += 1) {
+      conflict(spot === 0 ? null : spot - 1, 'both_inserted', a[index] ?? null, c[index] ?? null);
+    }
+  }
+
   const live = (list: readonly Inserted[]): readonly Entry[] =>
     list.map((entry) => {
       const edited = entry.movedFrom === undefined ? undefined : replaced.get(entry.movedFrom);
