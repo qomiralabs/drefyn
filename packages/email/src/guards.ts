@@ -116,7 +116,18 @@ const notice = z.discriminatedUnion('kind', [
       'password_removed',
       'password_reset',
       'new_device_sign_in',
+      'second_factor_added',
+      'second_factor_removed',
+      'recovery_codes_replaced',
+      'second_factor_failures',
+      'second_factor_disabled',
     ]),
+  }),
+  z.object({
+    ...facts,
+    kind: z.literal('recovery_code_used'),
+    // A person never holds more than ten.
+    codesLeft: z.number().int().min(0).max(10),
   }),
   z.object({
     ...facts,
