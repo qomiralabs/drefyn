@@ -3,6 +3,7 @@ import { test } from './csp.ts';
 import {
   banner,
   DESKTOP,
+  holdLoad,
   inbox,
   main,
   openShell,
@@ -65,12 +66,15 @@ test.describe('the tablet rail', () => {
 
   // The tooltip code lands after the page is ready, and a fast keyboard can reach the rail
   // first. Its arrival wraps every link anew, so the focused link must not lose focus to it.
+  // The code is asked for while the page still loads, as a fast client does, so the page
+  // load waits on it and the test must not.
   test('an item focused before the tooltip code lands keeps focus and shows its label', async ({
     page,
     browserName,
   }) => {
     const chunk = await routeChunk(page, RAIL_TIP_MARK, 'hold');
-    await openShell(page, ROUTES.project);
+    await holdLoad(page, () => chunk.requested() > 0);
+    await openShell(page, ROUTES.project, 'domcontentloaded');
     await expect
       .poll(chunk.requested, { message: 'the tooltip code was asked for' })
       .toBeGreaterThan(0);
@@ -82,6 +86,42 @@ test.describe('the tablet rail', () => {
     const tip = page.locator('[role="tooltip"]');
     await expect(tip).toHaveCount(0);
     chunk.release();
+    await expect(tip).toBeVisible();
+    await expect(first).toBeFocused();
+    const label = (await first.locator('span.truncate').first().textContent())?.trim() ?? '';
+    await expect(tip).toHaveText(label);
+  });
+
+  // The narrowest window: the code has arrived but not yet rendered when focus reaches a
+  // link. A message posted as the chunk runs is handled after the code is in hand and before
+  // React renders with it, so focus lands there every time rather than by chance.
+  test('an item focused after the tooltip code arrives but before it renders keeps focus', async ({
+    page,
+  }) => {
+    const chunk = await routeChunk(
+      page,
+      RAIL_TIP_MARK,
+      'hold',
+      `;(() => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          const links = document.querySelectorAll('nav[aria-label="Payments API docs"] a[href]');
+          [...links].find((link) => link.checkVisibility())?.focus();
+        };
+        channel.port2.postMessage(null);
+      })();`,
+    );
+    await openShell(page, ROUTES.project, 'domcontentloaded');
+    await expect
+      .poll(chunk.requested, { message: 'the tooltip code was asked for' })
+      .toBeGreaterThan(0);
+    // A key press first, so the focus that follows counts as keyboard focus.
+    await page.keyboard.press('F6');
+    await page.keyboard.press('F6');
+    const first = rail(page).getByRole('link').first();
+    await expect(first).not.toBeFocused();
+    chunk.release();
+    const tip = page.locator('[role="tooltip"]');
     await expect(tip).toBeVisible();
     await expect(first).toBeFocused();
     const label = (await first.locator('span.truncate').first().textContent())?.trim() ?? '';
