@@ -72,6 +72,31 @@ test('probe the rail focus order', async ({ browser, browserName }) => {
         Reflect.apply(real, this, args);
       };
     }
+    for (const name of ['removeChild', 'replaceChild', 'insertBefore'] as const) {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- applied with this below
+      const real: (...args: never[]) => unknown = Node.prototype[name];
+      Node.prototype[name] = function (this: Node, ...args: never[]) {
+        const node: unknown =
+          name === 'insertBefore' ? args[0] : args[name === 'replaceChild' ? 1 : 0];
+        const nav = this instanceof Element ? this.closest('nav') : null;
+        if (
+          node instanceof Element &&
+          nav !== null &&
+          (node.matches('a[href]') || node.querySelector('a[href]') !== null) &&
+          (name !== 'insertBefore' || node.isConnected)
+        ) {
+          const stack = (new Error().stack ?? '')
+            .split('\n')
+            .slice(2, 14)
+            .map((l) => l.trim().replace(/https?:[^ )]*\/chunks\//g, ''))
+            .join(' < ');
+          w.log.push(
+            `${at()} ${name} link in nav active=${d(document.activeElement)} from ${stack}`,
+          );
+        }
+        return Reflect.apply(real, this, args) as unknown;
+      } as never;
+    }
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         if (entry.name.endsWith('.js'))
