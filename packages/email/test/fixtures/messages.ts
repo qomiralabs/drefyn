@@ -62,6 +62,14 @@ function noticeMail(kind: SecurityNoticeKind): MailMessage {
         return { at: AT, kind, organizationName: ORG, domain: 'login.acme.example' };
       case 'password_set':
         return { at: AT, kind };
+      case 'recovery_code_used':
+        return { at: AT, kind, codesLeft: 4 };
+      case 'second_factor_added':
+      case 'second_factor_removed':
+      case 'recovery_codes_replaced':
+      case 'second_factor_failures':
+      case 'second_factor_disabled':
+        return { at: AT, kind, sessionsLink: link('/settings/sessions') };
       default:
         return { ...facts, kind };
     }
