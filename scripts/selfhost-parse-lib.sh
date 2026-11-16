@@ -113,7 +113,7 @@ parse_app_reaches() {
 # and answers the app tier.
 parse_boundary_checks() {
   local id="$1" token="$2" memory_mb="$3" network limit swap gateway bridge_gateway listener=""
-  local outside_port=18790 keys extra address open
+  local outside_port=18790 keys extra address open target reached machine
   network="$(parse_network_of "$id")"
 
   if [[ "$network" != *" "* ]] && [ -n "$network" ]; then
@@ -160,18 +160,28 @@ parse_boundary_checks() {
   listener=$!
   gateway="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' "$network")"
   bridge_gateway="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' bridge)"
+  # On Linux the machine answers at the bridge's gateway. Docker Desktop runs containers in a
+  # VM, where the machine is host.docker.internal instead.
+  machine=()
   for _ in $(seq 1 20); do
-    if parse_reaches_from_bridge "$bridge_gateway" "$outside_port"; then break; fi
+    for target in "$bridge_gateway" host.docker.internal; do
+      if parse_reaches_from_bridge "$target" "$outside_port"; then machine+=("$target"); fi
+    done
+    if [ "${#machine[@]}" -gt 0 ]; then break; fi
     sleep 1
   done
-  if ! parse_reaches_from_bridge "$bridge_gateway" "$outside_port"; then
+  reached=""
+  if [ "${#machine[@]}" -gt 0 ]; then
+    for target in "$gateway" "${machine[@]}"; do
+      if parse_reaches_from_inside "$id" "$target" "$outside_port"; then reached+=" $target"; fi
+    done
+  fi
+  if [ "${#machine[@]}" = 0 ]; then
     fail "control: the host network answers from the default bridge"
-  elif parse_reaches_from_inside "$id" "$gateway" "$outside_port"; then
-    fail "no connect to the host network from inside" "reached the network's gateway, $gateway"
-  elif parse_reaches_from_inside "$id" "$bridge_gateway" "$outside_port"; then
-    fail "no connect to the host network from inside" "reached the bridge at $bridge_gateway"
+  elif [ -n "$reached" ]; then
+    fail "no connect to the host network from inside" "reached$reached"
   else
-    pass "no connect to the host network from inside"
+    pass "no connect to the host network from inside (tried $gateway ${machine[*]})"
   fi
   kill "$listener" 2>/dev/null || true
   wait "$listener" 2>/dev/null || true
