@@ -1,4 +1,4 @@
-import type { AuthSecurityNotice } from '@drefyn/auth';
+import type { AuthSecurityNotice, SsoDomainNotice } from '@drefyn/auth';
 import {
   SECURITY_NOTICE_KINDS,
   renderMail,
@@ -91,9 +91,34 @@ function guarded(name = 'Acme') {
   return { send, adapter };
 }
 
+const DOMAIN = idOf('ssd', '01890a5d-ac96-774b-bcce-b302099a8075');
+
+const ssoNotice = (kind: SsoDomainNotice['kind'], at = AT): SsoDomainNotice => ({
+  kind,
+  organizationId: ORG,
+  domainId: DOMAIN,
+  domain: 'login.acme.example',
+  at,
+});
+
+const EVERY_SSO_NOTICE: Readonly<Record<SsoDomainNotice['kind'], SsoDomainNotice>> = {
+  sso_domain_claimed: ssoNotice('sso_domain_claimed'),
+  sso_domain_verified: ssoNotice('sso_domain_verified'),
+  sso_domain_unverified: ssoNotice('sso_domain_unverified'),
+};
+
 describe('every notice auth can send', () => {
   it('covers each kind the mail package knows', () => {
-    expect(Object.keys(EVERY_NOTICE).sort()).toEqual([...SECURITY_NOTICE_KINDS].sort());
+    expect([...Object.keys(EVERY_NOTICE), ...Object.keys(EVERY_SSO_NOTICE)].sort()).toEqual(
+      [...SECURITY_NOTICE_KINDS].sort(),
+    );
+  });
+
+  it.each(Object.values(EVERY_SSO_NOTICE))('passes the real guard: $kind', async (notice) => {
+    const { send, adapter } = guarded();
+    await adapter.sendSsoDomainNotice('owner@example.com', notice);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await send.mock.results[0]?.value).toEqual(sent);
   });
 
   it.each(Object.values(EVERY_NOTICE))('passes the real guard: $kind', async (notice) => {
@@ -276,6 +301,7 @@ describe('security notices', () => {
     ['github', 'GitHub'],
     ['google', 'Google'],
     ['cli_link', 'One time link'],
+    ['sso', 'Single sign on'],
   ] as const)('prints the method %s as %s', async (method, words) => {
     const { send, adapter } = mailer();
     await adapter.sendSecurityNotice('a@example.com', {
@@ -297,5 +323,64 @@ describe('security notices', () => {
     const message = firstMessage(send);
     expect(message).toMatchObject({ notice: { kind: 'new_device_sign_in' } });
     expect(JSON.stringify(message)).not.toContain('Node.js');
+  });
+});
+
+describe('SSO domain notices', () => {
+  const SHAPE = /^notice:[^:]+:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{22}$/;
+
+  it('names the organization and the domain, and drops the row ids', async () => {
+    const { send, adapter } = mailer();
+    await adapter.sendSsoDomainNotice('a@example.com', ssoNotice('sso_domain_verified'));
+    expect(firstMessage(send)).toEqual({
+      template: 'security_notice',
+      notice: {
+        kind: 'sso_domain_verified',
+        at: AT,
+        organizationName: 'Acme',
+        domain: 'login.acme.example',
+      },
+    });
+  });
+
+  it('carries the tenant, and keys by organization with no address or domain in the key', async () => {
+    const { send, adapter } = mailer();
+    await adapter.sendSsoDomainNotice('a@example.com', ssoNotice('sso_domain_claimed'));
+    expect(keyOf(send)).toMatch(SHAPE);
+    expect(keyOf(send)).toContain(`notice:${ORG}:`);
+    expect(keyOf(send)).not.toContain('example');
+    expect(send.mock.calls[0]?.[2].tenant).toEqual({ organizationId: ORG });
+  });
+
+  it('keeps the key on a retry and changes it for another person, kind or time', async () => {
+    const { send, adapter } = mailer();
+    await adapter.sendSsoDomainNotice('a@example.com', ssoNotice('sso_domain_claimed'));
+    await adapter.sendSsoDomainNotice('A@example.com', ssoNotice('sso_domain_claimed'));
+    await adapter.sendSsoDomainNotice('b@example.com', ssoNotice('sso_domain_claimed'));
+    await adapter.sendSsoDomainNotice('a@example.com', ssoNotice('sso_domain_verified'));
+    await adapter.sendSsoDomainNotice(
+      'a@example.com',
+      ssoNotice('sso_domain_claimed', new Date('2026-11-04T10:00:01Z')),
+    );
+    const keys = send.mock.calls.map((call) => call[2].idempotencyKey);
+    expect(keys[0]).toBe(keys[1]);
+    expect(new Set(keys).size).toBe(4);
+  });
+
+  it('still goes out when the stored organization name is refused by the guard', async () => {
+    const { send, adapter } = guarded('evil.example');
+    await adapter.sendSsoDomainNotice('owner@example.com', ssoNotice('sso_domain_unverified'));
+    expect(await send.mock.results[0]?.value).toEqual(sent);
+    expect(firstMessage(send)).toMatchObject({
+      notice: { organizationName: 'Your organization', domain: 'login.acme.example' },
+    });
+  });
+
+  it('rejects with only the code when the domain is not one host name', async () => {
+    const { adapter } = guarded();
+    const notice = { ...ssoNotice('sso_domain_claimed'), domain: 'https://evil.example/x' };
+    await expect(adapter.sendSsoDomainNotice('owner@example.com', notice)).rejects.toThrow(
+      /^email\.input_invalid$/,
+    );
   });
 });

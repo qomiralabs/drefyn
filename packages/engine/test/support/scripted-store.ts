@@ -1,4 +1,4 @@
-import type { TenantSchema } from '@drefyn/db';
+import type { PublishedSchema, TenantSchema } from '@drefyn/db';
 import type { CompiledQuery } from 'kysely';
 import {
   Kysely,
@@ -9,7 +9,8 @@ import {
   type Driver,
   type QueryResult,
 } from 'kysely';
-import type { EngineStore } from '../../src/index.ts';
+import type { EngineStore, PublishedStore } from '../../src/index.ts';
+import { createPoolGate, type PoolGate } from '../../src/pool-gate.ts';
 
 export interface Statement {
   readonly sql: string;
@@ -18,9 +19,18 @@ export interface Statement {
 
 export type Responder = (statement: Statement) => readonly Record<string, unknown>[];
 
+export const roomyGate = (): PoolGate =>
+  createPoolGate({
+    ceiling: 1000,
+    queued: 1000,
+    waitMs: 1000,
+    treeSlots: 2,
+    listsPerOrganization: 4,
+  });
+
 // A Kysely with no database behind it, so a test can say exactly what reached the wire and how
 // a transaction ended without a server.
-export function scriptedStore(respond: Responder) {
+function scriptedKysely<S>(respond: Responder) {
   const statements: Statement[] = [];
   const ends: ('commit' | 'rollback')[] = [];
 
@@ -55,7 +65,7 @@ export function scriptedStore(respond: Responder) {
     destroy: () => Promise.resolve(),
   };
 
-  const kysely = new Kysely<TenantSchema>({
+  const kysely = new Kysely<S>({
     dialect: {
       createAdapter: () => new PostgresAdapter(),
       createDriver: () => driver,
@@ -64,9 +74,22 @@ export function scriptedStore(respond: Responder) {
     },
   });
 
+  return { kysely, statements, ends };
+}
+
+export function scriptedStore(respond: Responder, gate: PoolGate = roomyGate()) {
+  const { kysely, statements, ends } = scriptedKysely<TenantSchema>(respond);
   const store: EngineStore = {
+    gate,
     tenant: (_tenant, work) => kysely.transaction().execute(work),
   };
+  return { store, statements, ends };
+}
 
+export function scriptedPublishedStore(respond: Responder) {
+  const { kysely, statements, ends } = scriptedKysely<PublishedSchema>(respond);
+  const store: PublishedStore = {
+    read: (_tenant, work) => kysely.transaction().execute(work),
+  };
   return { store, statements, ends };
 }

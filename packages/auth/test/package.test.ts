@@ -66,11 +66,12 @@ describe('package layout', () => {
 
   // The database is reached only through @drefyn/db's context bound functions, and only by
   // the limiter, the session files, organizations, invitations, devices, email sign in, email
-  // change, password sign in, password account, OAuth, API keys, the CLI link and operator
-  // revoke, and the command that opens both pools for them. The OAuth fetch file
+  // change, password sign in, password account, OAuth, SSO sign in, API keys, the CLI link and
+  // operator revoke, SSO domains, and the command that opens both pools for them. The OAuth fetch file
   // calls the platform fetch, which the egress rule scopes. Files are read only by the
-  // breached list lookup and its build command, and the build command is the only writer.
-  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke and the command, files only from the breached list, and no network anywhere', () => {
+  // breached list lookup and its build command, which is the only writer, and by the SSO
+  // domain lists. DNS is asked only by the TXT resolver.
+  it('reaches the database only from the limiter, sessions, organizations, invitations, roles, account, members, devices, email sign in, email change, password sign in, password account, OAuth, API keys, CLI links, operator revoke, SSO domains and the command, files only from the breached list and the SSO domain lists, DNS only from the TXT resolver, and no other network', () => {
     const database = /^(@drefyn\/db|kysely)$/;
     const files = /^node:fs\/promises$/;
     const allowed: Readonly<Record<string, RegExp>> = {
@@ -89,6 +90,7 @@ describe('package layout', () => {
       'password-sign-in.ts': database,
       'password-account.ts': database,
       'oauth.ts': database,
+      'sso-sign-in.ts': database,
       'api-keys.ts': database,
       'api-key-verifier.ts': database,
       'cli-links.ts': database,
@@ -96,6 +98,10 @@ describe('package layout', () => {
       'command.ts': database,
       'breached-file.ts': files,
       'password-list.ts': files,
+      'sso-domains.ts': database,
+      'sso-domain-store.ts': database,
+      'sso-domain-lists.ts': files,
+      'sso-dns.ts': /^node:dns\/promises$/,
     };
     const sources = sourceFiles(src);
     expect(sources).toContain('oauth/fetch.ts');
@@ -119,6 +125,24 @@ describe('the main entry', () => {
         'AUTH_CONFIG_KEYS',
         'ApiKeyReplayError',
         'AuthError',
+        'ACCEPTED_TOTP_STEPS',
+        'FACTOR_RATE_SCOPES',
+        'RECOVERY_CODE_COUNT',
+        'TOTP_DIGITS',
+        'TOTP_PERIOD_SECONDS',
+        'TOTP_SECRET_BYTES',
+        'base32Encode',
+        'factorNoticeLimit',
+        'factorVerifyLimits',
+        'matchRecoveryCode',
+        'matchTotp',
+        'newRecoveryCodes',
+        'newTotpSecret',
+        'otpauthUri',
+        'pendingTotpRow',
+        'recoveryCodeHash',
+        'totpCode',
+        'aesGcmSealer',
         'BREACHED_RECORD_BYTES',
         'BREACH_CHECK_TIMEOUT_MS',
         'CLI_LINK_PATH',
@@ -141,6 +165,8 @@ describe('the main entry', () => {
         'NEW_DEVICE_AFTER_DAYS',
         'SESSIONS_PAGE_PATH',
         'INVITE_MAX_AGE_SECONDS',
+        'LAST_METHODS',
+        'LAST_METHOD_MAX_AGE_SECONDS',
         'KEYBOARD_ROWS',
         'KEY_PURPOSES',
         'ORG_ROLES',
@@ -167,6 +193,7 @@ describe('the main entry', () => {
         'checkNewPassword',
         'constantTimeEqual',
         'cookieNames',
+        'lastMethodCookie',
         'countSeats',
         'createAccount',
         'createApiKeyFailureLimiter',
@@ -207,6 +234,7 @@ describe('the main entry', () => {
         'parseCode',
         'parseCliLinkToken',
         'parseInvitationToken',
+        'parseLastMethod',
         'parseOrganizationName',
         'parsePhc',
         'parseSessionToken',
@@ -226,8 +254,41 @@ describe('the main entry', () => {
         'sha256',
         'slugFromOrganizationName',
         'userAgentFamily',
+        'FREE_MAIL_DOMAINS',
+        'SSO_DOMAIN_STRIKES',
+        'SSO_TXT_LABEL',
+        'bundledPublicSuffixListPath',
+        'createNodeTxtResolver',
+        'createSsoDomainPolicy',
+        'createSsoDomainRecheck',
+        'createSsoDomainRepository',
+        'createSsoDomains',
+        'loadFreeMailDomains',
+        'loadPublicSuffixList',
+        'normalizeSsoDomain',
+        'parseFreeMailDomains',
+        'parsePublicSuffixList',
+        'ssoTxtName',
       ].sort(),
     );
+  });
+
+  // Only the protocol callbacks inside this package mint an identity and sign it in, so no
+  // entry offers either, and no subpath reaches the modules that do.
+  it('offers no way to mint a verified identity or sign one in', () => {
+    for (const name of [
+      'mintVerifiedIdentity',
+      'isVerifiedIdentity',
+      'createSsoSignIn',
+      'signInWithVerifiedIdentity',
+      'enrolledFactorRule',
+    ]) {
+      expect(name in main, name).toBe(false);
+      expect(name in permissions, name).toBe(false);
+    }
+    for (const target of Object.values(manifest.exports)) {
+      expect(target).not.toMatch(/verified-identity|sso-sign-in/);
+    }
   });
 
   it('exports exactly the permission model from the pure entry', () => {

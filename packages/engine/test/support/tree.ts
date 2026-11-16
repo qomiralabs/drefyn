@@ -47,10 +47,20 @@ export function chunksBySection(
   root: MdxRoot,
   chunks: readonly Chunk[],
 ): ReadonlyMap<number, readonly Omit<Chunk, 'ord'>[]> {
+  let headings = 0;
+  const sectionAt = root.children.map(({ type }) => {
+    if (type === 'heading') headings += 1;
+    return headings;
+  });
+
+  // A short cap cuts one block into tens of thousands of chunks, so nothing here may copy the
+  // chunks seen so far or walk the blocks again for each one.
   const sections = new Map<number, Omit<Chunk, 'ord'>[]>();
   for (const { blockPath, headingPath, body } of chunks) {
-    const section = sectionOf(root, Number.parseInt(blockPath, 10));
-    sections.set(section, [...(sections.get(section) ?? []), { blockPath, headingPath, body }]);
+    const section = sectionAt[Number.parseInt(blockPath, 10)] ?? headings;
+    const found = sections.get(section);
+    if (found === undefined) sections.set(section, [{ blockPath, headingPath, body }]);
+    else found.push({ blockPath, headingPath, body });
   }
   return sections;
 }

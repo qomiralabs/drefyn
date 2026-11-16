@@ -36,6 +36,7 @@ describe('parseAuthConfig defaults', () => {
       oauth: '__Host-drefyn_oauth',
       invite: '__Host-drefyn_invite',
       device: '__Host-drefyn_device',
+      lastMethod: '__Host-drefyn_last_method',
     });
     expect(config.trustedProxyHops).toBe(0);
     expect(config.clientIpHeader).toBeNull();
@@ -64,8 +65,18 @@ describe('parseAuthConfig defaults', () => {
       password_fail: [{ count: 10, windowSeconds: 900 }],
       password_fail_ip: [{ count: 30, windowSeconds: 600 }],
       cli_link_verify: [{ count: 20, windowSeconds: 900 }],
+      sso_domain_verify: [{ count: 20, windowSeconds: 3600 }],
+      totp_verify: [
+        { count: 5, windowSeconds: 300 },
+        { count: 20, windowSeconds: 3600 },
+        { count: 50, windowSeconds: 86_400 },
+      ],
+      recovery_code_verify: [{ count: 10, windowSeconds: 3600 }],
+      recovery_code_verify_ip: [{ count: 30, windowSeconds: 3600 }],
+      second_factor_notice: [{ count: 1, windowSeconds: 21_600 }],
     });
     expect(Object.keys(config.rateLimits)).toEqual([...RATE_BUCKETS]);
+    expect(config.sso).toEqual({ dnsTimeoutMs: 3000, freeMailDomainsFile: null });
   });
 
   it('freezes the config all the way down', () => {
@@ -116,12 +127,18 @@ describe('parseAuthConfig defaults', () => {
         DREFYN_AUTH_PASSWORD_HASH_CONCURRENCY: '7',
         DREFYN_AUTH_PASSWORD_HASH_QUEUE_MAX: '0',
         DREFYN_AUTH_BREACHED_PASSWORDS_FILE: '/var/lib/drefyn/breached.bin',
+        DREFYN_AUTH_SSO_DNS_TIMEOUT_MS: '1500',
+        DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE: '/etc/drefyn/free-mail.txt',
         // Owned by @drefyn/db, so auth leaves them alone.
         DREFYN_AUTH_DATABASE_URL: 'postgres://drefyn_auth:pw@postgres:5432/drefyn',
         DREFYN_AUTH_DATABASE_POOL_MAX: '4',
       }),
     );
     expect(config.keys.rotating).toBe(true);
+    expect(config.sso).toEqual({
+      dnsTimeoutMs: 1500,
+      freeMailDomainsFile: '/etc/drefyn/free-mail.txt',
+    });
     expect(config.signUp).toBe('open');
     expect(config.email).toBe('off');
     expect(config.oauth.github?.clientId).toBe('Iv1.abc123');
@@ -156,6 +173,7 @@ describe('parseAuthConfig defaults', () => {
         oauth: 'drefyn_oauth',
         invite: 'drefyn_invite',
         device: 'drefyn_device',
+        lastMethod: 'drefyn_last_method',
       });
     }
   });
@@ -343,6 +361,23 @@ describe('parseAuthConfig refuses, naming the key', () => {
     refuses(
       { DREFYN_AUTH_BREACHED_PASSWORDS_FILE: '/var/lib/x\u0000y' },
       'DREFYN_AUTH_BREACHED_PASSWORDS_FILE',
+    );
+  });
+
+  it('an SSO DNS timeout outside 100 ms to 30 s', () => {
+    for (const value of ['99', '30001', '0', '1.5', ' 3000', 'soon']) {
+      refuses({ DREFYN_AUTH_SSO_DNS_TIMEOUT_MS: value }, 'DREFYN_AUTH_SSO_DNS_TIMEOUT_MS');
+    }
+  });
+
+  it('a free mail domains path that is not absolute or holds a NUL', () => {
+    refuses(
+      { DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE: 'free-mail.txt' },
+      'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE',
+    );
+    refuses(
+      { DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE: '/etc/x\u0000y' },
+      'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE',
     );
   });
 

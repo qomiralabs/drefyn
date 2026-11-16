@@ -2,8 +2,9 @@ import type { FlagContext } from '@drefyn/flags';
 
 export type LogFields = Readonly<Record<string, string | number | boolean>>;
 
-// Fields are ids, hashes, sizes and codes. Nothing here ever carries content or an actor's
-// details, and an event names what happened, so a log search needs no message text.
+// Fields are ids, hashes, sizes and codes, and an event names what happened, so a log search
+// needs no message text. Never content. A move names its actor by kind and opaque id, and the
+// same fields go to the tracer's span, so traces carry that id too. Never an address or a name.
 export interface EngineLogger {
   info(event: string, fields: LogFields): void;
   warn(event: string, fields: LogFields): void;

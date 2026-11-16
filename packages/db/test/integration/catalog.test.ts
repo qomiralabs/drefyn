@@ -80,7 +80,33 @@ interface BadCase {
   readonly allow?: AllowLists;
 }
 
+// Only the listed columns of a second factor row may change, so a table level update is
+// refused on each, and the sign in role holds nothing there at all.
+const SECOND_FACTOR_CASES: Record<string, BadCase> = {};
+for (const table of ['totp_credentials', 'recovery_codes', 'factor_challenges']) {
+  SECOND_FACTOR_CASES[`a table level update on ${table}`] = {
+    rule: 'column_grant',
+    object: `app.${table}`,
+    mentions: ['UPDATE', 'drefyn_app'],
+    up: () => `grant update on app.${table} to drefyn_app;`,
+  };
+  SECOND_FACTOR_CASES[`a grant to drefyn_auth on ${table}`] = {
+    rule: 'auth_grant',
+    object: `app.${table}`,
+    mentions: ['SELECT', 'drefyn_auth'],
+    up: () => `grant select (user_id) on app.${table} to drefyn_auth;`,
+  };
+}
+
 const CASES: Record<string, BadCase> = {
+  // Organization work would read it across every project, so leaving project_id out is
+  // reviewed per table.
+  'an organization table off the organization table list': {
+    rule: 'organization_table',
+    object: 'app.bad_org_scope',
+    mentions: ['no project_id'],
+    up: () => orgTable('bad_org_scope'),
+  },
   'a table without organization_id': {
     rule: 'tenant_column',
     object: 'app.bad_no_org',
@@ -778,6 +804,9 @@ grant select (body) on app.bad_auth_column_option to drefyn_auth with grant opti
     mentions: ['INSERT', 'drefyn_app'],
     up: () => 'grant insert on app.password_credentials to drefyn_app;',
   },
+  // Only the listed columns of a second factor row may change, so a table level update is
+  // refused on each, and the sign in role holds nothing there at all.
+  ...SECOND_FACTOR_CASES,
   // The auth only tables hold addresses of people who never signed up, codes and limiter
   // keys; drefyn_app runs every request, so it holds nothing there.
   'a grant to drefyn_app on email_challenges': {
@@ -909,6 +938,15 @@ create policy membership_insert_origin on app.memberships as restrictive for ins
     mentions: ['organization_insert_tier', 'missing'],
     up: () => `drop policy organization_insert_tier on app.organizations;
 create policy organization_insert_tier on app.organizations as permissive for insert to drefyn_app
+  with check ((plan_tier = app.install_tier()) and (read_only_since is null));`,
+  },
+  // Without the enforcement terms a new organization could start with SSO required.
+  'the organization insert guard without its enforcement terms': {
+    rule: 'restrictive_policy',
+    object: 'app.organizations',
+    mentions: ['organization_insert_tier', 'WITH CHECK'],
+    up: () => `drop policy organization_insert_tier on app.organizations;
+create policy organization_insert_tier on app.organizations as restrictive for insert to drefyn_app
   with check ((plan_tier = app.install_tier()) and (read_only_since is null));`,
   },
   'app.install_tier() off the app function allow list': {
@@ -1155,6 +1193,7 @@ create unique index ok_slugs_slug_key on app.ok_slugs (slug);`,
         ...FIXTURE_ALLOW_LISTS.globalUniqueConstraints,
         reviewed('app.ok_slugs.ok_slugs_slug_key'),
       ],
+      organizationTables: [...FIXTURE_ALLOW_LISTS.organizationTables, reviewed('app.ok_slugs')],
     });
     const problems = await catalogProblems(db.owner, allow);
     expect(problems, describeProblems(problems)).toEqual([]);
@@ -1291,6 +1330,7 @@ describe('catalog case list', () => {
       'column_grant',
       'public_policy',
       'restrictive_policy',
+      'organization_table',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }

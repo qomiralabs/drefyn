@@ -1,16 +1,17 @@
 import { EventEmitter } from 'node:events';
 import { organizationId, projectId, type OrganizationRef, type TenantRef } from '@drefyn/tenancy';
-import { sql } from 'kysely';
-import type pg from 'pg';
-import { describe, expect, it } from 'vitest';
+import { sql, type Transaction } from 'kysely';
+import pg from 'pg';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   databaseOverPool,
+  poolSizeOf,
   withOrganization,
   withTenant,
   type Database,
   type DbLogger,
 } from '../src/database.ts';
-import type { DbError } from '../src/errors.ts';
+import { DbError } from '../src/errors.ts';
 import { rejected } from './support.ts';
 
 const ORG = organizationId('01a14984-4476-77ce-9335-2c3c3a59aa8b');
@@ -62,6 +63,19 @@ function scripted(answer: Answer = () => undefined, logger?: DbLogger) {
 }
 
 const serverError = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+// What pg itself builds from an ErrorResponse, so the only kind of failure Postgres heard of.
+const raisedByServer = (code: string, message: string) =>
+  Object.assign(new pg.DatabaseError(message, message.length, 'error'), { code });
+
+// Resolves once the client has been sent a statement containing text.
+function sentSignal() {
+  let mark: () => void = () => undefined;
+  const reached = new Promise<void>((resolve) => {
+    mark = resolve;
+  });
+  return { reached, mark };
+}
 
 describe('context refusals happen before any SQL', () => {
   it.each<[string, unknown, string]>([
@@ -208,5 +222,356 @@ describe('the end of every transaction', () => {
     });
     expect(await rejected(withTenant(db, TENANT, () => Promise.resolve(1)))).toBe(failure);
     expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+});
+
+describe('a work that catches a statement error', () => {
+  it('still commits after a server error, as Postgres decides what the commit does', async () => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select fails')) throw raisedByServer('23505', 'duplicate key');
+      return undefined;
+    });
+    await expect(
+      withTenant(db, TENANT, (tx) =>
+        sql`select fails`.execute(tx).catch(() => 'handled after a savepoint'),
+      ),
+    ).resolves.toBe('handled after a savepoint');
+    expect(clients[0]?.sent.at(-2)).toContain('commit');
+  });
+
+  it('does not commit after a client timeout, which Postgres never heard of', async () => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select slow')) throw new Error('Query read timeout');
+      return undefined;
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select slow`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it.each<[string, () => Error, string]>([
+    [
+      'a driver error with a code of its own',
+      () => serverError('ECONNRESET', 'read ECONNRESET'),
+      'DB_UNAVAILABLE',
+    ],
+    [
+      'a value the driver could not read',
+      () => new DbError('INTEGER_INVALID', 'a bigint value is outside the safe integer range'),
+      'INTEGER_INVALID',
+    ],
+    [
+      'a driver error that only looks like a server one',
+      () => serverError('23505', 'x'),
+      'DB_UNIQUE_VIOLATION',
+    ],
+  ])('does not commit after %s, which Postgres never raised', async (_label, failure, code) => {
+    const { db, clients } = scripted((text) => {
+      if (text.includes('select odd')) throw failure();
+      return undefined;
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select odd`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toMatchObject({ code });
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('waits for a statement left running with its own catch, and does not commit after it timed out', async () => {
+    const sent = sentSignal();
+    const { db, clients } = scripted((text) => {
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((_done, fail) => {
+        setTimeout(() => {
+          fail(new Error('Query read timeout'));
+        }, 20);
+      });
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        await sent.reached;
+        return 'returned early';
+      }),
+    );
+    expect(failed).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+  });
+
+  it('does not commit when a floating write queued behind another never ran', async () => {
+    const sent = sentSignal();
+    let refused: unknown;
+    const { db, clients } = scripted((text) => {
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((done) => {
+        setTimeout(() => {
+          done({ command: 'SELECT', rows: [], rowCount: 0 });
+        }, 20);
+      });
+    });
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        void sql`insert queued`.execute(tx).catch((error: unknown) => {
+          refused = error;
+        });
+        await sent.reached;
+        return 'ok';
+      }),
+    );
+    expect(String(failed)).toMatch(/this transaction has ended/);
+    expect(String(refused)).toMatch(/this transaction has ended/);
+    expect(clients[0]?.sent.some((text) => text.includes('insert queued'))).toBe(false);
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('does not commit after a rejection that is not an Error', async () => {
+    const { db, clients } = scripted((text) =>
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the case under test
+      text.includes('select odd') ? Promise.reject('not an error') : undefined,
+    );
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) => sql`select odd`.execute(tx).catch(() => undefined)),
+    );
+    expect(failed).toBe('not an error');
+    expect(clients[0]?.sent.some((text) => text.endsWith('; commit'))).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('commits only after a floating statement that succeeds has settled', async () => {
+    const sent = sentSignal();
+    let answered = false;
+    let answeredAtCommit: boolean | undefined;
+    const { db } = scripted((text) => {
+      if (text.endsWith('; commit')) answeredAtCommit = answered;
+      if (!text.includes('select floating')) return undefined;
+      sent.mark();
+      return new Promise((done) => {
+        setTimeout(() => {
+          answered = true;
+          done({ command: 'SELECT', rows: [], rowCount: 0 });
+        }, 20);
+      });
+    });
+    await expect(
+      withTenant(db, TENANT, async (tx) => {
+        void sql`select floating`.execute(tx).catch(() => undefined);
+        await sent.reached;
+        return 'ok';
+      }),
+    ).resolves.toBe('ok');
+    expect(answeredAtCommit).toBe(true);
+  });
+});
+
+// The clock is fake, so the abort lands before the answer by step and not by how fast the
+// runner is.
+describe('a statement the work tried to abort or stream', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const committed = (client: ScriptedClient | undefined) =>
+    client?.sent.some((text) => text.endsWith('; commit')) ?? false;
+  type Notes = Transaction<{ notes: { body: string } }>;
+  // The scripted tables are not in the generated schema, so the transaction is cast.
+  const notes = (tx: unknown) => (tx as Notes).selectFrom('notes').selectAll();
+
+  it('does not commit an insert whose signal fired before it answered', async () => {
+    vi.useFakeTimers();
+    const { db, clients } = scripted((text) =>
+      text.includes('insert probe')
+        ? new Promise((done) => {
+            setTimeout(() => {
+              done({ command: 'INSERT', rows: [], rowCount: 1 });
+            }, 30);
+          })
+        : undefined,
+    );
+    let seen: unknown;
+    const outcome = rejected(
+      withTenant(db, TENANT, async (tx) => {
+        const controller = new AbortController();
+        setTimeout(() => {
+          controller.abort(new Error('stop'));
+        }, 5);
+        await sql`insert probe`
+          .execute(tx, { signal: controller.signal })
+          .catch((error: unknown) => {
+            seen = error;
+          });
+        return 'ok';
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30);
+    const failed = await outcome;
+
+    expect(String(failed)).toMatch(/abort signals are not supported/);
+    expect(String(seen)).toMatch(/abort signals are not supported/);
+    expect(clients[0]?.sent.some((text) => text.includes('insert probe'))).toBe(false);
+    expect(committed(clients[0])).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+
+  it('refuses a signal that never fires, as the work cannot know it would not', async () => {
+    const { db, clients } = scripted();
+    const failed = await rejected(
+      withTenant(db, TENANT, (tx) =>
+        sql`select calm`.execute(tx, { signal: new AbortController().signal }),
+      ),
+    );
+
+    expect(String(failed)).toMatch(/abort signals are not supported/);
+    expect(clients[0]?.sent.some((text) => text.includes('select calm'))).toBe(false);
+    expect(committed(clients[0])).toBe(false);
+  });
+
+  it.each<[string, (tx: unknown) => AsyncIterableIterator<unknown>, RegExp]>([
+    ['a stream', (tx) => notes(tx).stream(), /streaming is not supported/],
+    [
+      'a stream with a signal',
+      (tx) => notes(tx).stream({ signal: new AbortController().signal }),
+      /abort signals are not supported/,
+    ],
+  ])('does not commit after the work caught the refusal of %s', async (_label, open, refusal) => {
+    const { db, clients } = scripted();
+    let seen: unknown;
+    const failed = await rejected(
+      withTenant(db, TENANT, async (tx) => {
+        try {
+          for await (const row of open(tx)) return row;
+        } catch (error) {
+          seen = error;
+        }
+        return 'carried on';
+      }),
+    );
+
+    expect(String(seen)).toMatch(refusal);
+    expect(String(failed)).toMatch(refusal);
+    expect(committed(clients[0])).toBe(false);
+    expect(clients[0]?.sent.slice(-2)).toEqual(['rollback', 'discard all']);
+  });
+});
+
+// A socket that stopped answering: the query never comes back until the socket is destroyed, which
+// is what a real client does to its active query.
+class HungClient extends ScriptedClient {
+  ended = 0;
+  readonly connection = {
+    stream: {
+      destroy: () => {
+        this.destroyed();
+      },
+    },
+  };
+  private abandon: (error: Error) => void = () => undefined;
+
+  override query(text: string): Promise<unknown> {
+    if (!text.includes('hang_forever')) return super.query(text);
+    this.sent.push(text);
+    return new Promise((_done, fail) => {
+      this.abandon = fail;
+    });
+  }
+
+  private destroyed(): void {
+    this.ended += 1;
+    this.abandon(new Error('Connection terminated'));
+  }
+}
+
+function hung(logger?: DbLogger) {
+  const client = new HungClient(() => undefined);
+  const pool = { connect: () => Promise.resolve(client) };
+  const db = databaseOverPool(pool as unknown as pg.Pool, 'app', {
+    statementTimeoutMs: 5000,
+    ...(logger === undefined ? {} : { logger }),
+  }) as Database;
+  return { db, client };
+}
+
+describe('a deadline on a transaction', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hanging = (db: Database, deadlineMs: number) =>
+    withTenant(db, TENANT, (tx) => sql`select hang_forever`.execute(tx), { deadlineMs });
+
+  it('closes a socket that stopped answering, and the connection never goes back', async () => {
+    vi.useFakeTimers();
+    const warn = vi.fn<DbLogger['warn']>();
+    const { db, client } = hung({ warn });
+    const failure = rejected(hanging(db, 1000));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(client.ended).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(client.ended).toBeGreaterThan(0);
+    expect(client.released).toBe(true);
+    expect(client.sent.join()).not.toContain('discard all');
+    expect(warn).toHaveBeenCalledWith('db_transaction_deadline', {
+      pool: 'app',
+      organization_id: ORG,
+      project_id: PRJ,
+      deadline_ms: 1000,
+    });
+  });
+
+  it('leaves a transaction that ends in time alone', async () => {
+    vi.useFakeTimers();
+    const { db, client } = hung();
+    await withTenant(db, TENANT, () => Promise.resolve(1), { deadlineMs: 1000 });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(client.ended).toBe(0);
+    expect(client.released).toBeUndefined();
+  });
+
+  it('sets no timer unless asked, so nothing else changes', async () => {
+    vi.useFakeTimers();
+    const { db } = hung();
+    await withTenant(db, TENANT, () => Promise.resolve(1));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('survives a logger that throws', async () => {
+    vi.useFakeTimers();
+    const { db, client } = hung({
+      warn: () => {
+        throw new Error('logger down');
+      },
+    });
+    const failure = rejected(hanging(db, 10));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await failure).toMatchObject({ code: 'DB_UNAVAILABLE' });
+    expect(client.released).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, 300_001, Number.NaN])('refuses %s before any SQL', async (deadlineMs) => {
+    const { db, clients } = scripted();
+    const error = await rejected(hanging(db, deadlineMs));
+    expect((error as DbError).code).toBe('DB_CONFIG_INVALID');
+    expect(clients).toHaveLength(0);
+  });
+});
+
+describe('poolSizeOf', () => {
+  it('reads the size the pool was built with', () => {
+    const pool = { options: { max: 7 } };
+    const db = databaseOverPool(pool as unknown as pg.Pool, 'app', {
+      statementTimeoutMs: 5000,
+    }) as Database;
+    expect(poolSizeOf(db)).toBe(7);
+  });
+
+  it('refuses anything else', () => {
+    expect(() => poolSizeOf({} as Database)).toThrow(/poolSizeOf/);
   });
 });

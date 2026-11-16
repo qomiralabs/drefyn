@@ -19,5 +19,7 @@ export default defineConfig({
       'test/merge-nodes.test.ts',
     ],
     restoreMocks: true,
+    setupFiles: ['@drefyn/test-watchdog/setup'],
+    globalSetup: ['@drefyn/test-watchdog/global-setup'],
   },
 });

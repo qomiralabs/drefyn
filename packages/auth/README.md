@@ -4,8 +4,8 @@ Identity, sessions, API keys, organizations and seats for Docs, Studio and Statu
 holds config parsing, key derivation, credential formats, input validators, the built in
 password rules, log redaction, the permission model, the rate limiters, database sessions
 with step up, organizations, and invitations with seats. Only the limiters, the session files,
-organizations, invitations, CLI links, operator revoke and the command reach the database, and only through `@drefyn/db`; nothing here touches the network or the file
-system.
+organizations, invitations, CLI links, operator revoke, SSO domains and the command reach the database, and only through `@drefyn/db`. The only network use is the OAuth fetch and the SSO
+TXT lookup; files are read only for the breached password list and the SSO domain lists.
 
 ## Entry points
 
@@ -38,6 +38,37 @@ system.
   its module graph (the `drefyn.pureEntries` field in `package.json`).
 
 Nothing else in `src/` is public.
+
+## Team SSO sign in
+
+- `VerifiedIdentity` is a type only outside the package. It is minted inside `src/` by the
+  OIDC and SAML verifiers alone, keyed by a module private symbol and checked again at run
+  time, so nothing outside can hand in a claimed identity. `subject` is 1 to 255 code points
+  with no control character, else refused and never trimmed; `displayName` loses control
+  characters and outer space and is cut to 120 code points, or is null; `idpAuthenticatedAt`
+  is clamped to the last day.
+- `signInWithVerifiedIdentity(b, identity, returnTo)`, internal: the connection must be
+  `active` or `test` (else `AUTH_SSO_DISABLED`) and the address in one of its verified domains
+  (else `AUTH_SSO_EMAIL_OUTSIDE_DOMAIN`). Then a known (`organization_id`, `connection_id`,
+  `subject`) is that person; an unknown subject whose address has an account gets a
+  `link_identity` code and nothing is linked until the code is proved in the same browser,
+  through `createEmailSignIn({ ssoLinks })`; no account is created only as the sign up mode
+  allows, where in `invite_only` a just in time `active` connection or a live invitation to the
+  organization counts, and `closed` refuses with `AUTH_SSO_SIGNUP_CLOSED`. Membership is the
+  existing one, a live invitation for the address, or just in time as `member` with the
+  connection's project role under the organization row lock and `checkLimit(tier,
+'org.seats', used + 1)` (`AUTH_SSO_SEAT_LIMIT`), else `AUTH_SSO_NOT_PROVISIONED`. A person
+  with a confirmed second factor gets `factor_required` and no session; until the factor gate
+  ships the challenge itself, that sign in cannot finish, and an SSO link code redeemed by such
+  a person answers `AUTH_FACTOR_REQUIRED` and links nothing. A `test` connection signs in only
+  the member who made it and never provisions anyone.
+- The user and the link are written in one transaction; membership in another, idempotent on
+  (`organization_id`, `user_id`), so a failure there leaves a valid user with no organization,
+  and the next sign in completes it.
+- Events `auth.sso_signed_in`, `auth.sso_refused`, `auth.sso_link_sent`, `auth.sso_linked`,
+  `auth.sso_provisioned`, `auth.sso_user_created`, `auth.sso_factor_required` and
+  `auth.sso_failed` carry public ids and outcome codes only, never an address, a domain, a
+  subject or a code.
 
 ## Config
 
@@ -91,9 +122,50 @@ const api = parseApiAuthConfig(process.env); // API service
   `emailMac(organizationId, address)` is the stored form of a blocked address, and
   `linkTag(parts)` and `verifyLinkTag(parts, tag)` sign the block link. Neither key can be
   read back from the config.
+- `config.totp` holds the second factor keyring from `DREFYN_AUTH_TOTP_KEYS`, a comma list
+  of `<id>:<key>` (id 1 to 8 lowercase letters or digits, key at least 32 bytes in canonical
+  unpadded base64url, at most 8 entries, no repeated id). Unset, `available` is false,
+  `sealer` is null and startup succeeds. It is apart from `DREFYN_AUTH_SECRET` because a TOTP
+  secret has to be read back for as long as the factor exists, and that secret's rotation
+  drops the old value after a day. `issuer` is `DREFYN_AUTH_TOTP_ISSUER`, 1 to 64 printable
+  ASCII characters with no colon, default `Drefyn`.
+- `aesGcmSealer(keys)` is the open core `SecretSealer`. `seal(plain, { userId })` uses the
+  first key: AES-256-GCM under an HKDF-SHA256 subkey, a random 96 bit nonce per call, and
+  associated data of a version label, the user id and the key id, joined by
+  `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
+  length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
+  with nothing from the row on the error. Key material lives in closures.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
+
+## Second factor core
+
+Pure functions on `node:crypto`; nothing here reads the database or config.
+
+- `totpCode(secret, step)`: RFC 6238 HMAC-SHA1, 6 digits, 30 second steps, for the 160 bit
+  secret `newTotpSecret()` makes. `matchTotp(secret, typed, currentStep)` accepts the steps in
+  `ACCEPTED_TOTP_STEPS`, the current one and the one before, and returns the step that
+  matched or null; the higher one when both match. Both are always computed and compared
+  with `constantTimeEqual`. Typed spaces are dropped; anything but six ASCII digits is
+  refused. The step set is a constant and no setting reaches it. A code is accepted for up
+  to 60 seconds, a recorded deviation from ASVS 6.5.5; the replay guard (`last_used_step`)
+  is the compensating control.
+- `base32Encode(bytes)` is RFC 4648 base32, upper case and unpadded.
+  `otpauthUri({ issuer, account, secret })` builds the key URI with each label part escaped.
+  The URI holds the secret and the address: never log, store or link it.
+- `newRecoveryCodes(userId)` makes `RECOVERY_CODE_COUNT` (10) codes of 15 random bytes,
+  shown as 24 lowercase Crockford characters in four groups of six, each with its SHA-256
+  hash over a version label, the user id and the code. `recoveryCodeHash(userId, typed)`
+  drops hyphens and gaps and lowercases first. `matchRecoveryCode(userId, typed, rows)`
+  compares every row, with no early exit, and returns the matching row id.
+- `factorVerifyLimits(kind, { userId, ip })` lists the reservations one attempt makes:
+  `totp_verify` on the person, or `recovery_code_verify` on the person and network plus
+  `recovery_code_verify_ip`. Recovery codes have no person wide ceiling, so nobody elsewhere
+  can fill the owner's budget. `factorNoticeLimit(userId)` is the `second_factor_notice` cap.
+- `pendingTotpRow(userId, sealed)` is the row enrolment inserts, unconfirmed and unused.
+- `pnpm bench:factor` times open plus `matchTotp`, and a recovery match over 10 rows, and
+  exits 1 if either p99 reaches 1 ms.
 
 ## Rate limits
 
@@ -697,3 +769,79 @@ const verifier = createApiKeyVerifier(process.env, { db, logger }); // API servi
   `checkApiKeyScope(actor, scope, projectId?)` gives `AUTH_API_KEY_SCOPE`.
 - `.gitleaks.toml` adds the `drefyn-api-key` rule on top of the defaults; CI proves it on a
   generated key with `packages/auth/test/gitleaks-fixture.ts`.
+
+## SSO domains
+
+An identity provider is trusted only for addresses in its own organization's verified domains.
+A domain is proved with a DNS TXT record and rechecked every day.
+
+```ts
+const policy = createSsoDomainPolicy({
+  publicSuffixes: await loadPublicSuffixList(), // the bundled snapshot
+  extraFreeMail:
+    config.sso.freeMailDomainsFile === null
+      ? []
+      : await loadFreeMailDomains(config.sso.freeMailDomainsFile),
+});
+const resolver = createNodeTxtResolver({ timeoutMs: config.sso.dnsTimeoutMs });
+const domains = createSsoDomains({
+  db,
+  authDb,
+  keys: config.keys,
+  limiter,
+  resolver,
+  policy,
+  flag,
+  logger,
+  mailer,
+  events,
+});
+const recheck = createSsoDomainRecheck({
+  db,
+  authDb,
+  keys: config.keys,
+  resolver,
+  flag,
+  logger,
+  mailer,
+  events,
+});
+```
+
+- `claimDomain(access, connectionId, domain)` answers `{ domainId, txtName, txtValue, verified }`.
+  `txtName` is `_drefyn-sso.<domain>`; `txtValue` is a fresh 32 byte token in base64url, and only
+  its SHA-256 is stored. A repeat claim of the same domain in any spelling returns the same row:
+  while unverified it issues a new token and the old one stops working; once verified it changes
+  nothing and `txtValue` is `null`. Moving a verified domain to another connection is
+  `AUTH_INPUT_INVALID`. Subdomains are their own claims.
+- Domains follow the `@drefyn/address` domain rule (lower case, IDN in punycode, one trailing dot
+  dropped), through `normalizeSsoDomain`. Public suffixes from the bundled Public Suffix List
+  (MPL 2.0, see `ASSETS.md`) and free mail domains (`FREE_MAIL_DOMAINS` plus the file in
+  `DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE`, one domain a line, `#` comments, subdomains included)
+  are `AUTH_SSO_DOMAIN_REFUSED`. A domain another organization holds verified is
+  `AUTH_SSO_DOMAIN_TAKEN`, at claim and at verify; the database's global unique index decides a
+  race.
+- `verifyDomain(access, domainId)` counts `sso_domain_verify` (20 an hour per organization), then
+  looks the TXT name up. A record that, trimmed, hashes to the stored token verifies the domain;
+  a missing, wrong or partial token is `AUTH_SSO_DOMAIN_UNVERIFIED`, and a lookup that gets no
+  answer is `AUTH_UNAVAILABLE`.
+- Both need the `auth.team_sso` flag for the organization and the person (`AUTH_SSO_DISABLED`,
+  a failed evaluation counts as off), a sign in within 15 minutes (`AUTH_RECENT_AUTH_REQUIRED`),
+  `org.manage_settings` on the stored membership (`AUTH_FORBIDDEN`) and `org.sso_saml` on the
+  stored plan (`AUTH_SSO_DISABLED`), all checked before anything is written or counted.
+- `createSsoDomainRecheck(deps).runOnce()` walks every verified domain. Each is looked up at most
+  once a day by database time. A lookup answered without the token is a strike; three in a row
+  unverify the domain. A lookup that times out or fails is not a strike and leaves the row as it
+  was, so the next run asks again. A success resets the count. An organization with the flag off
+  or without the entitlement is skipped and left untouched. Updates are conditional on the row
+  as it was read, so any number of servers may run it on any schedule. `maxPerRun` (500) bounds
+  the lookups of one run.
+- Claim, first verification and unverify each record an `AuthEventSink` event
+  (`sso.domain_claimed`, `sso.domain_verified`, `sso.domain_unverified`) and send
+  `sendSsoDomainNotice` to every owner, after the commit; a failure of either is logged and never
+  undoes the change. Events and logs carry `organization_id` and `domainKey`, the first 16 hex
+  digits of an HMAC of the domain, never the domain or the token. The notice names the domain,
+  since owners need to know which one.
+- `createNodeTxtResolver({ timeoutMs, servers? })` makes one try per lookup under
+  `DREFYN_AUTH_SSO_DNS_TIMEOUT_MS` (3000) and cancels it at the timeout. No records and no such
+  name are answers; everything else is unknown.

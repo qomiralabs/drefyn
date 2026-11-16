@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUDGET_MS,
   describeInp,
+  inpFigure,
   inpLimit,
   overBudget,
   SHARED_RUNNER_CEILING_MS,
@@ -41,6 +42,12 @@ describe('the INP summary', () => {
     expect(inpLimit({ DREFYN_QUIET_BENCH: 'on' })).toBe(BUDGET_MS);
     expect(inpLimit({})).toBe(SHARED_RUNNER_CEILING_MS);
     expect(inpLimit({ DREFYN_QUIET_BENCH: 'off' })).toBe(SHARED_RUNNER_CEILING_MS);
+  });
+
+  it('holds p75 on a quiet bench and the median anywhere else', () => {
+    expect(inpFigure({ DREFYN_QUIET_BENCH: 'on' })).toBe('p75');
+    expect(inpFigure({})).toBe('median');
+    expect(inpFigure({ DREFYN_QUIET_BENCH: 'off' })).toBe('median');
   });
 
   it('names a miss from the budget itself, whatever the limit in force', () => {

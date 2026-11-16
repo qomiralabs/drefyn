@@ -1,7 +1,11 @@
-import { ButtonLink, IconAlert, IconClock, Mark } from '@drefyn/ui/react';
+import { ButtonLink, IconAlert, IconClock, IconPage } from '@drefyn/ui/react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Answer, Eyebrow, Head } from '../views/calm.tsx';
+import { AUTH_CARD } from './card.ts';
+import { AuthCard } from './card-view.tsx';
+import type { LastMethod } from '@drefyn/auth';
+import type { Site } from './site.ts';
 import lockupInk from './marks/drefyn-lockup-ink.svg';
 import lockupPaper from './marks/drefyn-lockup-paper.svg';
 import githubBlack from './marks/github-black.svg';
@@ -14,19 +18,21 @@ import './auth.css';
 const pathOf = (image: unknown): string => (image as { src: string }).src;
 
 export { Answer, Head };
+export type { Site };
 
 interface FrameProps {
-  readonly hosted: boolean;
+  readonly site: Site;
   readonly label: string;
   readonly busy?: boolean | undefined;
   readonly children: ReactNode;
 }
 
-// The brand half sits after main in the DOM and takes the left by grid area, so it never
-// changes the reading order, and it holds nothing focusable. A self hosted server has none.
-export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactNode {
+// The form comes first in the DOM and on screen, so reading and focus order match what people
+// see. The side panel is hosted only and gone below 64rem; the Documentation link stays in the
+// header at every width, and the grid moves it over the panel when there is one.
+export function AuthFrame({ site, label, busy, children }: FrameProps): ReactNode {
   return (
-    <div className="auth" data-hosted={hosted ? '' : undefined}>
+    <div className="auth" data-hosted={site.hosted ? '' : undefined}>
       <header className="auth-head">
         <a className="sr-only focus:not-sr-only" href="#main">
           Skip to content
@@ -41,6 +47,12 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
             height="32"
           />
         </Link>
+        {/* Same tab: people come back to sign in, and a new tab hides the way back. */}
+        <span className="auth-docs">
+          <ButtonLink href={site.docs} size="sm" icon={<IconPage />}>
+            Documentation
+          </ButtonLink>
+        </span>
       </header>
       <main
         className="auth-main"
@@ -53,19 +65,13 @@ export function AuthFrame({ hosted, label, busy, children }: FrameProps): ReactN
         </div>
         <div className="auth-content">{children}</div>
       </main>
-      {hosted ? (
-        <div className="auth-brand" aria-hidden="true">
-          <div className="auth-dots auth-dots-1" />
-          <div className="auth-dots auth-dots-2" />
-          <div className="auth-dots auth-dots-3" />
-          <div className="auth-dots auth-dots-4" />
-          <div className="auth-brand-copy">
-            <Mark size="lg" />
-            <p className="auth-brand-line">
-              Publish your docs, content and status page from one place.
-            </p>
-            <p className="auth-brand-support">Open source, on one account and one plan.</p>
-          </div>
+      {site.hosted ? (
+        <div className="auth-side">
+          <div className="auth-dots auth-dots-1" aria-hidden="true" />
+          <div className="auth-dots auth-dots-2" aria-hidden="true" />
+          <div className="auth-dots auth-dots-3" aria-hidden="true" />
+          <div className="auth-dots auth-dots-4" aria-hidden="true" />
+          <AuthCard content={AUTH_CARD} />
         </div>
       ) : null}
     </div>
@@ -89,12 +95,23 @@ function ProviderMark({ provider }: { provider: Provider }): ReactNode {
   );
 }
 
+// Text inside the control it marks, so it is part of that control's name and never only a
+// colour or a position.
+export const LastUsed = (): ReactNode => (
+  <span className="auth-last">
+    <span className="sr-only">, </span>
+    Last used
+  </span>
+);
+
 export function Providers({
   providers,
   next,
+  lastUsed,
 }: {
   providers: readonly Provider[];
   next?: string | undefined;
+  lastUsed?: LastMethod | null | undefined;
 }): ReactNode {
   if (providers.length === 0) return null;
   const query = next === undefined || next === '' ? '' : `?next=${encodeURIComponent(next)}`;
@@ -109,6 +126,7 @@ export function Providers({
         >
           <ProviderMark provider={provider} />
           Continue with {PROVIDER_NAMES[provider]}
+          {lastUsed === provider ? <LastUsed /> : null}
         </a>
       ))}
     </div>

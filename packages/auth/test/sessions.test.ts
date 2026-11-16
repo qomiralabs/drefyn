@@ -1,5 +1,5 @@
 import { toPublicId } from '@drefyn/tenancy';
-import { organizationId } from '@drefyn/tenancy';
+import { idOf, organizationId } from '@drefyn/tenancy';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthError,
@@ -162,6 +162,36 @@ describe('resolve', () => {
       code: 'AUTH_UNAVAILABLE',
     });
   });
+
+  // The second factor will write these. An image that cannot read them would throw on every
+  // request from a person who stepped up with one, so reading lands first.
+  it.each(['totp', 'recovery_code'] as const)(
+    'reads back a session that stepped up with %s',
+    async (stepUp) => {
+      const row = () => sessionResponder([sessionRow({ step_up_method: stepUp })]);
+      const info = await setup(row()).sessions.resolveSession(tokenFor());
+      expect(info?.stepUpMethod).toBe(stepUp);
+      const resolved = await setup(row()).sessions.resolve(tokenFor());
+      expect(resolved).not.toBeNull();
+    },
+  );
+
+  // SSO sign in will write this. Reading lands first, so an image that writes it can roll
+  // back to one that still reads every session.
+  it('reads back a session that signed in through SSO', async () => {
+    const row = () => sessionResponder([sessionRow({ method: 'sso' })]);
+    const info = await setup(row()).sessions.resolveSession(tokenFor());
+    expect(info?.method).toBe('sso');
+    const resolved = await setup(row()).sessions.resolve(tokenFor());
+    expect(resolved).not.toBeNull();
+  });
+
+  it('refuses a stored step up method it does not know', async () => {
+    const { sessions } = setup(sessionResponder([sessionRow({ step_up_method: 'sms' })]));
+    await expect(sessions.resolveSession(tokenFor())).rejects.toMatchObject({
+      code: 'AUTH_UNAVAILABLE',
+    });
+  });
 });
 
 describe('touchSession', () => {
@@ -262,6 +292,45 @@ describe('startSession', () => {
     const cookie = started.setCookies.find((c) => c.name === config.cookies.session);
     expect(cookie?.maxAgeSeconds).toBe(30 * DAY);
     expect(cookie?.value).toBe(tokenFor(OTHER_USER, OTHER_SESSION, Buffer.alloc(32, 5)));
+  });
+
+  it('writes both SSO columns for an SSO session and neither for any other', async () => {
+    const scope = {
+      organizationId: organizationId(UUID_A),
+      connectionId: idOf('ssc', '01a14984-4476-77ce-9335-1280000009c1'),
+    };
+    const { sessions, scripted } = setup(startResponder([]));
+    await sessions.startSession(browser(), { userId: OTHER_USER, method: 'sso', sso: scope });
+    const insert = scripted.statements().find(isInsert);
+    expect(insert?.sql).toMatch(/"sso_connection_id", "sso_organization_id"/);
+    expect(insert?.parameters).toEqual(
+      expect.arrayContaining(['sso', scope.connectionId, scope.organizationId]),
+    );
+    scripted.clear();
+    await sessions.startSession(browser(), { userId: OTHER_USER, method: 'email' });
+    const plain = scripted.statements().find(isInsert);
+    expect(plain?.parameters.filter((p) => p === null)).toHaveLength(2);
+  });
+
+  it.each([
+    ['sso without a scope', { method: 'sso' as const }],
+    ['a scope on another method', { method: 'google' as const, sso: true }],
+    ['a password credential on sso', { method: 'sso' as const, sso: true, credential: true }],
+  ])('refuses %s before any statement', async (_label, shape) => {
+    const scope = {
+      organizationId: organizationId(UUID_A),
+      connectionId: idOf('ssc', '01a14984-4476-77ce-9335-1280000009c1'),
+    };
+    const { sessions, scripted } = setup(startResponder([]));
+    await expect(
+      sessions.startSession(browser(), {
+        userId: OTHER_USER,
+        method: shape.method,
+        ...('sso' in shape ? { sso: scope } : {}),
+        ...('credential' in shape ? { credential: { phc: 'x' } } : {}),
+      }),
+    ).rejects.toMatchObject({ code: 'AUTH_INPUT_INVALID' });
+    expect(scripted.statements()).toEqual([]);
   });
 
   it('clears the pre sign in cookies so nothing chosen before sign in survives it', async () => {
@@ -440,12 +509,13 @@ describe('sign out and revocation', () => {
   });
 
   // Read from the config, so a cookie added later is cleared unless someone decides otherwise.
-  it('signOut expires every cookie auth owns except the known device', async () => {
+  it('signOut expires every cookie auth owns except the known device and the last method', async () => {
     const { sessions } = setup(() => [{ id: SESSION }]);
     const cookies = await sessions.signOut(sessionInfo());
-    const { device, ...rest } = config.cookies;
+    const { device, lastMethod, ...rest } = config.cookies;
     expect(cookies.map((cookie) => cookie.name).sort()).toEqual(Object.values(rest).sort());
     expect(cookies.map((cookie) => cookie.name)).not.toContain(device);
+    expect(cookies.map((cookie) => cookie.name)).not.toContain(lastMethod);
     expect(cookies.every((c) => c.value === '' && c.maxAgeSeconds === 0)).toBe(true);
   });
 

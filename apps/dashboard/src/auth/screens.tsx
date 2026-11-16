@@ -2,12 +2,15 @@ import { IconClock, Skeleton, TextField } from '@drefyn/ui/react';
 import type { ReactNode } from 'react';
 import { CopyButton, SecretField, Submit } from './controls.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
+import type { LastMethod } from '@drefyn/auth';
+import type { Site } from './site.ts';
 import {
   Answer,
   AuthFrame,
   CodeField,
   FieldError,
   Head,
+  LastUsed,
   Notice,
   Or,
   PrimaryLink,
@@ -18,7 +21,7 @@ import {
 export type FormAction = ((form: FormData) => void) | undefined;
 
 export interface Shared {
-  readonly hosted: boolean;
+  readonly site: Site;
   readonly csrf: string;
 }
 
@@ -60,6 +63,7 @@ export interface SignInProps extends Shared {
   readonly emailOn: boolean;
   readonly passwordOn: boolean;
   readonly signUp: 'open' | 'invite_only' | 'closed';
+  readonly lastUsed?: LastMethod | null | undefined;
 }
 
 function AddressForm({
@@ -69,6 +73,7 @@ function AddressForm({
   invalid,
   next,
   from,
+  lastUsed,
   children,
 }: {
   action: FormAction;
@@ -77,6 +82,7 @@ function AddressForm({
   invalid?: boolean | undefined;
   next?: string | undefined;
   from?: string;
+  lastUsed?: LastMethod | null | undefined;
   children: ReactNode;
 }): ReactNode {
   return (
@@ -96,17 +102,21 @@ function AddressForm({
         autoFocus
         {...(invalid === true ? { error: 'Enter an address like name@example.com.' } : {})}
       />
-      <Submit label="Email me a code" busyLabel="Sending" />
+      <Submit
+        label="Email me a code"
+        busyLabel="Sending"
+        mark={lastUsed === 'email_code' ? <LastUsed /> : undefined}
+      />
       {children}
     </form>
   );
 }
 
 export function SignInScreen(props: SignInProps): ReactNode {
-  const { hosted, providers, emailOn, passwordOn, notice, signUp } = props;
+  const { site, providers, emailOn, passwordOn, notice, signUp } = props;
   if (!emailOn && providers.length === 0) {
     return (
-      <AuthFrame hosted={hosted} label="Set up">
+      <AuthFrame site={site} label="Set up">
         <Head>
           <Answer
             claim="Sign in is not set up yet."
@@ -127,13 +137,13 @@ export function SignInScreen(props: SignInProps): ReactNode {
     );
   }
   return (
-    <AuthFrame hosted={hosted} label="Sign in">
+    <AuthFrame site={site} label="Sign in">
       <Head>
         <Answer claim="Sign in to Drefyn." rest="One account for Docs, Studio and Status." />
       </Head>
       {providers.length === 0 ? null : (
         <div className="auth-ways">
-          <Providers providers={providers} next={props.next} />
+          <Providers providers={providers} next={props.next} lastUsed={props.lastUsed} />
           {emailOn ? <Or /> : null}
         </div>
       )}
@@ -147,12 +157,18 @@ export function SignInScreen(props: SignInProps): ReactNode {
           email={props.email}
           invalid={props.invalid}
           next={props.next}
+          lastUsed={props.lastUsed}
         >
           <p className="auth-fine">
             We send an 8 digit code that works for 10 minutes. There is nothing to remember.
           </p>
           <p className="auth-links">
-            {passwordOn ? <a href="/sign-in/password">Use a password instead</a> : null}
+            {passwordOn ? (
+              <a href="/sign-in/password">
+                Use a password instead
+                {props.lastUsed === 'password' ? <LastUsed /> : null}
+              </a>
+            ) : null}
             <a href="/sign-in/reset">Forgot your password?</a>
           </p>
         </AddressForm>
@@ -179,10 +195,11 @@ export interface SignUpProps extends Shared {
   readonly invalid?: boolean | undefined;
   readonly notice?: FormNotice | null | undefined;
   readonly providers: readonly Provider[];
+  readonly lastUsed?: LastMethod | null | undefined;
 }
 
 export function SignUpScreen(props: SignUpProps): ReactNode {
-  const { hosted, state, providers } = props;
+  const { site, state, providers } = props;
   const already = (
     <p className="auth-fine">
       Already have an account? <a href="/sign-in">Sign in</a>
@@ -190,7 +207,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
   );
   if (state === 'closed') {
     return (
-      <AuthFrame hosted={hosted} label="Sign up">
+      <AuthFrame site={site} label="Sign up">
         <Head>
           <Answer
             claim="Sign up is not open yet."
@@ -208,7 +225,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
   }
   if (state === 'invite_only') {
     return (
-      <AuthFrame hosted={hosted} label="Sign up">
+      <AuthFrame site={site} label="Sign up">
         <Head>
           <Answer
             claim="This server does not take sign ups."
@@ -229,7 +246,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
     );
   }
   return (
-    <AuthFrame hosted={hosted} label="Sign up">
+    <AuthFrame site={site} label="Sign up">
       <Head>
         <Answer
           claim="Create your Drefyn account."
@@ -238,7 +255,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
       </Head>
       {providers.length === 0 ? null : (
         <div className="auth-ways">
-          <Providers providers={providers} />
+          <Providers providers={providers} lastUsed={props.lastUsed} />
           <Or />
         </div>
       )}
@@ -251,6 +268,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
         email={props.email}
         invalid={props.invalid}
         from="sign-up"
+        lastUsed={props.lastUsed}
       >
         <p className="auth-fine">
           We ask for your name after the code, and you can add a password then if you want one.
@@ -258,7 +276,7 @@ export function SignUpScreen(props: SignUpProps): ReactNode {
         </p>
       </AddressForm>
       <hr className="auth-rule" />
-      {hosted ? (
+      {site.hosted ? (
         <p className="auth-fine">
           By creating an account you agree to the <a href="https://drefyn.com/terms">Terms</a> and
           the <a href="https://drefyn.com/privacy">Privacy notice</a>.
@@ -436,7 +454,7 @@ export interface PasswordProps extends Shared {
 export function PasswordScreen(props: PasswordProps): ReactNode {
   const paused = props.notice?.kind === 'limited' || props.notice?.kind === 'botcheck_down';
   return (
-    <AuthFrame hosted={props.hosted} label="Sign in">
+    <AuthFrame site={props.site} label="Sign in">
       <Head>
         <Answer
           claim="Sign in with a password."
@@ -575,9 +593,9 @@ export interface ResetProps extends Shared {
     | { readonly step: 'saved'; readonly email: string; readonly returnTo: string };
 }
 
-export function ResetScreen({ hosted, csrf, action, state }: ResetProps): ReactNode {
+export function ResetScreen({ site, csrf, action, state }: ResetProps): ReactNode {
   return (
-    <AuthFrame hosted={hosted} label="Reset password">
+    <AuthFrame site={site} label="Reset password">
       {state.step === 'ask' ? (
         <>
           <Head>
@@ -683,7 +701,7 @@ export function LinkScreen(props: LinkProps): ReactNode {
   const { provider, email } = props;
   const who = email ?? 'your address';
   return (
-    <AuthFrame hosted={props.hosted} label={`Link ${provider}`}>
+    <AuthFrame site={props.site} label={`Link ${provider}`}>
       <Head>
         <Answer claim="Confirm it is your account." rest={`${who} already has a Drefyn account.`} />
       </Head>

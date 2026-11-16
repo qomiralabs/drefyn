@@ -197,23 +197,179 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('control the grants on users, password_credentials and known_devices by column', () => {
+  it('control the grants on the identity and second factor tables by column', () => {
     expect(COLUMN_GRANT_TABLES.map((t) => t.name).sort()).toEqual([
+      'app.factor_challenges',
       'app.known_devices',
       'app.password_credentials',
+      'app.recovery_codes',
+      'app.totp_credentials',
       'app.users',
     ]);
   });
 
-  it('let drefyn_auth reach one tenant table, to find and delete old revoked keys', () => {
+  describe('the second factor tables', () => {
+    const TABLES = ['app.factor_challenges', 'app.recovery_codes', 'app.totp_credentials'];
+    const grantsOn = (table: string) =>
+      COLUMN_GRANTS.filter((g) => g.name.startsWith(`${table}.`)).map(
+        (g) => `${g.grantee} ${g.privilege} ${g.name.slice(table.length + 1)}`,
+      );
+
+    it('are global, each with the reviewed reason', () => {
+      for (const name of TABLES) {
+        expect(GLOBAL_TABLES.find((t) => t.name === name)?.reason, name).toBe(
+          "a person's own second factor, read under their user context",
+        );
+      }
+    });
+
+    // A stolen sign in credential must read no sealed secret and no recovery hash.
+    it('give drefyn_auth nothing at all', () => {
+      const authTables = AUTH_TABLES.map((t) => t.name);
+      for (const name of TABLES) {
+        expect(authTables, name).not.toContain(name);
+        expect(
+          grantsOn(name).filter((g) => g.startsWith('drefyn_auth ')),
+          name,
+        ).toEqual([]);
+        expect(
+          USER_POLICIES.filter((p) => p.name.startsWith(`${name}.`)).map((p) => p.name),
+          name,
+        ).toEqual([`${name}.self_access`]);
+      }
+    });
+
+    it('let drefyn_app read and insert every column and update only the listed ones', () => {
+      const update = (table: string) =>
+        grantsOn(table)
+          .filter((g) => g.startsWith('drefyn_app UPDATE '))
+          .map((g) => g.slice('drefyn_app UPDATE '.length))
+          .sort();
+      expect(update('app.totp_credentials')).toEqual([
+        'confirmed_at',
+        'failed_attempts',
+        'key_id',
+        'last_used_at',
+        'last_used_step',
+        'secret_nonce',
+        'secret_sealed',
+        'updated_at',
+      ]);
+      expect(update('app.recovery_codes')).toEqual(['used_at']);
+      // So replacing a challenge is a delete then an insert, never a rewrite of its secret.
+      expect(update('app.factor_challenges')).toEqual(['attempts']);
+      for (const name of TABLES) {
+        const select = grantsOn(name).filter((g) => g.startsWith('drefyn_app SELECT '));
+        const insert = grantsOn(name).filter((g) => g.startsWith('drefyn_app INSERT '));
+        expect(insert.map((g) => g.split(' ')[2]).sort(), name).toEqual(
+          select.map((g) => g.split(' ')[2]).sort(),
+        );
+      }
+      expect(
+        grantsOn('app.factor_challenges')
+          .filter((g) => g.startsWith('drefyn_app SELECT '))
+          .map((g) => g.split(' ')[2])
+          .sort(),
+      ).toEqual([
+        'attempts',
+        'created_at',
+        'expires_at',
+        'method',
+        'return_to',
+        'secret_hash',
+        'sso_connection_id',
+        'sso_organization_id',
+        'user_id',
+      ]);
+    });
+  });
+
+  it('let drefyn_auth reach old revoked keys and the SSO tables, and nothing else with organization_id', () => {
     expect(ALLOW_LISTS.authTenantGrants).toBe(AUTH_TENANT_GRANTS);
-    expect(AUTH_TENANT_GRANTS.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
+    const keys = AUTH_TENANT_GRANTS.filter((g) => g.name.startsWith('app.api_keys'));
+    expect(keys.map((g) => [g.name, g.grantee, g.privilege]).sort()).toEqual([
       ['app.api_keys', 'drefyn_auth', 'DELETE'],
       ['app.api_keys.ctid', 'drefyn_auth', 'SELECT'],
       ['app.api_keys.organization_id', 'drefyn_auth', 'SELECT'],
       ['app.api_keys.revoked_at', 'drefyn_auth', 'SELECT'],
     ]);
-    for (const grant of AUTH_TENANT_GRANTS) expect(grant.reason.trim()).not.toBe('');
+    const tables = new Set(AUTH_TENANT_GRANTS.map((g) => g.name.split('.').slice(0, 2).join('.')));
+    expect([...tables].sort()).toEqual([
+      'app.api_keys',
+      'app.sso_connections',
+      'app.sso_domains',
+      'app.sso_identities',
+      'app.sso_states',
+    ]);
+    for (const grant of AUTH_TENANT_GRANTS) {
+      expect(grant.grantee).toBe('drefyn_auth');
+      expect(grant.reason.trim(), grant.name).not.toBe('');
+    }
+  });
+
+  describe('the sign in role on the SSO tables', () => {
+    const on = (table: string, privilege: string) =>
+      AUTH_TENANT_GRANTS.filter(
+        (g) => g.name.startsWith(`app.${table}.`) && g.privilege === privilege,
+      ).map((g) => g.name.slice(`app.${table}.`.length));
+
+    // A sign in credential that read the sealed secret could complete any organization's
+    // OIDC exchange.
+    it('reads the lookup columns of a connection, never the secret, and writes nothing', () => {
+      expect(on('sso_connections', 'SELECT')).not.toContain('oidc_client_secret_sealed');
+      expect(on('sso_connections', 'SELECT').sort()).toEqual([
+        'display_name',
+        'id',
+        'jit_default_project_role',
+        'jit_enabled',
+        'oidc_client_id',
+        'oidc_endpoints',
+        'oidc_issuer',
+        'organization_id',
+        'protocol',
+        'saml_idp_certs',
+        'saml_idp_entity_id',
+        'saml_idp_sso_url',
+        'session_max_seconds',
+        'status',
+      ]);
+      expect(
+        AUTH_TENANT_GRANTS.filter(
+          (g) => g.name.startsWith('app.sso_connections') && g.privilege !== 'SELECT',
+        ),
+      ).toEqual([]);
+    });
+
+    it('reads four columns of a domain, and only verified rows', () => {
+      expect(on('sso_domains', 'SELECT').sort()).toEqual([
+        'connection_id',
+        'domain',
+        'organization_id',
+        'verified_at',
+      ]);
+      expect(USER_POLICIES.find((p) => p.name === 'app.sso_domains.auth_read')?.using).toBe(
+        '(verified_at IS NOT NULL)',
+      );
+    });
+
+    it('reads and links identities, and consumes states, and updates only when a link was used', () => {
+      expect(on('sso_identities', 'INSERT').sort()).toEqual([
+        'connection_id',
+        'email_normalized',
+        'last_used_at',
+        'organization_id',
+        'subject',
+        'user_id',
+      ]);
+      expect(on('sso_states', 'INSERT')).toContain('state_hash');
+      expect(on('sso_states', 'SELECT')).toContain('ctid');
+      expect(
+        AUTH_TENANT_GRANTS.filter((g) => g.name === 'app.sso_states').map((g) => g.privilege),
+      ).toEqual(['DELETE']);
+      expect(AUTH_TENANT_GRANTS.filter((g) => g.privilege === 'UPDATE').map((g) => g.name)).toEqual(
+        ['app.sso_identities.last_used_at'],
+      );
+    });
   });
 
   it('keep the API key tables off the auth table list, so nothing else opens with them', () => {
@@ -247,9 +403,15 @@ describe('allow lists', () => {
     expect(CROSS_PROJECT_FOREIGN_KEYS).toEqual([]);
   });
 
-  it('start with no SECURITY DEFINER function and no published table', () => {
+  it('start with no SECURITY DEFINER function', () => {
     expect(SECURITY_DEFINER_FUNCTIONS).toEqual([]);
-    expect(PUBLISHED_TABLES).toEqual([]);
+  });
+
+  it('publish exactly the two copies the publish transaction writes', () => {
+    expect(PUBLISHED_TABLES.map((entry) => entry.name)).toEqual([
+      'app.published_versions',
+      'app.published_filter_rows',
+    ]);
   });
 
   it.each<[string, (lists: AllowLists) => AllowLists]>([
@@ -261,8 +423,8 @@ describe('allow lists', () => {
       }),
     ],
     [
-      'an auth tenant grant that can write a row',
-      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.revoked_at', 'UPDATE')] }),
+      'an auth tenant grant that can move a row',
+      (l) => ({ ...l, authTenantGrants: [auth('app.api_keys.organization_id', 'UPDATE')] }),
     ],
     [
       'an auth tenant grant to insert',
@@ -488,11 +650,15 @@ describe('allow lists', () => {
 });
 
 describe('organization entries', () => {
-  it('list the one global unique key, the slug namespace, with its reason', () => {
+  it('list the global unique keys, each with its reason', () => {
     expect(GLOBAL_UNIQUE_CONSTRAINTS.map((e) => e.name)).toEqual([
       'app.organization_slugs.organization_slugs_slug_key',
+      'app.sso_domains.sso_domains_verified_domain_key',
+      'app.sso_states.sso_states_pkey',
     ]);
     expect(GLOBAL_UNIQUE_CONSTRAINTS[0]?.reason).toMatch(/one public namespace/);
+    expect(GLOBAL_UNIQUE_CONSTRAINTS[1]?.reason).toBe('a domain has one SSO owner');
+    expect(GLOBAL_UNIQUE_CONSTRAINTS[2]?.reason).toMatch(/before it knows the organization/);
   });
 
   it('keep the organization tables off the global and auth lists', () => {
@@ -541,7 +707,9 @@ const OWNER_ARM =
   "((role = 'owner'::text) AND (NOT (EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE (m.organization_id = memberships.organization_id)))) AND (EXISTS ( SELECT\n   FROM app.organizations o\n  WHERE ((o.organization_id = memberships.organization_id) AND (o.created_at = now())))))";
 const INVITATION_ARM =
   '(EXISTS ( SELECT\n   FROM app.invitations i\n  WHERE ((i.organization_id = memberships.organization_id) AND (i.id = memberships.invitation_id) AND (i.role = memberships.role) AND (i.expires_at > now()))))';
-const ORIGIN = `((user_id = app.current_actor_id()) AND (${OWNER_ARM} OR ${INVITATION_ARM}))`;
+const JIT_ARM =
+  "((role = 'member'::text) AND (invitation_id IS NULL) AND (EXISTS ( SELECT\n   FROM (app.sso_identities si\n     JOIN app.sso_connections c ON (((c.organization_id = si.organization_id) AND (c.id = si.connection_id))))\n  WHERE ((si.organization_id = memberships.organization_id) AND (si.user_id = memberships.user_id) AND (c.status = 'active'::text) AND c.jit_enabled AND (NOT (c.jit_default_project_role IS DISTINCT FROM memberships.default_project_role))))))";
+const ORIGIN = `((user_id = app.current_actor_id()) AND (${OWNER_ARM} OR ${INVITATION_ARM} OR ${JIT_ARM}))`;
 const INVITER =
   "(EXISTS ( SELECT\n   FROM app.memberships m\n  WHERE ((m.organization_id = invitations.organization_id) AND (m.id = invitations.invited_by) AND (m.user_id = app.current_actor_id()) AND ((m.role = 'owner'::text) OR ((m.role = 'admin'::text) AND (invitations.role <> 'owner'::text))))))";
 
@@ -624,7 +792,8 @@ describe('restrictive policies', () => {
         command: 'insert',
         roles: ['drefyn_app'],
         using: null,
-        withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+        withCheck:
+          "((plan_tier = app.install_tier()) AND (read_only_since IS NULL) AND (sso_enforcement = 'off'::text) AND (sso_enforcement_since IS NULL))",
       },
       {
         name: 'app.project_roles.project_role_delete_actor',
@@ -652,8 +821,22 @@ describe('restrictive policies', () => {
   });
 
   it('give the owner arm no way in for an admin or a member', () => {
-    const origin = RESTRICTIVE_POLICIES.find((p) => p.name.endsWith('.membership_insert_origin'));
-    expect(origin?.withCheck).not.toMatch(/'(admin|member)'/);
+    expect(OWNER_ARM).not.toMatch(/'(admin|member)'/);
+  });
+
+  // Only sign in writes an identity, so organization work cannot use this arm to add anyone.
+  it('let the just in time arm make a member only, through an active just in time connection', () => {
+    for (const part of [
+      "(role = 'member'::text)",
+      '(invitation_id IS NULL)',
+      '(si.user_id = memberships.user_id)',
+      "(c.status = 'active'::text)",
+      'c.jit_enabled',
+      '(NOT (c.jit_default_project_role IS DISTINCT FROM memberships.default_project_role))',
+    ]) {
+      expect(JIT_ARM, part).toContain(part);
+    }
+    expect(JIT_ARM).not.toMatch(/'(owner|admin)'/);
   });
 
   it('let only an owner or admin membership of the same organization create a key', () => {

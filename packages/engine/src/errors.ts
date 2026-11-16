@@ -7,6 +7,10 @@ export interface EngineIssue {
   readonly code: string;
   readonly line?: number;
   readonly column?: number;
+  // A checked id. Lets a client name the field without a value ever appearing here.
+  readonly fieldId?: string;
+  // Fixed text, for a person to act on.
+  readonly message?: string;
 }
 
 export interface EngineError {

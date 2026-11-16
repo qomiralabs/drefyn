@@ -4,7 +4,7 @@ import { PROVIDER_NAMES } from '../../../auth/outcomes.ts';
 import { visitorBrowser } from '../../../server/actions.ts';
 import { dashboardAuth } from '../../../server/auth.ts';
 import { guardPublic } from '../../../server/guard.ts';
-import { formBinding, hosted } from '../../../server/sign-in-support.ts';
+import { formBinding, site } from '../../../server/sign-in-support.ts';
 
 export async function generateMetadata(): Promise<Metadata> {
   await guardPublic();
@@ -26,7 +26,7 @@ export default async function LinkPending() {
   const provider = challenge?.provider === 'google' ? 'google' : 'github';
   return (
     <LinkForm
-      hosted={hosted()}
+      site={site()}
       csrf={csrf}
       email={challenge?.email ?? null}
       provider={PROVIDER_NAMES[provider]}

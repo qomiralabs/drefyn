@@ -18,10 +18,23 @@ without one of those.
   stored for all roles, when the database has any setting other than the bootstrap's
   `search_path=app, extensions`, or when the pool is on the wrong role. The optional logger
   gets `warn(event, fields)` with ids and the pool kind, never SQL text or values.
-- `withTenant(db, tenant, work, { timeoutMs })` takes a `TenantRef`: the project is required.
-  It runs `work(tx)` in one transaction with `drefyn.organization_id` and `drefyn.project_id`
-  set for that transaction only. The default timeout is
-  `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms.
+- `withTenant(db, tenant, work, { timeoutMs, deadlineMs })` takes a `TenantRef`: the project is
+  required. It runs `work(tx)` in one transaction with `drefyn.organization_id` and
+  `drefyn.project_id` set for that transaction only. The default timeout is
+  `DREFYN_DATABASE_STATEMENT_TIMEOUT_MS`; per call values go up to 60000 ms. `timeoutMs` is per
+  statement and enforced by the server. `deadlineMs`, up to 300000 ms and off by default, is for the
+  whole transaction and enforced here: past it the socket is destroyed, even one that stopped
+  answering, the pool slot is free at once whether or not the work has returned, and the call fails
+  with `DB_UNAVAILABLE`, logging `db_transaction_deadline`. A commit in flight may have landed, and
+  a deadline that fires during the `discard all` after a commit still returns the result. Only
+  `withTenant` takes it. The pool's `query_timeout` is the bound on everything else:
+  `withOrganization`, `withUser`, `withAuth`, the statements run alone and the reader.
+- Work that catches a statement error and returns does not commit. After a server error Postgres
+  refuses the commit itself. After a failure on this side, such as `query_timeout`, the transaction
+  would still be open, so on every entry point that takes a work the later statements are refused,
+  the transaction is rolled back and the call fails with that first failure.
+- `poolSizeOf(db)` reads the pool size, for limits that must stay below it.
+  `DREFYN_DATABASE_POOL_MAX` sizes the reader pool as well, so raising it raises both.
 - `withOrganization(db, org, work, { timeoutMs })` takes an `OrganizationRef` with no
   `projectId` key at all, for organization work such as members, plans and the credit
   ledger. Its transaction type holds only tables without `project_id`, and project tables
@@ -49,7 +62,8 @@ without one of those.
   `withAuth(db, work, { timeoutMs })` runs the sign in path, before any user or organization is
   known, with every setting empty. `drefyn_auth` holds grants on the identity tables and, for
   the expiry cleanup, on `ctid`, `organization_id`, `revoked_at` and delete of `api_keys`, past
-  the 90 day limit only, and on `scheduled_jobs`. Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
+  the 90 day limit only, on `scheduled_jobs`, and on the listed columns of the four SSO tables.
+  Its transaction type, `AuthSchema`, names only those. Default 2000 ms, up to 10000 ms.
 - `withApiKeyLimiter(db, work, { timeoutMs })` counts failed API key checks on the app pool,
   before any key or organization is proved, with every setting empty. Its transaction type,
   `ApiKeyLimiterSchema`, names `api_key_failures` alone. The `api_access` policy exists on
@@ -87,7 +101,9 @@ Rules for the work:
 - After every transaction the connection runs `DISCARD ALL` before it goes back to the pool,
   so cursors held past commit, session settings, `LISTEN` and advisory locks never reach the
   next tenant. It also drops prepared statements, so queries are never named.
-- Streaming is not supported inside a transaction.
+- Streaming and abort signals are not supported inside a transaction. An aborted statement keeps
+  running on the server and could commit, so both are refused, and the transaction rolls back
+  even if the work catches the refusal.
 - No insert path accepts a client chosen `id`. Ids come from `uuidv7()` or `newId(kind)`, so a
   primary key conflict can never tell a caller that an id exists in another tenant. This is
   why unique keys other than `(id)` must include `organization_id`.
@@ -163,6 +179,47 @@ list and the `AuthSchema` and `UserSchema` table types are both built from it, s
 `drefyn_app` reads `id`, `email`, `display_name` and `created_at` of users and updates only
 `display_name` and `updated_at`; only `drefyn_auth` writes the address.
 
+`totp_credentials`, `recovery_codes` and `factor_challenges` hold a person's second factor: a
+sealed TOTP secret, recovery code hashes and the one live challenge of a sign in that still
+needs the factor. They are global, with forced row level security and a `self_access` policy
+for `drefyn_app`, and only `UserSchema` names them. `drefyn_auth` holds no grant on any of
+them, so a stolen sign in credential reads no sealed secret and no recovery hash.
+`drefyn_app` selects and inserts every column, deletes rows, and updates only the columns
+listed in `src/identity-columns.ts`; on `factor_challenges` that is `attempts` alone, so a new
+challenge is a delete then an insert, and a second insert racing it fails on the key. Deleting
+a user removes all three. The down migration drops the tables, and with them every enrolment,
+so it is for use before the factor ships only.
+
+`sso_connections`, `sso_domains`, `sso_identities` and `sso_states` hold team SSO: an
+organization's identity provider connections, the domains it claimed and proved, the people
+linked through them, and the sign in round trips in flight. Each is a tenant table under
+`tenant_isolation` with no `project_id`, since SSO is organization scoped. `drefyn_auth` reads
+only the columns listed in `src/sso-columns.ts`: the connection lookup fields (never
+`oidc_client_secret_sealed`), four columns of verified domains for discovery, and identities
+and states, which it alone inserts; it deletes states when it consumes them and in the expiry
+cleanup, a day after `expires_at`. `drefyn_app` holds nothing on `sso_states`, cannot insert
+or update an identity (so an organization admin cannot map their IdP subject onto someone
+else's account), and reads a person's own links in every organization through `self_read`.
+Organization work updates only the listed columns of a connection or a domain; a domain is
+verified by one organization at a time, through the partial unique index
+`sso_domains_verified_domain_key`. `organizations.sso_enforcement` (`off`,
+`verified_domains`, `everyone`) is set together with `sso_enforcement_since`, and organization
+work cannot write either yet. A session that signed in through SSO has `method = 'sso'` and
+both `sso_connection_id` and `sso_organization_id`; any other session has neither. The down
+migration drops the tables and ends SSO sessions, so it is for use before SSO ships only.
+
+SSO sign in adds what it writes outside those tables. A link code in `email_challenges` with
+`pending_provider = 'sso'` carries `pending_sso_organization_id` and
+`pending_sso_connection_id`, set exactly then. A `factor_challenges` row with `method = 'sso'`
+carries `sso_connection_id` and `sso_organization_id` for the session it will start, and only
+then. `drefyn_auth` may update `sso_identities.last_used_at` and nothing else on a link; the
+catalog lets the sign in role update a tenant column only when the column names no owner (never
+`id` or a column ending in `_id`). `membership_insert_origin` gains a third arm: a `member` with
+no invitation, for a person who has an identity in the organization through an `active`
+connection with `jit_enabled`, and exactly that connection's `jit_default_project_role`. The
+down migration removes pending SSO link codes and factor challenges and keeps members who
+joined just in time.
+
 `reserveAuthRateWindows(authDb, { bucket, keyHmac, windowSeconds })` and
 `reserveApiKeyFailureWindows(appDb, { keyHmac, windowSeconds })` count one attempt against each
 fixed window (1 to 3 windows of 1 s to 7 days) with one upsert, aligned to the database clock,
@@ -227,7 +284,7 @@ beyond the bootstrap's.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
 `organization_id`, even one on the auth table list, unless that exact grant is on the auth tenant
-grant list (a column to select or a table to delete from, never with grant option, and a listed
+grant list (a column to select or insert, or a table to delete from, never with grant option, and a listed
 grant that is gone fails too), or on a table off that list; `EXECUTE` on
 any function in `app`, or anything beyond `USAGE` on the schema, for `drefyn_auth`; anything
 beyond `SELECT`, `INSERT`, `UPDATE` and `DELETE` for it on a listed table, or any grant option;
@@ -237,8 +294,10 @@ and `WITH CHECK` as `pg_get_expr` prints them), on tenant and global tables alik
 to `PUBLIC`, restrictive ones included; a restrictive policy in `app` that is not on the
 `restrictivePolicies` list, differs from its entry, or is listed but missing (a permissive one
 of the same name counts as missing); a unique key without `organization_id` on a tenant table
-unless it is on the global unique list; and on `users` and `password_credentials`, any table
-level `SELECT` or `UPDATE` and any column grant off the column grant list, so a new column is
+unless it is on the global unique list; a tenant table without `project_id` unless it is on
+the organization table list; and on `users`, `password_credentials`,
+`known_devices` and the three second factor tables, any table level `SELECT`, `INSERT` or
+`UPDATE` and any column grant off the column grant list, so a new column is
 closed until someone grants it. Insert is per column there too, so no insert can set a column
 such as `email_verified_at` that the role was not given. It refuses any grant to `drefyn_app`,
 even one column, on the auth only tables (`email_challenges`, `oauth_states`,
@@ -261,6 +320,15 @@ with `is_local` false) in any tracked file.
   password or the URL. Zero for the wait or the timeout is refused, because pg and Postgres
   read zero as "forever". Query parameters on the URL are refused: TLS is set only by
   `DREFYN_DATABASE_SSL`.
+  Each pool also gives up on an unanswered statement in the driver, 5 s past the longest timeout
+  it allows: 65 s on the app pool, 15 s on the reader and auth pools. That covers a peer that
+  vanished, which no `statement_timeout` can reach. A peer that goes silent and stays silent costs
+  two of those limits, the statement and its rollback, 130 s on the app pool and 30 s on the reader
+  and auth pools. A peer that answers late and then dies costs three, as the `discard all` after an
+  answered rollback gets its own: 195 s on the app pool, 45 s on the reader and auth pools. Either
+  way the connection is thrown away and the caller gets `DB_UNAVAILABLE`, and the slot frees within
+  one limit of the last answer. A limit that fires on a `commit` leaves the outcome unknown, as any
+  dropped connection does.
 - `parseMigrationConfig(env)`: reads `DREFYN_MIGRATION_DATABASE_URL` and `DREFYN_DATABASE_SSL`.
   It never falls back to the application URL.
 - `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same

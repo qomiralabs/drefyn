@@ -4,10 +4,14 @@ import { test } from './csp.ts';
 import {
   commandBar,
   DESKTOP,
+  inbox,
   MOBILE,
   openShell,
   ROUTES,
+  routeCommandBar,
   settingsStatePaths,
+  shortcutsSheet,
+  TABLET,
   THEMES,
   useTheme,
 } from './fixtures.ts';
@@ -82,11 +86,68 @@ for (const [role, person] of [
             fullPage: true,
           });
           await page.keyboard.press('ControlOrMeta+k');
-          await expect(commandBar(page)).toBeVisible();
+          // The results, not the frame that stands in while their code loads.
+          await expect(commandBar(page).getByRole('option').first()).toBeVisible();
           await expect(page).toHaveScreenshot(`shell-${role}-command_${size}-${theme}.png`);
         });
       }
     }
+  });
+}
+
+// The shell's own overlays: the inbox open over a project, the shortcuts sheet, and the
+// command bar's frame while its code is still on the way.
+for (const theme of THEMES) {
+  for (const [size, viewport] of Object.entries(SIZES)) {
+    test(`inbox ${theme} ${size}`, async ({ page }) => {
+      expect(process.env['DREFYN_PLAYWRIGHT_IMAGE'], 'run inside the pinned image').toBe(PINNED);
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await openShell(page, ROUTES.success);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: /^Inbox/ }).click();
+      await expect(inbox(page)).toBeVisible();
+      await expect(page).toHaveScreenshot(`shell-inbox_${size}-${theme}.png`);
+    });
+
+    test(`shortcuts ${theme} ${size}`, async ({ page }) => {
+      expect(process.env['DREFYN_PLAYWRIGHT_IMAGE'], 'run inside the pinned image').toBe(PINNED);
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await openShell(page, ROUTES.overview);
+      await page.evaluate(() => document.fonts.ready);
+      await page.keyboard.press('?');
+      await expect(shortcutsSheet(page)).toBeVisible();
+      await expect(page).toHaveScreenshot(`shell-shortcuts_${size}-${theme}.png`);
+    });
+
+    test(`command frame loading ${theme} ${size}`, async ({ page }) => {
+      expect(process.env['DREFYN_PLAYWRIGHT_IMAGE'], 'run inside the pinned image').toBe(PINNED);
+      const chunk = await routeCommandBar(page, 'hold');
+      await page.setViewportSize(viewport);
+      await useTheme(page, theme);
+      await openShell(page, ROUTES.overview);
+      await page.evaluate(() => document.fonts.ready);
+      await page.keyboard.press('ControlOrMeta+k');
+      await expect(commandBar(page).locator('[data-pending-rows] > span').first()).toBeVisible();
+      await expect(page).toHaveScreenshot(`shell-command-loading_${size}-${theme}.png`);
+      chunk.release();
+    });
+  }
+
+  // The tablet rail, with the tooltip that names the focused item beside it.
+  test(`rail tooltip ${theme} tablet`, async ({ page }) => {
+    expect(process.env['DREFYN_PLAYWRIGHT_IMAGE'], 'run inside the pinned image').toBe(PINNED);
+    await page.setViewportSize(TABLET);
+    await useTheme(page, theme);
+    await openShell(page, ROUTES.success);
+    await page.evaluate(() => document.fonts.ready);
+    await page.keyboard.press('F6');
+    await page.keyboard.press('F6');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[role="tooltip"]')).toHaveText('Home');
+    await expect(page).toHaveScreenshot(`shell-rail-tooltip_tablet-${theme}.png`);
   });
 }
 

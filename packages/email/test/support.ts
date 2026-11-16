@@ -158,6 +158,10 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'member_removed':
       case 'member_keys_revoked':
         return { ...f, kind, organizationName: a, memberName: c, revokedKeys: 3 };
+      case 'sso_domain_claimed':
+      case 'sso_domain_verified':
+      case 'sso_domain_unverified':
+        return { ...f, kind, organizationName: a, domain: 'login.acme.example' };
       default:
         return { ...f, kind };
     }

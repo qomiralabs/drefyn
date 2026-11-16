@@ -2,10 +2,14 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { TenantRef } from '@drefyn/tenancy';
 import { idOf } from '@drefyn/tenancy';
+import { sql } from 'kysely';
 import type { Chunk } from './chunk.ts';
 import { Refusal } from './errors.ts';
+import { canonicalFields, type StoredFields } from './fields.ts';
+import { parseSlotMap, slotRowOf, SLOT_COLUMNS, type SlotMap } from './filter-slots.ts';
 import type { NodeFamily, Origin } from './vocabulary.ts';
 import { assertWritable } from './limits.ts';
+import { storedSchema } from './query.ts';
 import type { EngineTx } from './store.ts';
 import type { Actor, NodeId, VersionId, VersionRef } from './types.ts';
 
@@ -14,6 +18,7 @@ export interface LockedNode {
   readonly family: NodeFamily;
   readonly typeId: string;
   readonly headVersionId: VersionId | null;
+  readonly headFields: StoredFields;
 }
 
 export interface NewVersion {
@@ -30,6 +35,11 @@ export interface NewVersion {
   // Only called once the version is certain to be written, so a replay or a conflict costs no
   // chunking. Empty when chunks are off.
   readonly chunksOf: () => readonly Chunk[];
+  // What a client sent, held to the type's definition under the lock, where that is read.
+  readonly rawFields?: Readonly<Record<string, unknown>> | undefined;
+  // Values already in history, for a rollback. They passed that check when first saved.
+  readonly storedFields?: StoredFields;
+  readonly maxFieldsBytes: number;
 }
 
 const OUTBOX_EMBED_CHUNKS = 'embed_chunks';
@@ -55,7 +65,7 @@ export async function lockNode(
 ): Promise<LockedNode> {
   const row = await tx
     .selectFrom('nodes')
-    .select(['id', 'family', 'type_id', 'head_version_id'])
+    .select(['id', 'family', 'type_id', 'head_version_id', 'head_fields'])
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', nodeId)
@@ -68,6 +78,7 @@ export async function lockNode(
     family: row.family as NodeFamily,
     typeId: row.type_id,
     headVersionId: row.head_version_id === null ? null : idOf('ver', row.head_version_id),
+    headFields: row.head_fields as StoredFields,
   };
 }
 
@@ -89,11 +100,18 @@ interface StoredVersion {
   readonly origin: string;
   readonly actor: unknown;
   readonly content_sha256: Buffer;
+  readonly fields: unknown;
 }
 
 // The same request again gets the version it made, whatever has happened to the head since.
-function replayed(node: LockedNode, draft: NewVersion, row: StoredVersion): VersionRef {
+function replayed(
+  node: LockedNode,
+  draft: NewVersion,
+  row: StoredVersion,
+  fields: StoredFields | null,
+): VersionRef {
   const same =
+    (fields === null || isDeepStrictEqual(row.fields, fields)) &&
     row.node_id === node.id &&
     row.parent_version_id === draft.expectedHeadVersionId &&
     row.origin === draft.origin &&
@@ -107,6 +125,8 @@ interface WriteRead {
   readonly replay: StoredVersion | null;
   readonly headSeq: number;
   readonly schemaVersion: number;
+  readonly schema: unknown;
+  readonly slots: unknown;
 }
 
 // One statement for all a write needs to know, as each one more is a round trip under the row
@@ -135,6 +155,8 @@ async function readForWrite(
     .select([
       'h.seq as head_seq',
       't.current_schema_version as schema_version',
+      't.content_schema',
+      't.filter_slots',
       'r.id as replay_id',
       'r.seq as replay_seq',
       'r.node_id as replay_node_id',
@@ -142,6 +164,7 @@ async function readForWrite(
       'r.origin as replay_origin',
       'r.actor as replay_actor',
       'r.content_sha256 as replay_content_sha256',
+      'r.fields as replay_fields',
     ])
     .where('t.organization_id', '=', tenant.organizationId)
     .where('t.project_id', '=', tenant.projectId)
@@ -158,8 +181,15 @@ async function readForWrite(
           origin: row.replay_origin,
           actor: row.replay_actor,
           content_sha256: row.replay_content_sha256,
+          fields: row.replay_fields,
         } as StoredVersion);
-  return { replay, headSeq: row.head_seq ?? 0, schemaVersion: row.schema_version };
+  return {
+    replay,
+    headSeq: row.head_seq ?? 0,
+    schemaVersion: row.schema_version,
+    schema: row.content_schema,
+    slots: row.filter_slots,
+  };
 }
 
 // Another node's save can take the same key between that read and the insert.
@@ -168,16 +198,26 @@ async function raceWinner(
   tenant: TenantRef,
   node: LockedNode,
   draft: NewVersion,
+  fields: StoredFields | null,
 ): Promise<VersionRef> {
   const row = await tx
     .selectFrom('node_versions')
-    .select(['id', 'seq', 'node_id', 'parent_version_id', 'origin', 'actor', 'content_sha256'])
+    .select([
+      'id',
+      'seq',
+      'node_id',
+      'parent_version_id',
+      'origin',
+      'actor',
+      'content_sha256',
+      'fields',
+    ])
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
     .where('idempotency_key', '=', draft.idempotencyKey)
     .executeTakeFirst();
   if (row === undefined) throw new Refusal('engine.idempotency_conflict');
-  return replayed(node, draft, row);
+  return replayed(node, draft, row, fields);
 }
 
 // In the version's transaction, so no version commits without its chunks. Embeddings stay out:
@@ -218,6 +258,47 @@ async function writeChunks(
     .execute();
 }
 
+// The statement itself compares, so an unchanged row costs one round trip and no write. Most
+// saves edit a body, and a write here would cost lists a heap fetch until the next vacuum.
+async function writeSlots(
+  tx: EngineTx,
+  tenant: TenantRef,
+  node: LockedNode,
+  slots: SlotMap,
+  fields: StoredFields,
+): Promise<void> {
+  const row = slotRowOf(slots, fields);
+  const values = SLOT_COLUMNS.map((column) => {
+    const value = row[column];
+    const named = sql.ref(column);
+    if (column.startsWith('t')) return sql`${value}::text as ${named}`;
+    if (column.startsWith('l')) return sql`${value}::text[] as ${named}`;
+    if (column.startsWith('i')) return sql`${value}::bigint as ${named}`;
+    return sql`${value}::timestamptz as ${named}`;
+  });
+  const assignments = SLOT_COLUMNS.map(
+    (column) => sql`${sql.ref(column)} = ${sql.ref(`v.${column}`)}`,
+  );
+  const current = SLOT_COLUMNS.map((column) => sql.ref(`f.${column}`));
+  const next = SLOT_COLUMNS.map((column) => sql.ref(`v.${column}`));
+  await sql`
+    update app.node_filter_rows f set ${sql.join(assignments)}
+    from (select ${sql.join(values)}) v
+    where f.organization_id = ${tenant.organizationId}::uuid
+      and f.project_id = ${tenant.projectId}::uuid
+      and f.type_id = ${node.typeId}::uuid
+      and f.node_id = ${node.id}::uuid
+      and (${sql.join(current)}) is distinct from (${sql.join(next)})`.execute(tx);
+}
+
+function fieldsOfDraft(draft: NewVersion, stored: unknown): StoredFields | null {
+  if (draft.storedFields !== undefined) return draft.storedFields;
+  if (draft.rawFields === undefined) return null;
+  const checked = canonicalFields(storedSchema(stored), draft.rawFields, draft.maxFieldsBytes);
+  if (!checked.ok) throw new Refusal(checked.error.code, checked.error.issues);
+  return checked.value;
+}
+
 // One way into history, for saves and rollbacks alike. The caller holds the node's lock. The
 // key is read before the head is compared, or a retry of a save that landed would conflict with
 // itself. Only a request that will write is held to the plan.
@@ -228,7 +309,8 @@ export async function appendVersion(
   draft: NewVersion,
 ): Promise<VersionRef> {
   const known = await readForWrite(tx, tenant, node, draft);
-  if (known.replay !== null) return replayed(node, draft, known.replay);
+  const fields = fieldsOfDraft(draft, known.schema);
+  if (known.replay !== null) return replayed(node, draft, known.replay, fields);
   if (node.headVersionId !== draft.expectedHeadVersionId) {
     throw new Refusal('engine.version_conflict');
   }
@@ -248,6 +330,7 @@ export async function appendVersion(
       content: draft.json,
       content_sha256: draft.sha256,
       idempotency_key: draft.idempotencyKey,
+      fields: JSON.stringify(fields ?? node.headFields),
     })
     // The same key can race on another node, which holds a different lock. Doing nothing leaves
     // this transaction usable, and the next read sees the winner's row.
@@ -259,18 +342,23 @@ export async function appendVersion(
     )
     .returning(['id', 'seq', 'content_sha256'])
     .executeTakeFirst();
-  if (inserted === undefined) return raceWinner(tx, tenant, node, draft);
+  if (inserted === undefined) return raceWinner(tx, tenant, node, draft, fields);
   await tx
     .updateTable('nodes')
     .set({
       head_version_id: inserted.id,
       head_content: headCopyOf(node, draft.json),
+      head_fields: JSON.stringify(fields ?? node.headFields),
       updated_at: new Date(),
     })
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', node.id)
     .executeTakeFirstOrThrow();
+  if (fields !== null) {
+    const slots = parseSlotMap(known.slots);
+    if (Object.keys(slots).length > 0) await writeSlots(tx, tenant, node, slots, fields);
+  }
   await writeChunks(tx, tenant, node.id, inserted.id, draft.chunksOf());
   return refOf(node.id, inserted);
 }

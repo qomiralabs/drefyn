@@ -104,6 +104,7 @@ export interface ContentTypesTable {
   filter_slots: Generated<JsonValue>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  content_schema: JsonValue | null;
 }
 
 // app.email_challenges
@@ -121,6 +122,8 @@ export interface EmailChallengesTable {
   expires_at: Date;
   consumed_at: Date | null;
   created_at: Generated<Date>;
+  pending_sso_organization_id: string | null;
+  pending_sso_connection_id: string | null;
 }
 
 // app.engine_outbox
@@ -131,6 +134,34 @@ export interface EngineOutboxTable {
   node_id: string;
   version_id: string;
   kind: string;
+  done_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.factor_challenges
+export interface FactorChallengesTable {
+  user_id: string;
+  secret_hash: Buffer;
+  method: string;
+  return_to: string | null;
+  attempts: Generated<number>;
+  expires_at: Date;
+  created_at: Generated<Date>;
+  sso_connection_id: string | null;
+  sso_organization_id: string | null;
+}
+
+// app.filter_backfills
+export interface FilterBackfillsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  type_id: string;
+  field_id: string;
+  slot_column: string;
+  action: string;
+  after_node_id: string | null;
+  started_at: Date | null;
   done_at: Date | null;
   created_at: Generated<Date>;
 }
@@ -209,6 +240,11 @@ export interface NodeFilterRowsTable {
   i5: number | null;
   d1: Date | null;
   d2: Date | null;
+  l1: string[] | null;
+  l2: string[] | null;
+  l3: string[] | null;
+  l4: string[] | null;
+  l5: string[] | null;
 }
 
 // app.node_versions
@@ -227,6 +263,7 @@ export interface NodeVersionsTable {
   content_sha256: Buffer;
   idempotency_key: string | null;
   created_at: Generated<Date>;
+  fields: Generated<JsonValue>;
 }
 
 // app.nodes
@@ -246,6 +283,7 @@ export interface NodesTable {
   deleted_at: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  head_fields: Generated<JsonValue>;
 }
 
 // app.oauth_states
@@ -284,6 +322,8 @@ export interface OrganizationsTable {
   read_only_since: Date | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  sso_enforcement: Generated<string>;
+  sso_enforcement_since: Date | null;
 }
 
 // app.password_credentials
@@ -316,6 +356,55 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.published_filter_rows
+export interface PublishedFilterRowsTable {
+  organization_id: string;
+  project_id: string;
+  type_id: string;
+  node_id: string;
+  t1: string | null;
+  t2: string | null;
+  t3: string | null;
+  t4: string | null;
+  t5: string | null;
+  l1: string[] | null;
+  l2: string[] | null;
+  l3: string[] | null;
+  l4: string[] | null;
+  l5: string[] | null;
+  i1: number | null;
+  i2: number | null;
+  i3: number | null;
+  i4: number | null;
+  i5: number | null;
+  d1: Date | null;
+  d2: Date | null;
+}
+
+// app.published_versions
+export interface PublishedVersionsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  type_id: string;
+  content: JsonValue;
+  fields: Generated<JsonValue>;
+  is_current: boolean;
+  render_policy_version: number;
+  published_at: Generated<Date>;
+}
+
+// app.recovery_codes
+export interface RecoveryCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  code_hash: Buffer;
+  used_at: Date | null;
+  created_at: Generated<Date>;
+}
+
 // app.scheduled_jobs
 export interface ScheduledJobsTable {
   name: string;
@@ -335,6 +424,87 @@ export interface SessionsTable {
   expires_at: Date;
   user_agent: string | null;
   created_at: Generated<Date>;
+  sso_connection_id: string | null;
+  sso_organization_id: string | null;
+}
+
+// app.sso_connections
+export interface SsoConnectionsTable {
+  id: Generated<string>;
+  organization_id: string;
+  protocol: string;
+  status: Generated<string>;
+  display_name: string;
+  oidc_issuer: string | null;
+  oidc_client_id: string | null;
+  oidc_client_secret_sealed: Buffer | null;
+  oidc_endpoints: JsonValue | null;
+  saml_idp_entity_id: string | null;
+  saml_idp_sso_url: string | null;
+  saml_idp_certs: string[] | null;
+  jit_enabled: Generated<boolean>;
+  jit_default_project_role: string | null;
+  session_max_seconds: number | null;
+  version: Generated<number>;
+  created_by: string | null;
+  idempotency_key: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.sso_domains
+export interface SsoDomainsTable {
+  id: Generated<string>;
+  organization_id: string;
+  connection_id: string;
+  domain: string;
+  txt_token_hash: Buffer;
+  verified_at: Date | null;
+  last_checked_at: Date | null;
+  failed_checks: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.sso_identities
+export interface SsoIdentitiesTable {
+  id: Generated<string>;
+  organization_id: string;
+  connection_id: string;
+  user_id: string;
+  subject: string;
+  email_normalized: string;
+  last_used_at: Date | null;
+  created_at: Generated<Date>;
+}
+
+// app.sso_states
+export interface SsoStatesTable {
+  state_hash: Buffer;
+  organization_id: string;
+  connection_id: string;
+  protocol: string;
+  code_verifier: string | null;
+  nonce: string | null;
+  saml_request_id: string | null;
+  browser_hash: Buffer;
+  return_to: string | null;
+  expires_at: Date;
+  created_at: Generated<Date>;
+}
+
+// app.totp_credentials
+export interface TotpCredentialsTable {
+  user_id: string;
+  key_id: string;
+  secret_nonce: Buffer;
+  secret_sealed: Buffer;
+  last_used_step: number | null;
+  failed_attempts: Generated<number>;
+  confirmed_at: Date | null;
+  last_used_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // app.users
@@ -360,6 +530,8 @@ export interface Schema {
   content_types: ContentTypesTable;
   email_challenges: EmailChallengesTable;
   engine_outbox: EngineOutboxTable;
+  factor_challenges: FactorChallengesTable;
+  filter_backfills: FilterBackfillsTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;
@@ -375,7 +547,15 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  published_filter_rows: PublishedFilterRowsTable;
+  published_versions: PublishedVersionsTable;
+  recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;
+  sso_connections: SsoConnectionsTable;
+  sso_domains: SsoDomainsTable;
+  sso_identities: SsoIdentitiesTable;
+  sso_states: SsoStatesTable;
+  totp_credentials: TotpCredentialsTable;
   users: UsersTable;
 }

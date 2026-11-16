@@ -21,6 +21,7 @@ import {
 import { createHmac, createSecretKey, hkdfSync } from 'node:crypto';
 import { builtInArgon2 } from './password-hash.ts';
 import { SecretValue } from './secret-value.ts';
+import { aesGcmSealer, type SecretSealer } from './secret-sealer.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
 export type SignUpMode = 'open' | 'invite_only' | 'closed';
@@ -63,6 +64,18 @@ export interface AuthConfig {
   };
   // null when unset, which leaves libuv at its default of 4.
   readonly threadPoolSize: number | null;
+  readonly sso: {
+    readonly dnsTimeoutMs: number;
+    // Read at start with loadFreeMailDomains; null means the built in list alone.
+    readonly freeMailDomainsFile: string | null;
+  };
+  readonly totp: {
+    // False with no key set: enrolment stays hidden and everything else starts as before.
+    readonly available: boolean;
+    readonly sealer: SecretSealer | null;
+    // The app label an authenticator shows beside the code.
+    readonly issuer: string;
+  };
 }
 
 const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
@@ -81,6 +94,14 @@ const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
   password_fail_ip: '30/10m',
   // A link carries 256 random bits, so this only caps the work a flood of guesses costs.
   cli_link_verify: '20/15m',
+  // Each verify is a DNS query this server makes on the organization's behalf.
+  sso_domain_verify: '20/1h',
+  // Attempts, not failures, on the person alone: this is what bounds guessing six digits.
+  totp_verify: '5/5m,20/1h,50/1d',
+  // Person and network, never the person alone, so nobody elsewhere can fill it.
+  recovery_code_verify: '10/1h',
+  recovery_code_verify_ip: '30/1h',
+  second_factor_notice: '1/6h',
 };
 
 // Every reason is fixed text: a value may be a secret pasted into the wrong key.
@@ -143,6 +164,33 @@ function secretKey(env: Env, key: AuthConfigKey): Buffer | undefined {
   }
   return bytes;
 }
+
+const TOTP_KEY_ENTRY = /^([a-z0-9]{1,8}):([A-Za-z0-9_-]+)$/;
+const TOTP_KEYS_REASON =
+  'must be a comma list of <id>:<key>, each id 1 to 8 lowercase letters or digits and each key at least 32 random bytes in unpadded base64url';
+
+// "<id>:<key>,<id>:<key>": the first seals, all open, so a rotation prepends a key. The
+// sealer refuses a repeated id or too many keys.
+function totpSealer(env: Env): SecretSealer | null {
+  const raw = read(env, 'DREFYN_AUTH_TOTP_KEYS');
+  if (raw === undefined) return null;
+  const keys = raw.split(',').map((entry) => {
+    const match = TOTP_KEY_ENTRY.exec(entry);
+    const text = match?.[2] ?? '';
+    const parsed = base64url.safeParse(text);
+    if (!parsed.success || parsed.data.toString('base64url') !== text) {
+      invalid('DREFYN_AUTH_TOTP_KEYS', TOTP_KEYS_REASON);
+    }
+    return { id: match?.[1] ?? '', material: parsed.data };
+  });
+  return aesGcmSealer(keys);
+}
+
+// ASCII only and no colon: the authenticator label is "<issuer>:<account>", and some apps
+// show other scripts or a stray colon wrongly.
+const ISSUER = z
+  .string()
+  .regex(/^[\x21-\x39\x3b-\x7e](?:[\x20-\x39\x3b-\x7e]{0,62}[\x21-\x39\x3b-\x7e])?$/);
 
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 const HTTP_LOOPBACK: ReadonlySet<string> = new Set(['localhost', '127.0.0.1']);
@@ -390,6 +438,27 @@ export function parseAuthConfig(
     }
   }
 
+  const dnsTimeoutMs = wholeKey(env, 'DREFYN_AUTH_SSO_DNS_TIMEOUT_MS', 3000, 100, 30_000);
+  const freeMailRaw = read(env, 'DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE');
+  if (
+    freeMailRaw !== undefined &&
+    (!freeMailRaw.startsWith('/') || freeMailRaw.includes('\u0000'))
+  ) {
+    invalid('DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE', 'must be an absolute path');
+  }
+
+  const sealer = totpSealer(env);
+  const issuerRaw = read(env, 'DREFYN_AUTH_TOTP_ISSUER');
+  const issuer =
+    issuerRaw === undefined
+      ? 'Drefyn'
+      : take(
+          'DREFYN_AUTH_TOTP_ISSUER',
+          ISSUER,
+          issuerRaw,
+          'must be 1 to 64 printable ASCII characters with no colon and no space at either end',
+        );
+
   const limits = {} as Record<RateBucket, readonly RateLimit[]>;
   for (const bucket of RATE_BUCKETS) {
     limits[bucket] = rateLimits(env, rateKey(bucket), DEFAULT_RATE_LIMITS[bucket]);
@@ -416,6 +485,8 @@ export function parseAuthConfig(
       breachedPasswordsFile: fileRaw ?? null,
     },
     threadPoolSize,
+    sso: { dnsTimeoutMs, freeMailDomainsFile: freeMailRaw ?? null },
+    totp: { available: sealer !== null, sealer, issuer },
   });
 }
 

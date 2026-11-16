@@ -216,9 +216,10 @@ describeWithStack('a crash mid save', () => {
   };
 
   it('keeps nothing when the connection dies after every write, before commit', async () => {
-    const real = databaseStore(db);
+    const real = databaseStore(db, DEFAULT_ENGINE_CONFIG);
     let arm = false;
     const dying: EngineStore = {
+      ...real,
       tenant: (tenant, work) =>
         real.tenant(tenant, async (tx) => {
           const answer = await work(tx);

@@ -1,3 +1,4 @@
+export { BACKFILL_BATCH, BACKFILL_PAUSE_MS, runFilterBackfill } from './backfill.ts';
 export { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 export { astVersionOf, type NodeContent } from './content.ts';
 export { DEFAULT_ENGINE_CONFIG, parseEngineConfig, type EngineConfig } from './config.ts';
@@ -11,18 +12,47 @@ export {
   type EngineTracer,
   type LogFields,
 } from './ports.ts';
+export type { PoolGate } from './pool-gate.ts';
+export {
+  cachedTypes,
+  createPublishedReader,
+  publishedStore,
+  storeTypes,
+  type PublishedNode,
+  type PublishedNodeSummary,
+  type PublishedPage,
+  type PublishedQuery,
+  type PublishedReader,
+  type PublishedReaderDeps,
+  type PublishedStore,
+  type PublishedTx,
+  type PublishedTypeDefinition,
+  type PublishedTypes,
+  type TypeCacheOptions,
+  type VersionPin,
+} from './published.ts';
+export type { SystemJob } from './actor.ts';
 export { databaseStore, type EngineStore } from './store.ts';
 export type {
   Actor,
+  BackfillState,
   CreateNodeInput,
+  DeclaredSchema,
+  DeclareSchemaInput,
   IdempotencyKey,
+  MoveNodeInput,
+  MovingActor,
   NodeHead,
   NodeId,
+  NodePage,
+  NodeQuery,
   NodeRef,
+  NodeSummary,
   Page,
   PageArgs,
   RollbackInput,
   SaveDraftInput,
+  SortDirection,
   VersionId,
   VersionRef,
   VersionSummary,

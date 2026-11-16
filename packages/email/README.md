@@ -129,6 +129,9 @@ two parts from them.
 - Every style is inline. The style block adds only phone sizes and dark mode, so a client
   that strips it still shows a complete mail. There are no images, web fonts, scripts or
   remote requests, and the only colours are the `@drefyn/ui` tokens in `src/html/palette.ts`.
+- The SSO domain notices name the domain, which is link shaped by nature, so it skips the
+  name guard and must be one host name in normalized form (lower case, punycode). It renders
+  as text in a fact row and is never a link.
 - The code has no space character: its gap is letter spacing, so a copy takes eight digits.
 - Templates are synchronous, because static rendering does not wait for anything suspended.
 

@@ -1,4 +1,6 @@
+import { setTimeout as pause } from 'node:timers/promises';
 import { closeDatabase, type Database } from '@drefyn/db';
+import type { MdxRoot } from '@drefyn/mdx';
 import fc from 'fast-check';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { Engine, NodeId, VersionId } from '../src/index.ts';
@@ -15,6 +17,8 @@ import {
   type Seeded,
 } from './support/fixture.ts';
 import { describeWithStack } from './support/presence.ts';
+
+const BUSY_PAUSE_MS = 20;
 
 let db: Database;
 let built: Built;
@@ -43,16 +47,19 @@ const expectChain = (rows: readonly Row[]) => {
   });
 };
 
-const saveText = async (node: NodeId, expected: VersionId | null, text: string) =>
+const saveTree = (node: NodeId, expected: VersionId | null, content: MdxRoot) =>
   engine.saveDraft({
     tenant: home.tenant,
     nodeId: node,
     expectedHeadVersionId: expected,
-    content: await tree(built.parse, home, text),
+    content,
     origin: 'human',
     actor: ACTOR,
     idempotencyKey: key(),
   });
+
+const saveText = async (node: NodeId, expected: VersionId | null, text: string) =>
+  saveTree(node, expected, await tree(built.parse, home, text));
 
 const op = fc.oneof(
   fc.record({ kind: fc.constant('save' as const), word: fc.stringMatching(/^[a-z]{1,8}$/) }),
@@ -127,19 +134,23 @@ describeWithStack('version chains', () => {
         fc.integer({ min: 1, max: 4 }),
         async (writers, rounds) => {
           const node = await newNode(engine, home);
-          const writer = async (index: number) => {
+          // Parsed one at a time. Six writers pass the host's queue of four for one project, which
+          // would stop the test in its setup and say nothing about the chain.
+          const content = await tree(built.parse, home, 'shared body\n');
+          const writer = async () => {
             let done = 0;
             while (done < rounds) {
               const head = await engine.getHead(home.tenant, node);
               if (!head.ok) throw new Error(head.error.code);
-              const saved = await saveText(node, head.value.versionId, `w${index} r${done}\n`);
+              const saved = await saveTree(node, head.value.versionId, content);
               if (saved.ok) done += 1;
+              else if (saved.error.retryable) await pause(BUSY_PAUSE_MS);
               else if (saved.error.code !== 'engine.version_conflict') {
                 throw new Error(saved.error.code);
               }
             }
           };
-          await Promise.all(Array.from({ length: writers }, (_, index) => writer(index)));
+          await Promise.all(Array.from({ length: writers }, () => writer()));
           const rows = await history(node);
           expect(rows).toHaveLength(writers * rounds);
           expectChain(rows);

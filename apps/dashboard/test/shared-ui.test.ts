@@ -38,7 +38,12 @@ describe('shared ui in the dashboard', () => {
   });
 
   it('handles F6 only through the shared landmarks', () => {
-    // A second F6 handler fights the one React Aria runs for the toast region.
-    expect(matching(/['"]F6['"]/)).toEqual([]);
+    // A second F6 handler fights the one React Aria runs for the toast region. The shortcut
+    // registry names F6 as data, so the sheet can list it, and must never handle a key itself.
+    const REGISTRY = join('shell', 'shortcuts.ts');
+    expect(matching(/['"]F6['"]/).filter((file) => file !== REGISTRY)).toEqual([]);
+    const registry = sources.find(({ file }) => file === REGISTRY)?.text ?? '';
+    expect(registry).toMatch(/['"]F6['"]/);
+    expect(registry).not.toMatch(/addEventListener|onKeyDown|keydown|\.key\b/);
   });
 });

@@ -192,15 +192,21 @@ describe('tenant access types', () => {
   });
 
   it('build AuthSchema and UserSchema from their table lists only', () => {
-    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<AuthTableName | 'api_keys'>();
-    expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName>();
+    expectTypeOf<keyof AuthSchema>().toEqualTypeOf<
+      | AuthTableName
+      | 'api_keys'
+      | 'sso_connections'
+      | 'sso_domains'
+      | 'sso_identities'
+      | 'sso_states'
+    >();
+    expectTypeOf<keyof UserSchema>().toEqualTypeOf<UserTableName | 'sso_identities'>();
     expectTypeOf<
       keyof NamedTables<FixtureSchema, 'fixture_drafts'>
     >().toEqualTypeOf<'fixture_drafts'>();
   });
 
   it('build PublishedSchema from the published allow list only', () => {
-    // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty until the first table is published
     expectTypeOf<PublishedSchema>().toEqualTypeOf<PublishedView<Schema, PublishedTableName>>();
     expectTypeOf<keyof FixturePublished>().toEqualTypeOf<'fixture_published'>();
     expectTypeOf<keyof OrganizationView<FixtureSchema>>().toEqualTypeOf<'fixture_drafts'>();
@@ -212,5 +218,18 @@ describe('tenant access types', () => {
     expectTypeOf<Database>().not.toHaveProperty('query');
     expectTypeOf<PublishedDatabase>().not.toHaveProperty('pool');
     expectTypeOf<AuthDatabase>().not.toHaveProperty('pool');
+  });
+});
+
+describe('a deadline', () => {
+  const noWork = () => Promise.resolve();
+
+  it('is for tenant work alone, as nothing else reads it', () => {
+    const unused = (db: Database, tenant: TenantRef, org: OrganizationRef) => {
+      void withTenant(db, tenant, noWork, { deadlineMs: 1000 });
+      // @ts-expect-error organization work has no deadline
+      void withOrganization(db, org, noWork, { deadlineMs: 1000 });
+    };
+    expect(typeof unused).toBe('function');
   });
 });

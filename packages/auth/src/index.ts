@@ -20,6 +20,45 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  ACCEPTED_TOTP_STEPS,
+  TOTP_DIGITS,
+  TOTP_PERIOD_SECONDS,
+  TOTP_SECRET_BYTES,
+  base32Encode,
+  matchTotp,
+  newTotpSecret,
+  otpauthUri,
+  totpCode,
+  type FactorKind,
+  type OtpauthInput,
+} from './totp.ts';
+export {
+  RECOVERY_CODE_COUNT,
+  matchRecoveryCode,
+  newRecoveryCodes,
+  recoveryCodeHash,
+  type NewRecoveryCode,
+  type RecoveryCodeRow,
+} from './recovery-codes.ts';
+export {
+  FACTOR_RATE_SCOPES,
+  factorNoticeLimit,
+  factorVerifyLimits,
+  type FactorAttempt,
+  type FactorBucket,
+  type FactorRateScope,
+  type RateReservation,
+} from './factor-limits.ts';
+export { pendingTotpRow, type PendingTotpRow } from './totp-rows.ts';
+export {
+  aesGcmSealer,
+  type SealContext,
+  type SealedRow,
+  type SealedSecret,
+  type SealingKey,
+  type SecretSealer,
+} from './secret-sealer.ts';
+export {
   INVITE_MAX_AGE_SECONDS,
   PRE_MAX_AGE_SECONDS,
   cookieNames,
@@ -29,6 +68,13 @@ export {
   type CookieNames,
   type CookieSpec,
 } from './cookies.ts';
+export {
+  LAST_METHODS,
+  LAST_METHOD_MAX_AGE_SECONDS,
+  lastMethodCookie,
+  parseLastMethod,
+  type LastMethod,
+} from './last-method.ts';
 export {
   createSessions,
   type CheckedCredential,
@@ -42,6 +88,7 @@ export {
   type RotatedSession,
   type Sessions,
   type SessionsDeps,
+  type SsoScope,
   type StartSessionInput,
   type StartedSession,
   type StepUpMethod,
@@ -222,6 +269,10 @@ export {
   type OAuthSessions,
   type OAuthTransport,
 } from './oauth.ts';
+export type { LinkProvider } from './oauth-types.ts';
+// Types only: the identity is minted and signed in inside this package, never outside it.
+export type { SsoCompleted, SsoRefusal } from './sso-sign-in.ts';
+export type { SsoConnectionStatus, SsoProtocol, VerifiedIdentity } from './verified-identity.ts';
 export {
   createEmailChange,
   type AuthNoticeMailer,
@@ -333,3 +384,60 @@ export {
   type PasswordListFailure,
   type PasswordListSummary,
 } from './password-list.ts';
+export {
+  type AuthEvent,
+  type AuthEventSink,
+  type SsoConnectionId,
+  type SsoDomainEvent,
+  type SsoDomainId,
+} from './auth-events.ts';
+export {
+  FREE_MAIL_DOMAINS,
+  SSO_TXT_LABEL,
+  createSsoDomainPolicy,
+  normalizeSsoDomain,
+  parsePublicSuffixList,
+  ssoTxtName,
+  type PublicSuffixList,
+  type SsoDomainPolicy,
+  type SsoDomainPolicyInput,
+  type SsoDomainRefusal,
+} from './sso-domain-rules.ts';
+export {
+  bundledPublicSuffixListPath,
+  loadFreeMailDomains,
+  loadPublicSuffixList,
+  parseFreeMailDomains,
+} from './sso-domain-lists.ts';
+export {
+  createNodeTxtResolver,
+  type DnsBackend,
+  type NodeTxtResolverOptions,
+  type TxtLookup,
+  type TxtResolver,
+} from './sso-dns.ts';
+export {
+  createSsoDomainRepository,
+  type SsoDomainMember,
+  type SsoDomainOps,
+  type SsoDomainRepository,
+  type SsoDomainRepositoryDeps,
+  type SsoDomainSqlStore,
+  type StoredSsoDomain,
+  type VerifiedSsoDomainRef,
+} from './sso-domain-store.ts';
+export {
+  SSO_DOMAIN_STRIKES,
+  createSsoDomainRecheck,
+  createSsoDomains,
+  type SsoDomainClaim,
+  type SsoDomainNotice,
+  type SsoDomainNoticeMailer,
+  type SsoDomainRecheck,
+  type SsoDomainRecheckDeps,
+  type SsoDomainRecheckSummary,
+  type SsoDomainView,
+  type SsoDomains,
+  type SsoDomainsDeps,
+  type TeamSsoFlag,
+} from './sso-domains.ts';

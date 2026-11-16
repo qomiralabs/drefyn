@@ -6,15 +6,23 @@ import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
 import type { NodeContent } from './content.ts';
 import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
+import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
 import {
+  backfillInput,
   createNodeSchema,
+  declareSchemaInput,
   issuesOf,
+  moveNodeSchema,
   pageSchema,
+  querySchema,
   readSchema,
   rollbackSchema,
   saveDraftSchema,
 } from './input.ts';
+import { actorFields } from './actor.ts';
+import { backfillStep } from './backfill.ts';
+import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
 import {
   noopLogger,
@@ -24,11 +32,20 @@ import {
   type EngineTracer,
   type LogFields,
 } from './ports.ts';
+import { runQuery } from './query.ts';
 import type { EngineStore, EngineTx } from './store.ts';
+import { busyIssue, PoolBusy } from './pool-gate.ts';
+import { assertRoomUnder, lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
+  BackfillState,
   CreateNodeInput,
+  DeclaredSchema,
+  DeclareSchemaInput,
+  MoveNodeInput,
   NodeHead,
   NodeId,
+  NodePage,
+  NodeQuery,
   NodeRef,
   Page,
   PageArgs,
@@ -54,12 +71,17 @@ export interface Engine {
   createNode(input: CreateNodeInput): Promise<EngineResult<NodeRef>>;
   saveDraft(input: SaveDraftInput): Promise<EngineResult<VersionRef>>;
   rollback(input: RollbackInput): Promise<EngineResult<VersionRef>>;
+  moveNode(input: MoveNodeInput): Promise<EngineResult<void>>;
   getHead(tenant: TenantRef, nodeId: NodeId): Promise<EngineResult<NodeHead>>;
   listVersions(
     tenant: TenantRef,
     nodeId: NodeId,
     page: PageArgs,
   ): Promise<EngineResult<Page<VersionSummary>>>;
+  queryNodes(tenant: TenantRef, query: NodeQuery): Promise<EngineResult<NodePage>>;
+  declareSchema(input: DeclareSchemaInput): Promise<EngineResult<DeclaredSchema>>;
+  // One batch. runFilterBackfill paces these.
+  backfillFilters(tenant: TenantRef): Promise<EngineResult<BackfillState>>;
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
@@ -68,7 +90,7 @@ const RETRYABLE_DB: ReadonlySet<string> = new Set(['DB_TIMEOUT', 'DB_UNAVAILABLE
 
 // A refusal becomes a result, and a busy database a retryable one. Anything else is a bug and
 // stays a throw, after the store has rolled the transaction back.
-async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
+export async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
   try {
     return { ok: true, value: await work() };
   } catch (error) {
@@ -80,7 +102,7 @@ async function settled<T>(work: () => Promise<T>): Promise<EngineResult<T>> {
   }
 }
 
-function parsedOrRefused<S extends z.ZodType>(
+export function parsedOrRefused<S extends z.ZodType>(
   schema: S,
   value: unknown,
 ): EngineResult<z.output<S>> {
@@ -90,7 +112,7 @@ function parsedOrRefused<S extends z.ZodType>(
     : { ok: false, error: engineError('engine.validation_failed', issuesOf(parsed.error)) };
 }
 
-const tenantFields = (tenant: TenantRef): LogFields => ({
+export const tenantFields = (tenant: TenantRef): LogFields => ({
   organization_id: tenant.organizationId,
   project_id: tenant.projectId,
 });
@@ -124,6 +146,7 @@ async function assertTypeFits(tx: EngineTx, input: z.output<typeof createNodeSch
 
 export function createEngine(deps: EngineDeps): Engine {
   const { store, flags } = deps;
+  const { gate } = store;
   const config = deps.config ?? DEFAULT_ENGINE_CONFIG;
   const logger = deps.logger ?? noopLogger;
   const tracer = deps.tracer ?? noopTracer;
@@ -132,6 +155,24 @@ export function createEngine(deps: EngineDeps): Engine {
     targetChars: config.chunkTargetChars,
     maxChars: config.chunkMaxChars,
   };
+  const held = { deadlineMs: config.slotHoldMs };
+
+  const noted = async <T>(tenant: TenantRef, pass: () => Promise<T>): Promise<T> => {
+    try {
+      return await pass();
+    } catch (error) {
+      if (error instanceof PoolBusy) {
+        logger.warn(error.issue.code, { ...tenantFields(tenant), ...gate.load() });
+      }
+      throw error;
+    }
+  };
+  // Everything that can sit on a row or tree lock waits here, off the pool, as a stalled write
+  // would otherwise hold its connection for the whole statement timeout.
+  const writing = <T>(tenant: TenantRef, work: (tx: EngineTx) => Promise<T>) =>
+    noted(tenant, () => gate.write(tenant, () => store.tenant(tenant, work, held)));
+  const writingTree = <T>(tenant: TenantRef, work: (tx: EngineTx) => Promise<T>) =>
+    noted(tenant, () => gate.treeWrite(tenant, () => store.tenant(tenant, work, held)));
 
   const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
     try {
@@ -189,31 +230,45 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return input;
       const { tenant, family, typeId, parentId, slug, orderKey } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      const under = parentId ?? null;
+      // A keyed root picks no place and has no depth, so it alone skips the queue.
+      const placed = orderKey === undefined || under !== null;
+      const write = async (tx: EngineTx) => {
+        await assertTypeFits(tx, input.value);
+        if (placed) await lockTree(tx, tenant);
+        if (under !== null) await assertRoomUnder(tx, tenant, under);
+        const key = orderKey ?? (await tailKey(tx, tenant, under));
+        await reserveNode(tx, tenant, family);
+        const row = await tx
+          .insertInto('nodes')
+          .values({
+            organization_id: tenant.organizationId,
+            project_id: tenant.projectId,
+            family,
+            type_id: typeId,
+            parent_id: parentId ?? null,
+            slug: slug ?? null,
+            order_key: key,
+            lifecycle: 'draft',
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        // Lists read only this row, so a node without one would never be listed.
+        await tx
+          .insertInto('node_filter_rows')
+          .values({
+            organization_id: tenant.organizationId,
+            project_id: tenant.projectId,
+            type_id: typeId,
+            node_id: row.id,
+          })
+          .execute();
+        return { nodeId: idOf('nod', row.id), family, typeId };
+      };
       return logged(
         'engine.create',
         { ...tenantFields(tenant), family },
-        () =>
-          settled(() =>
-            store.tenant(tenant, async (tx) => {
-              await assertTypeFits(tx, input.value);
-              await reserveNode(tx, tenant, family);
-              const row = await tx
-                .insertInto('nodes')
-                .values({
-                  organization_id: tenant.organizationId,
-                  project_id: tenant.projectId,
-                  family,
-                  type_id: typeId,
-                  parent_id: parentId ?? null,
-                  slug: slug ?? null,
-                  order_key: orderKey,
-                  lifecycle: 'draft',
-                })
-                .returning('id')
-                .executeTakeFirstOrThrow();
-              return { nodeId: idOf('nod', row.id), family, typeId };
-            }),
-          ),
+        () => settled(() => (placed ? writingTree(tenant, write) : writing(tenant, write))),
         (value) => ({ node_id: value.nodeId }),
       );
     },
@@ -244,7 +299,7 @@ export function createEngine(deps: EngineDeps): Engine {
             : [];
           return tracer.span('engine.save.write', fields, () =>
             settled(() =>
-              store.tenant(tenant, async (tx) => {
+              writing(tenant, async (tx) => {
                 const node = await lockNode(tx, tenant, nodeId);
                 return appendVersion(tx, tenant, node, {
                   ...verified.value,
@@ -252,6 +307,8 @@ export function createEngine(deps: EngineDeps): Engine {
                   actor,
                   idempotencyKey: input.value.idempotencyKey,
                   expectedHeadVersionId: input.value.expectedHeadVersionId,
+                  rawFields: input.value.fields,
+                  maxFieldsBytes: config.maxNodeBytes,
                   chunksOf: () => {
                     written = chunks.length;
                     return chunks;
@@ -278,7 +335,7 @@ export function createEngine(deps: EngineDeps): Engine {
         { ...tenantFields(tenant), node_id: nodeId, to_version_id: toVersionId },
         () =>
           settled(() =>
-            store.tenant(tenant, async (tx) => {
+            writing(tenant, async (tx) => {
               const node = await lockNode(tx, tenant, nodeId);
               const target = await tx
                 .selectFrom('node_versions')
@@ -288,6 +345,7 @@ export function createEngine(deps: EngineDeps): Engine {
                   'ast_version',
                   'schema_version',
                   'origin',
+                  'fields',
                 ])
                 .where('organization_id', '=', tenant.organizationId)
                 .where('project_id', '=', tenant.projectId)
@@ -306,6 +364,8 @@ export function createEngine(deps: EngineDeps): Engine {
                 actor,
                 idempotencyKey: input.value.idempotencyKey,
                 expectedHeadVersionId: input.value.expectedHeadVersionId,
+                storedFields: target.fields as StoredFields,
+                maxFieldsBytes: config.maxNodeBytes,
                 // Chunked again and not copied: the target may predate chunking, and its rows
                 // belong to its own version.
                 chunksOf: () => {
@@ -318,6 +378,27 @@ export function createEngine(deps: EngineDeps): Engine {
             }),
           ),
         (value) => ({ ...versionFields(value), chunks: written }),
+      );
+    },
+
+    async moveNode(raw) {
+      const input = parsedOrRefused(moveNodeSchema, raw);
+      if (!input.ok) return input;
+      const { tenant, nodeId, parentId, afterId, actor } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.move',
+        {
+          ...tenantFields(tenant),
+          node_id: nodeId,
+          parent_id: parentId ?? 'root',
+          ...actorFields(actor),
+        },
+        () =>
+          settled(() =>
+            writingTree(tenant, (tx) => moveWithinTree(tx, tenant, { nodeId, parentId, afterId })),
+          ),
+        () => ({}),
       );
     },
 
@@ -340,6 +421,7 @@ export function createEngine(deps: EngineDeps): Engine {
               'n.type_id',
               'n.lifecycle',
               'n.head_version_id',
+              'n.head_fields',
               sql`coalesce(n.head_content, v.content)`.as('content'),
               'v.seq',
               'v.ast_version',
@@ -359,6 +441,7 @@ export function createEngine(deps: EngineDeps): Engine {
             seq: row.seq,
             astVersion: row.ast_version,
             content: row.content as NodeContent | null,
+            fields: row.head_fields as StoredFields,
           };
         }),
       );
@@ -413,6 +496,75 @@ export function createEngine(deps: EngineDeps): Engine {
           }));
           return { items, nextBefore: rows.length > limit ? (items.at(-1)?.seq ?? null) : null };
         }),
+      );
+    },
+
+    async queryNodes(rawTenant, rawQuery) {
+      const input = parsedOrRefused(querySchema, { tenant: rawTenant, query: rawQuery });
+      if (!input.ok) return input;
+      const { tenant, query } = input.value;
+      let route = 'slots';
+      return logged(
+        'engine.query',
+        { ...tenantFields(tenant), type_id: query.typeId },
+        async () => {
+          const leave = gate.enterList(tenant);
+          if (typeof leave === 'string') {
+            const issue = busyIssue(leave, 'query');
+            logger.warn(issue.code, {
+              ...tenantFields(tenant),
+              max_in_flight: config.queryMaxInFlight,
+              ...gate.load(),
+            });
+            return refuse('engine.unavailable', [issue]);
+          }
+          try {
+            return await settled(() =>
+              store.tenant(
+                tenant,
+                async (tx) => {
+                  const outcome = await runQuery(tx, tenant, query, config);
+                  ({ route } = outcome);
+                  return outcome.page;
+                },
+                { timeoutMs: config.queryTimeoutMs, ...held },
+              ),
+            );
+          } finally {
+            leave();
+          }
+        },
+        (value) => ({
+          route,
+          items: value.items.length,
+          backfilling: value.backfilling.length > 0,
+        }),
+      );
+    },
+
+    async declareSchema(raw) {
+      const input = parsedOrRefused(declareSchemaInput, raw);
+      if (!input.ok) return input;
+      const { tenant, typeId } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.declare_schema',
+        { ...tenantFields(tenant), type_id: typeId },
+        () => settled(() => writing(tenant, (tx) => declareSchema(tx, tenant, input.value))),
+        (value) => ({ version: value.version, backfills: value.backfills }),
+      );
+    },
+
+    async backfillFilters(rawTenant) {
+      const input = parsedOrRefused(backfillInput, { tenant: rawTenant });
+      if (!input.ok) return input;
+      const { tenant } = input.value;
+      if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      return logged(
+        'engine.filter_backfill',
+        tenantFields(tenant),
+        () => settled(() => backfillStep(store, tenant)),
+        (state) => ({ state }),
       );
     },
   };

@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
+    "test:process": "vitest run --config vitest.process.config.ts",
     "test:fuzz": "node fuzz/run.ts",
     "test:merge": "MERGE_PROPERTY_RUNS=100000 vitest run test/merge3.property.test.ts",
     "test:mutation": "stryker run",
@@ -44,6 +45,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@drefyn/test-watchdog": "workspace:*",
     "@stryker-mutator/core": "10.1.1",
     "@stryker-mutator/vitest-runner": "10.1.1",
     "@types/estree": "1.0.9",

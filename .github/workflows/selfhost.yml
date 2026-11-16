@@ -26,8 +26,15 @@ concurrency:
 
 jobs:
   compose:
-    name: compose stack
-    runs-on: ubuntu-latest
+    name: compose stack (${{ matrix.runner }})
+    # Named images, not latest: the move to 26.04 brought Compose 5, which leaves an empty secret
+    # out instead of mounting an empty file, and nothing said so. Self hosters run both, so both
+    # stay proven until the older one is retired.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
       contents: read

@@ -101,6 +101,10 @@ describe('toDbError', () => {
     },
   );
 
+  it('maps the driver giving up on a query to DB_UNAVAILABLE', () => {
+    expect(mapped(new Error('Query read timeout')).code).toBe('DB_UNAVAILABLE');
+  });
+
   it('maps the pool wait running out to DB_UNAVAILABLE', () => {
     expect(mapped(new Error('timeout exceeded when trying to connect')).code).toBe(
       'DB_UNAVAILABLE',

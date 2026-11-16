@@ -96,9 +96,13 @@ describe('organization schema types', () => {
       | 'sessions'
       | 'password_credentials'
       | 'known_devices'
+      | 'totp_credentials'
+      | 'recovery_codes'
+      | 'factor_challenges'
       | 'memberships'
       | 'organizations'
       | 'organization_slugs'
+      | 'sso_identities'
     >();
   });
 

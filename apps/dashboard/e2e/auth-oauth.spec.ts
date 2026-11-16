@@ -20,6 +20,7 @@ import {
   toProvider,
   usersOf,
 } from './oauth-helpers.ts';
+import { expectMarkOn, forgetSession, lastMethodValue } from './last-method.ts';
 import { SIGNED_OUT } from './people.ts';
 
 // A real build through the whole redirect, in a browser, with sign up open. The provider is
@@ -88,6 +89,29 @@ for (const each of PROVIDERS) {
       expect(await usersOf(address)).toBe('1');
       expect(await identitiesOf(name, account)).toBe('1');
       expect(await sessionsOf(address)).toBe('1');
+    });
+
+    test('the next visit marks this provider as last used, on sign in and sign up', async ({
+      page,
+      provider,
+    }) => {
+      const account = newAccount(uniqueAddress(`oauth-last-${name}`));
+      await signInThrough(page, provider, each, { account });
+      await expect(page).toHaveURL(/\/welcome$/);
+      expect(await lastMethodValue(page)).toBe(name);
+      await forgetSession(page);
+      for (const path of ['/sign-in', '/sign-up']) {
+        await page.goto(path);
+        await expectMarkOn(page.getByRole('link', { name: new RegExp(`^Continue with ${label}`) }));
+      }
+    });
+
+    test('a refused return writes no mark', async ({ page, provider }) => {
+      provider.script = { account: newAccount(uniqueAddress(`oauth-last-no-${name}`)) };
+      await toProvider(page, label);
+      await page.goto(`/auth/oauth/${name}/callback?state=forged&code=x`);
+      await expect(page).toHaveURL(/\/sign-in\?error=/);
+      expect(await lastMethodValue(page)).toBeUndefined();
     });
 
     test('the start asks with PKCE and the fixed callback, and shows no secret', async ({
@@ -593,4 +617,32 @@ test('every provider call in the stack landed on the fake', async ({ page, provi
   ]) {
     expect(log).toContain(call);
   }
+});
+
+// Providers first, each in a fixed place, then the email code, then the password link. SSO
+// takes the place after Google when it exists.
+const WAY_IN = /^(Continue with (GitHub|Google)|Email me a code|Use a password instead)$/;
+
+test('sign in offers GitHub, Google, the email code, then the password link', async ({ page }) => {
+  await page.goto('/sign-in');
+  const order = await page
+    .getByRole('main')
+    .locator('a, button')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).innerText.trim()));
+  expect(order.filter((name) => WAY_IN.test(name))).toEqual([
+    'Continue with GitHub',
+    'Continue with Google',
+    'Email me a code',
+    'Use a password instead',
+  ]);
+  const boxes = await Promise.all(
+    [
+      page.getByRole('link', { name: 'Continue with GitHub' }),
+      page.getByRole('link', { name: 'Continue with Google' }),
+      page.getByRole('button', { name: 'Email me a code' }),
+      page.getByRole('link', { name: 'Use a password instead' }),
+    ].map((way) => way.boundingBox()),
+  );
+  const tops = boxes.map((box) => box?.y ?? Number.NaN);
+  expect(tops).toEqual([...tops].sort((a, b) => a - b));
 });

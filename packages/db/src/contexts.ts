@@ -1,13 +1,22 @@
 import type { AuthTableName, MemberTableName, UserTableName } from './allow-lists.ts';
 import type {
+  AppFactorChallengesTable,
   AppKnownDevicesTable,
   AppPasswordCredentialsTable,
+  AppRecoveryCodesTable,
+  AppTotpCredentialsTable,
   AppUsersTable,
   AuthKnownDevicesTable,
   AuthPasswordCredentialsTable,
   AuthUsersTable,
 } from './identity-columns.ts';
-import type { ApiKeysTable, ColumnType, Schema } from './schema.generated.ts';
+import type { ApiKeysTable, ColumnType, Schema, SsoIdentitiesTable } from './schema.generated.ts';
+import type {
+  AuthSsoConnectionsTable,
+  AuthSsoDomainsTable,
+  AuthSsoIdentitiesTable,
+  AuthSsoStatesTable,
+} from './sso-columns.ts';
 
 // Only the named tables, so a table outside the list is not even a name the transaction can
 // type.
@@ -39,7 +48,15 @@ export type AuthSchema = WithColumns<
   AuthUsersTable,
   AuthPasswordCredentialsTable,
   AuthKnownDevicesTable
-> & { api_keys: AuthApiKeysTable };
+> & {
+  api_keys: AuthApiKeysTable;
+  // Tenant tables the sign in role reaches by column, kept apart from AuthTableName for the
+  // same reason as api_keys.
+  sso_connections: AuthSsoConnectionsTable;
+  sso_domains: AuthSsoDomainsTable;
+  sso_identities: AuthSsoIdentitiesTable;
+  sso_states: AuthSsoStatesTable;
+};
 
 // Every column readable and none insertable or updatable. The policies already refuse the
 // write; this keeps it from compiling.
@@ -49,16 +66,27 @@ type ReadOnlyTables<S, T extends string> = Omit<S, T> & {
   [K in keyof S & T]: ReadOnlyTable<S[K]>;
 };
 
-// The signed in person's own rows, and the organizations they belong to, read only.
+// The second factor tables, swapped for their granted columns. Only the user context names
+// them, so this applies to UserSchema alone.
+type WithFactorColumns<S> = Omit<S, 'totp_credentials' | 'recovery_codes' | 'factor_challenges'> & {
+  totp_credentials: AppTotpCredentialsTable;
+  recovery_codes: AppRecoveryCodesTable;
+  factor_challenges: AppFactorChallengesTable;
+};
+
+// The signed in person's own rows, and the organizations they belong to, read only. Their
+// SSO links are read only too: only sign in writes one.
 export type UserSchema = ReadOnlyTables<
-  WithColumns<
-    NamedTables<Schema, UserTableName>,
-    AppUsersTable,
-    AppPasswordCredentialsTable,
-    AppKnownDevicesTable
+  WithFactorColumns<
+    WithColumns<
+      NamedTables<Schema, UserTableName>,
+      AppUsersTable,
+      AppPasswordCredentialsTable,
+      AppKnownDevicesTable
+    >
   >,
   MemberTableName
->;
+> & { sso_identities: ReadOnlyTable<SsoIdentitiesTable> };
 
 // The one table the API key failure limiter writes, before any key or organization is proved.
 export type ApiKeyLimiterSchema = NamedTables<Schema, 'api_key_failures'>;

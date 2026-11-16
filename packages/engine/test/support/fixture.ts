@@ -7,7 +7,8 @@ import { inject } from 'vitest';
 import {
   createEngine,
   databaseStore,
-  type Actor,
+  DEFAULT_ENGINE_CONFIG,
+  type MovingActor,
   type Engine,
   type EngineDeps,
   type NodeId,
@@ -38,7 +39,7 @@ export const PARSE_POLICY = {
 export const parseClient = (): ParseClient =>
   createParseClient(parseClientConfig(inject('engineParseUrl')));
 
-export const ACTOR: Actor = {
+export const ACTOR: MovingActor = {
   kind: 'user',
   userId: idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8099'),
   roles: ['editor'],
@@ -93,7 +94,7 @@ export interface Built {
 export function buildEngine(db: Database, over: Partial<EngineDeps> = {}): Built {
   const parse = parseClient();
   const engine = createEngine({
-    store: databaseStore(db),
+    store: databaseStore(db, DEFAULT_ENGINE_CONFIG),
     parse,
     parsePolicy: PARSE_POLICY,
     flags: { evaluate: () => Promise.resolve({ value: true }) },

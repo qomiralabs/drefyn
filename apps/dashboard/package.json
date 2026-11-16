@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
+    "bench:inp": "node bench/inp-quiet.ts",
     "bench:wrapper": "node bench/wrapper.ts",
     "test:server": "vitest run --config vitest.server.config.ts",
     "test:e2e": "playwright test --project=shell-chromium --project=shell-firefox --project=shell-webkit --project=flag-off --project=axe --project=reduced-motion --project=bundle --project=inp --project=lighthouse --project=auth --project=auth-no-js --project=auth-hop",

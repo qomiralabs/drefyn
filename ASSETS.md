@@ -75,3 +75,19 @@ Real Markdown and MDX pages under `packages/mdx/test/fixtures/corpus`, copied un
 only by tests and the bench; they never ship. `packages/mdx/test/fixtures/manifest.json` names the
 source repo, commit, path, licence and SHA-256 of each file, and a test fails if one drifts. Each
 source repo's licence file sits in `packages/mdx/test/fixtures/licenses`.
+
+## Public Suffix List
+
+A snapshot of the Public Suffix List, shipped unchanged under a `.txt` name (the workspace
+admits no `.dat` files) so the SSO domain claim can refuse a name
+nobody can own, such as `co.uk` or `github.io`. It is the one file in this repository under the
+Mozilla Public License 2.0 rather than Apache-2.0; the owner approved it on 2026-11-14. The licence
+notice and the source address are the first lines of the file itself, and the licence text sits
+beside it. Any change to the file stays under the MPL 2.0, so an update replaces it whole with a
+newer download rather than editing it. `packages/auth/test/sso-domain-lists.test.ts` fails if
+either file differs from the SHA-256 recorded here.
+
+| File in `packages/auth/data/public-suffix-list` | Source                                                 | Version                                                                      | Licence         | SHA-256                                                            |
+| ----------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------ |
+| `public_suffix_list.txt`                        | `https://publicsuffix.org/list/public_suffix_list.dat` | `2026-11-13_14-44-35_UTC`, commit `71c235dd3f888dd4ecd066817050a7482da710e5` | MPL-2.0         | `8576b335b871dea99dc0fccd04138311bd43f7a8da256c31bf964f11e2f7c179` |
+| `MPL-2.0.txt`                                   | `https://www.mozilla.org/media/MPL/2.0/index.txt`      | 2.0                                                                          | MPL-2.0, itself | `3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04` |

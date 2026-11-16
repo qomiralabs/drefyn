@@ -68,6 +68,11 @@ describe('the bucket list', () => {
         'password_fail',
         'password_fail_ip',
         'cli_link_verify',
+        'sso_domain_verify',
+        'totp_verify',
+        'recovery_code_verify',
+        'recovery_code_verify_ip',
+        'second_factor_notice',
       ].sort(),
     );
     expect(rateLimits.email_send_device).toEqual([{ count: 10, windowSeconds: 86_400 }]);

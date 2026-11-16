@@ -171,7 +171,8 @@ describe('session setting check', () => {
     expect(problem?.line).toBe(3);
   });
 
-  it('passes the real repository', () => {
+  // A sync scan of every tracked file, so a busy gate stretches it: over 5 s at load 50.
+  it('passes the real repository', { timeout: 60_000 }, () => {
     expect(repoSourceProblems(repoRoot)).toEqual([]);
   });
 

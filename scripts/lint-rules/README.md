@@ -142,7 +142,8 @@ of its reach. It runs in the root config and in the guard, like the other bounda
 ### `drefyn/no-select-all`
 
 Refuses `selectAll()` and `returningAll()` on a table whose grants are per column, because the
-database refuses `select *` and `returning *` there for every role. It reads the chain and
+database refuses `select *` and `returning *` there for a role that lacks a column, and where a
+role holds every column today it would read one granted later. It reads the chain and
 follows local variables, including each value written to a `let`. It cannot see a query passed
 as a parameter or returned by a helper, a table name held in a variable, a template with a
 placeholder, or a computed method name; `test/no-select-all.test.ts` pins those limits, and the
@@ -178,6 +179,17 @@ bare user id. The factories stay importable, because apps need `redeem` and
 `createOrganization` from the same objects, so the names are refused: imports and re-exports
 from `@drefyn/auth`, member reads and destructuring. An unrelated method called `issue` has to
 be renamed under `apps/`.
+
+### `drefyn/published-reads-only`
+
+On for `PUBLIC_PATHS` in the root config and the guard: `apps/docs-site`, `apps/status-page`,
+`apps/website` and `apps/api/src/public`. Code there may import only the published reader's runtime
+names: `createPublishedDatabase`, `parsePublishedReaderConfig`, `withPublishedReader`,
+`closeDatabase` and `DbError` from `@drefyn/db`, `createPublishedReader` and `publishedStore` from
+`@drefyn/engine`, and `sql` from `kysely`. The list names what is allowed, so a new draft read is
+refused without anyone adding it. `pg`, `pg-pool` and `postgres` are refused outright, as is any
+default, namespace, side effect, subpath, dynamic or `require` import of a guarded module. Type
+only imports pass, as they load nothing.
 
 ## Manifest checker
 

@@ -48,6 +48,10 @@ async function signIn(page: Page, address: string): Promise<void> {
 async function signOut(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
+  // Sign out drops the pre sign in cookie, and the hop draws each redirect as a page of its
+  // own, so that URL first belongs to an empty refresh bound for the mint route. Only the
+  // form proves the hops are over, and a navigation before it can lose to the last refresh.
+  await expect(page.getByLabel('Email address')).toBeVisible();
   await expect.poll(() => hasSession(page.context())).toBe(false);
 }
 

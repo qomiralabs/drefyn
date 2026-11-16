@@ -13,9 +13,11 @@ import {
   openShell,
   products,
   ROUTES,
+  routeCommandBar,
   tabKey,
 } from './fixtures.ts';
 import { askForCode, uniqueAddress } from './auth-helpers.ts';
+import { expectMarkOn } from './last-method.ts';
 import { SIGNED_OUT } from './people.ts';
 
 test('Tab goes skip link, top bar left to right, then the sidebar', async ({
@@ -41,9 +43,6 @@ test('Tab goes skip link, top bar left to right, then the sidebar', async ({
     expect.stringMatching(/^a Overview/),
   ]);
 });
-
-// Text only the command bar's own chunk carries: its empty results line.
-const COMMAND_BAR_MARK = 'Nothing matches';
 
 test.describe('command bar', () => {
   for (const key of ['Control+k', 'Meta+k']) {
@@ -104,35 +103,6 @@ test.describe('command bar', () => {
     await expect(commandBar(page)).toBeVisible();
     expect(scripts.length, scripts.slice(before).join('\n')).toBeGreaterThan(before);
   });
-
-  test('a failed chunk shows the error toast, no spinner, and the next press works', async ({
-    page,
-  }) => {
-    // The command bar's chunk fails however and whenever it is fetched, by its content, not
-    // by timing: a route set after the load missed a copy fetched while the page settled.
-    let blocked = 0;
-    await page.route('**/_next/static/**/*.js', async (route) => {
-      const response = await route.fetch();
-      const body = await response.text();
-      if (body.includes(COMMAND_BAR_MARK)) {
-        blocked += 1;
-        await route.abort('failed');
-        return;
-      }
-      await route.fulfill({ response, body });
-    });
-    await openShell(page, ROUTES.overview);
-    await page.keyboard.press('ControlOrMeta+k');
-    const toast = page.getByRole('region', { name: /notification/i });
-    // An error: announced at once, and it stays until dismissed.
-    await expect(toast.getByRole('alert')).toHaveText('Could not open search. Try again.');
-    await expect(commandBar(page)).toBeHidden();
-    await expect(page.getByRole('progressbar')).toHaveCount(0);
-    expect(blocked, 'the command bar chunk was requested and refused').toBeGreaterThan(0);
-    await page.unrouteAll({ behavior: 'wait' });
-    await page.keyboard.press('ControlOrMeta+k');
-    await expect(commandBar(page)).toBeVisible();
-  });
 });
 
 test('F6 and Shift+F6 move between the top bar, the sidebar and main', async ({ page }) => {
@@ -147,16 +117,15 @@ test('F6 and Shift+F6 move between the top bar, the sidebar and main', async ({ 
   expect(await focusedRegion(page)).toBe('main');
 });
 
-// A placeholder action in the account menu says it is not available yet in a toast, which
-// is the shared one from @drefyn/ui.
+// A command bar whose code fails to load says so in a toast, which is the shared one from
+// @drefyn/ui. Pressed from the account button, so focus comes back there.
 async function showToast(page: Page): Promise<void> {
+  await routeCommandBar(page, 'fail');
   const account = banner(page).getByRole('button', { name: /^MO/ });
   await account.focus();
-  await page.keyboard.press('Enter');
-  await page.getByRole('menuitem', { name: /Keyboard shortcuts/ }).click();
-  await expect(
-    notifications(page).getByText('The shortcuts sheet is not available yet.'),
-  ).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(notifications(page).getByText('Could not open search. Try again.')).toBeVisible();
+  await expect(account).toBeFocused();
 }
 
 test('F6 goes into the notifications after main and out again, both ways', async ({ page }) => {
@@ -311,6 +280,43 @@ test.describe('signed out pages', () => {
     await expect(button).toHaveAccessibleDescription('Paused until tomorrow.');
     await button.focus();
     await expect(button).toBeFocused();
+  });
+
+  test('Last used is part of the name of the control it marks', async ({ page }) => {
+    for (const [state, control] of [
+      ['last-github', page.getByRole('link', { name: /^Continue with GitHub/ })],
+      ['last-google', page.getByRole('link', { name: /^Continue with Google/ })],
+      ['last-email-code', page.getByRole('button', { name: /^Email me a code/ })],
+      ['last-password', page.getByRole('link', { name: /^Use a password instead/ })],
+    ] as const) {
+      await page.goto(`/auth-states/sign-in/${state}`);
+      await expectMarkOn(control);
+    }
+  });
+
+  test('the card is a named aside that Tab never enters', async ({ page, browserName }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/auth-states/sign-in/ready');
+    await expect(page.getByRole('complementary', { name: 'About Drefyn' })).toBeVisible();
+    // Blurring the autofocused field keeps it as the start point, so the walk starts at the
+    // top on purpose.
+    await page.getByRole('link', { name: 'Skip to content' }).focus();
+    const stops: string[] = [await focused(page)];
+    for (let i = 0; i < 40; i += 1) {
+      await page.keyboard.press(tabKey(browserName));
+      const here = await focused(page);
+      // Past the last stop focus leaves the page or wraps to the top.
+      if (here === 'body' || here === stops[0]) break;
+      const inCard = await page.evaluate(() => document.activeElement?.closest('aside') !== null);
+      stops.push(inCard ? `card ${here}` : here);
+    }
+    expect(stops.slice(0, 3)).toEqual([
+      'a Skip to content',
+      'a Drefyn, sign in',
+      'a Documentation',
+    ]);
+    expect(stops.at(-1)).toBe('a Create an account');
+    expect(stops.filter((stop) => stop.startsWith('card '))).toEqual([]);
   });
 
   test('the first Tab reaches the skip link, and it moves to main', async ({

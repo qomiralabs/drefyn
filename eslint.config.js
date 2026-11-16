@@ -1,6 +1,6 @@
 // @ts-check
 import js from '@eslint/js';
-import drefyn, { egressAllowList } from '@drefyn/lint-rules';
+import drefyn, { egressAllowList, PUBLIC_PATHS } from '@drefyn/lint-rules';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
@@ -95,12 +95,21 @@ export default tseslint.config(
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
       'drefyn/no-mdx-evaluate': 'error',
       'drefyn/no-tier-literals': 'error',
-      // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * is refused
-      // there for every role, so it must not compile into a query either. A test holds this
-      // list to that one.
+      // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * fails on a
+      // column the role lacks, or would read a column granted later, so it must not compile
+      // into a query either. A test holds this list to that one.
       'drefyn/no-select-all': [
         'error',
-        { tables: ['users', 'password_credentials', 'known_devices'] },
+        {
+          tables: [
+            'users',
+            'password_credentials',
+            'known_devices',
+            'totp_credentials',
+            'recovery_codes',
+            'factor_challenges',
+          ],
+        },
       ],
     },
   },
@@ -114,6 +123,11 @@ export default tseslint.config(
     // Operator only: no web route may mint a sign in link or act for a bare user id.
     files: ['apps/**'],
     rules: { 'drefyn/no-operator-auth': 'error' },
+  },
+  {
+    // Public paths hold the published reader and nothing that can reach a draft.
+    files: [...PUBLIC_PATHS],
+    rules: { 'drefyn/published-reads-only': 'error' },
   },
   {
     // Everything people see is styled from tokens only.

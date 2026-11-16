@@ -3,8 +3,9 @@
 import type {
   AuthSecurityNotice,
   InvitationSend,
-  OAuthProvider,
+  LinkProvider as AuthLinkProvider,
   SignInCodePurpose,
+  SsoDomainNotice,
 } from '@drefyn/auth';
 import type {
   InvitationMail,
@@ -21,8 +22,10 @@ type KeyFields = 'organizationId' | 'invitationId' | 'sendCount';
 
 // Fields that say which row a notice is about. They become the key, the tenant and the log
 // context, never words in the mail.
-type RowIds = 'organizationId' | 'keyId' | 'membershipId';
-type Kind = AuthSecurityNotice['kind'];
+type RowIds = 'organizationId' | 'keyId' | 'membershipId' | 'domainId';
+// Owners hear about SSO domains through a port of their own, sent as security notices.
+type AuthNotice = AuthSecurityNotice | SsoDomainNotice;
+type Kind = AuthNotice['kind'];
 
 // Several kinds share one union member, so Extract on a single kind would find nothing.
 type Of<Union extends { readonly kind: string }, K> = Union extends unknown
@@ -44,16 +47,16 @@ type AuthFields<Notice> =
 // Every mail kind may hold the optional facts, and only some kinds fill them.
 type MailFields<K extends Kind> = Exclude<
   keyof Of<SecurityNoticeMail, K>,
-  Exclude<OptionalKeys<Of<SecurityNoticeMail, K>>, keyof Of<AuthSecurityNotice, K>>
+  Exclude<OptionalKeys<Of<SecurityNoticeMail, K>>, keyof Of<AuthNotice, K>>
 >;
 
 describe('auth and mail agree', () => {
   it('on every notice kind', () => {
-    expectTypeOf<AuthSecurityNotice['kind']>().toEqualTypeOf<SecurityNoticeKind>();
+    expectTypeOf<Kind>().toEqualTypeOf<SecurityNoticeKind>();
   });
 
   it('on the fields of every notice kind', () => {
-    expectTypeOf<{ [K in Kind]: AuthFields<Of<AuthSecurityNotice, K>> }>().toEqualTypeOf<{
+    expectTypeOf<{ [K in Kind]: AuthFields<Of<AuthNotice, K>> }>().toEqualTypeOf<{
       [K in Kind]: MailFields<K>;
     }>();
   });
@@ -69,7 +72,7 @@ describe('auth and mail agree', () => {
   });
 
   it('on every provider', () => {
-    expectTypeOf<OAuthProvider>().toEqualTypeOf<LinkProvider>();
+    expectTypeOf<AuthLinkProvider>().toEqualTypeOf<LinkProvider>();
   });
 
   it('on every invitation field, so none is dropped', () => {

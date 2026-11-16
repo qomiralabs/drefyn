@@ -42,6 +42,10 @@ that others can read. Two first `up` runs at once share one generated file.
 If `up` fails, it says whether compose could not start the container or the healthcheck
 failed, with the last healthcheck message, and prints the command that shows the server log.
 A first start that was interrupted leaves nothing in the log; `reset --yes` and `up` again.
+Newer Compose releases (5.1 does, 2.38 does not) leave a secret with an empty value out of the
+container. With the superuser password empty, the server then cannot start at all, even with
+data already in the volume. Put the password back and run `up` again; do not reset, which would
+delete the data.
 
 ## Postgres
 
@@ -164,7 +168,8 @@ commands so `deploy/.env` is ready when it does.
 
 `up` also writes three dashboard keys to `deploy/.env`, each exactly 32 random bytes in
 unpadded base64url: `DREFYN_AUTH_SECRET`, `DREFYN_AUTH_INVITATION_BLOCK_KEY` and
-`DREFYN_API_RATE_LIMIT_KEY`. It never prints them. A `deploy/.env` from before a key existed
+`DREFYN_API_RATE_LIMIT_KEY`. It writes a fourth, `DREFYN_AUTH_TOTP_KEYS`, as one
+`<id>:<key>` entry with a random 8 character hex id. It never prints them. A `deploy/.env` from before a key existed
 gets that key appended by `up` or `upgrade`; one already there is never replaced. To make one
 by hand:
 
@@ -196,6 +201,14 @@ lifts every block at once, and people who asked not to be invited again can be. 
 if it leaked, knowing that cost: replace the value and restart. There is no previous key for
 it. Keep it in the same backups as the database, because a restored database with a lost key
 has the same effect.
+
+### `DREFYN_AUTH_TOTP_KEYS` lives outside the database backups
+
+It seals each person's authenticator secret. The first key seals and every listed key opens,
+so a rotation prepends a key. Unset, nobody can turn on authenticator codes and everything
+else works. Unlike the block key, keep a copy of it **outside** the database backups: a backup
+holding both gives up every enrolled person's secret. Lose it, and people enrolled under it
+need their recovery codes.
 
 ### Rotating `DREFYN_API_RATE_LIMIT_KEY`
 
@@ -343,6 +356,19 @@ select name, last_run_at, next_run_at from app.scheduled_jobs;
 
 With no dashboard server running, nothing is deleted until one starts.
 
+Content lists read one shared table, and that table needs looking after. After a bulk import, and
+on a schedule of your choosing, run this with `DREFYN_MIGRATION_DATABASE_URL` set:
+
+```sh
+drefyn maintain filter-rows --after-import   # once an import ends
+drefyn maintain filter-rows                  # rebuilds the key only when it has bloated
+```
+
+Each run prints one JSON line of counts. Alert on `alerts` being non empty: an open transaction past
+5 minutes or more than 20,000 dead rows both slow every content list. A run takes a few seconds on
+a small table and scales with the table, and two runs never overlap. To see transactions of other
+roles the migration role needs `pg_read_all_stats`, which only a superuser can grant.
+
 ## Mail for tests
 
 A test profile adds Mailpit (MIT), pinned by digest, for the auth flows and end to end tests.
@@ -403,6 +429,19 @@ apply.
 The list is checked only when a password is chosen, never at sign in. A check that does not
 answer within one second lets the password through and logs and counts
 `auth.breach_check_unavailable`. A rebuilt list takes effect on the next restart.
+
+## SSO domain verification
+
+Team SSO proves a domain with a DNS TXT record, so the dashboard makes TXT queries to the
+resolvers the host is set up with. Allow outbound DNS from the dashboard container.
+
+- `DREFYN_AUTH_SSO_DNS_TIMEOUT_MS` (default 3000, 100 to 30000): how long one lookup may take. A
+  lookup that runs out of time never counts against a domain.
+- `DREFYN_AUTH_SSO_FREE_MAIL_DOMAINS_FILE`: an absolute path to a UTF-8 file of extra domains
+  that can never be claimed, one a line, `#` for comments, at most 1 MiB. A line that is not a
+  domain stops startup with `AUTH_CONFIG_INVALID`. The built in list of large free mail
+  providers always applies.
+- `DREFYN_AUTH_RATE_SSO_DOMAIN_VERIFY` (default `20/1h`): verify attempts per organization.
 
 ## Managed Postgres
 

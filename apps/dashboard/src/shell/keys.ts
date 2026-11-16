@@ -1,4 +1,5 @@
 // Keyboard rules for the shell, kept apart from React so they can be tested on their own.
+import { sequences, SHORTCUTS } from './shortcuts.ts';
 
 // Single key shortcuts must not fire while someone types.
 export function isTyping(el: Element | null): boolean {
@@ -16,12 +17,7 @@ export function isTyping(el: Element | null): boolean {
 // G then a key, within a second: 1, 2 and 3 open the products in suite order, O the overview.
 export const SEQUENCE_WINDOW_MS = 1000;
 
-const SEQUENCES: Readonly<Record<string, string>> = {
-  '1': 'docs',
-  '2': 'studio',
-  '3': 'status',
-  o: 'overview',
-};
+const SEQUENCES = sequences(SHORTCUTS);
 
 export function sequenceTarget(
   pending: { key: string; at: number } | null,

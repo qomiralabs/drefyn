@@ -958,6 +958,9 @@ describeWithStack('the engine tables', () => {
         'content_types|content_types_tenant_stats|{d,f}',
         'node_versions|node_versions_tenant_stats|{d,f}',
         'nodes|nodes_tenant_stats|{d,f}',
+        // Not foreign key targets: the reader's own lists plan on these.
+        'published_filter_rows|published_filter_rows_tenant_stats|{d,f}',
+        'published_versions|published_versions_tenant_stats|{d,f}',
       ]);
     });
 
@@ -993,7 +996,7 @@ describeWithStack('the engine tables', () => {
       );
       expect(await definition('node_filter_rows_pkey')).toContain(
         'btree (organization_id, project_id, type_id, node_id) ' +
-          'INCLUDE (t1, t2, t3, t4, t5, i1, i2, i3, i4, i5, d1, d2)',
+          'INCLUDE (t1, t2, t3, t4, t5, l1, l2, l3, l4, l5, i1, i2, i3, i4, i5, d1, d2)',
       );
     });
 
@@ -1166,7 +1169,28 @@ describeWithStack('the engine tables', () => {
       expect(counts.trim()).toBe('');
       const versions = await superuser(`select count(*) from app.node_versions;`, fresh.name);
       expect(versions.trim()).toBe('3');
-      expect(await catalogProblems(fresh.owner, ALLOW_LISTS)).toEqual([]);
+      // The down also reverts the later SSO tables, whose grants the check would miss, the
+      // just in time arm of the membership insert policy, which ends both arms before it, and
+      // the enforcement terms of the organization insert guard.
+      const jitArm = " OR ((role = 'member'::text)";
+      const ssoTerms = " AND (sso_enforcement = 'off'::text)";
+      const beforeSso = {
+        ...ALLOW_LISTS,
+        authTenantGrants: ALLOW_LISTS.authTenantGrants.filter(
+          (g) => !g.name.startsWith('app.sso_'),
+        ),
+        restrictivePolicies: ALLOW_LISTS.restrictivePolicies.map((p) => {
+          if (p.withCheck === null) return p;
+          if (p.name === 'app.memberships.membership_insert_origin') {
+            return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(jitArm))}))` };
+          }
+          if (p.name === 'app.organizations.organization_insert_tier') {
+            return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(ssoTerms))})` };
+          }
+          return p;
+        }),
+      };
+      expect(await catalogProblems(fresh.owner, beforeSso)).toEqual([]);
 
       const up = await migrate(['migrate', 'up'], { url: fresh.owner });
       expect(up.code, describeFailure(up)).toBe(0);
