@@ -72,21 +72,22 @@ jobs:
         env:
           DREFYN_STACK_ID: build-only
         run: docker compose -f deploy/compose.yaml --profile api build api
-      # The same commands a self hoster runs, from a clean runner with no volume, with the API
-      # profile on. The wait matches the promise that a clean start is healthy within a minute.
+      # The same commands a self hoster runs, from a clean runner with no volume, with the API and
+      # search profiles on. The wait matches the promise that a clean start is healthy within a
+      # minute.
       - name: Start
         env:
           DREFYN_SELFHOST_WAIT_SECONDS: 60
-          COMPOSE_PROFILES: api
+          COMPOSE_PROFILES: api,search
         run: bash scripts/selfhost.sh up
       - name: Smoke check
         env:
-          COMPOSE_PROFILES: api
+          COMPOSE_PROFILES: api,search
         run: bash scripts/selfhost-smoke.sh
       - name: Restart keeps the data and the roles
         env:
           DREFYN_SELFHOST_WAIT_SECONDS: 60
-          COMPOSE_PROFILES: api
+          COMPOSE_PROFILES: api,search
         run: |
           bash scripts/selfhost.sh restart
           bash scripts/selfhost-smoke.sh
@@ -107,7 +108,7 @@ jobs:
         run: bash scripts/selfhost-parse-test.sh
       - name: Tear down
         env:
-          COMPOSE_PROFILES: api
+          COMPOSE_PROFILES: api,search
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove
       # those stacks themselves. This covers the main stack. The placeholder ID always wins
@@ -116,5 +117,5 @@ jobs:
         if: failure()
         env:
           DREFYN_STACK_ID: logs-only
-          COMPOSE_PROFILES: api
+          COMPOSE_PROFILES: api,search
         run: docker compose -f deploy/compose.yaml logs --no-color --timestamps

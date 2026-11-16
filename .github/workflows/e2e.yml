@@ -25,6 +25,8 @@ jobs:
     env:
       # A project of its own per attempt, so the tests never assume the default name.
       COMPOSE_PROJECT_NAME: drefyn-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      # Typesense joins the stack for the search tests, and every compose step below sees it.
+      COMPOSE_PROFILES: search
       DREFYN_POSTGRES_PORT: '55432'
       DREFYN_DATABASE_SSL: disable
     steps:
@@ -54,6 +56,10 @@ jobs:
       # Key checks, tenancy, readiness and graceful stop, with real keys on databases of their own.
       - name: API integration tests
         run: pnpm --filter @drefyn/api test:integration
+      # Two tenants, a fault injected query builder, widening attempts and the route over HTTP,
+      # against the stack's own Typesense.
+      - name: Search integration tests
+        run: pnpm --filter @drefyn/search test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the
@@ -102,7 +108,7 @@ jobs:
           fi
       - name: Logs
         if: failure()
-        run: docker compose -f deploy/compose.yaml logs --no-color --timestamps postgres
+        run: docker compose -f deploy/compose.yaml logs --no-color --timestamps postgres typesense
       - name: Tear down
         if: always()
         run: bash scripts/selfhost.sh reset --yes

@@ -37,7 +37,8 @@ random_key() {
 # DREFYN_AUTH_SECRET: blocks are stored as an HMAC under it, so a new one lifts them all.
 # The second factor keyring is a list of <id>:<key>, so it starts as one entry. Its id only
 # has to differ from the ids an operator adds later, and random hex does.
-KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS'
+# The search admin key is Typesense's own and has the same shape as the auth keys.
+KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS|DREFYN_SEARCH_ADMIN_KEY'
 
 # generated_value <key>: a fresh value of the right shape for that key, checked, on stdout.
 generated_value() {
@@ -84,8 +85,8 @@ ensure_env() {
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
     [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
-    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ]; then
-    say <<<"selfhost: $example does not list the stack ID, the five passwords and the four auth keys; nothing was written."
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 5 ]; then
+    say <<<"selfhost: $example does not list the stack ID, the five passwords and the five generated keys; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
