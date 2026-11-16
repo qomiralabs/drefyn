@@ -3,6 +3,7 @@ import { idOf, type OrganizationId } from '@drefyn/tenancy';
 
 export const DASHBOARD_FLAG = 'dashboard.shell';
 export const MAIL_FLAG = 'email.smtp_delivery';
+export const TEAM_SSO_FLAG = 'auth.team_sso';
 
 // Who the flag is asked about when nobody is signed in. The nil UUID, which generated ids
 // never are, so it belongs to no tenant and the answer can never depend on a slug.
@@ -32,6 +33,18 @@ export async function mailDelivery(
 ): Promise<boolean> {
   try {
     const value: unknown = await client.isOn(MAIL_FLAG, context);
+    return value === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function teamSso(
+  client: FlagClient,
+  context: Pick<FlagContext, 'organizationId'>,
+): Promise<boolean> {
+  try {
+    const value: unknown = await client.isOn(TEAM_SSO_FLAG, context);
     return value === true;
   } catch {
     return false;
