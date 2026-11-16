@@ -6,8 +6,16 @@ import { sql, type Transaction } from 'kysely';
 import { grantAccess, type AccessResult } from './access.ts';
 import type { AuthConfig } from './config.ts';
 import { forgetDevices, resetDevices } from './devices.ts';
-import { sessionCookieValue, type BrowserContext, type CookieSpec } from './cookies.ts';
+import {
+  FACTOR_MAX_AGE_SECONDS,
+  sessionCookieValue,
+  type BrowserContext,
+  type CookieSpec,
+} from './cookies.ts';
 import { AuthError } from './errors.ts';
+import { spendFactorProof, type FactorProof } from './factor-proof.ts';
+import { dropChallenge, hasConfirmedFactor, lockFactor, openChallenge } from './factor-rows.ts';
+import { safeReturnTo } from './return-to.ts';
 import { constantTimeEqual, sha256 } from './keys.ts';
 import { isSlugShape } from './organization-rules.ts';
 import { createRateLimiter, type AuthLogger, type RateLimiter } from './rate-limiter.ts';
@@ -38,6 +46,7 @@ export type {
 } from './session-support.ts';
 import {
   SECRET_BYTES,
+  formatFactorToken,
   formatSessionToken,
   parseSessionToken,
   type SessionToken,
@@ -68,9 +77,21 @@ export interface SessionRef {
 }
 
 export interface StartedSession {
+  readonly kind: 'session';
   readonly session: SessionInfo;
   readonly setCookies: readonly CookieSpec[];
 }
+
+// The person has a confirmed second factor: no session exists yet, only a challenge. The
+// cookies set the factor cookie and clear the OAuth one; the pre sign in cookie stays for
+// the challenge form.
+export interface FactorRequired {
+  readonly kind: 'factor_required';
+  readonly setCookies: readonly CookieSpec[];
+}
+
+export const factorRequired = (value: object): value is FactorRequired =>
+  'kind' in value && value.kind === 'factor_required';
 
 export interface RotatedSession {
   // The other sessions removed; the reissued one is not counted.
@@ -105,12 +126,20 @@ export interface StartSessionInput {
   readonly credential?: CheckedCredential;
   // Required with the sso method and refused with any other.
   readonly sso?: SsoScope;
+  // Where to go once a factor challenge passes. Kept on the challenge, never on a session.
+  readonly returnTo?: string;
+  // A factor this person just passed, which only the factor check can make. Spent here.
+  readonly factor?: FactorProof;
 }
 
 export interface Sessions extends StepUps {
-  // Creates the row for a sign in that was just proved. Any session the browser already
-  // holds is deleted first, once its cookie proves it, whoever it belongs to.
-  startSession(b: BrowserContext, input: StartSessionInput): Promise<StartedSession>;
+  // The one way into a session. A person with a confirmed second factor gets a challenge
+  // instead, unless the input carries a proof of it. Once a session exists, any session
+  // the browser held before is deleted, once its cookie proves it, whoever it belongs to.
+  startSession(
+    b: BrowserContext,
+    input: StartSessionInput,
+  ): Promise<StartedSession | FactorRequired>;
   resolve(cookie: string | undefined): Promise<ResolvedSession | null>;
   resolveSession(cookie: string | undefined): Promise<SessionInfo | null>;
   // The guard's one call. Read only: a due touch is reported, never written here.
@@ -207,6 +236,122 @@ async function prove(
   const matched = constantTimeEqual(sha256(token.secret), row?.secret_hash ?? DUMMY_HASH);
   if (row === undefined || !matched || row.user_id !== token.userId) return null;
   return row;
+}
+
+// Deletes the row a browser's cookie proves. A cookie that proves nothing leaves every row
+// alone, so a forged cookie cannot sign anyone out.
+export async function retireSession(
+  store: SessionStore,
+  idleDays: number,
+  token: SessionToken,
+): Promise<void> {
+  try {
+    await store.user(token.userId, async (tx) => {
+      if ((await prove(tx, token, idleDays)) === null) throw REFUSED;
+      await tx.deleteFrom('sessions').where('id', '=', token.sessionId).execute();
+    });
+  } catch (error) {
+    if (error !== REFUSED) throw unavailable(error);
+  }
+}
+
+export interface ProvedSessionValues {
+  readonly userId: UserId;
+  readonly method: SessionMethod;
+  readonly sso?: SsoScope;
+  readonly userAgent: string;
+  readonly secretHash: Buffer;
+  readonly absoluteDays: number;
+}
+
+// The session a passed factor challenge earns, inserted in the caller's transaction so the
+// code, the challenge and the session commit together. Refuses any proof but a fresh one
+// for this person.
+export async function insertProvedSession(
+  tx: Transaction<UserSchema>,
+  proof: FactorProof,
+  values: ProvedSessionValues,
+): Promise<SessionInfo> {
+  if (!spendFactorProof(proof, values.userId)) throw new AuthError('AUTH_INPUT_INVALID');
+  const row = await insertPlain(
+    tx,
+    {
+      user_id: values.userId,
+      secret_hash: values.secretHash,
+      method: values.method,
+      user_agent: userAgent(values.userAgent),
+    },
+    values.sso,
+    values.absoluteDays,
+  );
+  return sessionFrom(tx, values.userId, values.method, row);
+}
+
+async function insertPlain(
+  tx: Transaction<UserSchema>,
+  values: SessionValues,
+  sso: SsoScope | undefined,
+  absoluteDays: number,
+) {
+  return tx
+    .insertInto('sessions')
+    .values({
+      ...values,
+      sso_connection_id: sso?.connectionId ?? null,
+      sso_organization_id: sso?.organizationId ?? null,
+      authenticated_at: sql<Date>`now()`,
+      last_seen_at: sql<Date>`now()`,
+      expires_at: sql<Date>`now() + make_interval(days => ${absoluteDays})`,
+    })
+    .returning(['id', 'authenticated_at', 'expires_at'])
+    .executeTakeFirstOrThrow();
+}
+
+async function sessionFrom(
+  tx: Transaction<UserSchema>,
+  userId: UserId,
+  sessionMethod: SessionMethod,
+  row: { readonly id: string; readonly authenticated_at: Date; readonly expires_at: Date },
+): Promise<SessionInfo> {
+  const user = await tx
+    .selectFrom('users')
+    .select('email')
+    .where('id', '=', userId)
+    .executeTakeFirstOrThrow();
+  return {
+    sessionId: idOf('ses', row.id),
+    userId,
+    email: user.email,
+    authenticatedAt: row.authenticated_at,
+    expiresAt: row.expires_at,
+    method: sessionMethod,
+  };
+}
+
+// Holds the person's password row while it still holds the hash the sign in checked, and
+// writes the rehash then, as insertGuarded does for a session. False when the hash moved.
+async function holdPassword(
+  tx: Transaction<UserSchema>,
+  credential: CheckedCredential,
+): Promise<boolean> {
+  const rehash = credential.rehash;
+  const held = await tx
+    .selectFrom('password_credentials')
+    .select('user_id')
+    .where('user_id', '=', sql<string>`app.current_user_id()`)
+    .where('phc', '=', credential.phc)
+    .$call((q) => (rehash === undefined ? q.forShare() : q.forUpdate()))
+    .executeTakeFirst();
+  if (held === undefined) return false;
+  if (rehash !== undefined) {
+    await tx
+      .updateTable('password_credentials')
+      .set({ phc: rehash, updated_at: sql<Date>`now()` })
+      .where('user_id', '=', sql<string>`app.current_user_id()`)
+      .where('phc', '=', credential.phc)
+      .execute();
+  }
+  return true;
 }
 
 function info(row: Proved, token: SessionToken, email: string): SessionInfo {
@@ -327,19 +472,6 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
     }
   }
 
-  // Deletes the row a browser's cookie proves. A cookie that proves nothing leaves every
-  // row alone, so a forged cookie cannot sign anyone out.
-  async function retire(token: SessionToken): Promise<void> {
-    try {
-      await store.user(token.userId, async (tx) => {
-        if ((await prove(tx, token, idleDays)) === null) throw REFUSED;
-        await tx.deleteFrom('sessions').where('id', '=', token.sessionId).execute();
-      });
-    } catch (error) {
-      if (error !== REFUSED) throw unavailable(error);
-    }
-  }
-
   // Ids and a count only: never a cookie, a secret or an address.
   function logRevoked(
     user: UserId,
@@ -370,11 +502,40 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       if ((input.method === 'sso') !== sso || (sso && input.credential !== undefined)) {
         throw new AuthError('AUTH_INPUT_INVALID');
       }
-      const old = parseSessionToken(sessionCookieValue(config, b.cookies));
-      if (old !== null) await retire(old);
+      const proved = input.factor !== undefined;
+      if (proved && !spendFactorProof(input.factor, input.userId)) {
+        throw new AuthError('AUTH_INPUT_INVALID');
+      }
       const secret = random(SECRET_BYTES);
+      let started: { readonly kind: 'session'; readonly session: SessionInfo } | FactorRequired;
       try {
-        const session = await store.user(input.userId, async (tx) => {
+        started = await store.user(input.userId, async (tx) => {
+          await lockFactor(tx, input.userId, 'shared');
+          // Read after the lock, so an enrolment that committed first is always seen.
+          if (!proved && (await hasConfirmedFactor(tx))) {
+            const credential = input.credential;
+            if (credential !== undefined && !(await holdPassword(tx, credential))) {
+              throw new AuthError('AUTH_CREDENTIALS_INVALID');
+            }
+            await openChallenge(tx, {
+              userId: input.userId,
+              secretHash: sha256(secret),
+              method: input.method,
+              returnTo: safeReturnTo(input.returnTo, config.appOrigin),
+              ...(input.sso === undefined ? {} : { sso: input.sso }),
+            });
+            return {
+              kind: 'factor_required' as const,
+              setCookies: [
+                {
+                  name: config.cookies.factor,
+                  value: formatFactorToken({ userId: input.userId, secret }),
+                  maxAgeSeconds: FACTOR_MAX_AGE_SECONDS,
+                },
+                clear(config.cookies.oauth),
+              ],
+            };
+          }
           const values = {
             user_id: input.userId,
             secret_hash: sha256(secret),
@@ -384,18 +545,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
           const credential = input.credential;
           const row =
             credential === undefined
-              ? await tx
-                  .insertInto('sessions')
-                  .values({
-                    ...values,
-                    sso_connection_id: input.sso?.connectionId ?? null,
-                    sso_organization_id: input.sso?.organizationId ?? null,
-                    authenticated_at: sql<Date>`now()`,
-                    last_seen_at: sql<Date>`now()`,
-                    expires_at: sql<Date>`now() + make_interval(days => ${absoluteDays})`,
-                  })
-                  .returning(['id', 'authenticated_at', 'expires_at'])
-                  .executeTakeFirstOrThrow()
+              ? await insertPlain(tx, values, input.sso, absoluteDays)
               : await insertGuarded(
                   tx,
                   values,
@@ -413,37 +563,33 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
               .where('phc', '=', credential.phc)
               .execute();
           }
-          const user = await tx
-            .selectFrom('users')
-            .select('email')
-            .where('id', '=', input.userId)
-            .executeTakeFirstOrThrow();
           return {
-            sessionId: idOf('ses', row.id),
-            userId: input.userId,
-            email: user.email,
-            authenticatedAt: row.authenticated_at,
-            expiresAt: row.expires_at,
-            method: input.method,
-          } satisfies SessionInfo;
+            kind: 'session' as const,
+            session: await sessionFrom(tx, input.userId, input.method, row),
+          };
         });
-        const value = formatSessionToken({
-          userId: input.userId,
-          sessionId: session.sessionId,
-          secret,
-        });
-        return {
-          session,
-          // The pre sign in cookies go, so nothing chosen before sign in outlives it.
-          setCookies: [
-            { name: config.cookies.session, value, maxAgeSeconds: absoluteDays * DAY_SECONDS },
-            clear(config.cookies.pre),
-            clear(config.cookies.oauth),
-          ],
-        };
       } catch (error) {
         throw unavailable(error);
       }
+      // A challenge leaves the browser's old session alone: an abandoned one costs nothing.
+      if (started.kind === 'factor_required') return started;
+      const old = parseSessionToken(sessionCookieValue(config, b.cookies));
+      if (old !== null) await retireSession(store, idleDays, old);
+      const value = formatSessionToken({
+        userId: input.userId,
+        sessionId: started.session.sessionId,
+        secret,
+      });
+      return {
+        kind: 'session',
+        session: started.session,
+        // The pre sign in cookies go, so nothing chosen before sign in outlives it.
+        setCookies: [
+          { name: config.cookies.session, value, maxAgeSeconds: absoluteDays * DAY_SECONDS },
+          clear(config.cookies.pre),
+          clear(config.cookies.oauth),
+        ],
+      };
     },
 
     resolve,
@@ -567,6 +713,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .execute();
           // A copied device cookie must not keep its rate limit exemption either.
           await forgetDevices(tx);
+          await dropChallenge(tx);
           return gone;
         });
         revoked = rows.length;
@@ -581,6 +728,9 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
       const secret = random(SECRET_BYTES);
       try {
         const rotated = await store.user(s.userId, async (tx) => {
+          // This inserts a session, so it waits for an enrolment in flight and then finds
+          // its own row gone, rather than reissuing a row the enrolment never saw.
+          await lockFactor(tx, s.userId, 'shared');
           // Every row of the user, locked in id order: two presses in two tabs queue on the
           // first row, and the second then finds its own row gone instead of deadlocking.
           const rows = await tx
@@ -641,6 +791,7 @@ export function createSessions(config: AuthConfig, deps: SessionsDeps): Sessions
             .where('id', '<>', inserted.id)
             .returning('id')
             .execute();
+          await dropChallenge(tx);
           // This browser keeps a device, on a new cookie; every copy of an old one is forgotten.
           const deviceCookies = await resetDevices(tx, config, s.userId, b.userAgent, random);
           return {

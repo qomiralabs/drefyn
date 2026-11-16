@@ -1,3 +1,4 @@
+import { asSignedIn } from '../../support.ts';
 import { randomBytes } from 'node:crypto';
 import {
   createPasswordHasher,
@@ -85,9 +86,9 @@ export async function personWithPassword(
     userId,
     method: 'email',
   });
-  const set = await flow.signIn.setPassword(started.session, { newPassword: password });
+  const set = await flow.signIn.setPassword(asSignedIn(started).session, { newPassword: password });
   if (!set.ok) throw set.error;
-  return { email, session: started.session };
+  return { email, session: asSignedIn(started).session };
 }
 
 // GET the form, then POST it from the same browser, as the page does.

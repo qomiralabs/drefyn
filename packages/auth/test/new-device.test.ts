@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
@@ -163,7 +164,7 @@ describe('sign in flows send the new device notice', () => {
     const result = await signIn.verifyEmailCode(browser(), { code: '48312097' });
     if (!result.ok) throw result.error;
     expect(mail.notices).toEqual([]);
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(
       mail.notices.map((n) => [n.notice.kind, 'method' in n.notice && n.notice.method]),
     ).toEqual([['new_device_sign_in', 'email']]);
@@ -173,7 +174,7 @@ describe('sign in flows send the new device notice', () => {
     const { signIn, mail } = emailFlow(false);
     const result = await signIn.verifyEmailCode(browser(), { code: '48312097' });
     if (!result.ok) throw result.error;
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(mail.notices).toEqual([]);
   });
 
@@ -203,7 +204,7 @@ describe('sign in flows send the new device notice', () => {
     );
     const result = await signIn.verifyEmailCode(browser(), { code: '48312097' });
     if (!result.ok) throw result.error;
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(mail.notices).toEqual([]);
   });
 
@@ -228,7 +229,7 @@ describe('sign in flows send the new device notice', () => {
       csrf: csrfFor(config),
     });
     if (!result.ok) throw result.error;
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(mail.notices.map((n) => n.notice.kind)).toEqual(['new_device_sign_in']);
   });
 });
