@@ -606,10 +606,11 @@ describe('public surface tokens', () => {
     expect(renderTokensCss()).toContain('url("../fonts/');
   });
 
-  it('ships both, each under the token size budget', () => {
+  // Docs carries the reader palette on top, allowed 2 KB more. Each page is pruned to the
+  // properties it reads before it ships, so this is the ceiling, not what a page pays.
+  it('ships both, each under its token size budget', () => {
     expect(surfaceTokensCss).toEqual({ docs, status });
-    for (const css of Object.values(surfaceTokensCss)) {
-      expect(gzipSync(css).length).toBeLessThan(2.5 * 1024);
-    }
+    expect(gzipSync(surfaceTokensCss.status).length).toBeLessThan(2.5 * 1024);
+    expect(gzipSync(surfaceTokensCss.docs).length).toBeLessThan(4.5 * 1024);
   });
 });

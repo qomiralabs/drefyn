@@ -6,6 +6,7 @@ import {
   holdLoad,
   inbox,
   main,
+  ON_ORIGIN,
   openShell,
   RAIL_TIP_MARK,
   ROUTES,
@@ -14,6 +15,7 @@ import {
   tabKey,
 } from './fixtures.ts';
 import { openCockpit, sidebar } from './incident-helpers.ts';
+import { MAYA, stateFile } from './people.ts';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Payments API docs' });
 
@@ -126,6 +128,49 @@ test.describe('the tablet rail', () => {
     await expect(first).toBeFocused();
     const label = (await first.locator('span.truncate').first().textContent())?.trim() ?? '';
     await expect(tip).toHaveText(label);
+  });
+
+  // The window the tests above cannot pin: the code is in and React is still rendering with it
+  // when the key lands, so the link is replaced inside the very commit that wraps it. A slowed
+  // page on a first visit widens that window to where a busy runner meets it. Before the fix,
+  // about one first visit in four lost focus here, so twenty in a row cannot pass by luck.
+  test('focus on a first visit survives the tooltips wrapping the links, on a slow page', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'CPU throttling is a Chromium DevTools control');
+    test.setTimeout(240_000);
+    const misses: string[] = [];
+    for (let visit = 0; visit < 20; visit += 1) {
+      const rate = 4 + (visit % 3) * 2;
+      // A fresh context each time, so the tooltip code is fetched as on a first visit.
+      const context = await browser.newContext({
+        baseURL: ON_ORIGIN,
+        storageState: stateFile(MAYA),
+        viewport: TABLET,
+      });
+      const page = await context.newPage();
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+      await openShell(page, ROUTES.project);
+      await page.keyboard.press('F6');
+      await page.keyboard.press('F6');
+      await page.keyboard.press('Tab');
+      const first = rail(page).getByRole('link').first();
+      const tip = page.locator('[role="tooltip"]');
+      // Each check waits its usual time; a miss is noted rather than thrown, so the report
+      // shows how many visits lost focus, not just the first.
+      const kept = await expect(tip)
+        .toBeVisible()
+        .then(() => expect(first).toBeFocused())
+        .then(
+          () => true,
+          () => false,
+        );
+      if (!kept) misses.push(`visit ${String(visit)} at rate ${String(rate)}`);
+      await context.close();
+    }
+    expect(misses).toEqual([]);
   });
 });
 

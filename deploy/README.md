@@ -4,14 +4,18 @@ Docker Compose files for running Drefyn yourself. Today the stack is Postgres wi
 other services join it as they are built.
 
 The parse host and the API service do not start with the stack. They are off behind the
-`parse` and `api` compose profiles until the app tier joins it. See
-[The API service](#the-api-service) and [The parse host](#the-parse-host).
+`parse` and `api` compose profiles until the app tier joins it; `COMPOSE_PROFILES=api,parse`
+turns both on. See [The API service](#the-api-service) and [The parse host](#the-parse-host).
 
 ## Requirements
 
 - Docker Engine 25 or later, for the healthcheck's start interval
 - Docker Compose 2.23.1 or later, for secrets read from the environment
 - `jq`, for the scripts and the smoke check
+- Memory: these are limits, not reservations. Postgres is capped at 1 GB, the API at 512 MB
+  and the parse host at 2 GB by default. Once the app tier joins, plan on a 4 GB machine (an
+  estimate: the app tier is not measured yet). For less, use the parse host's small profile
+  below.
 
 ## Start, stop, reset
 
@@ -565,22 +569,39 @@ Customer pages are hostile input, so they are parsed in a service of their own: 
 image, built from `deploy/parse-host/Dockerfile`. It holds no credentials, has no volume and
 publishes no port, and its `parse` network is `internal`, so it has no route to the internet or
 to the machine it runs on. Node has no network permission, so that network is the only thing
-closing egress. Keep it that way: anything on the `parse` network can reach the host, and only
-the app tier belongs there.
+closing egress. Keep it that way: only the app tier belongs on the `parse` network.
+
+`internal` closes the way out, not the way to a neighbour. A host taken over by a hostile page
+can connect to anything listening on the `parse` network, so the app tier must listen there on
+nothing: bind its own ports to its address on its other network, never to every interface. The
+smoke check tries every port of every neighbour from inside the host and fails on any answer.
+
+One command brings it up with the stack:
 
 ```sh
-token="$(openssl rand -hex 32)"                 # goes to the app tier as DREFYN_PARSE_HOST_TOKEN
-printf '%s' "$token" | shasum -a 256            # goes in deploy/.env as DREFYN_PARSE_TOKEN_SHA256
-docker compose -f deploy/compose.yaml --profile parse up --detach --build --wait parse-host
-bash scripts/selfhost-parse-test.sh             # proves the boundary from real containers
+COMPOSE_PROFILES=parse bash scripts/selfhost.sh up   # or set COMPOSE_PROFILES=parse in deploy/.env
+bash scripts/selfhost-smoke.sh --parse                # checks the boundary from real containers
+bash scripts/selfhost-smoke.sh --faults               # also kills and floods a host of its own
 ```
 
-The host keeps only the hash, and it will not start without one. `DREFYN_PARSE_HOST_MEMORY_MB`,
-default 2048, sets both the check the host makes at start and the container's memory limit. On a
-small machine lower `DREFYN_PARSE_WORKER_MEMORY_MB`, default 512, and
-`DREFYN_PARSE_MAX_HELD_BYTES`, default 268435456, as well: the host refuses to start unless two
-threads at that cap, three times the held bytes and 256 MB fit. 128 and 134217728 fit in 1024,
-and a page that needs more heap is refused with `mdx.out_of_memory`. The
-supervisor inside the container restarts a host that dies. A crash loop stops it for a minute
-and logs `mdx.parse_host_crash_loop` at error level, and the container reads unhealthy until it
-is back.
+`up` builds the image, waits for the host to be healthy, and writes two lines to `deploy/.env`
+the first time: `DREFYN_PARSE_HOST_TOKEN`, which the app tier sends, and
+`DREFYN_PARSE_TOKEN_SHA256`, its hash, which is all the host gets. The host will not start
+without the hash. To change the token, set both lines, then run `restart`. With the profile set
+only in the shell, pass it to every command, `down` and `reset` included, or they leave the
+host running.
+
+`DREFYN_PARSE_HOST_MEMORY_MB`, default 2048, sets both the check the host makes at start and the
+container's memory limit, with no swap. The host refuses to start unless two threads at
+`DREFYN_PARSE_WORKER_MEMORY_MB` (default 512), three times `DREFYN_PARSE_MAX_HELD_BYTES`
+(default 268435456) and 256 MB fit in it. A flood of full size pages from many organizations at
+the defaults stays inside the limit, and `--faults` proves it again on every run.
+
+On a small machine use the small profile: `DREFYN_PARSE_HOST_MEMORY_MB=1024`,
+`DREFYN_PARSE_WORKER_MEMORY_MB=256` and `DREFYN_PARSE_MAX_HELD_BYTES=67108864` in `deploy/.env`.
+A page at the 1 MiB size limit parses and prints inside it. A larger flood is refused sooner,
+with a retryable `mdx.queue_full`, and a page that needs more heap with `mdx.out_of_memory`.
+
+The supervisor inside the container restarts a host that dies, including one the kernel kills
+at the memory limit. A crash loop stops it for a minute and logs `mdx.parse_host_crash_loop` at
+error level, and the container reads unhealthy until it is back.

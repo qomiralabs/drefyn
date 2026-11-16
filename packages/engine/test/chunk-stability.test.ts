@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { DEFAULT_LIMITS, type Dialect, type MdxIssueCode, type MdxRoot } from '@drefyn/mdx';
+import {
+  DEFAULT_LIMITS,
+  type Dialect,
+  type MdxIssueCode,
+  type MdxRoot,
+  type ReaderPage,
+} from '@drefyn/mdx';
 import { createParseClient, type ParseClient } from '@drefyn/mdx/client';
 import { organizationId, projectId } from '@drefyn/tenancy';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -45,13 +51,25 @@ const BUSY: ReadonlySet<MdxIssueCode> = new Set([
 // A new tenant for each call, as the parse budget is per organization and one slow run would
 // otherwise spend it. A page refused for a component this policy does not list is not a page to
 // edit, but a busy host says nothing about the page, and skipping there would shrink the sample.
+// Chunks are made from reader text, so the edit is judged on the units the host gives.
 async function parsed(client: ParseClient, source: string, dialect: Dialect) {
   const tenant = {
     organizationId: organizationId(randomUUID()),
     projectId: projectId(randomUUID()),
   };
-  const answer = await client.parse({ tenant, path: 'corpus', source, dialect, policy });
-  if (answer.ok) return answer.value.ast;
+  const answer = await client.parse({
+    tenant,
+    path: 'corpus',
+    source,
+    dialect,
+    policy,
+    reader: true,
+  });
+  if (answer.ok) {
+    const { ast, reader } = answer.value;
+    if (reader === undefined) throw new Error('the host sent no reader text');
+    return { ast, reader };
+  }
   if (answer.error.some(({ code }) => BUSY.has(code))) throw new Error('the parse host is busy');
   return null;
 }
@@ -110,9 +128,11 @@ function newBodies(before: readonly string[], after: readonly string[]): number 
 
 const bodiesOf = (chunks: readonly Chunk[]) => chunks.map(({ body }) => body);
 
-function outsideSection(before: MdxRoot, after: MdxRoot, home: number): number {
-  const was = chunksBySection(before, chunkNode(before, options));
-  const now = chunksBySection(after, chunkNode(after, options));
+const unitsIn = (reader: ReaderPage) => (reader.state === 'ok' ? reader.units : []);
+
+function outsideSection(before: ReaderPage, after: ReaderPage, home: number): number {
+  const was = chunksBySection(unitsIn(before), chunkNode(before, options));
+  const now = chunksBySection(unitsIn(after), chunkNode(after, options));
   const keys = new Set([...was.keys(), ...now.keys()]);
   keys.delete(home);
   return [...keys].filter((key) => !isDeepStrictEqual(was.get(key) ?? [], now.get(key) ?? []))
@@ -124,9 +144,10 @@ async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, re
   for (const file of readdirSync(corpus).sort()) {
     const dialect: Dialect = file.endsWith('.mdx.txt') ? 'mdx' : 'md';
     const text = readFileSync(join(corpus, file), 'utf8');
-    const root = await parsed(client, text, dialect);
-    if (root === null) continue;
-    const before = bodiesOf(chunkNode(root, options));
+    const page = await parsed(client, text, dialect);
+    if (page === null) continue;
+    const root = page.ast;
+    const before = bodiesOf(chunkNode(page.reader, options));
     const positions = before.length >= LONG_PAGE_CHUNKS ? LONG_PAGE_POSITIONS : POSITIONS;
     for (const position of positions) {
       const target = targetIn(root, position);
@@ -138,11 +159,11 @@ async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, re
         const next = text.slice(0, from) + CHANGES[name](raw) + text.slice(from + raw.length);
         const after = await parsed(client, next, dialect);
         if (after === null) continue;
-        const bodies = bodiesOf(chunkNode(after, options));
+        const bodies = bodiesOf(chunkNode(after.reader, options));
         edits[name].push({
           chunks: bodies.length,
           changed: newBodies(before, bodies),
-          outside: outsideSection(root, after, sectionOf(root, index)),
+          outside: outsideSection(page.reader, after.reader, sectionOf(root, index)),
         });
       }
     }

@@ -1,8 +1,14 @@
 import { isDeepStrictEqual } from 'node:util';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { chunkNode } from '../src/index.ts';
-import { chunksBySection, sectionOf, treeOf, visibleOf, type BlockSpec } from './support/tree.ts';
+import {
+  chunksBySection,
+  chunkTree,
+  sectionOf,
+  treeOf,
+  visibleOf,
+  type BlockSpec,
+} from './support/tree.ts';
 
 // Long lines are one short text repeated: drawing thousands of random characters per line costs
 // seconds a run, and the cap and the pair check only care about length and where a pair falls.
@@ -55,8 +61,8 @@ describe('chunkNode', () => {
       fc.assert(
         fc.property(page, sizes, (root, options) => {
           const again = structuredClone(root);
-          expect(JSON.stringify(chunkNode(again, options))).toBe(
-            JSON.stringify(chunkNode(root, options)),
+          expect(JSON.stringify(chunkTree(again, options))).toBe(
+            JSON.stringify(chunkTree(root, options)),
           );
         }),
         RUNS,
@@ -71,7 +77,7 @@ describe('chunkNode', () => {
       const inked = (text: string) => text.replace(/\s/g, '');
       fc.assert(
         fc.property(page, sizes, (root, options) => {
-          const bodies = chunkNode(root, options).map(({ body }) => body);
+          const bodies = chunkTree(root, options).map(({ body }) => body);
           expect(inked(bodies.join(''))).toBe(inked(visibleOf(root)));
         }),
         RUNS,
@@ -86,96 +92,12 @@ describe('chunkNode', () => {
       fc.assert(
         fc.property(page, sizes, (root, options) => {
           const wellFormedBefore = visibleOf(root).isWellFormed();
-          chunkNode(root, options).forEach((chunk, index) => {
+          chunkTree(root, options).forEach((chunk, index) => {
             expect(chunk.ord).toBe(index);
             expect(chunk.body.trim().length).toBeGreaterThan(0);
             expect(chunk.body.length).toBeLessThanOrEqual(options.maxChars);
             if (wellFormedBefore) expect(chunk.body.isWellFormed()).toBe(true);
           });
-        }),
-        RUNS,
-      );
-    },
-    TIMEOUT_MS,
-  );
-});
-
-// Every place a page can hold text no reader gets, in a tree built by hand so the shapes are not
-// limited to what one parser happens to give.
-const HIDDEN = 'CANARY';
-const hiddenLeaf = fc.constantFrom(
-  { type: 'html', value: `<!-- ${HIDDEN} -->` },
-  { type: 'yaml', value: `key: ${HIDDEN}` },
-  { type: 'definition', identifier: 'a', url: `https://${HIDDEN}.test`, title: HIDDEN },
-  { type: 'mdxjsEsm', value: `export const a = '${HIDDEN}'` },
-  { type: 'mdxFlowExpression', value: `'${HIDDEN}'` },
-  { type: 'mdxTextExpression', value: `'${HIDDEN}'` },
-  { type: 'footnoteReference', identifier: HIDDEN, label: HIDDEN },
-  { type: 'someFutureNode', value: HIDDEN },
-);
-const shown = fc.constantFrom(
-  { type: 'text', value: 'shown' },
-  { type: 'inlineCode', value: 'shown' },
-  { type: 'image', url: `https://${HIDDEN}.test`, title: HIDDEN, alt: 'shown' },
-);
-const leaf = fc.oneof(hiddenLeaf, shown);
-const tree = fc.letrec<{ node: unknown }>((self) => ({
-  node: fc.oneof(
-    { depthSize: 'small', withCrossShrink: true },
-    leaf,
-    fc.record({
-      type: fc.constantFrom(
-        'paragraph',
-        'blockquote',
-        'list',
-        'listItem',
-        'emphasis',
-        'strong',
-        'delete',
-        'table',
-        'tableRow',
-        'tableCell',
-        'footnoteDefinition',
-      ),
-      children: fc.array(self('node'), { maxLength: 4 }),
-    }),
-    fc.record({
-      type: fc.constant('link'),
-      url: fc.constant(`https://${HIDDEN}.test`),
-      title: fc.constant(HIDDEN),
-      children: fc.array(self('node'), { maxLength: 3 }),
-    }),
-    fc.record({
-      type: fc.constantFrom('mdxJsxFlowElement', 'mdxJsxTextElement'),
-      name: fc.constant(HIDDEN),
-      attributes: fc.constant([{ type: 'mdxJsxAttribute', name: 'a', value: HIDDEN }]),
-      children: fc.array(self('node'), { maxLength: 3 }),
-    }),
-  ),
-}));
-
-describe('text no reader sees', () => {
-  it(
-    'never reaches a body or a heading path, wherever it sits in the tree',
-    () => {
-      const blocks = fc.array(fc.record({ block: tree.node, heading: fc.boolean() }), {
-        minLength: 1,
-        maxLength: 8,
-      });
-      fc.assert(
-        fc.property(blocks, sizes, (specs, options) => {
-          const base = treeOf([]);
-          const children = specs.map(({ block, heading }) =>
-            heading ? { type: 'heading', depth: 1, children: [block] } : block,
-          );
-          // The source holds it too, as a real block's would.
-          const source = { raw: HIDDEN, gapBefore: HIDDEN, rawOf: '', sourceOf: '' };
-          const sourced = children.map((block) => ({ ...(block as object), source }));
-          const root = { ...base, children: sourced, tail: HIDDEN } as unknown as typeof base;
-          for (const { body, headingPath } of chunkNode(root, options)) {
-            expect(body).not.toContain(HIDDEN);
-            expect(headingPath.join(' ')).not.toContain(HIDDEN);
-          }
         }),
         RUNS,
       );
@@ -227,8 +149,8 @@ describe('an edit', () => {
             const before = treeOf(specs, tail);
             const after = treeOf(changed, tail);
             const home = sectionOf(before, target);
-            const was = chunksBySection(before, chunkNode(before, options));
-            const now = chunksBySection(after, chunkNode(after, options));
+            const was = chunksBySection(before, chunkTree(before, options));
+            const now = chunksBySection(after, chunkTree(after, options));
             const others = (found: typeof was) => [...found].filter(([key]) => key !== home);
             // Not toEqual: a miss there writes a diff of every chunk.
             expect(isDeepStrictEqual(others(now), others(was))).toBe(true);

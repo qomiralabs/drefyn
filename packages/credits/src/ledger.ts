@@ -2,7 +2,13 @@ import { idOf, type IdOf, type OrganizationId, type OrganizationRef } from '@dre
 import { entryAmount, type Credits } from './amounts.ts';
 import { CreditError } from './errors.ts';
 
-export const ENTRY_KINDS = Object.freeze(['grant', 'spend', 'reversal', 'expiry'] as const);
+export const ENTRY_KINDS = Object.freeze([
+  'grant',
+  'spend',
+  'reversal',
+  'expiry',
+  'settlement',
+] as const);
 // AI work only. Sends are capped per plan elsewhere and never draw on this pool.
 export const SPEND_REASONS = Object.freeze([
   'generation',
@@ -27,7 +33,9 @@ export type CreditEntry =
   | (EntryBase & { readonly kind: 'grant' })
   | (EntryBase & { readonly kind: 'spend'; readonly reason: SpendReason })
   | (EntryBase & { readonly kind: 'reversal'; readonly reverses: CreditEntryId })
-  | (EntryBase & { readonly kind: 'expiry' });
+  | (EntryBase & { readonly kind: 'expiry' })
+  // Returns the unused part of a spend once the real cost is known. The spend was the hold.
+  | (EntryBase & { readonly kind: 'settlement'; readonly settles: CreditEntryId });
 
 export type CreditOutcome =
   | { readonly status: 'applied'; readonly entry: CreditEntry }
@@ -53,6 +61,12 @@ export interface CreditLedger {
   reverse(
     ref: OrganizationRef,
     request: { idempotencyKey: string; entryId: CreditEntryId },
+  ): Promise<{ readonly status: 'applied'; readonly entry: CreditEntry }>;
+  // Returns part of a spend: more than zero and less than the spend, since returning all of
+  // it is a reversal. A spend closes once, by one settlement or one reversal, never both.
+  settle(
+    ref: OrganizationRef,
+    request: { idempotencyKey: string; entryId: CreditEntryId; amount: Credits },
   ): Promise<{ readonly status: 'applied'; readonly entry: CreditEntry }>;
 }
 

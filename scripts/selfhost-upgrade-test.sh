@@ -145,8 +145,9 @@ if [ -n "$(find "$root/deploy/.env" -prune -perm 600)" ]; then
 else
   fail "deploy/.env is still mode 600" "$(ls -l "$root/deploy/.env")"
 fi
-# Values are hex or plain words, so a second = on a line means two keys were joined.
-bad_lines="$(grep -vE '^(#.*)?$' "$root/deploy/.env" | grep -vE '^[A-Z_]+=[^=]*$' | sed 's/=.*/=.../' || true)"
+# Values are hex or plain words, so a second = on a line means two keys were joined. Keys can
+# carry digits, as DREFYN_PARSE_TOKEN_SHA256 does.
+bad_lines="$(grep -vE '^(#.*)?$' "$root/deploy/.env" | grep -vE '^[A-Z][A-Z0-9_]*=[^=]*$' | sed 's/=.*/=.../' || true)"
 if [ -z "$bad_lines" ] && [ "$(env_value DREFYN_POSTGRES_MEMORY_LIMIT)" = 1g ] &&
   [ "$(grep -c '^DREFYN_AUTH_PASSWORD=' "$root/deploy/.env")" = 1 ]; then
   pass "every key in deploy/.env still parses after the append, the last value included"

@@ -419,3 +419,170 @@ export function measure(
 ): number {
   return floor2(contrast(colorOf(pair.fg, mode), colorOf(pair.bg, mode)));
 }
+
+// The docs family, the reader palette on published docs sites. Measured on its own grounds,
+// never against the paper family, because a docs page never mixes the two.
+export type DocsRole = Leaves<typeof tokens.docs.color>;
+export type DocsWash = keyof typeof tokens.docs.wash;
+export type DocsBackdrop = DocsRole | `wash.${DocsWash}@${DocsRole}`;
+
+export interface DocsPairGroup {
+  fg: readonly DocsRole[];
+  bg: readonly DocsBackdrop[];
+  kind: PairKind;
+  modes: readonly Mode[];
+  why: string;
+}
+
+export interface DocsPair {
+  mode: Mode;
+  fg: DocsRole;
+  bg: DocsBackdrop;
+  kind: PairKind;
+  why: string;
+}
+
+function rolesOf(node: unknown, path: string[] = []): string[] {
+  if (typeof node === 'object' && node !== null && 'light' in node) return [path.join('.')];
+  return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+    rolesOf(v, [...path, k]),
+  );
+}
+
+export const docsRoles = rolesOf(tokens.docs.color) as DocsRole[];
+
+const DOCS_SURFACES = [
+  'surface.ground',
+  'surface.raised',
+  'surface.sunken',
+  'surface.hover',
+  'surface.overlay',
+  'surface.card',
+  'surface.chip',
+] as const;
+const DOCS_READING = [
+  'text.ink',
+  'text.body',
+  'text.secondary',
+  'text.subtle',
+  'accent.ink',
+  'accent.press',
+  'state.fresh.text',
+  'state.stale.text',
+  'state.broken.text',
+  'state.neutral.text',
+] as const;
+const DOCS_CODE = [
+  'code.text',
+  'code.key',
+  'code.str',
+  'code.num',
+  'code.kw',
+  'code.com',
+  'code.flag',
+] as const;
+const DOCS_WASHES = [
+  'wash.accent@surface.ground',
+  'wash.accent@surface.raised',
+  'wash.accent@surface.card',
+  'wash.info@surface.ground',
+  'wash.info@surface.card',
+  'wash.stale@surface.ground',
+  'wash.stale@surface.card',
+] as const;
+const METHODS = ['get', 'post', 'patch', 'delete', 'graphql'] as const;
+
+export const docsPairs: readonly DocsPairGroup[] = [
+  {
+    fg: DOCS_READING,
+    bg: DOCS_SURFACES,
+    kind: 'text',
+    modes: BOTH,
+    why: 'Reading text on every docs surface',
+  },
+  {
+    fg: ['accent.on'],
+    bg: ['accent.ink', 'accent.press'],
+    kind: 'text',
+    modes: BOTH,
+    why: 'Primary button label, at rest and pressed',
+  },
+  {
+    fg: ['border.control', 'focus.ring'],
+    bg: DOCS_SURFACES,
+    kind: 'non-text',
+    modes: BOTH,
+    why: 'Field edges are findable and focus is visible wherever it lands',
+  },
+  {
+    fg: DOCS_CODE,
+    bg: ['code.bg', 'wash.codeHit@code.bg'],
+    kind: 'text',
+    modes: BOTH,
+    why: 'Every code colour reads on the block and on the line a field points at',
+  },
+  ...METHODS.map((m): DocsPairGroup => ({
+    fg: [`method.${m}`],
+    bg: [`method.${m}Fill`, ...DOCS_SURFACES],
+    kind: 'text',
+    modes: BOTH,
+    why: 'The method word on its soft pill, and bare in breadcrumbs and lists',
+  })),
+  {
+    fg: ['method.on'],
+    bg: METHODS.map((m): DocsRole => `method.${m}`),
+    kind: 'text',
+    modes: BOTH,
+    why: 'The method word on the solid pill of the active row',
+  },
+  {
+    fg: ['required.text'],
+    bg: ['required.fill', ...DOCS_SURFACES],
+    kind: 'text',
+    modes: BOTH,
+    why: 'The required badge, on its fill and bare',
+  },
+  {
+    fg: ['text.ink', 'text.body', 'text.secondary', 'accent.ink'],
+    bg: DOCS_WASHES,
+    kind: 'text',
+    modes: BOTH,
+    why: 'The current nav row, notes and stale notices over the ground and cards',
+  },
+  {
+    fg: ['focus.ring'],
+    bg: DOCS_WASHES,
+    kind: 'non-text',
+    modes: BOTH,
+    why: 'Focus stays visible on a washed row',
+  },
+];
+
+export const docsDecorativeRoles: readonly { role: DocsRole; why: string }[] = [
+  { role: 'border.rule', why: 'Hairlines that group content; the content carries its contrast' },
+  { role: 'border.ruleStrong', why: 'Card and frame edges; a field edge uses border.control' },
+  { role: 'skeleton.fill', why: 'Placeholder blocks while content loads; never under text' },
+];
+
+export function expandDocsPairs(groups: readonly DocsPairGroup[]): DocsPair[] {
+  return groups.flatMap((g) =>
+    g.modes.flatMap((mode) =>
+      g.fg.flatMap((fg) => g.bg.map((bg) => ({ mode, fg, bg, kind: g.kind, why: g.why }))),
+    ),
+  );
+}
+
+export function docsColorOf(role: DocsBackdrop, mode: Mode): Hex {
+  const at = role.indexOf('@');
+  if (at !== -1) {
+    const wash = tokens.docs.wash[role.slice('wash.'.length, at) as DocsWash][mode];
+    return composite(wash.base, wash.alpha, docsColorOf(role.slice(at + 1) as DocsRole, mode));
+  }
+  let node: unknown = tokens.docs.color;
+  for (const part of role.split('.')) node = (node as Record<string, unknown>)[part];
+  return (node as ModeColor)[mode];
+}
+
+export function measureDocs(pair: { fg: DocsRole; bg: DocsBackdrop }, mode: Mode): number {
+  return floor2(contrast(docsColorOf(pair.fg, mode), docsColorOf(pair.bg, mode)));
+}

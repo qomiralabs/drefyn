@@ -5,6 +5,7 @@
 #   restart  recreate the containers from deploy/.env and wait until healthy again
 #   upgrade  add what an older volume lacks (roles added since it was made), then wait
 #   reset    remove the containers and the data volume (needs --yes)
+# COMPOSE_PROFILES=parse, in the shell or in deploy/.env, adds the parse host to every command.
 set -euo pipefail
 
 # shellcheck source=scripts/selfhost-lib.sh
@@ -39,12 +40,35 @@ random_key() {
 # has to differ from the ids an operator adds later, and random hex does.
 KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS'
 
+# The app tier sends the token and the parse host keeps only its hash, so a taken host holds
+# nothing a stranger could use. Both go in deploy/.env; compose hands the host the hash alone.
+PARSE_TOKEN=DREFYN_PARSE_HOST_TOKEN
+PARSE_HASH=DREFYN_PARSE_TOKEN_SHA256
+
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1
+}
+
+# parse_hash_line <file>: the hash line for the token the file holds, or nothing when it holds
+# none. A failed hash must not write an empty value that reads as set.
+parse_hash_line() {
+  local token hash
+  token="$(sed -n "s/^$PARSE_TOKEN=//p" "$1" | tail -n 1)"
+  if [ -z "$token" ]; then return 0; fi
+  hash="$(printf '%s' "$token" | sha256_hex)"
+  if [[ ! "$hash" =~ ^[0-9a-f]{64}$ ]]; then return 1; fi
+  printf '%s=%s\n' "$PARSE_HASH" "$hash"
+}
+
 # generated_value <key>: a fresh value of the right shape for that key, checked, on stdout.
 generated_value() {
   local value want=48
   if [ "$1" = DREFYN_AUTH_TOTP_KEYS ]; then
     value="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n'):$(random_key)"
     want=52
+  elif [ "$1" = "$PARSE_TOKEN" ]; then
+    value="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    want=64
   elif [[ "$1" =~ ^($KEY_NAMES)$ ]]; then
     value="$(random_key)"
     want=43
@@ -69,7 +93,7 @@ ensure_env() {
   env_tmp="$(mktemp "$deploy/.env.XXXXXX")"
   chmod 600 "$env_tmp"
   while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID|$KEY_NAMES)=$ ]]; then
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|DREFYN_STACK_ID|$KEY_NAMES|$PARSE_TOKEN)=$ ]]; then
       key="${BASH_REMATCH[1]}"
       # A failure inside a command substitution used as an argument would go unnoticed and
       # leave the value empty, so generate it on its own and check it.
@@ -78,20 +102,28 @@ ensure_env() {
         exit 1
       fi
       printf '%s=%s\n' "$key" "$value" >>"$env_tmp"
+    elif [ "$line" = "$PARSE_HASH=" ]; then
+      # The example lists the token first, so its value is already in the file.
+      if ! value="$(parse_hash_line "$env_tmp")" || [ -z "$value" ]; then
+        say <<<"selfhost: could not hash the parse host token; nothing was written."
+        exit 1
+      fi
+      printf '%s\n' "$value" >>"$env_tmp"
     else
       printf '%s\n' "$line" >>"$env_tmp"
     fi
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
     [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 6 ] ||
-    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ]; then
-    say <<<"selfhost: $example does not list the stack ID, the six passwords and the four auth keys; nothing was written."
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ] ||
+    ! grep -q "^$PARSE_TOKEN=." "$env_tmp" || ! grep -q "^$PARSE_HASH=." "$env_tmp"; then
+    say <<<"selfhost: $example does not list the stack ID, the six passwords, the four auth keys and the parse host token and hash; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
   # file wins and the other uses it, rather than each starting with passwords the file lost.
   if ln "$env_tmp" "$env_file" 2>/dev/null; then
-    echo "selfhost: wrote $env_file with generated passwords, auth keys and a stack ID"
+    echo "selfhost: wrote $env_file with generated passwords, auth keys, a parse host token and a stack ID"
   elif [ -f "$env_file" ]; then
     say <<<"selfhost: $env_file appeared while this up was generating one; using the one already there"
   else
@@ -108,10 +140,21 @@ add_missing_passwords() {
   local line key value added=""
   if [ ! -f "$env_file" ] || [ ! -r "$deploy/.env.example" ]; then return; fi
   while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|$KEY_NAMES)=$ ]]; then
+    if [[ "$line" =~ ^(DREFYN_[A-Z_]+_PASSWORD|$KEY_NAMES|$PARSE_TOKEN|$PARSE_HASH)=$ ]]; then
       key="${BASH_REMATCH[1]}"
       if grep -q "^$key=" "$env_file"; then continue; fi
-      if ! value="$(generated_value "$key")"; then
+      # A new token beside an existing hash would never match it.
+      if [ "$key" = "$PARSE_TOKEN" ] && grep -q "^$PARSE_HASH=" "$env_file"; then continue; fi
+      if [ "$key" = "$PARSE_HASH" ]; then
+        # Only ever the hash of the token in the file. An operator who removed the token and
+        # set the hash alone keeps that choice.
+        if ! value="$(parse_hash_line "$env_file")"; then
+          say <<<"selfhost: could not hash the parse host token; deploy/.env was not changed."
+          exit 1
+        fi
+        if [ -z "$value" ]; then continue; fi
+        value="${value#*=}"
+      elif ! value="$(generated_value "$key")"; then
         say <<<"selfhost: could not generate a random value for $key; deploy/.env was not changed."
         exit 1
       fi
@@ -145,7 +188,9 @@ wait_healthy() {
   local recreate=(--force-recreate)
   if [ "${1:-}" = keep ]; then recreate=(); fi
   start="$(date +%s)"
-  if ! "${compose[@]}" up --detach ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout "$wait_seconds"; then
+  # --build only touches the parse host, the one image built here, so a pulled checkout never
+  # runs an older build of it. Without its profile there is nothing to build.
+  if ! "${compose[@]}" up --detach --build ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout "$wait_seconds"; then
     compose_ok=false
   fi
   end="$(date +%s)"
@@ -168,8 +213,14 @@ wait_healthy() {
   fi
   if [ "$compose_ok" = true ] && [ -z "$problem" ] &&
     [ "$health $status $restarting" = "healthy running false" ]; then
+    wait_parse_healthy
     echo "selfhost: healthy in $((end - start))s"
     return
+  fi
+
+  # Postgres is fine, so compose more likely gave up on the parse host; say so if it did.
+  if [ -z "$problem" ] && [ "$health $status $restarting" = "healthy running false" ]; then
+    wait_parse_healthy
   fi
 
   # A port clash or a name conflict fails at once and leaves no started container, so say
@@ -184,6 +235,21 @@ wait_healthy() {
     if [ -n "$first" ]; then say <<<"selfhost: $first"; fi
   fi
   say <<<"The server log may say more: docker compose -p $selfhost_project -f $compose_file logs postgres"
+  exit 1
+}
+
+# With its profile on, the parse host must be healthy too, by the same standard as postgres.
+wait_parse_healthy() {
+  local ids count state
+  if ! "${compose[@]}" config --services 2>/dev/null | grep -qx parse-host; then return; fi
+  ids="$("${compose[@]}" ps -aq parse-host 2>/dev/null || true)"
+  count="$(grep -c . <<<"$ids" || true)"
+  if [ "$count" = 1 ] &&
+    state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}} {{.State.Status}}' "$ids" 2>/dev/null)" &&
+    [ "$state" = "healthy running" ]; then
+    return
+  fi
+  say <<<"selfhost: the parse host is not healthy (${state:-found $count containers}). Its log says why: docker compose -p $selfhost_project -f $compose_file logs parse-host"
   exit 1
 }
 
@@ -218,7 +284,7 @@ case "$1" in
   up)
     warn_env_mode
     # Pull first so the healthy time measures startup, not the network. Images this checkout
-    # builds, such as the API under COMPOSE_PROFILES=api, are built by up instead.
+    # builds, the API and the parse host under their profiles, are built by up instead.
     "${compose[@]}" pull --quiet --ignore-buildable
     wait_healthy
     ;;
