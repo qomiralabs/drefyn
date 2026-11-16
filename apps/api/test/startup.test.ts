@@ -56,7 +56,9 @@ function failure(exit: Exit): Record<string, unknown> {
   return line;
 }
 
-describe('the API service refuses to start beside auth', () => {
+// Each case starts a fresh node and loads the whole service, which takes seconds on a busy
+// runner. Above the child's own 20 s kill, so a hang reports as the child's exit, not a timeout.
+describe('the API service refuses to start beside auth', { timeout: 30_000 }, () => {
   it.each([
     ['DREFYN_AUTH_DATABASE_URL', AUTH_URL],
     ['DREFYN_AUTH_SECRET', AUTH_SECRET],
