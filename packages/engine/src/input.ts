@@ -114,6 +114,36 @@ export const rollbackSchema = z.strictObject({
   idempotencyKey,
 });
 
+// A publish is logged under its actor's id, so ids are opaque here too. A job keeps any name: it
+// is refused all the same, and a refusal should say why rather than call the name malformed.
+const publishingActor = z.discriminatedUnion('kind', [
+  user,
+  z.strictObject({ kind: z.literal('api_key'), keyId: z.string().regex(CANONICAL_UUID), scopes }),
+  z.strictObject({
+    kind: z.literal('git'),
+    installationId: z.string().regex(INSTALLATION_ID),
+    commitSha,
+    authorEmail,
+  }),
+  z.strictObject({ kind: z.literal('system'), job: stored(100) }),
+]) satisfies z.ZodType<Actor>;
+
+export const publishSchema = z.strictObject({
+  tenant,
+  nodeId,
+  versionId,
+  expectedHeadVersionId: versionId,
+  actor: publishingActor,
+  idempotencyKey,
+});
+
+export const approveSchema = z.strictObject({
+  tenant,
+  nodeId,
+  versionId,
+  actor: publishingActor,
+});
+
 export const readSchema = z.strictObject({ tenant, nodeId });
 
 const MAX_PAGE = 100;
