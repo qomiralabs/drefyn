@@ -36,11 +36,11 @@ import {
   quietInfo,
   quietWarn,
   type SessionInfo,
-  type SessionMethod,
   type SessionStore,
   type SsoScope,
 } from './session-support.ts';
-import { createSessions, type Sessions } from './sessions.ts';
+import { hasConfirmedFactor } from './factor-rows.ts';
+import { createSessions, factorRequired, type FactorRequired, type Sessions } from './sessions.ts';
 import type { AuthMailer } from './step-up.ts';
 import {
   isVerifiedIdentity,
@@ -66,7 +66,7 @@ export type SsoCompleted =
       readonly send?: () => Promise<void>;
     }
   // Signed in only once the second factor passes. No session exists yet.
-  | { readonly kind: 'factor_required'; readonly setCookies: readonly CookieSpec[] }
+  | FactorRequired
   // The address belongs to an account this identity is not linked to. send mails the code.
   | {
       readonly kind: 'link_code_sent';
@@ -75,20 +75,10 @@ export type SsoCompleted =
     }
   | { readonly kind: 'refused'; readonly reason: SsoRefusal };
 
-// What the sign in waits on once a person has a second factor. The factor gate brings the
-// challenge itself; until then a person with a confirmed factor gets no session at all.
+// Whether a person has a second factor, read before a link is written. The session itself
+// is gated by startSession, which reads the rows again under the factor lock.
 export interface FactorRule {
   required(userId: UserId): Promise<boolean>;
-  // The cookies of the challenge that finishes this sign in after the factor passes.
-  challenge(
-    b: BrowserContext,
-    input: {
-      readonly userId: UserId;
-      readonly method: SessionMethod;
-      readonly sso: SsoScope;
-      readonly returnTo: string;
-    },
-  ): Promise<readonly CookieSpec[]>;
 }
 
 export type SsoStore = SessionStore & OrganizationStore;
@@ -149,20 +139,7 @@ const CREATE_PASSES = 2;
 
 // Reads only the factor rows the person owns. A pending enrolment does not count.
 export function enrolledFactorRule(store: SessionStore): FactorRule {
-  return {
-    async required(userId) {
-      const row = await store.user(userId, (tx) =>
-        tx
-          .selectFrom('totp_credentials')
-          .select('user_id')
-          .where('user_id', '=', sql<string>`app.current_user_id()`)
-          .where('confirmed_at', 'is not', null)
-          .executeTakeFirst(),
-      );
-      return row !== undefined;
-    },
-    challenge: () => Promise.resolve([]),
-  };
+  return { required: (userId) => store.user(userId, hasConfirmedFactor) };
 }
 
 function domainOf(address: string): string {
@@ -491,12 +468,18 @@ export function createSsoSignIn(config: AuthConfig, deps: SsoSignInDeps): SsoSig
         via: provisioned === 'jit' ? 'jit' : 'invitation',
       });
     }
-    if (await factor.required(userId)) {
-      const setCookies = await factor.challenge(b, { userId, method: 'sso', sso: scope, returnTo });
+    const started = await sessions.startSession(b, {
+      userId,
+      method: 'sso',
+      sso: scope,
+      returnTo,
+    });
+    // The challenge keeps the scope, so the session it ends in is still an SSO one. The
+    // device and its notice wait for the factor.
+    if (factorRequired(started)) {
       quietInfo(deps.logger, 'auth.sso_factor_required', ids(scope, userId));
-      return { kind: 'factor_required', setCookies };
+      return started;
     }
-    const started = await sessions.startSession(b, { userId, method: 'sso', sso: scope });
     const device = await recordDevice(config, devices, b, userId);
     const seen = device.newDevice;
     // An account made by this very sign in has no device to tell apart from this one.
@@ -600,18 +583,33 @@ export function createSsoSignIn(config: AuthConfig, deps: SsoSignInDeps): SsoSig
       }
     },
 
-    async finishLink(b, link: PendingSsoLink): Promise<Result<SignedIn, AuthError>> {
+    async finishLink(
+      b,
+      link: PendingSsoLink,
+    ): Promise<Result<SignedIn | FactorRequired, AuthError>> {
       const scope = link.sso;
       try {
         const c = await connectionFor(scope, link.email);
         if (c.status === 'test' && !(await isCreator(scope, link.userId))) {
           throw new Refused('AUTH_SSO_NOT_PROVISIONED');
         }
-        // An enrolled person passes the factor before anything is linked. Until the factor
-        // gate can carry the link through its challenge, the link is not written at all.
+        // An enrolled person adds no credential before the factor. The link is dropped and
+        // the proved code hands off to a factor challenge as an email sign in, so the
+        // session carries no SSO scope the identity never earned.
         if (await factor.required(link.userId)) {
-          quietInfo(deps.logger, 'auth.sso_factor_required', ids(scope, link.userId));
-          throw new Refused('AUTH_FACTOR_REQUIRED');
+          quietInfo(deps.logger, 'auth.sso_link_dropped_for_factor', ids(scope, link.userId));
+          const started = await sessions.startSession(b, {
+            userId: link.userId,
+            method: 'email',
+            returnTo: link.returnTo,
+          });
+          // Removed meanwhile: the code proved the address, which is an email sign in.
+          if (factorRequired(started)) return ok(started);
+          return ok({
+            session: started.session,
+            setCookies: started.setCookies,
+            returnTo: link.returnTo,
+          });
         }
         const made = await store.auth((tx) =>
           tx
@@ -634,7 +632,9 @@ export function createSsoSignIn(config: AuthConfig, deps: SsoSignInDeps): SsoSig
         quietInfo(deps.logger, 'auth.sso_linked', ids(scope, link.userId));
         const done = await finish(b, scope, c, link.userId, link.email, link.returnTo, false);
         if (done.kind === 'refused') return fail(new AuthError(done.reason));
-        if (done.kind !== 'signed_in') throw new Refused('AUTH_FACTOR_REQUIRED');
+        // Enrolled after the read above: the link stands, and the sign in waits on the factor.
+        if (done.kind === 'factor_required') return ok(done);
+        if (done.kind !== 'signed_in') throw new Refused('AUTH_UNAVAILABLE');
         const notice = linkNotice(link.email, c.displayName, made.created_at, scope, link.userId);
         const send = sendBoth(notice, done.send);
         return ok({

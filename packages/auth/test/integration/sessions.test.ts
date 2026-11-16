@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { withAuth, withUser } from '@drefyn/db';
 import { toPublicId } from '@drefyn/tenancy';
 import type { Transaction } from 'kysely';
@@ -38,7 +39,7 @@ async function signIn(user?: Awaited<ReturnType<Harness['user']>>) {
   return {
     sessions,
     user: id,
-    session: started.session,
+    session: asSignedIn(started).session,
     cookie: cookieOf(h, started.setCookies),
     started,
   };
@@ -187,22 +188,25 @@ describeWithStack('sessions against Postgres', () => {
       method: 'email',
     });
     await h.sql(
-      `update app.sessions set expires_at = now() - interval '1 second' where id = '${expired.session.sessionId}';`,
+      `update app.sessions set expires_at = now() - interval '1 second' where id = '${asSignedIn(expired).session.sessionId}';`,
     );
     const list = await first.sessions.listSessions(first.session);
     expect(list.map((s) => s.sessionId).sort()).toEqual(
-      [first.session.sessionId, second.session.sessionId].sort(),
+      [asSignedIn(first).session.sessionId, asSignedIn(second).session.sessionId].sort(),
     );
     expect(list.find((s) => s.current)?.sessionId).toBe(first.session.sessionId);
     expect(list.every((s) => s.userAgent === 'Integration/1.0')).toBe(true);
     await expect(
-      first.sessions.revokeSession(first.session, second.session.sessionId),
+      first.sessions.revokeSession(asSignedIn(first).session, asSignedIn(second).session.sessionId),
     ).resolves.toEqual({
       ok: true,
       value: undefined,
     });
     await expect(first.sessions.resolveSession(cookieOf(h, second.setCookies))).resolves.toBeNull();
-    const again = await first.sessions.revokeSession(first.session, second.session.sessionId);
+    const again = await first.sessions.revokeSession(
+      asSignedIn(first).session,
+      asSignedIn(second).session.sessionId,
+    );
     expect(!again.ok && again.error.code).toBe('AUTH_NOT_FOUND');
   });
 
@@ -387,7 +391,7 @@ describeWithStack('sessions against Postgres', () => {
       const a = await withOthers(2);
       const tab = a.others[0];
       if (tab === undefined) throw new Error('no other session');
-      await a.sessions.revokeSession(tab.session, a.session.sessionId);
+      await a.sessions.revokeSession(asSignedIn(tab).session, asSignedIn(a).session.sessionId);
       const before = await rowsOf(a.user);
       const result = await a.sessions.signOutOtherSessions(a.session, browser());
       expect(!result.ok && result.error.code).toBe('AUTH_SESSION_INVALID');

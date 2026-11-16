@@ -5,6 +5,7 @@ import {
   createCliLinks,
   createEmailChange,
   createEmailSignIn,
+  createFactorChallenges,
   createInvitations,
   createMembers,
   createOAuth,
@@ -22,6 +23,7 @@ import {
   type ApiKeys,
   type AuthConfig,
   type CliLinks,
+  type FactorChallenges,
   type EmailChange,
   type EmailSignIn,
   type Env,
@@ -89,6 +91,7 @@ export interface DashboardAuth {
     | 'seatUsage'
   >;
   readonly cliLinks: Pick<CliLinks, 'redeem'>;
+  readonly factorChallenges: FactorChallenges;
   readonly members: Members;
   readonly roles: Pick<Roles, 'changeRole' | 'removeMember' | 'setProjectRole'>;
   readonly apiKeys: Pick<ApiKeys, 'createApiKey' | 'revokeApiKey' | 'listApiKeys'>;
@@ -172,6 +175,7 @@ async function compose(): Promise<DashboardAuth> {
   });
   const passwordAccount = createPasswordAccount(parsed, { ...shared, hasher, breachedPasswords });
   const oauth = createOAuth(parsed, { ...shared, invitations });
+  const factorChallenges = createFactorChallenges(parsed, { db, authDb, logger, mailer, limiter });
   const cliLinks = createCliLinks(parsed, {
     db,
     authDb,
@@ -231,6 +235,7 @@ async function compose(): Promise<DashboardAuth> {
       seatUsage: (access) => invitations.seatUsage(access),
     },
     cliLinks: { redeem: (b, token) => cliLinks.redeem(b, token) },
+    factorChallenges,
     members,
     roles: {
       changeRole: (access, member, role) => roles.changeRole(access, member, role),

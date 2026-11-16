@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { AUTH_EXPIRY_RULES, deleteExpired, withAuth } from '@drefyn/db';
 import { beforeAll, expect, it } from 'vitest';
 import { decodeSecret, sha256 } from '../../src/index.ts';
@@ -141,7 +142,7 @@ describeWithStack('known devices against Postgres', () => {
     await h.user(email);
     const b = newBrowser();
     const signedIn = await signIn(flow, b, email);
-    await flow.sessions.signOutEverywhere(signedIn.session);
+    await flow.sessions.signOutEverywhere(asSignedIn(signedIn).session);
     expect(await devicesOf(email)).toBe('');
   });
 
@@ -155,7 +156,7 @@ describeWithStack('known devices against Postgres', () => {
     // The first sign in of the account is from a device it has never seen.
     const b = newBrowser();
     const first = await signIn(flow, b, email);
-    await first.send?.();
+    await asSignedIn(first).send?.();
     expect(noticesTo(flow, email)).toHaveLength(1);
     const notice = noticesTo(flow, email)[0]?.notice;
     expect(notice).toMatchObject({
@@ -164,7 +165,7 @@ describeWithStack('known devices against Postgres', () => {
       device: 'Firefox on Linux',
     });
     const repeat = await signIn(flow, b, email);
-    await repeat.send?.();
+    await asSignedIn(repeat).send?.();
     expect(noticesTo(flow, email)).toHaveLength(1);
     // A device cookie this person has no row for counts as new too.
     const other = newBrowser();
@@ -173,14 +174,14 @@ describeWithStack('known devices against Postgres', () => {
       `delete from app.known_devices d using app.users u where u.id = d.user_id and u.email_normalized = '${email}';`,
     );
     const unknownRow = await signIn(flow, other, email);
-    await unknownRow.send?.();
+    await asSignedIn(unknownRow).send?.();
     expect(noticesTo(flow, email)).toHaveLength(2);
     // Unseen for 91 days by database time: new again, and last_seen_at moves to now.
     await h.sql(
       `update app.known_devices d set last_seen_at = now() - interval '91 days' from app.users u where u.id = d.user_id and u.email_normalized = '${email}';`,
     );
     const stale = await signIn(flow, other, email);
-    await stale.send?.();
+    await asSignedIn(stale).send?.();
     expect(noticesTo(flow, email)).toHaveLength(3);
     expect(
       await h.sql(
@@ -192,7 +193,7 @@ describeWithStack('known devices against Postgres', () => {
       `update app.known_devices d set last_seen_at = now() - interval '89 days' from app.users u where u.id = d.user_id and u.email_normalized = '${email}';`,
     );
     const recent = await signIn(flow, other, email);
-    await recent.send?.();
+    await asSignedIn(recent).send?.();
     expect(noticesTo(flow, email)).toHaveLength(3);
   });
 
