@@ -10,7 +10,17 @@ minimumReleaseAge: 4320
 # Install scripts nothing needs; listing them keeps installs warning free.
 # protobufjs (under the flagd provider) only prints a version hint. esbuild only checks
 # that its platform binary is present, which the optional dependency already guarantees.
-ignoredBuiltDependencies: [esbuild, protobufjs]
+# The tree-sitter grammars build native bindings we never load; we use the .wasm they ship.
+ignoredBuiltDependencies:
+  [
+    esbuild,
+    protobufjs,
+    tree-sitter-go,
+    tree-sitter-javascript,
+    tree-sitter-python,
+    tree-sitter-rust,
+    tree-sitter-typescript,
+  ]
 
 # The flagd provider's gRPC sync kept reconnecting after close and held the process open;
 # the patch adds a closed guard. Drop it once a provider release stops on close.
