@@ -72,9 +72,12 @@ test('probe the rail focus order', async ({ browser, browserName }) => {
       viewport: TABLET,
     });
     const page = await context.newPage();
+    // A busy runner, made steady: Chromium runs the page this many times slower.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 2 + (run % 5) * 2 });
     await page.addInitScript(script);
     await page.goto(ROUTES.project);
-    await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready');
+    await expect(page.locator('html')).toHaveAttribute('data-shell', 'ready', { timeout: 60_000 });
     await page.evaluate(() => {
       (window as unknown as { log: string[] }).log.push('--- shell ready');
     });
@@ -88,7 +91,7 @@ test('probe the rail focus order', async ({ browser, browserName }) => {
     const ok = await first.evaluate((el) => el === document.activeElement).catch(() => false);
     const tip = await page
       .locator('[role="tooltip"]')
-      .waitFor({ state: 'visible', timeout: 3000 })
+      .waitFor({ state: 'visible', timeout: 10_000 })
       .then(() => true)
       .catch(() => false);
     const focusedLater = await first
@@ -97,7 +100,7 @@ test('probe the rail focus order', async ({ browser, browserName }) => {
     if (!ok || !tip || !focusedLater) {
       const log = await page.evaluate(() => (window as unknown as { log: string[] }).log);
       failures.push(
-        `run ${String(run)} focusedAtOnce=${String(ok)} tip=${String(tip)} focusedLater=${String(focusedLater)}\n${log.join('\n')}`,
+        `run ${String(run)} rate ${String(2 + (run % 5) * 2)} focusedAtOnce=${String(ok)} tip=${String(tip)} focusedLater=${String(focusedLater)}\n${log.join('\n')}`,
       );
     }
     await context.close();
