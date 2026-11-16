@@ -27,9 +27,13 @@ line ending.
 
 ## Changed blocks
 
-`client.print({ tenant, path, root, policy })` gives back the bytes of a tree, the tree they parse
-to, and `timing`: milliseconds for each step in the thread, plus the pool's wait and thread time. The
-same numbers are on the host's `mdx.parse_finished` line. A block prints its
+`client.print({ tenant, path, root, policy, reader })` gives back the bytes of a tree, the tree they
+parse to, and `timing`. With `reader: true`, on print or parse, it also gives `reader`: the text a
+reader of that tree gets, in top level units, taken from the sanitized tree `renderSafe` makes, or
+`{ state: 'not_renderable' }` when the render refuses the page. It runs in the thread under the same
+kill, and the client checks its shape and caps it at twice the page size before handing it back.
+Reader text nobody asked for is dropped. `timing` holds milliseconds for each step in the thread,
+plus the pool's wait and thread time. The same numbers are on the host's `mdx.parse_finished` line. A block prints its
 stored bytes only while its tree still hashes to `rawOf`. A block with no source, or one that
 moved on, goes through the one canonical printer, whose options are fixed in code. Changing them
 is an `astVersion` bump, and stored blocks are never reprinted because of it.

@@ -1,6 +1,6 @@
 import { DbError } from '@drefyn/db';
 import { createTestFlagClient } from '@drefyn/flags/testing';
-import type { MdxIssueCode, MdxRoot, PrintResult } from '@drefyn/mdx';
+import type { MdxIssueCode, MdxRoot, PrintResult, ReaderPage } from '@drefyn/mdx';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,12 +56,29 @@ const joined = (root: MdxRoot) =>
     '',
   ) + root.tail;
 
-const printed = (ast: MdxRoot): PrintResult => ({
+// What the host says a reader of the page gets. Its own tests prove it is the render's text.
+const READER: ReaderPage = {
+  state: 'ok',
+  units: [
+    { heading: { depth: 1, text: 'Guide' }, text: 'Guide' },
+    { text: 'Shown words for a reader.' },
+    { heading: { depth: 2, text: 'Next' }, text: 'Next' },
+    { text: 'More shown words.' },
+  ],
+};
+
+const printed = (ast: MdxRoot, reader?: ReaderPage): PrintResult => ({
   ok: true,
-  value: { ast, text: joined(ast), issues: [] },
+  value: { ast, text: joined(ast), issues: [], ...(reader === undefined ? {} : { reader }) },
 });
 
-const parseOk = { print: () => Promise.resolve(printed(page)) };
+const answerTo = (
+  { reader }: { readonly reader?: boolean },
+  page: MdxRoot,
+  text: ReaderPage = READER,
+) => Promise.resolve(printed(page, reader === true ? text : undefined));
+
+const parseOk = { print: (request: { readonly reader?: boolean }) => answerTo(request, page) };
 
 const has = (statement: Statement, text: string) => statement.sql.includes(text);
 
@@ -794,7 +811,7 @@ describe('chunks at write', () => {
     await engine.saveDraft(save());
     const parameters = chunkWrites(statements).flatMap((statement) => [...statement.parameters]);
     const hashes = parameters.filter((value): value is Buffer => Buffer.isBuffer(value));
-    const bodies = chunkNode(page, DEFAULT_CHUNKS).map(({ body }) => body);
+    const bodies = chunkNode(READER, DEFAULT_CHUNKS).map(({ body }) => body);
     expect(hashes.map((hash) => hash.toString('hex'))).toEqual(
       bodies.map((body) => createHash('sha256').update(body).digest('hex')),
     );
@@ -968,11 +985,189 @@ describe('chunks at write', () => {
     });
 
     it('writes neither with the flag off', async () => {
-      const { engine, statements } = build(stored, { flags: onlyWrites });
+      const print = vi.fn(parseOk.print);
+      const { engine, statements } = build(stored, { flags: onlyWrites, parse: { print } });
       expect(await engine.rollback(ask)).toMatchObject({ ok: true });
       expect(chunkWrites(statements)).toEqual([]);
       expect(outboxWrites(statements)).toEqual([]);
+      expect(print).not.toHaveBeenCalled();
     });
+
+    it('gets reader text for the stored tree from the host before it takes the lock', async () => {
+      const order: string[] = [];
+      const print = vi.fn((request: { readonly reader?: boolean; readonly root: MdxRoot }) => {
+        order.push('print');
+        return answerTo(request, request.root);
+      });
+      const noted: Responder = (statement) => {
+        if (has(statement, 'for update')) order.push('lock');
+        return stored(statement);
+      };
+      const { engine } = build(noted, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({ ok: true });
+      expect(order).toEqual(['print', 'lock']);
+      expect(print).toHaveBeenCalledWith(
+        expect.objectContaining({ root: page, reader: true, tenant }),
+      );
+    });
+
+    it('chunks nothing under the lock, and writes what the host said', async () => {
+      const { engine, statements } = build(stored);
+      await engine.rollback(ask);
+      const bodies = chunkWrites(statements)
+        .flatMap((statement) => [...statement.parameters])
+        .filter((value) => typeof value === 'string' && value.includes('shown'));
+      expect(bodies).toEqual(
+        chunkNode(READER, DEFAULT_CHUNKS)
+          .map(({ body }) => body)
+          .filter((body) => body.includes('shown')),
+      );
+    });
+
+    it('stores no chunks for a page the render refuses, and says so', async () => {
+      const print = (request: { readonly reader?: boolean }) =>
+        answerTo(request, page, { state: 'not_renderable' });
+      const { engine, statements } = build(stored, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({
+        ok: true,
+        value: { readerState: 'not_renderable' },
+      });
+      expect(chunkWrites(statements)).toEqual([]);
+      expect(outboxWrites(statements)).toEqual([]);
+    });
+
+    it('refuses as unavailable when the host is busy, before any lock', async () => {
+      const print = () =>
+        Promise.resolve({
+          ok: false as const,
+          error: [
+            { code: 'mdx.queue_full' as const, severity: 'error' as const, line: 1, column: 1 },
+          ],
+        });
+      const { engine, statements } = build(stored, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({
+        ok: false,
+        error: { code: 'engine.unavailable' },
+      });
+      expect(statements.filter((statement) => has(statement, 'for update'))).toEqual([]);
+    });
+
+    it('stores no chunks when the host cannot print the stored tree, and says so', async () => {
+      const print = () =>
+        Promise.resolve({
+          ok: false as const,
+          error: [
+            {
+              code: 'mdx.print_changed_meaning' as const,
+              severity: 'error' as const,
+              line: 1,
+              column: 1,
+            },
+          ],
+        });
+      const { engine, statements } = build(stored, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({
+        ok: true,
+        value: { readerState: 'not_renderable' },
+      });
+      expect(chunkWrites(statements)).toEqual([]);
+    });
+
+    it('refuses an answer that left out the reader text, before any lock', async () => {
+      const print = () => Promise.resolve(printed(page));
+      const { engine, statements } = build(stored, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({
+        ok: false,
+        error: { code: 'engine.unavailable' },
+      });
+      expect(statements.filter((statement) => has(statement, 'for update'))).toEqual([]);
+    });
+
+    it('refuses a target that does not exist, before asking the host', async () => {
+      const print = vi.fn(parseOk.print);
+      const missing: Responder = (statement) =>
+        has(statement, 'content::text') ? [] : stored(statement);
+      const { engine } = build(missing, { parse: { print } });
+      expect(await engine.rollback(ask)).toMatchObject({
+        ok: false,
+        error: { code: 'engine.not_found' },
+      });
+      expect(print).not.toHaveBeenCalled();
+    });
+  });
+
+  it('asks the host for reader text only with chunks on', async () => {
+    const print = vi.fn(parseOk.print);
+    const on = build(happy, { parse: { print } });
+    await on.engine.saveDraft(save());
+    const off = build(happy, { parse: { print }, flags: onlyWrites });
+    await off.engine.saveDraft(save({ idempotencyKey: 'key-2' }));
+    expect(print.mock.calls.map(([request]) => request.reader)).toEqual([true, false]);
+  });
+
+  it('stores no chunks for a page the render refuses, saves it, and says so', async () => {
+    const lines: { event: string; fields: LogFields }[] = [];
+    const logger: EngineLogger = {
+      info: (event, fields) => lines.push({ event, fields }),
+      warn: (event, fields) => lines.push({ event, fields }),
+    };
+    const print = (request: { readonly reader?: boolean }) =>
+      answerTo(request, page, { state: 'not_renderable' });
+    const { engine, statements } = build(happy, { parse: { print }, logger });
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: true,
+      value: { readerState: 'not_renderable' },
+    });
+    expect(
+      statements.filter((statement) => has(statement, 'insert into "node_versions"')),
+    ).toHaveLength(1);
+    expect(chunkWrites(statements)).toEqual([]);
+    expect(outboxWrites(statements)).toEqual([]);
+    expect(lines.find(({ event }) => event === 'engine.save')?.fields).toMatchObject({
+      chunks: 0,
+      reader_state: 'not_renderable',
+    });
+  });
+
+  it('says a page with reader text was chunked', async () => {
+    const { engine } = build(happy);
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: true,
+      value: { readerState: 'ok' },
+    });
+  });
+
+  it('leaves the reader state out with chunks off', async () => {
+    const { engine } = build(happy, { flags: onlyWrites });
+    const done = await engine.saveDraft(save());
+    expect(done.ok && 'readerState' in done.value).toBe(false);
+  });
+
+  it('refuses an answer that left out the reader text it was asked for', async () => {
+    const print = () => Promise.resolve(printed(page));
+    const { engine, statements } = build(happy, { parse: { print } });
+    expect(await engine.saveDraft(save())).toMatchObject({
+      ok: false,
+      error: { code: 'engine.unavailable' },
+    });
+    expect(statements).toEqual([]);
+  });
+
+  it('records the render policy each chunk was made under', async () => {
+    const parsePolicy = {
+      version: 7_431,
+      components: [],
+      rawHtml: 'sanitize',
+      remoteImages: 'proxy',
+      linkProtocols: ['https'],
+    } as const;
+    const { engine, statements } = build(happy, { parsePolicy });
+    await engine.saveDraft(save());
+    const [write] = chunkWrites(statements);
+    expect(write?.sql).toContain('"render_policy_version"');
+    expect(write?.parameters.filter((value) => value === 7_431)).toHaveLength(
+      chunkNode(READER, DEFAULT_CHUNKS).length,
+    );
   });
 
   it('logs a count and never a body', async () => {
@@ -988,10 +1183,10 @@ describe('chunks at write', () => {
       organization_id: tenant.organizationId,
       project_id: tenant.projectId,
       node_id: NODE,
-      chunks: chunkNode(page, DEFAULT_CHUNKS).length,
+      chunks: chunkNode(READER, DEFAULT_CHUNKS).length,
     });
     const logged = JSON.stringify(lines);
-    for (const { body } of chunkNode(page, DEFAULT_CHUNKS)) {
+    for (const { body } of chunkNode(READER, DEFAULT_CHUNKS)) {
       expect(logged).not.toContain(JSON.stringify(body).slice(1, -1));
     }
   });
@@ -1042,10 +1237,22 @@ describe('the pool gate', () => {
   const full = () =>
     createPoolGate({ ceiling: 1, queued: 2, waitMs: 5, treeSlots: 2, listsPerOrganization: 4 });
 
+  // A rollback reads the version it brings back first, as reads stay out of the gate. Nothing
+  // that locks or writes may run.
+  const withTarget: Responder = (statement) =>
+    has(statement, 'content::text')
+      ? [{ json: JSON.stringify(page), content_sha256: SHA, ast_version: 1, schema_version: 1 }]
+      : happy(statement);
+  const TARGET_READ = 'content::text';
+
   it.each(CALLS)('holds %s out of the pool when the gate is full', async (_name, call) => {
     const gate = full();
     const warn = vi.fn<EngineLogger['warn']>();
-    const { engine, statements } = build(happy, { logger: { info: () => undefined, warn } }, gate);
+    const { engine, statements } = build(
+      withTarget,
+      { logger: { info: () => undefined, warn } },
+      gate,
+    );
     const leave = gate.enterList(OTHER);
     const answer = await call(engine);
     leaveAll(leave);
@@ -1057,7 +1264,7 @@ describe('the pool gate', () => {
         issues: [{ path: 'write', code: 'engine.pool_busy' }],
       },
     });
-    expect(statements).toEqual([]);
+    expect(statements.filter((statement) => !has(statement, TARGET_READ))).toEqual([]);
     expect(warn).toHaveBeenCalledWith('engine.pool_busy', {
       organization_id: tenant.organizationId,
       project_id: tenant.projectId,

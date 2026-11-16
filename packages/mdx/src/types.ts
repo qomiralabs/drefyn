@@ -86,6 +86,16 @@ export interface RenderPolicy {
   readonly limits: MdxLimits;
 }
 
+// A top level element of the rendered page, as the text a reader sees. A heading starts a section.
+export interface ReaderUnit {
+  readonly heading?: { readonly depth: number; readonly text: string };
+  readonly text: string;
+}
+
+export type ReaderPage =
+  | { readonly state: 'ok'; readonly units: readonly ReaderUnit[] }
+  | { readonly state: 'not_renderable' };
+
 // Milliseconds a print spent in each step, read off the thread. Beside the tree and never in it,
 // so a stored version stays the same bytes however long it took.
 export interface PrintTiming {
@@ -106,11 +116,12 @@ export type PrintResult = Result<
     readonly ast: MdxRoot;
     readonly issues: readonly MdxIssue[];
     readonly timing?: PrintTiming;
+    readonly reader?: ReaderPage;
   },
   readonly MdxIssue[]
 >;
 
 export type ParseResult = Result<
-  { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[] },
+  { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[]; readonly reader?: ReaderPage },
   readonly MdxIssue[]
 >;
