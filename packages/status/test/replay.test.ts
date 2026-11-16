@@ -130,28 +130,30 @@ const SHAPES = [
 ] as const;
 const SEEDS = [1, 2, 3, 4];
 
+// Synchronous and heavy under coverage on shared runners: each case gets a wide timeout.
+const SLOW = { timeout: 120_000 };
+const CASES = SHAPES.flatMap((shape) => SEEDS.map((seed) => ({ ...shape, seed })));
+
 describe('a replayed week of synthetic noise', () => {
-  it.each(SHAPES)('gives no false flip at $name with a perfect control', ({ regions: n, min }) => {
-    for (const seed of SEEDS) {
-      for (const stress of [false, true]) {
-        expect(
-          falseFlips(seed, n, min, stress, true),
-          `seed ${String(seed)}, stress ${String(stress)}`,
-        ).toBe(0);
-      }
-    }
-  });
+  it.each(CASES)(
+    'gives no false flip at $name, seed $seed, with a perfect control',
+    SLOW,
+    ({ regions: n, min, seed }) => {
+      expect(falseFlips(seed, n, min, false, true), 'noise week').toBe(0);
+      expect(falseFlips(seed, n, min, true, true), 'stress week').toBe(0);
+    },
+  );
 
   // Not proof of anything: without a control a fleet fault fails every region at once, and
   // agreement cannot tell that from an outage. These counts are the residual to watch in beta.
-  it('flips with no control, and the count is pinned so a change shows up', () => {
-    const counts = SHAPES.map(({ name, regions: n, min }) => ({
-      name,
-      noise: SEEDS.map((seed) => falseFlips(seed, n, min, false, false)),
-      stress: SEEDS.map((seed) => falseFlips(seed, n, min, true, false)),
-    }));
-    // Each forced fleet fault costs two flips, down and back; seed 1 draws a second one.
-    const pinned = { noise: [0, 0, 0, 0], stress: [4, 2, 2, 2] };
-    expect(counts).toEqual(SHAPES.map(({ name }) => ({ name, ...pinned })));
-  });
+  // Each forced fleet fault costs two flips, down and back; seed 1 draws a second one.
+  const PINNED_STRESS: Readonly<Record<number, number>> = { 1: 4, 2: 2, 3: 2, 4: 2 };
+  it.each(CASES)(
+    'flips with no control at $name, seed $seed, and the count is pinned',
+    SLOW,
+    ({ regions: n, min, seed }) => {
+      expect(falseFlips(seed, n, min, false, false), 'noise week').toBe(0);
+      expect(falseFlips(seed, n, min, true, false), 'stress week').toBe(PINNED_STRESS[seed]);
+    },
+  );
 });

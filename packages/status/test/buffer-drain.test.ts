@@ -4,6 +4,10 @@ import { INTERVAL, LONG_AGO, NONE, regions, rule } from './support/fixtures.ts';
 import { LatestTable, rng, type Result } from './support/latest.ts';
 
 const TRIALS = 2_000;
+// Split in chunks so each case stays short under coverage on shared runners.
+const CHUNK = 250;
+const CHUNKS = Array.from({ length: TRIALS / CHUNK }, (_, i) => i * CHUNK + 1);
+const SLOW = { timeout: 120_000 };
 const cfg = rule({ mode: 'apply' });
 
 interface Send {
@@ -82,22 +86,27 @@ function flipsDuring(seed: number, view: (r: RegionReport) => RegionReport): num
   return flips;
 }
 
-describe('a probe buffer drained oldest first after an outage', () => {
-  it(`gives no flip in ${String(TRIALS)} trials`, () => {
-    let flipped = 0;
-    for (let seed = 1; seed <= TRIALS; seed++) {
-      if (flipsDuring(seed, (r) => r) > 0) flipped++;
-    }
-    expect(flipped).toBe(0);
+const receivedOnly = (r: RegionReport): RegionReport => ({ ...r, scheduledAt: r.receivedAt });
+
+function flippedIn(first: number, view: (r: RegionReport) => RegionReport): number {
+  let flipped = 0;
+  for (let seed = first; seed < first + CHUNK; seed++) {
+    if (flipsDuring(seed, view) > 0) flipped++;
+  }
+  return flipped;
+}
+
+describe(`a probe buffer drained oldest first after an outage, ${String(TRIALS)} trials`, () => {
+  it.each(CHUNKS)('gives no flip in trials %i onward', SLOW, (first) => {
+    expect(flippedIn(first, (r) => r)).toBe(0);
   });
 
-  it('would flip if freshness read the server clock alone', () => {
-    // What a rule that trusted receivedAt alone would see: every drained result looks live.
-    const receivedOnly = (r: RegionReport): RegionReport => ({ ...r, scheduledAt: r.receivedAt });
-    let flipped = 0;
-    for (let seed = 1; seed <= TRIALS; seed++) {
-      if (flipsDuring(seed, receivedOnly) > 0) flipped++;
-    }
-    expect(flipped).toBeGreaterThan(TRIALS * 0.9);
-  });
+  // What a rule that trusted receivedAt alone would see: every drained result looks live.
+  it.each(CHUNKS)(
+    'would flip from trial %i onward if freshness read the server clock alone',
+    SLOW,
+    (first) => {
+      expect(flippedIn(first, receivedOnly)).toBeGreaterThan(CHUNK * 0.9);
+    },
+  );
 });
