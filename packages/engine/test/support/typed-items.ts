@@ -22,10 +22,18 @@ const joined = (root: MdxRoot) =>
 
 // These tests are about field values, and the parse host is shared with every file running beside
 // them, so a real print per save only crowds tests that are about the host. One real parse per
-// text stands behind it.
+// text stands behind it. Reader text, when asked for, is empty: chunks are not what these test.
 const echoParse = {
-  print: ({ root }: { readonly root: MdxRoot }) =>
-    Promise.resolve({ ok: true, value: { ast: root, text: joined(root), issues: [] } }),
+  print: ({ root, reader }: { readonly root: MdxRoot; readonly reader?: boolean }) =>
+    Promise.resolve({
+      ok: true,
+      value: {
+        ast: root,
+        text: joined(root),
+        issues: [],
+        ...(reader === true ? { reader: { state: 'ok', units: [] } } : {}),
+      },
+    }),
 } as unknown as EngineDeps['parse'];
 
 export const itemEngine = (db: Database, over: Partial<EngineDeps> = {}): Built =>
