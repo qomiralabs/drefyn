@@ -1,0 +1,17 @@
+def public(a, b=2, *args, **kwargs):
+    """One line."""
+
+
+def _private():
+    pass
+
+
+class Thing:
+    def method(self):
+        pass
+
+    def _helper(self):
+        pass
+
+    def __eq__(self, other):
+        return True

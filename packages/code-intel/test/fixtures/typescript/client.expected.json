@@ -1,0 +1,189 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "ClientOptions",
+      "kind": "interface",
+      "exported": true,
+      "signature": "interface ClientOptions<T = unknown> extends Base",
+      "doc": "Options for a client.\n\nEvery field is optional.",
+      "startLine": 8
+    },
+    {
+      "name": "UserId",
+      "kind": "type",
+      "exported": true,
+      "signature": "type UserId = string & { readonly brand: 'UserId' }",
+      "doc": "A user id.",
+      "startLine": 14
+    },
+    {
+      "name": "DEFAULT_TIMEOUT_MS",
+      "kind": "const",
+      "exported": true,
+      "signature": "const DEFAULT_TIMEOUT_MS: number",
+      "doc": null,
+      "startLine": 16
+    },
+    {
+      "name": "internalRetries",
+      "kind": "const",
+      "exported": false,
+      "signature": "const internalRetries",
+      "doc": null,
+      "startLine": 18
+    },
+    {
+      "name": "internalDelay",
+      "kind": "const",
+      "exported": false,
+      "signature": "const internalDelay",
+      "doc": null,
+      "startLine": 19
+    },
+    {
+      "name": "createClient",
+      "kind": "function",
+      "exported": true,
+      "signature": "function createClient(options: ClientOptions, retries = internalRetries): Client",
+      "doc": "Creates a client.\n@param options - how to connect",
+      "startLine": 25
+    },
+    {
+      "name": "pages",
+      "kind": "function",
+      "exported": true,
+      "signature": "async function* pages<T>(fetchPage: (n: number) => Promise<T[]>): AsyncGenerator<T>",
+      "doc": null,
+      "startLine": 32
+    },
+    {
+      "name": "Client",
+      "kind": "class",
+      "exported": true,
+      "signature": "class Client extends EventEmitter",
+      "doc": "Talks to the API.",
+      "startLine": 37
+    },
+    {
+      "name": "Client.constructor",
+      "kind": "method",
+      "exported": true,
+      "signature": "constructor(private readonly options: ClientOptions, readonly retries: number)",
+      "doc": null,
+      "startLine": 40
+    },
+    {
+      "name": "Client.listUsers",
+      "kind": "method",
+      "exported": true,
+      "signature": "async listUsers(limit?: number): Promise<UserId[]>",
+      "doc": "Lists users.",
+      "startLine": 48
+    },
+    {
+      "name": "Client.sign",
+      "kind": "method",
+      "exported": false,
+      "signature": "private sign(body: string): string",
+      "doc": null,
+      "startLine": 52
+    },
+    {
+      "name": "Client.guard",
+      "kind": "method",
+      "exported": false,
+      "signature": "protected guard(): void",
+      "doc": null,
+      "startLine": 56
+    },
+    {
+      "name": "Client.create",
+      "kind": "method",
+      "exported": true,
+      "signature": "static create(): Client",
+      "doc": null,
+      "startLine": 58
+    },
+    {
+      "name": "Store",
+      "kind": "class",
+      "exported": true,
+      "signature": "abstract class Store",
+      "doc": null,
+      "startLine": 63
+    },
+    {
+      "name": "Store.get",
+      "kind": "method",
+      "exported": true,
+      "signature": "abstract get(key: string): Promise<string | undefined>",
+      "doc": null,
+      "startLine": 64
+    },
+    {
+      "name": "Role",
+      "kind": "enum",
+      "exported": true,
+      "signature": "enum Role",
+      "doc": null,
+      "startLine": 67
+    },
+    {
+      "name": "toId",
+      "kind": "function",
+      "exported": true,
+      "signature": "const toId = (value: string): UserId =>",
+      "doc": null,
+      "startLine": 72
+    },
+    {
+      "name": "helper",
+      "kind": "function",
+      "exported": true,
+      "signature": "function helper(): void",
+      "doc": null,
+      "startLine": 74
+    },
+    {
+      "name": "overloaded",
+      "kind": "function",
+      "exported": true,
+      "signature": "function overloaded(value: string): string",
+      "doc": null,
+      "startLine": 78
+    },
+    {
+      "name": "overloaded",
+      "kind": "function",
+      "exported": true,
+      "signature": "function overloaded(value: number): number",
+      "doc": null,
+      "startLine": 79
+    },
+    {
+      "name": "overloaded",
+      "kind": "function",
+      "exported": true,
+      "signature": "function overloaded(value: string | number): string | number",
+      "doc": null,
+      "startLine": 80
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "exported": true,
+      "signature": "function main(): void",
+      "doc": null,
+      "startLine": 84
+    },
+    {
+      "name": "ambient",
+      "kind": "function",
+      "exported": false,
+      "signature": "function ambient(name: string): void",
+      "doc": null,
+      "startLine": 86
+    }
+  ]
+}

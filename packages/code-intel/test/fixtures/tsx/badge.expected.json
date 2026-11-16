@@ -1,0 +1,37 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "BadgeProps",
+      "kind": "interface",
+      "exported": true,
+      "signature": "interface BadgeProps",
+      "doc": "Props for a badge.",
+      "startLine": 4
+    },
+    {
+      "name": "Badge",
+      "kind": "function",
+      "exported": true,
+      "signature": "function Badge({ tone, children }: BadgeProps): ReactNode",
+      "doc": "Shows a short status.",
+      "startLine": 10
+    },
+    {
+      "name": "Dot",
+      "kind": "function",
+      "exported": true,
+      "signature": "const Dot = ({ tone }: Pick<BadgeProps, 'tone'>) =>",
+      "doc": null,
+      "startLine": 14
+    },
+    {
+      "name": "Inner",
+      "kind": "function",
+      "exported": false,
+      "signature": "const Inner = function Inner<T,>(props: { item: T })",
+      "doc": null,
+      "startLine": 16
+    }
+  ]
+}

@@ -19,6 +19,9 @@ way in; see "Parsing customer content".
   recursive touches the tree. Problems are field paths and codes, never text. A tree that passes
   has the right shape; only a reparse says its bytes mean what its nodes say.
 - `DEFAULT_LIMITS` and `AST_VERSION`.
+- `@drefyn/mdx/seal-thread`, imported first in a worker, takes the network, child processes,
+  new threads and native addons away from that thread. The parse threads use it, and so do
+  `@drefyn/code-intel`'s, so there is one list of what a thread that reads hostile input may not do.
 
 Each top level block keeps `source: { raw, gapBefore, rawOf, sourceOf }`. `gapBefore` holds everything
 since the previous block, so it ends at a line start and holds a BOM if the file has one. The
