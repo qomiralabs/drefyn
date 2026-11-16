@@ -134,6 +134,57 @@ services:
     stop_grace_period: 15s
     restart: unless-stopped
 
+  # /v1: key checks, health and, later, content routes. Off by default until the app tier joins
+  # the stack; start it with the stack by setting COMPOSE_PROFILES=api for scripts/selfhost.sh up.
+  # It holds the app and public reader roles and never the auth role or any auth secret, and it
+  # refuses to start if either is set. Passwords reach it as secret files, never as environment.
+  api:
+    profiles: [api]
+    build:
+      context: ..
+      dockerfile: deploy/api/Dockerfile
+    image: drefyn-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Signals reach node through a real init, and stray children are reaped.
+    init: true
+    user: node
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Compose copies the secrets into the container before start, so the root filesystem cannot
+    # be read only, as with postgres.
+    pids_limit: 128
+    mem_limit: ${DREFYN_API_MEMORY_LIMIT:-512m}
+    environment:
+      DREFYN_API_HOST: 0.0.0.0
+      DREFYN_API_PORT: '3100'
+      # Written into openapi.json. Set it to the address clients use when anything sits in front.
+      DREFYN_API_PUBLIC_URL: ${DREFYN_API_PUBLIC_URL:-http://127.0.0.1:3100}
+      # The compose network never leaves the machine.
+      DREFYN_DATABASE_SSL: disable
+      DREFYN_TRUSTED_PROXY_HOPS: ${DREFYN_TRUSTED_PROXY_HOPS:-0}
+    secrets:
+      - drefyn_app_password
+      - drefyn_public_reader_password
+      - drefyn_api_rate_limit_key
+    ports:
+      - 127.0.0.1:${DREFYN_API_PORT:-3100}:3100
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3100/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+      start_interval: 1s
+    # The service drains for 8 s on SIGTERM; this leaves it room to close its pools.
+    stop_grace_period: 12s
+    restart: unless-stopped
+
 secrets:
   postgres_password:
     environment: DREFYN_POSTGRES_PASSWORD
@@ -145,6 +196,8 @@ secrets:
     environment: DREFYN_PUBLIC_READER_PASSWORD
   drefyn_auth_password:
     environment: DREFYN_AUTH_PASSWORD
+  drefyn_api_rate_limit_key:
+    environment: DREFYN_API_RATE_LIMIT_KEY
 
 networks:
   # internal drops the route out, so nothing reaches the internet. It leaves the bridge an
