@@ -96,6 +96,12 @@ const DEFAULT_RATE_LIMITS: Readonly<Record<RateBucket, string>> = {
   cli_link_verify: '20/15m',
   // Each verify is a DNS query this server makes on the organization's behalf.
   sso_domain_verify: '20/1h',
+  // Attempts, not failures, on the person alone: this is what bounds guessing six digits.
+  totp_verify: '5/5m,20/1h,50/1d',
+  // Person and network, never the person alone, so nobody elsewhere can fill it.
+  recovery_code_verify: '10/1h',
+  recovery_code_verify_ip: '30/1h',
+  second_factor_notice: '1/6h',
 };
 
 // Every reason is fixed text: a value may be a secret pasted into the wrong key.
