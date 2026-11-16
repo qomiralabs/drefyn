@@ -149,7 +149,7 @@ describe('type tests', () => {
       | 'ssi'
     >();
     expectTypeOf<CacheScope>().toEqualTypeOf<
-      'page' | 'nav' | 'search' | 'retrieval' | 'render' | 'asset'
+      'page' | 'nav' | 'search' | 'retrieval' | 'render' | 'asset' | 'schema'
     >();
     expectTypeOf<TenantRef>().toExtend<OrganizationRef>();
     expectTypeOf<OrganizationRef>().not.toExtend<TenantRef>();

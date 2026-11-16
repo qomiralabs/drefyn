@@ -40,7 +40,7 @@ Refs:
 Cache keys:
 
 - `CacheKey`: a branded string. `cacheKey` is the only way to build one.
-- `CacheScope`: `page`, `nav`, `search`, `retrieval`, `render` or `asset`.
+- `CacheScope`: `page`, `nav`, `search`, `retrieval`, `render`, `asset` or `schema`.
 - `cacheKey(tenant, scope, ...parts)`: `v1:<orgId>:<projectId>:<scope>:<hash>`, where the hash
   is SHA-256 over the parts in base64url. Parts are length prefixed, so no two different lists
   of parts share a key, and they never appear in the key itself.
