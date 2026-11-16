@@ -21,7 +21,6 @@ import {
   type Account,
   type ApiKeys,
   type AuthConfig,
-  type AuthLogger,
   type CliLinks,
   type EmailChange,
   type EmailSignIn,
@@ -40,15 +39,13 @@ import {
   createDatabase,
   parseAuthDatabaseConfig,
   parseDatabaseConfig,
-  withOrganization,
-  type Database,
 } from '@drefyn/db';
 import { parseEmailConfig } from '@drefyn/email/config';
 import { signInMethods, type SignInMethods } from '../auth/outcomes.ts';
-import { mailableOrganizationName } from './organization-name.ts';
-import { dashboardMail, noteEmailOff, type OrganizationName } from './auth-mailer.ts';
+import { authLogger } from './auth-logger.ts';
+import { mailableOrganizationName, organizationNames } from './organization-name.ts';
+import { dashboardMail, noteEmailOff } from './auth-mailer.ts';
 import { mailDeliveryEnabled } from './gate.ts';
-import { logInfo, logWarn, type LogContext } from './log.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
 // wiring that no test reaches, and ensureOrganizationFor, which takes a bare user id, stays
@@ -98,25 +95,7 @@ export interface DashboardAuth {
   readonly methods: SignInMethods;
 }
 
-// Auth passes ids and outcome codes; a value of any other shape stays out of the log.
-function plainFields(fields: Readonly<Record<string, unknown>>): LogContext {
-  const kept: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (['string', 'number', 'boolean'].includes(typeof value)) {
-      kept[key] = value as string | number | boolean;
-    }
-  }
-  return kept;
-}
-
-const logger: AuthLogger = {
-  info: (event, fields) => {
-    logInfo(event, plainFields(fields));
-  },
-  warn: (event, fields) => {
-    logWarn(event, plainFields(fields));
-  },
-};
+const logger = authLogger;
 
 let config: AuthConfig | undefined;
 
@@ -127,19 +106,6 @@ export function authConfig(): AuthConfig {
 
 export function sessionCookieName(): string {
   return authConfig().cookies.session;
-}
-
-function organizationNames(db: Database): OrganizationName {
-  return async (organizationId) => {
-    const row = await withOrganization(db, { organizationId }, (tx) =>
-      tx
-        .selectFrom('organizations')
-        .select('name')
-        .where('organization_id', '=', organizationId)
-        .executeTakeFirstOrThrow(),
-    );
-    return row.name;
-  };
 }
 
 async function compose(): Promise<DashboardAuth> {

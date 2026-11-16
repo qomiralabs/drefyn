@@ -30,6 +30,9 @@ export const SECURITY_NOTICE_KINDS = Object.freeze([
   'owner_added',
   'member_removed',
   'member_keys_revoked',
+  'sso_domain_claimed',
+  'sso_domain_verified',
+  'sso_domain_unverified',
 ] as const);
 export type SecurityNoticeKind = (typeof SECURITY_NOTICE_KINDS)[number];
 
@@ -73,6 +76,12 @@ export type SecurityNoticeMail =
       readonly organizationName: string;
       readonly memberName: string;
       readonly revokedKeys: number;
+    })
+  | (NoticeFacts & {
+      readonly kind: 'sso_domain_claimed' | 'sso_domain_verified' | 'sso_domain_unverified';
+      readonly organizationName: string;
+      // One normalized host name, IDN in punycode. Shown as text, never as a link.
+      readonly domain: string;
     });
 
 interface CodeFields {

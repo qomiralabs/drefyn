@@ -26,10 +26,13 @@ export function bundledPublicSuffixListPath(): string {
 }
 
 // The snapshot shipped with this package, unchanged. Read once at start by the caller.
+// Bundlers are told to leave the read alone: they cannot follow the computed path, and
+// would otherwise trace the whole project into the server output. The app runs from the
+// installed packages, where the data folder already sits beside src.
 export async function loadPublicSuffixList(
   path: string = bundledPublicSuffixListPath(),
 ): Promise<PublicSuffixList> {
-  return parsePublicSuffixList(await readFile(path, 'utf8'));
+  return parsePublicSuffixList(await readFile(/* turbopackIgnore: true */ path, 'utf8'));
 }
 
 const invalid = (reason: string, cause?: unknown) =>
