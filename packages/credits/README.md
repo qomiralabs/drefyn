@@ -1,7 +1,8 @@
 # `@drefyn/credits`
 
-The AI credit ledger. Generation, translation drafts and incident drafts spend from one
-credit pool per organization, shared by all its projects. Credits pay for AI work only;
+The AI credit ledger. Generation, translation drafts, incident drafts, stale page drafts
+and reader answers spend from one credit pool per organization, shared by all its
+projects. Credits pay for AI work only;
 sends are never credits. The ledger never goes below zero and never charges twice for a
 retried request. This package holds the ledger rules and an in memory store; a Postgres
 store with the same contract follows.
@@ -40,9 +41,57 @@ is public.
   carry a project id because the pool belongs to the organization.
 - `CreditOutcome` is `applied` with the entry, or `insufficient`.
 - `ENTRY_KINDS` (`grant`, `spend`, `reversal`, `expiry`) and `SPEND_REASONS`
-  (`generation`, `translation_draft`, `incident_draft`) are frozen lists.
+  (`generation`, `translation_draft`, `incident_draft`, `stale_draft`, `reader_answer`)
+  are frozen lists.
+- `AiBudget`, `AI_OPERATIONS`, `unmeteredBudget()` and `createLedgerBudget()`: see below.
 - `CreditError` is thrown for caller mistakes and business refusals. Its `code` is one of
   the codes below and its message is fixed per code, never echoing caller input.
+
+## AI budget
+
+`AiBudget` meters the AI work whose worth is known only after the run: stale page drafts
+and reader answers (`AI_OPERATIONS`: `stale_draft`, `reader_answer`). It charges first and
+refunds when the run produced nothing, so an unanswered question costs nothing and a burst
+cannot spend credits the pool does not have.
+
+- `charge(ref, { idempotencyKey, operation, floor? })` takes a `TenantRef` and returns one
+  of:
+  - `{ status: 'charged', entryId }`: a spend with `operation` as its reason was recorded.
+    Repeating the same key returns the same entry and charges nothing more.
+  - `{ status: 'refused' }`: the pool cannot cover it, or the charge would take the
+    balance below `floor`. Nothing is recorded and the key stays free. Do not run the
+    model.
+  - `{ status: 'unmetered' }`: nothing is counted. Run the model.
+- `floor` is a reserve the charge may not spend into, for example so a public assistant
+  cannot empty the credits incident drafts need. It is checked by reading the balance
+  before the spend, so parallel charges can pass it together and overshoot by at most
+  their number times the cost; bound that with a concurrency limit. A retry of an applied
+  charge may be refused once the pool has fallen below the floor, so crash recovery
+  repeats the charge without a floor to find the entry it made.
+- `refund(ref, { idempotencyKey, entryId })` reverses the whole charge, at most once.
+  Repeating the same key changes nothing. A sweeper refunding a crashed turn must use the
+  same refund key as the turn itself.
+
+Amounts are whole credits. A fractional, negative, zero or unsafe cost or floor throws
+`CREDIT_AMOUNT_INVALID`; an operation outside `AI_OPERATIONS` throws
+`CREDIT_REASON_INVALID`. Checks run before any read or charge.
+
+`createLedgerBudget({ ledger, creditsFor })` builds a metered budget over any
+`CreditLedger`. `creditsFor(operation)` returns what one operation costs and is read on
+every charge. This package holds no costs: they belong to whoever runs the pool.
+
+`unmeteredBudget()` is what a self host wires: every charge returns `unmetered` and
+refunds do nothing. Requests are still checked, so a caller bug fails the same way on
+every install.
+
+### Contract suite
+
+`aiBudgetContract(make)` from `@drefyn/credits/testing` registers vitest suites that any
+`AiBudget` over a ledger must pass: each result, the floor, refusals that record nothing,
+and a fast-check property that under every interleaving of charge, refund and crash each
+turn is charged at most once and refunded at most once. `make` returns
+`{ budget, ledger, tenant, creditsFor }` with a pool that starts empty for `tenant`. The
+entry needs `vitest` and `fast-check` in the consumer; production code never imports it.
 
 ## Idempotency
 
@@ -83,5 +132,6 @@ pnpm --filter @drefyn/credits typecheck
 
 The behavior suites live in `test/contract` as functions that take a ledger factory;
 `test/memory.test.ts` runs them against `createMemoryLedger`, and the Postgres store will
-run the same functions. The type tests in `test/types` use `@ts-expect-error`, so
+run the same functions. `test/budget.test.ts` runs `aiBudgetContract` against
+`createLedgerBudget` over the in memory ledger. The type tests in `test/types` use `@ts-expect-error`, so
 `typecheck` is what proves them. Line coverage must stay at or above 95 percent.

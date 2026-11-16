@@ -8,6 +8,8 @@ export const SPEND_REASONS = Object.freeze([
   'generation',
   'translation_draft',
   'incident_draft',
+  'stale_draft',
+  'reader_answer',
 ] as const);
 
 export type EntryKind = (typeof ENTRY_KINDS)[number];

@@ -62,8 +62,13 @@ describe('package shape', () => {
     expect(manifest.optionalDependencies ?? {}).toEqual({});
   });
 
-  it('has one public entry point', () => {
-    expect(manifest.exports).toEqual({ '.': './src/index.ts', './package.json': './package.json' });
+  // The contract suite is public so a host can prove its own budget; it is test code only.
+  it('has one public entry point plus the testing entry', () => {
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './testing': './src/testing.ts',
+      './package.json': './package.json',
+    });
   });
 
   it('imports only @drefyn/tenancy, node:crypto and its own src files', () => {
@@ -71,8 +76,10 @@ describe('package shape', () => {
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       expect(file.endsWith('.ts'), `${relative(root, file)} is not TypeScript`).toBe(true);
+      const testing = file === join(src, 'testing.ts');
       for (const spec of specifiers(file)) {
         if (spec === '@drefyn/tenancy' || spec === 'node:crypto') continue;
+        if (testing && (spec === 'vitest' || spec === 'fast-check')) continue;
         const local = spec.startsWith('./') || spec.startsWith('../');
         expect(local, `${relative(root, file)} imports '${spec}'`).toBe(true);
         expect(resolve(dirname(file), spec).startsWith(src + sep)).toBe(true);
@@ -89,8 +96,37 @@ describe('package shape', () => {
 
   it('exports exactly the public API', () => {
     expect(Object.keys(creditsPackage).sort()).toEqual(
-      ['CreditError', 'ENTRY_KINDS', 'SPEND_REASONS', 'createMemoryLedger', 'credits'].sort(),
+      [
+        'AI_OPERATIONS',
+        'CreditError',
+        'ENTRY_KINDS',
+        'SPEND_REASONS',
+        'createLedgerBudget',
+        'createMemoryLedger',
+        'credits',
+        'unmeteredBudget',
+      ].sort(),
     );
+  });
+
+  it('exports only the contract suite from the testing entry', async () => {
+    const testing = await import('../src/testing.ts');
+    expect(Object.keys(testing)).toEqual(['aiBudgetContract']);
+  });
+
+  // Production code must never load vitest or fast-check through the main entry.
+  it('keeps the testing entry out of the main entry graph', () => {
+    const seen = new Set<string>();
+    const visit = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const spec of specifiers(file)) {
+        if (spec.startsWith('./')) visit(resolve(dirname(file), spec));
+      }
+    };
+    visit(join(src, 'index.ts'));
+    expect(seen.has(join(src, 'testing.ts'))).toBe(false);
+    expect(seen.has(join(src, 'budget.ts'))).toBe(true);
   });
 
   // Prices, allowance sizes, purchases and Stripe are hosted only, and sends are never credits.
@@ -134,6 +170,18 @@ describe('package shape', () => {
       'CREDIT_ENTRY_NOT_FOUND',
       'CREDIT_NOT_REVERSIBLE',
       'CREDIT_BALANCE_OVERFLOW',
+      'AiBudget',
+      'AI_OPERATIONS',
+      'charge',
+      'refund',
+      'floor',
+      'unmeteredBudget',
+      'createLedgerBudget',
+      'creditsFor',
+      'aiBudgetContract',
+      '@drefyn/credits/testing',
+      'stale_draft',
+      'reader_answer',
     ]) {
       expect(readme, `README mentions ${name}`).toContain(name);
     }
