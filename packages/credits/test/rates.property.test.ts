@@ -360,8 +360,8 @@ describe('credit math properties', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     );
   });
 
-  // Each fixture rate is the provider rate divided by 0.6 and rounded up, so 0.6 times the
-  // exact retail amount is at least what the provider bills. The charge must cover it.
+  // A table is built so each rate is the provider rate divided by 0.6, rounded up, so the
+  // provider bills at most 0.6 times the exact amount at that rate. The charge must cover it.
   it('never charges below the provider cost the fixture rates imply', () => {
     fc.assert(
       fc.property(callsArb, (calls) => {

@@ -1,7 +1,7 @@
-// A rate table for tests only. The ids are made up and the live table is hosted config that
-// can differ. The rates are shaped like a real table (a small model with a second band for
-// long prompts, a middle default model, a premium large one) so the worked examples and the
-// band edge exercise every rule.
+// A rate table for tests only. The ids and the round rates are made up and match no real
+// model or price; live rates are hosted config. The shape is a real one (a small model with
+// a second band for long prompts, a middle default model, a premium large one) so the worked
+// examples and the band edge exercise every rule.
 export const FIXTURE_TABLE = {
   version: 'fixture.1',
   models: [
@@ -11,19 +11,19 @@ export const FIXTURE_TABLE = {
       bands: [
         {
           upToPromptTokens: 100_000,
-          input: 16_667,
-          cacheWrite5m: 20_834,
-          cacheWrite1h: 33_334,
-          cacheRead: 1_667,
-          output: 83_334,
+          input: 20_000,
+          cacheWrite5m: 25_000,
+          cacheWrite1h: 40_000,
+          cacheRead: 2_000,
+          output: 100_000,
         },
         {
           upToPromptTokens: null,
-          input: 83_334,
-          cacheWrite5m: 104_167,
-          cacheWrite1h: 166_667,
-          cacheRead: 8_334,
-          output: 416_667,
+          input: 100_000,
+          cacheWrite5m: 125_000,
+          cacheWrite1h: 200_000,
+          cacheRead: 10_000,
+          output: 500_000,
         },
       ],
     },
@@ -33,11 +33,11 @@ export const FIXTURE_TABLE = {
       bands: [
         {
           upToPromptTokens: null,
-          input: 333_334,
-          cacheWrite5m: 416_667,
-          cacheWrite1h: 666_667,
-          cacheRead: 16_667,
-          output: 1_666_667,
+          input: 300_000,
+          cacheWrite5m: 375_000,
+          cacheWrite1h: 600_000,
+          cacheRead: 30_000,
+          output: 1_500_000,
         },
       ],
     },
@@ -47,11 +47,11 @@ export const FIXTURE_TABLE = {
       bands: [
         {
           upToPromptTokens: null,
-          input: 666_667,
-          cacheWrite5m: 833_334,
-          cacheWrite1h: 1_333_334,
-          cacheRead: 33_334,
-          output: 3_333_334,
+          input: 700_000,
+          cacheWrite5m: 875_000,
+          cacheWrite1h: 1_400_000,
+          cacheRead: 70_000,
+          output: 3_500_000,
         },
       ],
     },

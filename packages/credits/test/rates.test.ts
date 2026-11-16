@@ -72,7 +72,7 @@ describe('parseRateTable', () => {
     const input = fixtureCopy();
     const parsed = parseRateTable(input);
     at(input, 'models', 0, 'bands', 0)['input'] = 1;
-    expect(parsed.models[0]?.bands[0]?.input).toBe(16_667);
+    expect(parsed.models[0]?.bands[0]?.input).toBe(20_000);
   });
 
   it('accepts a table with no reference profiles', () => {
@@ -371,9 +371,9 @@ describe('creditsForUsage', () => {
   it('uses the first band up to 100,000 prompt tokens and the second from 100,001', () => {
     const at100k = creditsForUsage(table, [{ modelId: 'fixture-small', usage: usage(100_000, 0) }]);
     const over = creditsForUsage(table, [{ modelId: 'fixture-small', usage: usage(100_001, 0) }]);
-    // 100,000 x 16,667 is 1.67 credits; 100,001 x 83,334 is 8.33 credits.
+    // 100,000 x 20,000 is 2 credits; 100,001 x 100,000 is 10.0001 credits.
     expect(at100k).toBe(2);
-    expect(over).toBe(8);
+    expect(over).toBe(10);
   });
 
   it('counts cache reads and writes toward the band', () => {
@@ -480,31 +480,31 @@ describe('estimateCredits', () => {
   });
 
   it('rounds up and charges at least one credit', () => {
-    // 1 output token on the middle model is 0.0017 credits.
+    // 1 output token on the middle model is 0.0015 credits.
     expect(estimateCredits(table, [plan('fixture-mid', 0, 1)])).toBe(1);
     expect(estimateCredits(table, [plan('fixture-mid', 0, 0)])).toBe(1);
-    // 20,000 x 666,667 (the dearest prompt rate) + 2,000 x 1,666,667 = 16.67, so 17.
-    expect(estimateCredits(table, [plan('fixture-mid', 20_000, 2_000)])).toBe(17);
+    // 20,000 x 600,000 (the dearest prompt rate) + 2,000 x 1,500,000 = 15 exactly.
+    expect(estimateCredits(table, [plan('fixture-mid', 20_000, 2_000)])).toBe(15);
   });
 
   it('takes the second band once the largest prompt may pass 100,000 tokens', () => {
     const first = estimateCredits(table, [plan('fixture-small', 100_000, 0)]);
     const second = estimateCredits(table, [plan('fixture-small', 100_001, 0)]);
-    // 100,000 x 33,334 is 3.33 credits, rounded up; 100,001 x 166,667 is 16.67, rounded up.
+    // 100,000 x 40,000 is 4 credits; 100,001 x 200,000 is 20.0002, rounded up to 21.
     expect(first).toBe(4);
-    expect(second).toBe(17);
+    expect(second).toBe(21);
   });
 
   it('includes every planned call, such as the check', () => {
-    // The check adds 60,000 x 33,334 + 4,000 x 83,334, 2.33 credits, to the 16.67 above:
-    // 19.00005 in all, which rounds up to 20.
+    // The check adds 60,000 x 40,000 + 4,000 x 100,000, 2.8 credits, to the 15 above:
+    // 17.8 in all, which rounds up to 18.
     const main = estimateCredits(table, [plan('fixture-mid', 20_000, 2_000)]);
     const both = estimateCredits(table, [
       plan('fixture-mid', 20_000, 2_000),
       plan('fixture-small', 60_000, 4_000),
     ]);
-    expect(main).toBe(17);
-    expect(both).toBe(20);
+    expect(main).toBe(15);
+    expect(both).toBe(18);
   });
 
   it('refuses an unknown model and bad counts by path', () => {
@@ -539,14 +539,14 @@ describe('estimateMonthlyRuns', () => {
   });
 
   it('is the floor of monthly credits over the reference charge', () => {
-    // The reference draft on the middle model costs 10 credits.
+    // The reference draft on the middle model costs 9 credits.
     expect(estimateMonthlyRuns(table, credits(0), 'stale_draft', 'fixture-mid')).toBe(0);
-    expect(estimateMonthlyRuns(table, credits(9), 'stale_draft', 'fixture-mid')).toBe(0);
-    expect(estimateMonthlyRuns(table, credits(10), 'stale_draft', 'fixture-mid')).toBe(1);
-    expect(estimateMonthlyRuns(table, credits(1_999), 'stale_draft', 'fixture-mid')).toBe(199);
+    expect(estimateMonthlyRuns(table, credits(8), 'stale_draft', 'fixture-mid')).toBe(0);
+    expect(estimateMonthlyRuns(table, credits(9), 'stale_draft', 'fixture-mid')).toBe(1);
+    expect(estimateMonthlyRuns(table, credits(1_999), 'stale_draft', 'fixture-mid')).toBe(222);
     expect(
       estimateMonthlyRuns(table, credits(Number.MAX_SAFE_INTEGER), 'stale_draft', 'fixture-mid'),
-    ).toBe(900_719_925_474_099);
+    ).toBe(1_000_799_917_193_443);
   });
 
   it('runs the check calls on the check model whatever the main model is', () => {
