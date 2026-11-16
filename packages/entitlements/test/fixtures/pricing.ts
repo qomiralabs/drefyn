@@ -100,6 +100,20 @@ export const LIMITS = {
       self_hosted: 'unlimited',
     },
   },
+  // Every plan carries a monthly credit grant; the sizes wait for calibration. A self
+  // host runs its own models, so nothing meters it.
+  'org.ai_credits_monthly': {
+    scope: 'org',
+    direction: 'max',
+    cells: {
+      free: open(),
+      starter: open(),
+      growth: open(),
+      scale: open(),
+      enterprise: open(),
+      self_hosted: 'unlimited',
+    },
+  },
   'docs.pages': {
     scope: 'docs',
     direction: 'max',
@@ -482,6 +496,11 @@ export const FEATURES = {
 
   'org.sso_saml': f('org', 'enterprise'),
   'org.audit_logs': f('org', 'enterprise'),
+  'org.ai_model_picker': f('org', 'free'),
+  'org.ai_premium_models': f('org', 'starter'),
+  'org.ai_byom': f('org', 'growth'),
+  // Packs are sold by the hosted service; a self host has no credits to top up.
+  'org.ai_credit_packs': f('org', 'starter', false),
 } as const satisfies Record<string, FeatureRow>;
 
 export type FixtureFeatureKey = keyof typeof FEATURES;
