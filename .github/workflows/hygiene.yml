@@ -3,11 +3,15 @@ name: Hygiene
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  # The merge queue waits for the required checks on its own commit, so they run there too.
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
 concurrency:
-  group: hygiene-${{ github.event.pull_request.number }}
+  # Queue entries have no PR number; their ref is unique per entry, so none replaces another.
+  group: hygiene-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -20,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       # The checker uses only Node built-ins, so no install step is needed.
@@ -30,14 +34,17 @@ jobs:
           package-manager-cache: false
       - name: Tracked files
         run: node scripts/hygiene/src/cli.ts --files
+      # In the queue this is the squash commit GitHub wrote, the message that lands on development.
       - name: Commit messages
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: node scripts/hygiene/src/cli.ts --commits "${BASE_SHA}..${HEAD_SHA}"
       # Title and body arrive through env vars; expanding them inside the script would let
       # a crafted PR title run shell commands.
+      # The queue event carries no PR, and the title and body were checked on the PR itself.
       - name: PR title and body
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           HYGIENE_PR_TITLE: ${{ github.event.pull_request.title }}
           HYGIENE_PR_BODY: ${{ github.event.pull_request.body }}

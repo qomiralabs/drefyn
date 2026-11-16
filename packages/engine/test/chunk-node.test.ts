@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { chunkNode } from '../src/index.ts';
-import { treeOf, visibleOf } from './support/tree.ts';
+import { chunkTree, treeOf, visibleOf } from './support/tree.ts';
 
 const options = { targetChars: 800, maxChars: 2000 };
 const words = (chars: number) => 'word '.repeat(Math.ceil(chars / 5)).slice(0, chars);
 
 describe('chunkNode boundaries', () => {
   it('gives nothing for an empty page', () => {
-    expect(chunkNode(treeOf([]), options)).toEqual([]);
+    expect(chunkTree(treeOf([]), options)).toEqual([]);
   });
 
   it('keeps small blocks together under one heading', () => {
@@ -16,7 +16,7 @@ describe('chunkNode boundaries', () => {
       { raw: 'First.' },
       { raw: 'Second.' },
     ]);
-    expect(chunkNode(root, options)).toEqual([
+    expect(chunkTree(root, options)).toEqual([
       {
         ord: 0,
         blockPath: '0',
@@ -36,7 +36,7 @@ describe('chunkNode boundaries', () => {
       { raw: '# Top', heading: { depth: 1, text: 'Top' } },
     ]);
     expect(
-      chunkNode(root, options).map(({ blockPath, headingPath }) => [blockPath, headingPath]),
+      chunkTree(root, options).map(({ blockPath, headingPath }) => [blockPath, headingPath]),
     ).toEqual([
       ['0', []],
       ['1', ['One']],
@@ -47,23 +47,40 @@ describe('chunkNode boundaries', () => {
     ]);
   });
 
-  it('reads heading text through inline marks and code', () => {
-    const root = treeOf([{ raw: '# x', heading: { depth: 1, text: '' } }]);
-    const heading = root.children[0];
-    const inline = {
-      ...heading,
-      children: [
-        { type: 'text', value: 'Use ' },
-        { type: 'strong', children: [{ type: 'inlineCode', value: 'saveDraft' }] },
-      ],
-    };
-    const page = { ...root, children: [inline] } as typeof root;
-    expect(chunkNode(page, options)[0]?.headingPath).toEqual(['Use saveDraft']);
+  it('takes heading text from the unit the host marked as a heading', () => {
+    const chunks = chunkNode(
+      {
+        state: 'ok',
+        units: [
+          { heading: { depth: 2, text: 'Use saveDraft' }, text: 'Use saveDraft' },
+          { text: 'Body.' },
+        ],
+      },
+      options,
+    );
+    expect(chunks).toEqual([
+      { ord: 0, blockPath: '0', headingPath: ['Use saveDraft'], body: 'Use saveDraft\n\nBody.' },
+    ]);
+  });
+
+  it('gives a page the render refused no chunks', () => {
+    expect(chunkNode({ state: 'not_renderable' }, options)).toEqual([]);
+  });
+
+  it('skips a unit with no text but keeps its heading for what follows', () => {
+    const chunks = chunkNode(
+      {
+        state: 'ok',
+        units: [{ heading: { depth: 1, text: '' }, text: '' }, { text: '   ' }, { text: 'Body.' }],
+      },
+      options,
+    );
+    expect(chunks).toEqual([{ ord: 0, blockPath: '2', headingPath: [''], body: 'Body.' }]);
   });
 
   it('closes a chunk before it passes the target', () => {
     const root = treeOf([{ raw: words(500) }, { raw: words(290) }, { raw: words(100) }]);
-    const chunks = chunkNode(root, options);
+    const chunks = chunkTree(root, options);
     expect(chunks.map(({ body }) => body.length)).toEqual([792, 100]);
     expect(chunks.map(({ blockPath }) => blockPath)).toEqual(['0', '2']);
   });
@@ -71,7 +88,7 @@ describe('chunkNode boundaries', () => {
   it('splits a block over the target at line ends and numbers the parts', () => {
     const lines = Array.from({ length: 40 }, (_, at) => `line ${String(at)} ${words(50)}`);
     const raw = `\`\`\`\n${lines.join('\n')}\n\`\`\``;
-    const chunks = chunkNode(treeOf([{ raw: 'Before.' }, { raw }]), options);
+    const chunks = chunkTree(treeOf([{ raw: 'Before.' }, { raw }]), options);
     expect(chunks.length).toBeGreaterThan(2);
     expect(chunks[0]?.body).toBe('Before.');
     expect(chunks[1]?.blockPath).toBe('1.0');
@@ -82,41 +99,41 @@ describe('chunkNode boundaries', () => {
   it('holds the hard cap on a very long code block with one line', () => {
     const raw = `\`\`\`\n${'x'.repeat(10_074)}\n\`\`\``;
     const root = treeOf([{ raw }]);
-    const chunks = chunkNode(root, options);
+    const chunks = chunkTree(root, options);
     expect(Math.max(...chunks.map(({ body }) => body.length))).toBeLessThanOrEqual(2000);
     expect(chunks.map(({ body }) => body).join('')).toBe(raw);
   });
 
   it('does not cut a pair of surrogates at the cap', () => {
     const root = treeOf([{ raw: `a${'\u{1F600}'.repeat(50)}` }]);
-    const chunks = chunkNode(root, { targetChars: 10, maxChars: 10 });
+    const chunks = chunkTree(root, { targetChars: 10, maxChars: 10 });
     for (const { body } of chunks) expect(body.isWellFormed()).toBe(true);
     expect(chunks.map(({ body }) => body).join('')).toBe(visibleOf(root));
   });
 
   it('takes nothing from the gaps between blocks', () => {
     const root = treeOf([{ raw: 'One.' }, { raw: 'Two.', gap: '\n\n<!-- gap -->\n\n' }]);
-    expect(chunkNode(root, options).map(({ body }) => body)).toEqual(['One.\n\nTwo.']);
+    expect(chunkTree(root, options).map(({ body }) => body)).toEqual(['One.\n\nTwo.']);
   });
 
   it('starts a chunk on its text, never on blank lines', () => {
     const root = treeOf([{ raw: words(790) }, { raw: words(100) }]);
-    expect(chunkNode(root, options)[1]?.body).toBe(words(100));
+    expect(chunkTree(root, options)[1]?.body).toBe(words(100));
   });
 
   it('takes nothing from what follows the last block', () => {
-    const chunks = chunkNode(treeOf([{ raw: 'One.' }], '\nleft over <!-- tail -->\n'), options);
+    const chunks = chunkTree(treeOf([{ raw: 'One.' }], '\nleft over <!-- tail -->\n'), options);
     expect(chunks.map(({ body }) => body)).toEqual(['One.']);
   });
 
   it('gives a page that is only a tail no chunks', () => {
-    expect(chunkNode(treeOf([], 'Tail.'), options)).toEqual([]);
+    expect(chunkTree(treeOf([], 'Tail.'), options)).toEqual([]);
   });
 
   it('caps heading text, so a long heading cannot grow every row beneath it', () => {
     const text = '\u{1F600}'.repeat(5000);
     const root = treeOf([{ raw: `# ${text}`, heading: { depth: 1, text } }, { raw: 'Body.' }]);
-    for (const { headingPath } of chunkNode(root, options)) {
+    for (const { headingPath } of chunkTree(root, options)) {
       expect(headingPath[0]?.length).toBeLessThanOrEqual(200);
       expect(headingPath[0]?.isWellFormed()).toBe(true);
     }
@@ -126,7 +143,7 @@ describe('chunkNode boundaries', () => {
     const root = treeOf([{ raw: 'One.' }, { raw: 'Two.' }]);
     const [first, second] = root.children;
     const page = { ...root, children: [first, { ...second, source: undefined }] };
-    expect(chunkNode(page as typeof root, options).map(({ body }) => body)).toEqual([
+    expect(chunkTree(page as typeof root, options).map(({ body }) => body)).toEqual([
       'One.\n\nTwo.',
     ]);
   });
@@ -136,7 +153,7 @@ describe('chunkNode boundaries', () => {
     [{ targetChars: 0, maxChars: 10 }],
     [{ targetChars: 11, maxChars: 10 }],
   ])('refuses sizes it cannot honour: %j', (sizes) => {
-    expect(() => chunkNode(treeOf([{ raw: 'One.' }]), sizes)).toThrow(RangeError);
+    expect(() => chunkTree(treeOf([{ raw: 'One.' }]), sizes)).toThrow(RangeError);
   });
 
   it('keeps heading paths under a page budget on hostile deep headings', () => {
@@ -149,7 +166,7 @@ describe('chunkNode boundaries', () => {
       heading: { depth: 6, text: '\u4e2d' } as const,
     }));
     const root = treeOf([long(1), long(2), long(3), long(4), long(5), ...deep]);
-    const chunks = chunkNode(root, options);
+    const chunks = chunkTree(root, options);
     const stored = chunks.reduce(
       (sum, { headingPath }) =>
         sum + headingPath.reduce((row, text) => row + Buffer.byteLength(text) + 1, 0),
@@ -172,7 +189,7 @@ describe('chunkNode boundaries', () => {
     expect(73 * fills.length).toBe(37_449);
     expect(50 * passes.length).toBe(37_450);
 
-    const chunks = chunkNode(treeOf([...fills, ...passes, ...rest]), {
+    const chunks = chunkTree(treeOf([...fills, ...passes, ...rest]), {
       targetChars: 4,
       maxChars: 2000,
     });
@@ -194,7 +211,7 @@ describe('chunkNode boundaries', () => {
       raw: '#',
       heading: { depth, text: '' },
     }));
-    const elements = chunkNode(treeOf([...empty, ...deep]), options).reduce(
+    const elements = chunkTree(treeOf([...empty, ...deep]), options).reduce(
       (sum, { headingPath }) => sum + headingPath.length,
       0,
     );
@@ -207,7 +224,7 @@ describe('chunkNode boundaries', () => {
       { raw: words(1500) },
     ];
     const root = treeOf(Array.from({ length: 500 }, (_, at) => section(at)).flat());
-    const chunks = chunkNode(root, options);
+    const chunks = chunkTree(root, options);
     expect(chunks.at(-1)?.headingPath).toEqual(['Section 499']);
   });
 
@@ -217,7 +234,7 @@ describe('chunkNode boundaries', () => {
     const page = (first: string) =>
       treeOf([heading('o'.repeat(200)), { raw: first }, heading(later), { raw: 'ab\ncd\n' }]);
     const second = (first: string) =>
-      chunkNode(page(first), { targetChars: 3, maxChars: 3 }).filter(
+      chunkTree(page(first), { targetChars: 3, maxChars: 3 }).filter(
         ({ blockPath }) => Number.parseInt(blockPath, 10) >= 2,
       );
     // Long enough that rows under the 200 character heading pass the whole page budget.
@@ -229,7 +246,7 @@ describe('chunkNode boundaries', () => {
   it('does not change its input', () => {
     const root = treeOf([{ raw: words(3000) }]);
     const before = JSON.stringify(root);
-    chunkNode(root, options);
+    chunkTree(root, options);
     expect(JSON.stringify(root)).toBe(before);
   });
 });

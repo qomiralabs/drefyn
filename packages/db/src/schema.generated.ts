@@ -81,6 +81,7 @@ export interface ChunksTable {
   body: string;
   body_sha256: Buffer;
   created_at: Generated<Date>;
+  render_policy_version: number | null;
 }
 
 // app.cli_sign_in_links
@@ -413,6 +414,43 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.publish_approvals
+export interface PublishApprovalsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  approver_id: string;
+  approved_at: Generated<Date>;
+}
+
+// app.publish_log
+export interface PublishLogTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  expected_head_version_id: string;
+  previous_version_id: string | null;
+  actor_kind: string;
+  actor_id: string;
+  idempotency_key: string;
+  render_policy_version: number;
+  published_at: Generated<Date>;
+}
+
+// app.publish_workflows
+export interface PublishWorkflowsTable {
+  organization_id: string;
+  project_id: string;
+  approval_required: Generated<boolean>;
+  api_keys_publish: Generated<boolean>;
+  git_publish: Generated<boolean>;
+  updated_at: Generated<Date>;
+}
+
 // app.published_filter_rows
 export interface PublishedFilterRowsTable {
   organization_id: string;
@@ -608,6 +646,9 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  publish_approvals: PublishApprovalsTable;
+  publish_log: PublishLogTable;
+  publish_workflows: PublishWorkflowsTable;
   published_filter_rows: PublishedFilterRowsTable;
   published_versions: PublishedVersionsTable;
   recovery_codes: RecoveryCodesTable;

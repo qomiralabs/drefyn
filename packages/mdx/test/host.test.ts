@@ -33,6 +33,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const workspace = resolve(here, '../../..');
 const hostMain = resolve(here, '../src/host-main.ts');
 const fixtureHost = resolve(here, 'fixtures/hosts/fixture-host.ts');
+// Past the fixture host's 200 ms parse limit, the way a thread waits on a loaded machine.
+const PROBE_HOLD_MS = 300;
+// Half the test's limit, so a hang is reported as a parse timeout, not as a test timeout.
+const PROBE_PARSE_TIMEOUT_MS = TIMEOUT_MS / 2;
 const PERMISSION = ['--permission', `--allow-fs-read=${workspace}`, '--allow-worker'];
 
 const hosts: ChildProcess[] = [];
@@ -162,9 +166,19 @@ describe('the parse host', () => {
   it(
     'keeps files, children and addons from a thread, where the seal is only a seatbelt',
     async () => {
-      const { url } = start([fixtureHost, 'host-probe']);
+      // The claim is what the thread can reach, not how fast it answers, so the parse limit
+      // is out of the way: a loaded machine can leave a thread unrun far past 200 ms. A real
+      // hang still ends as mdx.parse_timeout inside the test's own limit.
+      const limit = String(PROBE_PARSE_TIMEOUT_MS);
+      // A print and a project's budget may not be shorter than a parse.
+      const { url } = start([fixtureHost, 'host-probe'], {
+        DREFYN_PARSE_TIMEOUT_MS: limit,
+        DREFYN_PARSE_PRINT_TIMEOUT_MS: limit,
+        DREFYN_PARSE_PROJECT_BUDGET_MS: limit,
+      });
       const client = createParseClient({ ...CLIENT, url: await url });
-      const result = await client.parse(page('x'));
+      // The probe holds its thread past the fixture host's usual limit, as a loaded machine can.
+      const result = await client.parse(page(String(PROBE_HOLD_MS)));
       expect(result).toMatchObject({
         error: [{ code: 'mdx.probe:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:0' }],
       });

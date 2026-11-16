@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ENGINE_ERROR_CODES, NODE_FAMILIES, NODE_LIFECYCLES, ORIGINS } from '../src/index.ts';
+import {
+  ENGINE_ERROR_CODES,
+  NODE_FAMILIES,
+  NODE_LIFECYCLES,
+  ORIGINS,
+  PUBLISH_ERROR_CODES,
+  PUBLISH_SCOPES,
+  STRICT_WORKFLOW,
+} from '../src/index.ts';
 
 describe('the closed sets', () => {
   it('lists the seven node families', () => {
@@ -44,6 +52,9 @@ describe('the closed sets', () => {
     ['NODE_LIFECYCLES', NODE_LIFECYCLES],
     ['ORIGINS', ORIGINS],
     ['ENGINE_ERROR_CODES', ENGINE_ERROR_CODES],
+    ['PUBLISH_ERROR_CODES', PUBLISH_ERROR_CODES],
+    ['PUBLISH_SCOPES', PUBLISH_SCOPES],
+    ['STRICT_WORKFLOW', STRICT_WORKFLOW],
   ])('freezes %s', (_name, list) => {
     expect(Object.isFrozen(list)).toBe(true);
   });

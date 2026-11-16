@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "bench": "vitest bench --run --reporter=verbose"
   },
   "dependencies": {
     "@drefyn/tenancy": "workspace:*"

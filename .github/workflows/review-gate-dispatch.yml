@@ -17,8 +17,9 @@
 #   on the status.
 #
 # What it does not protect: GitHub runs this file from the ref the caller picked, so a
-# branch in this repository can edit it. The controls for that are the same as for
-# review-gate.yml: code owner review on .github/ and, later, a status from a GitHub App.
+# branch in this repository can edit it. The control for that is the same as for
+# review-gate.yml: staging and main require review-gate-required.yml through an
+# organization ruleset, and a fork PR into either is judged there by its own runs.
 
 name: Review gate (dispatch)
 

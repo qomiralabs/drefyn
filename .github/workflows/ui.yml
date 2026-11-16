@@ -3,6 +3,9 @@ name: UI
 # No path filter, so these jobs can become required checks without leaving a PR pending.
 on:
   pull_request:
+  # The merge queue waits for the required checks on its own commit, so they run there too.
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [development, staging, main]
 

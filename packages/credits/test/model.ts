@@ -38,6 +38,13 @@ export type Op =
       readonly kind: 'reversal';
       readonly key: string;
       readonly target: number;
+    }
+  | {
+      readonly org: number;
+      readonly kind: 'settlement';
+      readonly key: string;
+      readonly target: number;
+      readonly amount: number;
     };
 
 export type Result =
@@ -94,6 +101,16 @@ export function opArb(orgs = ORGS.length, keys = keyArb): fc.Arbitrary<Op> {
         target: fc.integer({ min: -1, max: 6 }),
       }),
     },
+    {
+      weight: 2,
+      arbitrary: fc.record({
+        org,
+        kind: fc.constant('settlement' as const),
+        key: keys,
+        target: fc.integer({ min: -1, max: 6 }),
+        amount: amountArb,
+      }),
+    },
   );
 }
 
@@ -120,13 +137,15 @@ interface ModelEntry {
   readonly idempotencyKey: string;
   readonly reason?: SpendReason;
   readonly reverses?: number;
+  readonly settles?: number;
 }
 
 interface OrgState {
   readonly entries: ModelEntry[];
   readonly keys: Map<string, { readonly request: string; readonly result: Result }>;
   readonly spends: number[];
-  readonly reversed: Set<number>;
+  // Spends already reversed or settled; each spend closes once, either way.
+  readonly closed: Set<number>;
 }
 
 export class Model {
@@ -135,7 +154,7 @@ export class Model {
   private state(org: number): OrgState {
     let state = this.orgs.get(org);
     if (state === undefined) {
-      state = { entries: [], keys: new Map(), spends: [], reversed: new Set() };
+      state = { entries: [], keys: new Map(), spends: [], closed: new Set() };
       this.orgs.set(org, state);
     }
     return state;
@@ -143,7 +162,11 @@ export class Model {
 
   balance(org: number): number {
     return this.state(org).entries.reduce(
-      (sum, e) => sum + (e.kind === 'grant' || e.kind === 'reversal' ? e.amount : -e.amount),
+      (sum, e) =>
+        sum +
+        (e.kind === 'grant' || e.kind === 'reversal' || e.kind === 'settlement'
+          ? e.amount
+          : -e.amount),
       0,
     );
   }
@@ -151,7 +174,7 @@ export class Model {
   apply(op: Op): Result {
     const state = this.state(op.org);
     const target =
-      op.kind === 'reversal'
+      op.kind === 'reversal' || op.kind === 'settlement'
         ? op.target < 0 || state.spends.length === 0
           ? -1
           : (state.spends[op.target % state.spends.length] ?? -1)
@@ -159,7 +182,9 @@ export class Model {
     const request = JSON.stringify(
       op.kind === 'reversal'
         ? { kind: op.kind, target }
-        : { ...op, org: undefined, key: undefined },
+        : op.kind === 'settlement'
+          ? { kind: op.kind, target, amount: op.amount }
+          : { ...op, org: undefined, key: undefined },
     );
     const seen = state.keys.get(op.key);
     if (seen !== undefined)
@@ -183,14 +208,29 @@ export class Model {
       case 'reversal': {
         const spent = target === undefined || target < 0 ? undefined : state.entries[target];
         if (spent === undefined || target === undefined) return 'CREDIT_ENTRY_NOT_FOUND';
-        if (state.reversed.has(target)) return 'CREDIT_NOT_REVERSIBLE';
+        if (state.closed.has(target)) return 'CREDIT_NOT_REVERSIBLE';
         if (balance + spent.amount > SAFE_MAX) return 'CREDIT_BALANCE_OVERFLOW';
-        state.reversed.add(target);
+        state.closed.add(target);
         entry = {
           kind: 'reversal',
           amount: spent.amount,
           idempotencyKey: op.key,
           reverses: target,
+        };
+        break;
+      }
+      case 'settlement': {
+        const spent = target === undefined || target < 0 ? undefined : state.entries[target];
+        if (spent === undefined || target === undefined) return 'CREDIT_ENTRY_NOT_FOUND';
+        if (state.closed.has(target)) return 'CREDIT_NOT_REVERSIBLE';
+        if (op.amount >= spent.amount) return 'CREDIT_AMOUNT_INVALID';
+        if (balance + op.amount > SAFE_MAX) return 'CREDIT_BALANCE_OVERFLOW';
+        state.closed.add(target);
+        entry = {
+          kind: 'settlement',
+          amount: op.amount,
+          idempotencyKey: op.key,
+          settles: target,
         };
         break;
       }
@@ -253,6 +293,18 @@ export async function runOp(
             ? UNKNOWN_ENTRY
             : (own[op.target % own.length] ?? UNKNOWN_ENTRY);
         await ledger.reverse(ref, { idempotencyKey: op.key, entryId });
+        return;
+      }
+      case 'settlement': {
+        const entryId =
+          op.target < 0 || own.length === 0
+            ? UNKNOWN_ENTRY
+            : (own[op.target % own.length] ?? UNKNOWN_ENTRY);
+        await ledger.settle(ref, {
+          idempotencyKey: op.key,
+          entryId,
+          amount: credits(op.amount),
+        });
         return;
       }
     }

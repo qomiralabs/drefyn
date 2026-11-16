@@ -38,8 +38,8 @@ export function ledgerContract(makeLedger: LedgerFactory): void {
   }
 
   describe('constants', () => {
-    it('has exactly four entry kinds, frozen', () => {
-      expect([...ENTRY_KINDS]).toEqual(['grant', 'spend', 'reversal', 'expiry']);
+    it('has exactly five entry kinds, frozen', () => {
+      expect([...ENTRY_KINDS]).toEqual(['grant', 'spend', 'reversal', 'expiry', 'settlement']);
       expect(Object.isFrozen(ENTRY_KINDS)).toBe(true);
     });
 
@@ -355,6 +355,12 @@ export function ledgerContract(makeLedger: LedgerFactory): void {
       const spend = await spendOf(ledger, 's1', 3);
       await ledger.reverse(ORG_A, { idempotencyKey: 'r1', entryId: spend.id });
       await ledger.expire(ORG_A, { idempotencyKey: 'e1', amount: credits(1) });
+      const settled = await spendOf(ledger, 's2', 3);
+      await ledger.settle(ORG_A, {
+        idempotencyKey: 'st1',
+        entryId: settled.id,
+        amount: credits(1),
+      });
       const base = ['amount', 'id', 'idempotencyKey', 'kind', 'organizationId'];
       const fields = (await ledger.entries(ORG_A)).map((entry) => Object.keys(entry).sort());
       expect(fields).toEqual([
@@ -362,6 +368,8 @@ export function ledgerContract(makeLedger: LedgerFactory): void {
         [...base, 'reason'].sort(),
         [...base, 'reverses'].sort(),
         base,
+        [...base, 'reason'].sort(),
+        [...base, 'settles'].sort(),
       ]);
     });
   });

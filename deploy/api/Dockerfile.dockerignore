@@ -19,6 +19,8 @@
 !packages/entitlements/src
 !packages/flags/package.json
 !packages/flags/src
+!packages/seal/package.json
+!packages/seal/src
 !packages/tenancy/package.json
 !packages/tenancy/src
 !deploy/api/entrypoint.sh

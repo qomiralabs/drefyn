@@ -292,6 +292,60 @@ describe('resetStep', () => {
     });
   });
 
+  describe('with a second factor', () => {
+    const CHOOSE = { step: 'choose', code: '12345678', challenge: '' };
+    const withFactor = (code: string) =>
+      call['resetStep']?.(
+        form({ step: 'save', code: '12345678', challenge: '', password: 'p', factor_code: code }),
+      );
+
+    // Only someone holding the email code learns the account has a factor.
+    it('asks for the factor once the email code matched', async () => {
+      auth.passwordAccount.completePasswordReset.mockResolvedValue(refused('AUTH_FACTOR_REQUIRED'));
+      await expect(save()).resolves.toEqual({ ...CHOOSE, factor: 'ask' });
+    });
+
+    it('sends the factor with the password', async () => {
+      auth.passwordAccount.completePasswordReset.mockResolvedValue(refused('AUTH_FACTOR_INVALID'));
+      await withFactor('abc');
+      expect(auth.passwordAccount.completePasswordReset).toHaveBeenCalledWith(BROWSER, {
+        code: '12345678',
+        newPassword: 'p',
+        factor: { kind: 'recovery_code', code: 'abc' },
+      });
+    });
+
+    it.each([
+      ['AUTH_FACTOR_INVALID', 'wrong'],
+      ['AUTH_FACTOR_DISABLED', 'disabled'],
+    ] as const)('reads %s and never echoes the typed factor', async (code, factor) => {
+      auth.passwordAccount.completePasswordReset.mockResolvedValue(refused(code));
+      const result = await withFactor('654321');
+      expect(result).toEqual({ ...CHOOSE, factor });
+      expect(JSON.stringify(result)).not.toContain('654321');
+    });
+
+    it('reads a limited factor as a limit, with the factor still asked for', async () => {
+      auth.passwordAccount.completePasswordReset.mockResolvedValue(
+        refused('AUTH_RATE_LIMITED', 120),
+      );
+      await expect(withFactor('654321')).resolves.toEqual({
+        ...CHOOSE,
+        factor: 'ask',
+        notice: { kind: 'limited', minutes: 2 },
+      });
+    });
+
+    it('sends no factor when none was typed', async () => {
+      auth.passwordAccount.completePasswordReset.mockResolvedValue(refused('AUTH_FACTOR_REQUIRED'));
+      await withFactor('  ');
+      expect(auth.passwordAccount.completePasswordReset).toHaveBeenCalledWith(BROWSER, {
+        code: '12345678',
+        newPassword: 'p',
+      });
+    });
+  });
+
   it('names the rule a weak password broke', async () => {
     auth.passwordAccount.completePasswordReset.mockResolvedValue({
       ok: false,
@@ -661,6 +715,14 @@ describe('the second factor', () => {
     );
     expect(result).toEqual(state);
     expect(JSON.stringify(result)).not.toContain('654321');
+  });
+
+  it('tells a limited person when to retry', async () => {
+    auth.factorChallenges.completeChallenge.mockResolvedValue(refused('AUTH_RATE_LIMITED', 300));
+    const result = await call['completeFactor']?.(
+      form({ kind: 'totp', code: '654321', csrf: 'c' }),
+    );
+    expect(result).toEqual({ kind: 'totp', notice: { kind: 'limited', minutes: 5 } });
   });
 
   it('gives a reference for our own failure, without the code', async () => {

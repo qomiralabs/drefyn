@@ -147,6 +147,9 @@ export const stepUpChoices = signedInAction(
     const read = await auth.account.readAccount(session);
     if (!read.ok) return refused(read.error, 'settings.step_up_read_failed');
     const providers = read.value.identities.map((identity) => identity.provider);
+    // Unreadable reads as not enrolled: the other ways then answer that the factor is
+    // needed, and the dialog switches to it.
+    const factor = await auth.secondFactors.status(session);
     return done({
       address: session.email,
       lastSignIn: session.authenticatedAt.toISOString(),
@@ -154,6 +157,7 @@ export const stepUpChoices = signedInAction(
       email: auth.methods.email,
       google: providers.includes('google'),
       github: providers.includes('github'),
+      factor: factor.ok && factor.value.enrolled,
     });
   },
 );
@@ -177,6 +181,36 @@ export const stepUpWithCode = signedInAction(
     const auth = await dashboardAuth();
     const proved = await auth.sessions.verifyStepUpCode(browser, session, { challenge, code });
     return proved.ok ? nothing : refused(proved.error, 'settings.step_up_failed');
+  },
+);
+
+// The second factor. These return no secret and never the typed code, so a Server Action
+// is fine for them; enrolment and new recovery codes go through the POST routes instead.
+
+interface TypedFactor {
+  readonly kind: 'totp' | 'recovery_code';
+  readonly code: string;
+}
+
+// From the client, so the kind is read, not trusted.
+const factorInput = (input: TypedFactor): TypedFactor => ({
+  kind: input.kind === 'recovery_code' ? 'recovery_code' : 'totp',
+  code: typeof input.code === 'string' ? input.code : '',
+});
+
+export const stepUpWithFactor = signedInAction(async ({ browser, session }, input: TypedFactor) => {
+  const auth = await dashboardAuth();
+  const proved = await auth.secondFactors.stepUpWithFactor(browser, session, factorInput(input));
+  return proved.ok ? nothing : refused(proved.error, 'settings.step_up_failed');
+});
+
+export const removeSecondFactor = signedInAction(
+  async ({ browser, session }, input: TypedFactor) => {
+    const auth = await dashboardAuth();
+    const removed = await auth.secondFactors.removeFactor(browser, session, factorInput(input));
+    if (!removed.ok) return refused(removed.error, 'settings.factor_remove_failed');
+    after(removed.value.send);
+    return nothing;
   },
 );
 

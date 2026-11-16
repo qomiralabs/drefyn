@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NoOrganizationScreen, OrganizationScreen, WelcomeScreen } from './first-run-screens.tsx';
 import { BlockScreen, CliScreen, InviteScreen } from './outcome-screens.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
+import { FactorScreen } from './factor-screen.tsx';
 import { AuthFrame } from './parts.tsx';
 import {
   ChoosePassword,
@@ -139,12 +140,23 @@ export const STATES: Readonly<Record<string, Readonly<Record<string, Screen>>>> 
       <PasswordScreen {...shared(h)} providers={PROVIDERS} notice={{ kind: 'botcheck_down' }} />
     ),
   },
+  factor: {
+    ready: (h) => <FactorScreen {...shared(h)} kind="totp" />,
+    recovery: (h) => <FactorScreen {...shared(h)} kind="recovery_code" />,
+    wrong: (h) => <FactorScreen {...shared(h)} kind="totp" problem="wrong" />,
+    disabled: (h) => <FactorScreen {...shared(h)} kind="totp" problem="disabled" />,
+    limited: (h) => <FactorScreen {...shared(h)} kind="totp" notice={LIMITED} />,
+    unavailable: (h) => <FactorScreen {...shared(h)} kind="totp" notice={UNAVAILABLE} />,
+    expired: (h) => <FactorScreen {...shared(h)} kind="totp" problem="expired" />,
+  },
   reset: {
     ask: (h) => <ResetScreen {...shared(h)} state={{ step: 'ask' }} />,
     code: (h) => <ResetScreen {...shared(h)} state={{ step: 'code', email: EMAIL }} />,
     choose: (h) => <ResetScreen {...shared(h)} state={CHOOSE} />,
     refused: (h) => <ResetScreen {...shared(h)} state={{ ...CHOOSE, rules: ['keyboard_row'] }} />,
     breached: (h) => <ResetScreen {...shared(h)} state={{ ...CHOOSE, breached: true }} />,
+    factor: (h) => <ResetScreen {...shared(h)} state={{ ...CHOOSE, factor: 'ask' }} />,
+    'factor-wrong': (h) => <ResetScreen {...shared(h)} state={{ ...CHOOSE, factor: 'wrong' }} />,
     saved: (h) => (
       <ResetScreen {...shared(h)} state={{ step: 'saved', email: EMAIL, returnTo: '/' }} />
     ),
