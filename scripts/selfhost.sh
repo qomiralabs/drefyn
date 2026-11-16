@@ -3,7 +3,7 @@
 #   up       create deploy/.env with random passwords if it is missing, then start and wait
 #   down     stop and remove the containers, keep the data volume
 #   restart  recreate the containers from deploy/.env and wait until healthy again
-#   upgrade  add what an older volume lacks (today the drefyn_auth role), then wait
+#   upgrade  add what an older volume lacks (roles added since it was made), then wait
 #   reset    remove the containers and the data volume (needs --yes)
 # COMPOSE_PROFILES=parse, in the shell or in deploy/.env, adds the parse host to every command.
 set -euo pipefail
@@ -114,10 +114,10 @@ ensure_env() {
     fi
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
-    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
+    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 6 ] ||
     [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ] ||
     ! grep -q "^$PARSE_TOKEN=." "$env_tmp" || ! grep -q "^$PARSE_HASH=." "$env_tmp"; then
-    say <<<"selfhost: $example does not list the stack ID, the five passwords, the four auth keys and the parse host token and hash; nothing was written."
+    say <<<"selfhost: $example does not list the stack ID, the six passwords, the four auth keys and the parse host token and hash; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
@@ -299,7 +299,7 @@ case "$1" in
     warn_env_mode
     "${compose[@]}" pull --quiet --ignore-buildable
     # Recreating copies the new secrets into the container. It cannot be healthy yet, because
-    # the healthcheck logs in as the role the upgrade adds, so this waits for TCP only.
+    # the healthcheck logs in as the roles the upgrade adds, so this waits for TCP only.
     "${compose[@]}" up --detach --force-recreate
     wait_tcp
     if ! "${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh; then

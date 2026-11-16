@@ -74,28 +74,29 @@ data directory, so they hold from the very first start, even one that stopped ha
 On the first start, with an empty volume, `postgres/bootstrap.sql` runs once as the
 superuser and creates:
 
-| Role                   | Purpose                                        | Notes                                     |
-| ---------------------- | ---------------------------------------------- | ----------------------------------------- |
-| `drefyn_owner`         | Owns schema `app`; migrations run as this role | no superuser, no `BYPASSRLS`              |
-| `drefyn_app`           | The application's connection                   | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
-| `drefyn_public_reader` | Public read paths only                         | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
-| `drefyn_auth`          | Sign in lookups, before anyone is known        | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
+| Role                      | Purpose                                        | Notes                                     |
+| ------------------------- | ---------------------------------------------- | ----------------------------------------- |
+| `drefyn_owner`            | Owns schema `app`; migrations run as this role | no superuser, no `BYPASSRLS`              |
+| `drefyn_app`              | The application's connection                   | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
+| `drefyn_public_reader`    | Public read paths only                         | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
+| `drefyn_auth`             | Sign in lookups, before anyone is known        | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
+| `drefyn_protected_reader` | Published pages a signed in reader may see     | owns nothing, `NOINHERIT`, no `BYPASSRLS` |
 
 It also:
 
 - creates schema `extensions` and installs pgvector there, both owned by the superuser.
   pgvector is not a trusted extension, so only a superuser can create it; migrations never
-  need to. `drefyn_owner`, `drefyn_app` and `drefyn_public_reader` get `USAGE` on the schema;
-  none can create, drop or change anything in it. `drefyn_auth` never needs pgvector and gets
+  need to. `drefyn_owner`, `drefyn_app`, `drefyn_public_reader` and `drefyn_protected_reader`
+  get `USAGE` on the schema; none can create, drop or change anything in it. `drefyn_auth` never needs pgvector and gets
   nothing there.
 - sets the `drefyn` database's `search_path` to `app, extensions`, so `vector` works
   unqualified. The roles carry no settings of their own.
 - revokes every right on schema `public` from `PUBLIC`.
 - revokes `CONNECT` and `TEMP` on the `drefyn` database from `PUBLIC` and grants `CONNECT`
-  to the four roles only. A role created later cannot connect until it is granted, and no
+  to the five roles only. A role created later cannot connect until it is granted, and no
   role can create temporary tables in `drefyn`.
 - revokes every right on the `postgres` and `template1` databases from `PUBLIC`, so the
-  four roles and any role created later cannot connect to them.
+  five roles and any role created later cannot connect to them.
 
 Grants on `app` and row level security policies come from migrations.
 
@@ -105,22 +106,23 @@ nothing newer than what managed Postgres offers.
 
 ### Upgrading a volume
 
-A volume first started before `drefyn_auth` existed has only the first three roles. The
-bootstrap never runs twice and `drefyn_owner` cannot create roles, so after pulling a version
-that adds the role, `up` fails with `role drefyn_auth is missing` and migrations exit 4 naming
-it. The fix is one command, which is safe to run again:
+A volume first started before `drefyn_auth` or `drefyn_protected_reader` existed lacks those
+roles. The bootstrap never runs twice and `drefyn_owner` cannot create roles, so after pulling
+a version that adds one, `up` fails with `role drefyn_auth is missing` (or the role it lacks)
+and migrations exit 4 naming it. The fix is one command, which is safe to run again:
 
 ```sh
 bash scripts/selfhost.sh upgrade
 ```
 
-It adds a generated `DREFYN_AUTH_PASSWORD` to `deploy/.env` if the file has none, recreates
+It adds a generated `DREFYN_AUTH_PASSWORD` and `DREFYN_PROTECTED_READER_PASSWORD` to
+`deploy/.env` for any the file does not name, recreates
 the container so the new secret is mounted, runs every script in `postgres/upgrade/` as the
 superuser over the socket, and waits until the stack is healthy. Your data is not touched.
 
 Each script reads its quiet log settings from `postgres/quiet-log.sql`, the same file the
 bootstrap uses, so the password never reaches the server log or `pg_stat_statements`. If
-`drefyn_auth` already exists with other attributes, for example `BYPASSRLS` or a membership in
+the role a script adds already exists with other attributes, for example `BYPASSRLS` or a membership in
 another role, the script names what differs and changes nothing; fix the role as the
 superuser and run it again. The scripts need psql 10 or later, which the image has.
 
@@ -451,8 +453,8 @@ resolvers the host is set up with. Allow outbound DNS from the dashboard contain
 ## Managed Postgres
 
 On a managed database, run the same file once as the master user, with
-`DREFYN_OWNER_PASSWORD`, `DREFYN_APP_PASSWORD`, `DREFYN_PUBLIC_READER_PASSWORD` and
-`DREFYN_AUTH_PASSWORD` set in the environment:
+`DREFYN_OWNER_PASSWORD`, `DREFYN_APP_PASSWORD`, `DREFYN_PUBLIC_READER_PASSWORD`,
+`DREFYN_AUTH_PASSWORD` and `DREFYN_PROTECTED_READER_PASSWORD` set in the environment:
 
 ```sh
 psql --no-psqlrc --dbname drefyn --file deploy/postgres/bootstrap.sql
@@ -467,6 +469,13 @@ run the same way as the master user with `DREFYN_AUTH_PASSWORD` set:
 
 ```sh
 psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0001-auth-role.sql
+```
+
+One bootstrapped before `drefyn_protected_reader` runs the second script the same way, with
+`DREFYN_PROTECTED_READER_PASSWORD` set:
+
+```sh
+psql --no-psqlrc --dbname drefyn --file deploy/postgres/upgrade/0002-protected-reader-role.sql
 ```
 
 Both files turn off statement logging for their own session before they read a password. A

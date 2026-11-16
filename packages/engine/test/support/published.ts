@@ -89,6 +89,8 @@ export interface PublishedRow {
   readonly fields?: Readonly<Record<string, unknown>>;
   // Slot column to value, written to the filter row when the version is current.
   readonly slots?: Readonly<Record<string, string | number>>;
+  // Public unless a test needs a protected row; the public reader never sees those.
+  readonly visibility?: 'public' | 'protected';
 }
 
 export const publishedContent = (versionId: string) => ({ published: versionId });
@@ -99,7 +101,8 @@ export async function publish(seeded: Seeded, rows: readonly PublishedRow[]): Pr
   const versions = rows.map(
     (row) =>
       `('${org}', '${prj}', '${row.nodeId}', '${row.versionId}', '${typeId}',
-        ${json(publishedContent(row.versionId))}, ${json(row.fields ?? {})}, ${String(row.current)}, 1)`,
+        ${json(publishedContent(row.versionId))}, ${json(row.fields ?? {})}, ${String(row.current)}, 1,
+        '${row.visibility ?? 'public'}')`,
   );
   const filters = rows
     .filter((row) => row.current)
@@ -110,12 +113,12 @@ export async function publish(seeded: Seeded, rows: readonly PublishedRow[]): Pr
         .map(([, value]) => `, ${typeof value === 'number' ? String(value) : `'${value}'`}`)
         .join('');
       return `insert into app.published_filter_rows
-  (organization_id, project_id, type_id, node_id${columns})
-  values ('${org}', '${prj}', '${typeId}', '${row.nodeId}'${values});`;
+  (organization_id, project_id, type_id, node_id, visibility${columns})
+  values ('${org}', '${prj}', '${typeId}', '${row.nodeId}', '${row.visibility ?? 'public'}'${values});`;
     });
   await admin(`
 insert into app.published_versions (organization_id, project_id, node_id, version_id, type_id,
-    content, fields, is_current, render_policy_version)
+    content, fields, is_current, render_policy_version, visibility)
   values ${versions.join(',\n')};
 ${filters.join('\n')}`);
 }

@@ -102,6 +102,31 @@ describe('publishedTableSql', () => {
     expect(policy).toMatch(/project_id = app\.current_project\(\)/);
     expect(policy).not.toMatch(/is null/);
   });
+
+  it('gives every row a visibility a write cannot leave out', () => {
+    expect(sql()).toMatch(
+      /visibility text not null check \(visibility in \('public', 'protected'\)\)/,
+    );
+    expect(sql()).not.toMatch(/visibility text not null default/);
+  });
+
+  it('keeps protected rows from the public reader with a restrictive policy', () => {
+    const policy =
+      /create policy published_public_only on app\.published_pages(.*?)(;|$)/.exec(sql())?.[1] ??
+      '';
+    expect(policy).toMatch(/as restrictive for select to drefyn_public_reader/);
+    expect(policy).toMatch(/using \(visibility = 'public'\)/);
+  });
+
+  it('lets the protected reader select under the same tenant rule, and nothing else', () => {
+    expect(sql()).toMatch(/grant select on app\.published_pages to drefyn_protected_reader/);
+    const policy =
+      /create policy protected_read on app\.published_pages(.*?)(;|$)/.exec(sql())?.[1] ?? '';
+    expect(policy).toMatch(/for select to drefyn_protected_reader/);
+    expect(policy).toMatch(
+      /organization_id = app\.current_org\(\) and project_id = app\.current_project\(\)/,
+    );
+  });
 });
 
 describe('tenantTableSql input', () => {

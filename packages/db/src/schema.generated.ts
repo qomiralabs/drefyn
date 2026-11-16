@@ -285,6 +285,7 @@ export interface NodesTable {
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   head_fields: Generated<JsonValue>;
+  visibility_override: string | null;
 }
 
 // app.oauth_states
@@ -446,6 +447,7 @@ export interface PublishedFilterRowsTable {
   i5: number | null;
   d1: Date | null;
   d2: Date | null;
+  visibility: string;
 }
 
 // app.published_project_term_totals
@@ -479,6 +481,7 @@ export interface PublishedVersionsTable {
   is_current: boolean;
   render_policy_version: number;
   published_at: Generated<Date>;
+  visibility: string;
 }
 
 // app.recovery_codes

@@ -43,7 +43,9 @@ export type CatalogRule =
   | 'restrictive_policy'
   | 'actor_policy'
   | 'tenant_statistics'
-  | 'organization_table';
+  | 'organization_table'
+  | 'protected_grant'
+  | 'published_visibility';
 
 export interface CatalogProblem {
   readonly rule: CatalogRule;
@@ -56,6 +58,7 @@ export interface CatalogProblem {
 const APP_ROLE = POOL_ROLES.app;
 const READER_ROLE = POOL_ROLES.reader;
 const AUTH_ROLE = POOL_ROLES.auth;
+const PROTECTED_ROLE = POOL_ROLES.protected;
 
 const BOOKKEEPING = new Set([
   `${MIGRATIONS_SCHEMA}.${MIGRATIONS_TABLE}`,
@@ -72,6 +75,12 @@ const PROJECT_POLICY =
 const ORGANIZATION_POLICY = '(organization_id = app.current_org())';
 const PUBLISHED_POLICY =
   '((organization_id = app.current_org()) AND (project_id = app.current_project()))';
+// The restrictive guard every published table carries for the public reader. Only 'public'
+// passes, so a null, a typo or a value added later all stay hidden.
+const PUBLIC_ONLY = 'published_public_only';
+const PUBLIC_ONLY_POLICY = "(visibility = 'public'::text)";
+// What the visibility column must be: no default, so a write that forgets it fails.
+const VISIBILITY_COLUMN = 'text not null';
 
 const TABLE_NAME = /^app\.[a-z_][a-z0-9_]*$/;
 const FUNCTION_NAME = /^app\.[a-z_][a-z0-9_]*\([^()]*\)$/;
@@ -470,7 +479,8 @@ select r.rolname::text as role_name, d.datname::text as database_name, s.setconf
   from pg_db_role_setting s
   join pg_roles r on r.oid = s.setrole
   left join pg_database d on d.oid = s.setdatabase
- where r.rolname in ('${APP_ROLE}', '${READER_ROLE}', '${AUTH_ROLE}') and cardinality(s.setconfig) > 0
+ where r.rolname in ('${APP_ROLE}', '${READER_ROLE}', '${AUTH_ROLE}', '${PROTECTED_ROLE}')
+   and cardinality(s.setconfig) > 0
  order by 1, 2 nulls first`;
 
 // alter role all set ...: no role and no database, so it follows every connection.
@@ -481,6 +491,19 @@ const DATABASE_SETTINGS = `
 select current_database()::text as database_name,
        coalesce((select s.setconfig from pg_db_role_setting s join pg_database d on d.oid = s.setdatabase
                   where s.setrole = 0 and d.datname = current_database()), '{}'::text[]) as settings`;
+
+// The visibility column of every table in app that has one, with what a write must give it.
+const VISIBILITY_COLUMNS = `
+select n.nspname || '.' || c.relname as table_name,
+       format_type(a.atttypid, a.atttypmod) || case when a.attnotnull then ' not null' else '' end
+         as type,
+       a.atthasdef as has_default
+  from pg_attribute a
+  join pg_class c on c.oid = a.attrelid
+  join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'app' and c.relkind in ('r', 'p') and a.attname = 'visibility'
+   and a.attnum > 0 and not a.attisdropped
+ order by 1`;
 
 interface TableFacts {
   readonly name: string;
@@ -640,9 +663,21 @@ function policyProblems(
   const clause = table.projectColumn === null ? ORGANIZATION_POLICY : PROJECT_POLICY;
   const isolation = { cmd: '*', role: APP_ROLE, qual: clause, withCheck: clause };
   const reading = { cmd: 'r', role: READER_ROLE, qual: PUBLISHED_POLICY, withCheck: null };
+  const protectedReading = {
+    cmd: 'r',
+    role: PROTECTED_ROLE,
+    qual: PUBLISHED_POLICY,
+    withCheck: null,
+  };
+  const expected = new Map<string, ExpectedPolicy>([
+    ['tenant_isolation', isolation],
+    ['published_read', reading],
+    ['protected_read', protectedReading],
+  ]);
   // Restrictive policies can only narrow, so they are checked on their own list instead.
   for (const policy of policies.filter((p) => p.permissive)) {
-    if (policy.name !== 'tenant_isolation' && policy.name !== 'published_read') {
+    const standard = expected.get(policy.name);
+    if (standard === undefined) {
       const listed = userPolicyProblem(table.name, policy, userPolicies);
       if (listed === null) continue;
       out.push(
@@ -655,20 +690,17 @@ function policyProblems(
       );
       continue;
     }
-    if (policy.name === 'published_read' && !published) {
+    if (policy.name !== 'tenant_isolation' && !published) {
       out.push(
         problem(
           'policy',
           table.name,
-          `${table.name} has a published_read policy but is not on the published table allow list`,
+          `${table.name} has a ${policy.name} policy but is not on the published table allow list`,
         ),
       );
       continue;
     }
-    const wrong = policyMismatches(
-      policy,
-      policy.name === 'tenant_isolation' ? isolation : reading,
-    );
+    const wrong = policyMismatches(policy, standard);
     if (wrong.length > 0) {
       out.push(
         problem('policy', table.name, `${table.name} policy ${policy.name} ${wrong.join('; ')}`),
@@ -680,6 +712,62 @@ function policyProblems(
       problem('policy', table.name, `${table.name} has no tenant_isolation policy to ${APP_ROLE}`),
     );
   }
+  if (published && !policies.some((p) => p.permissive && p.name === 'protected_read')) {
+    out.push(
+      problem(
+        'policy',
+        table.name,
+        `${table.name} is published and has no protected_read policy to ${PROTECTED_ROLE}`,
+      ),
+    );
+  }
+  return out;
+}
+
+// Every published table keeps protected rows from the public reader by itself: a visibility
+// column a write cannot leave out, and the restrictive guard in its one exact form. Checked
+// apart from the allow lists, so neither can be listed away.
+function publishedVisibilityProblems(
+  table: string,
+  policies: readonly Policy[],
+  column: string | undefined,
+): CatalogProblem[] {
+  const out: CatalogProblem[] = [];
+  if (column !== VISIBILITY_COLUMN) {
+    out.push(
+      problem(
+        'published_visibility',
+        table,
+        column === undefined
+          ? `${table} is published and has no visibility column`
+          : `${table}.visibility must be ${VISIBILITY_COLUMN} with no default, found ${column}`,
+      ),
+    );
+  }
+  const guard = policies.find((p) => p.name === PUBLIC_ONLY);
+  if (guard === undefined || guard.permissive) {
+    out.push(
+      problem(
+        'published_visibility',
+        table,
+        guard === undefined
+          ? `${table} is published and has no restrictive ${PUBLIC_ONLY} policy, so the public reader sees protected rows`
+          : `${table} policy ${PUBLIC_ONLY} is permissive; permissive policies are OR'd, so it must be restrictive`,
+      ),
+    );
+    return out;
+  }
+  const wrong = policyMismatches(guard, {
+    cmd: 'r',
+    role: READER_ROLE,
+    qual: PUBLIC_ONLY_POLICY,
+    withCheck: null,
+  });
+  if (wrong.length > 0) {
+    out.push(
+      problem('published_visibility', table, `${table} policy ${PUBLIC_ONLY} ${wrong.join('; ')}`),
+    );
+  }
   return out;
 }
 
@@ -688,12 +776,15 @@ function policyProblems(
 function restrictivePolicyProblems(
   policies: ReadonlyMap<string, readonly Policy[]>,
   entries: readonly PolicyEntry[],
+  published: ReadonlySet<string>,
 ): CatalogProblem[] {
   const out: CatalogProblem[] = [];
   const listed = new Map(entries.map((e) => [e.name, e]));
   const found = new Set<string>();
   for (const [table, list] of policies) {
     for (const policy of list.filter((p) => !p.permissive)) {
+      // The public guard on a published table has its own built in check.
+      if (policy.name === PUBLIC_ONLY && published.has(table)) continue;
       const name = `${table}.${policy.name}`;
       found.add(name);
       const entry = listed.get(name);
@@ -797,7 +888,16 @@ async function tableProblems(client: pg.ClientBase, allow: AllowLists): Promise<
   for (const table of withoutTenantColumn) {
     out.push(...globalPolicyProblems(table, policies.get(table) ?? [], userPolicies));
   }
-  out.push(...restrictivePolicyProblems(policies, allow.restrictivePolicies));
+  out.push(...restrictivePolicyProblems(policies, allow.restrictivePolicies, publishedTables));
+  const visibility = new Map<string, string>();
+  for (const row of await rows(client, VISIBILITY_COLUMNS)) {
+    const type = text(row, 'type');
+    visibility.set(text(row, 'table_name'), flag(row, 'has_default') ? `${type} default` : type);
+  }
+  // Only tables that exist: a listed name with no table behind it reads nothing.
+  for (const { name } of tables.filter((t) => publishedTables.has(t.name))) {
+    out.push(...publishedVisibilityProblems(name, policies.get(name) ?? [], visibility.get(name)));
+  }
   // Checked apart from the allow lists, so listing such a policy cannot make it pass.
   for (const [table, list] of policies) {
     for (const policy of list.filter((p) => p.permissive && readsActor(p.qual, p.withCheck))) {
@@ -1034,8 +1134,24 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
         ),
       );
     }
-    if (grantee !== READER_ROLE && grantee !== 'public') continue;
     const sequence = text(row, 'kind') === 'S';
+    if (grantee === PROTECTED_ROLE) {
+      // The same reach as the public reader and nothing to pass on: a protected page is still
+      // a published copy, so a draft table or a write would be a way around publish.
+      const fine =
+        !sequence && privilege === 'SELECT' && published.has(object) && !flag(row, 'grantable');
+      if (!fine) {
+        out.push(
+          problem(
+            'protected_grant',
+            object,
+            `${target} grants ${privilege}${flag(row, 'grantable') ? ' with grant option' : ''} to ${PROTECTED_ROLE}; the protected reader may only select from tables on the published allow list`,
+          ),
+        );
+      }
+      continue;
+    }
+    if (grantee !== READER_ROLE && grantee !== 'public') continue;
     const allowed =
       grantee === READER_ROLE && !sequence && privilege === 'SELECT' && published.has(object);
     if (allowed) continue;
@@ -1075,6 +1191,14 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
           `${object} grants EXECUTE to ${AUTH_ROLE}; the sign in role runs no function in app`,
         ),
       );
+    } else if (grantee === PROTECTED_ROLE && !readerFunctions.has(object)) {
+      out.push(
+        problem(
+          'protected_grant',
+          object,
+          `${object} grants EXECUTE to ${PROTECTED_ROLE} and is not on the reader function allow list`,
+        ),
+      );
     } else if (grantee === READER_ROLE && !readerFunctions.has(object)) {
       out.push(
         problem(
@@ -1098,6 +1222,15 @@ async function grantProblems(client: pg.ClientBase, allow: AllowLists): Promise<
         ),
       );
     }
+    if (grantee === PROTECTED_ROLE && privilege !== 'USAGE') {
+      out.push(
+        problem(
+          'protected_grant',
+          MIGRATIONS_SCHEMA,
+          `schema app grants ${privilege} to ${PROTECTED_ROLE}; the protected reader may only use it`,
+        ),
+      );
+    }
     if (grantee === 'public' || (grantee === READER_ROLE && !reader)) {
       out.push(
         problem(
@@ -1115,7 +1248,8 @@ async function defaultPrivilegeProblems(client: pg.ClientBase): Promise<CatalogP
   const out: CatalogProblem[] = [];
   for (const row of await rows(client, DEFAULT_ACLS)) {
     const grantee = text(row, 'grantee');
-    if (grantee !== READER_ROLE && grantee !== AUTH_ROLE && grantee !== 'public') continue;
+    const explicitOnly = [READER_ROLE, AUTH_ROLE, PROTECTED_ROLE, 'public'];
+    if (!explicitOnly.includes(grantee)) continue;
     out.push(
       problem(
         'default_privileges',

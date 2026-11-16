@@ -42,6 +42,7 @@ services:
       - drefyn_app_password
       - drefyn_public_reader_password
       - drefyn_auth_password
+      - drefyn_protected_reader_password
     volumes:
       - pgdata:/var/lib/postgresql
       - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -196,6 +197,8 @@ secrets:
     environment: DREFYN_PUBLIC_READER_PASSWORD
   drefyn_auth_password:
     environment: DREFYN_AUTH_PASSWORD
+  drefyn_protected_reader_password:
+    environment: DREFYN_PROTECTED_READER_PASSWORD
   drefyn_api_rate_limit_key:
     environment: DREFYN_API_RATE_LIMIT_KEY
 

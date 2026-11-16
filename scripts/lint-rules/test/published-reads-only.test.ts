@@ -47,6 +47,12 @@ describe('published-reads-only', () => {
     ["export { withTenant } from '@drefyn/db';", 'withTenant'],
     ["import { 'withTenant' as t } from '@drefyn/db';", 'withTenant'],
     ["import { default as db } from '@drefyn/db';", 'default'],
+    // Protected pages need a reader grant, which no public path has proved yet.
+    ["import { withProtectedReader } from '@drefyn/db';", 'withProtectedReader'],
+    [
+      "import { createProtectedReaderDatabase } from '@drefyn/db';",
+      'createProtectedReaderDatabase',
+    ],
   ])('refuses %s', async (code, name) => {
     const found = await lint(code);
     expect(found).toHaveLength(1);
