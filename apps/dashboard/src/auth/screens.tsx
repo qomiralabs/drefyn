@@ -4,6 +4,7 @@ import { CopyButton, SecretField, Submit } from './controls.tsx';
 import type { FormNotice, Provider } from './outcomes.ts';
 import type { LastMethod } from '@drefyn/auth';
 import type { Site } from './site.ts';
+import { FACTOR_PAUSED, FACTOR_WRONG } from '../settings/factor-words.ts';
 import {
   Answer,
   AuthFrame,
@@ -534,6 +535,7 @@ export function ChoosePassword({
   challenge,
   rules,
   breached,
+  factor,
   notice,
 }: {
   action: FormAction;
@@ -542,9 +544,12 @@ export function ChoosePassword({
   challenge: string;
   rules?: readonly string[] | undefined;
   breached?: boolean | undefined;
+  factor?: 'ask' | 'wrong' | 'disabled' | undefined;
   notice?: FormNotice | undefined;
 }): ReactNode {
   const error = passwordProblem(rules, breached);
+  const factorError =
+    factor === 'wrong' ? FACTOR_WRONG : factor === 'disabled' ? FACTOR_PAUSED : undefined;
   return (
     <>
       <Head>
@@ -556,6 +561,16 @@ export function ChoosePassword({
       {notice === undefined ? null : <Notice notice={notice} />}
       <form className="auth-form" action={action}>
         <Hidden fields={{ csrf, step: 'save', code, challenge }} />
+        {factor === undefined ? null : (
+          <CodeField
+            id="factor-code"
+            name="factor_code"
+            label="Code from your authenticator app"
+            hint="Your account has two step sign in. Type the 6 digit code from your app, or one of your recovery codes."
+            letters
+            error={factorError}
+          />
+        )}
         <SecretField
           id="new-password"
           label="New password"
@@ -588,6 +603,7 @@ export interface ResetProps extends Shared {
         readonly challenge: string;
         readonly rules?: readonly string[];
         readonly breached?: boolean;
+        readonly factor?: 'ask' | 'wrong' | 'disabled';
         readonly notice?: FormNotice;
       }
     | { readonly step: 'saved'; readonly email: string; readonly returnTo: string };
@@ -665,6 +681,7 @@ export function ResetScreen({ site, csrf, action, state }: ResetProps): ReactNod
           challenge={state.challenge}
           rules={state.rules}
           breached={state.breached}
+          factor={state.factor}
           notice={state.notice}
         />
       ) : null}

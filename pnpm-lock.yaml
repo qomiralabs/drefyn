@@ -111,6 +111,9 @@ importers:
       '@drefyn/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      lean-qr:
+        specifier: 2.7.4
+        version: 2.7.4
       motion:
         specifier: 14.4.0
         version: 14.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -3115,6 +3118,10 @@ packages:
   kysely@0.29.7:
     resolution: {integrity: sha512-fmIq+7kv4WbFm2tcfznRzikqB4cuNpgZ40PSU2fAJ2/OO5XhojqnTPrmgrCjYSRJVwBln03XcRXJGnw9H099IQ==}
     engines: {node: '>=22.0.0'}
+
+  lean-qr@2.7.4:
+    resolution: {integrity: sha512-tlMPFfqhAAZN7+j/djRSvl/2+AYT2+7RRuyq8bvcbV8gMiENiscquQ9WTfCSyeEdxsVaEB+tU7e9nFZC63BFnQ==}
+    hasBin: true
 
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
@@ -6805,6 +6812,8 @@ snapshots:
       '@keyv/serialize': 1.1.1
 
   kysely@0.29.7: {}
+
+  lean-qr@2.7.4: {}
 
   levn@0.4.1:
     dependencies:

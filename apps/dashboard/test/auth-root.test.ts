@@ -7,6 +7,9 @@ const createOrganizations = vi.fn();
 const parseAuthConfig = vi.fn();
 const parseDatabaseConfig = vi.fn();
 const parseAuthDatabaseConfig = vi.fn();
+const createSecondFactors = vi.fn(() => ({}));
+const createFactorChallenges = vi.fn(() => ({}));
+const createPasswordAccount = vi.fn(() => ({}));
 
 vi.mock('@drefyn/db', () => ({
   createDatabase,
@@ -24,7 +27,8 @@ vi.mock('@drefyn/auth', () => ({
   createAccount: () => ({}),
   createApiKeys: () => ({}),
   createCliLinks: () => ({}),
-  createFactorChallenges: () => ({}),
+  createFactorChallenges,
+  createSecondFactors,
   createEmailChange: () => ({}),
   createMembers: () => ({}),
   createRoles: () => ({}),
@@ -32,7 +36,7 @@ vi.mock('@drefyn/auth', () => ({
   createEmailSignIn: () => ({}),
   createInvitations: () => ({}),
   createOAuth: () => ({}),
-  createPasswordAccount: () => ({}),
+  createPasswordAccount,
   createPasswordHasher: () => ({}),
   createPasswordSignIn: () => ({}),
   createRateLimiter: () => ({}),
@@ -122,8 +126,29 @@ describe('the composition root', () => {
       'passwordAccount',
       'passwordSignIn',
       'roles',
+      'secondFactors',
       'sessions',
     ]);
+  });
+
+  // The flag gates enrolment for the person asking, and failure notices go after the reply.
+  it('hands the factor modules the flag and the after-response hook', async () => {
+    const { dashboardAuth } = await load();
+    const { totpFlag } = await import('../src/server/flags.ts');
+    const { afterResponse } = await import('../src/server/later.ts');
+    await dashboardAuth();
+    expect(createSecondFactors).toHaveBeenCalledWith(
+      CONFIG,
+      expect.objectContaining({ flag: totpFlag, later: afterResponse }),
+    );
+    expect(createFactorChallenges).toHaveBeenCalledWith(
+      CONFIG,
+      expect.objectContaining({ later: afterResponse }),
+    );
+    expect(createPasswordAccount).toHaveBeenCalledWith(
+      CONFIG,
+      expect.objectContaining({ later: afterResponse }),
+    );
   });
 
   it('reports email on only with a working mailer', async () => {
