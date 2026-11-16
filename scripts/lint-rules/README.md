@@ -180,6 +180,17 @@ bare user id. The factories stay importable, because apps need `redeem` and
 from `@drefyn/auth`, member reads and destructuring. An unrelated method called `issue` has to
 be renamed under `apps/`.
 
+### `drefyn/published-reads-only`
+
+On for `PUBLIC_PATHS` in the root config and the guard: `apps/docs-site`, `apps/status-page`,
+`apps/website` and `apps/api/src/public`. Code there may import only the published reader's runtime
+names: `createPublishedDatabase`, `parsePublishedReaderConfig`, `withPublishedReader`,
+`closeDatabase` and `DbError` from `@drefyn/db`, `createPublishedReader` and `publishedStore` from
+`@drefyn/engine`, and `sql` from `kysely`. The list names what is allowed, so a new draft read is
+refused without anyone adding it. `pg`, `pg-pool` and `postgres` are refused outright, as is any
+default, namespace, side effect, subpath, dynamic or `require` import of a guarded module. Type
+only imports pass, as they load nothing.
+
 ## Manifest checker
 
 `pnpm check:packages` checks every package under `packages/` and `apps/`: exports map

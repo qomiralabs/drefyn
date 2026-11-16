@@ -13,6 +13,24 @@ export {
   type LogFields,
 } from './ports.ts';
 export type { PoolGate } from './pool-gate.ts';
+export {
+  cachedTypes,
+  createPublishedReader,
+  publishedStore,
+  storeTypes,
+  type PublishedNode,
+  type PublishedNodeSummary,
+  type PublishedPage,
+  type PublishedQuery,
+  type PublishedReader,
+  type PublishedReaderDeps,
+  type PublishedStore,
+  type PublishedTx,
+  type PublishedTypeDefinition,
+  type PublishedTypes,
+  type TypeCacheOptions,
+  type VersionPin,
+} from './published.ts';
 export type { SystemJob } from './actor.ts';
 export { databaseStore, type EngineStore } from './store.ts';
 export type {
