@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthError, decodeSecret, sha256 } from '../src/index.ts';
@@ -597,7 +598,7 @@ describe('a verified provider address that matches an existing user', () => {
     const verified = await t.email.verifyEmailCode(jar.context(), {
       code: t.mail.sent[0]?.code ?? '',
     });
-    expect(verified.ok && verified.value.session.method).toBe('github');
+    expect(verified.ok && asSignedIn(verified.value).session.method).toBe('github');
     expect(t.db.tables.identities).toHaveLength(1);
   });
 

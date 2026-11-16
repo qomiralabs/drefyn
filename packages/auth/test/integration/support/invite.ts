@@ -1,3 +1,4 @@
+import { asSignedIn } from '../../support.ts';
 import { randomBytes } from 'node:crypto';
 import type {
   AccessContext,
@@ -28,9 +29,11 @@ export async function invitingOrganization(h: Harness) {
   const user = await h.user(email);
   const browser = { ip: '203.0.113.9', userAgent: 'Integration/1.0', cookies: new Map() };
   const started = await h.sessions().startSession(browser, { userId: user, method: 'email' });
-  const made = await h.organizations({ limiter: unlimited }).createOrganization(started.session, {
-    name: 'Sign Up Co',
-  });
+  const made = await h
+    .organizations({ limiter: unlimited })
+    .createOrganization(asSignedIn(started).session, {
+      name: 'Sign Up Co',
+    });
   if (!made.ok) throw made.error;
   const { access, slug } = made.value;
   const resolved = await h.sessions().resolveAccess(sessionCookie(h, started.setCookies), slug);

@@ -15,6 +15,14 @@ export interface TypedCodeState {
   readonly notice?: FormNotice;
 }
 
+// The second factor challenge. Never carries the typed code: returned state reaches the
+// page payload, and a code must not sit there.
+export interface FactorState {
+  readonly kind?: 'totp' | 'recovery_code';
+  readonly problem?: 'wrong' | 'disabled' | 'expired';
+  readonly notice?: FormNotice;
+}
+
 export type LinkState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'gone' }

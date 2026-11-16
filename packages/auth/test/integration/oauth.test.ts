@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import {
@@ -132,7 +133,7 @@ async function signedInAs(w: World, email: string) {
   const jar = new Jar();
   const started = await w.sessions.startSession(jar.context(), { userId: user, method: 'email' });
   jar.apply(started.setCookies);
-  return { user, jar, session: started.session };
+  return { user, jar, session: asSignedIn(started).session };
 }
 
 async function nothingFor(email: string) {
