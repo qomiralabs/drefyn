@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import type { AuthDatabase, Database } from '@drefyn/db';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -143,9 +144,10 @@ describe('signInWithPassword', () => {
       userId: USER,
       method: 'password',
       credential: { phc: stored },
+      returnTo: '/acme/docs',
     });
-    expect(result.value.returnTo).toBe('/acme/docs');
-    expect(result.value.session.method).toBe('password');
+    expect(asSignedIn(result.value).returnTo).toBe('/acme/docs');
+    expect(asSignedIn(result.value).session.method).toBe('password');
   });
 
   it('records the known device the way email sign in does, and hands out its cookie', async () => {
@@ -174,7 +176,7 @@ describe('signInWithPassword', () => {
       ...input(),
       returnTo: '//evil.example/x',
     });
-    expect(result.ok && result.value.returnTo).toBe('/');
+    expect(result.ok && asSignedIn(result.value).returnTo).toBe('/');
   });
 
   it('hands the new hash to the session step when the parameters moved', async () => {

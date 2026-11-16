@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { withUser } from '@drefyn/db';
 import { sql } from 'kysely';
 import { beforeAll, expect, it } from 'vitest';
@@ -152,14 +153,14 @@ describeWithStack('password reset, change and removal against Postgres', () => {
     b.apply(result.value.setCookies);
     expect(await allSessionsOf(email)).toBe('1');
     const resolved = await flow.sessions.resolveSession(b.cookies.get(flow.config.cookies.session));
-    expect(resolved?.sessionId).toBe(result.value.session.sessionId);
+    expect(resolved?.sessionId).toBe(asSignedIn(result.value).session.sessionId);
     // The fresh session counts as a recent sign in.
-    expect((await flow.sessions.requireRecentAuth(result.value.session)).ok).toBe(true);
+    expect((await flow.sessions.requireRecentAuth(asSignedIn(result.value).session)).ok).toBe(true);
     const old = await signInFrom(flow, newBrowser(), email, PASSWORD);
     expect(!old.ok && old.error.code).toBe('AUTH_CREDENTIALS_INVALID');
     const next = await signInFrom(flow, newBrowser(), email, NEW_PASSWORD);
     expect(next.ok).toBe(true);
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(flow.mail.notices.filter((m) => m.to === email).map((m) => m.notice.kind)).toContain(
       'password_reset',
     );
@@ -317,7 +318,9 @@ describeWithStack('password reset, change and removal against Postgres', () => {
       userId,
       method: 'email',
     });
-    const set = await flow.signIn.setPassword(started.session, { newPassword: PASSWORD });
+    const set = await flow.signIn.setPassword(asSignedIn(started).session, {
+      newPassword: PASSWORD,
+    });
     if (!set.ok) throw set.error;
     await set.value.send();
     expect(mail.notices.map((m) => m.notice.kind)).toEqual(['password_set']);

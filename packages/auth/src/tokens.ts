@@ -243,3 +243,28 @@ export function parseCliLinkToken(value: unknown): Buffer | null {
   if (typeof value !== 'string' || !value.startsWith(CLI_LINK_PREFIX)) return null;
   return decodeSecret(value.slice(CLI_LINK_PREFIX.length));
 }
+
+export interface FactorToken {
+  readonly userId: UserId;
+  readonly secret: Buffer;
+}
+
+const FACTOR_PREFIX = 'v1.';
+const FACTOR_LENGTH = FACTOR_PREFIX.length + BODY_LENGTH + 1 + SECRET_LENGTH;
+
+// The factor cookie: v1.<user>.<secret>. The user only picks whose challenge to read; the
+// secret is the proof.
+export function formatFactorToken(token: { readonly userId: UserId; readonly secret: Uint8Array }) {
+  return `${FACTOR_PREFIX}${bodyOf('usr', token.userId)}.${encodeSecret(token.secret)}`;
+}
+
+export function parseFactorToken(value: unknown): FactorToken | null {
+  if (typeof value !== 'string' || value.length !== FACTOR_LENGTH) return null;
+  if (!value.startsWith(FACTOR_PREFIX)) return null;
+  const at = FACTOR_PREFIX.length;
+  if (value.charAt(at + BODY_LENGTH) !== '.') return null;
+  const userId = decodeBody('usr', value, at);
+  const secret = decodeSecret(value.slice(at + BODY_LENGTH + 1));
+  if (userId === null || secret === null) return null;
+  return { userId, secret };
+}
