@@ -103,6 +103,39 @@ The logger in `deps` hears `site.unknown_route`, `site.render_failed`, `site.bud
 key and sizes. Routes, titles and page content never reach a log; the key holds a hash of the
 route.
 
+## Public page gates
+
+`gates/` holds the CI gates for built public pages. `gates/server.ts` renders a docs page, a
+status home page and the largest incident fixture with this package and serves them from
+loopback the way a static host would: the policy header, gzip and the docs fonts.
+
+| Gate           | Measure                                                     | Fails when                                     |
+| -------------- | ----------------------------------------------------------- | ---------------------------------------------- |
+| Lighthouse     | Mobile defaults, simulated slow 4G and CPU                  | Any category under 95 (docs) or 98 (status)    |
+| Status LCP     | The same Lighthouse run                                     | Over 1,000 ms                                  |
+| JS             | Every script the browser received plus inline ones, gzipped | 90,000 bytes or more (docs), 50,000 (status)   |
+| First response | The status page as served, gzipped                          | Warns at 14,000 bytes, fails at 16,000         |
+| Scripts off    | Each page with JavaScript disabled, desktop and mobile      | Required text hidden, or a link with no target |
+| axe            | WCAG 2.2 AA tags, light and dark, desktop and mobile        | Any violation                                  |
+| Keyboard       | Tab through the page                                        | Order differs from the DOM, or no visible ring |
+| Reduced motion | Every transition under `prefers-reduced-motion: reduce`     | Anything moves, or a fade passes 120 ms        |
+| Visual         | Full page screenshots, zero tolerance                       | Any pixel changes                              |
+
+Scripts off, axe, keyboard, reduced motion and visual run on Chromium, Firefox and WebKit.
+
+```sh
+pnpm --filter @drefyn/site test:gates --project=budgets   # Lighthouse, JS, first response
+pnpm --filter @drefyn/site test:gates --project=chromium  # also firefox, webkit
+pnpm --filter @drefyn/site test:gates:update              # visual baselines, in the pinned image
+pnpm --filter @drefyn/site test:gates:controls            # every gate against a broken page
+```
+
+Visual baselines are made and compared only inside the pinned Playwright image, so
+`test:gates:update` starts it through Docker. `DREFYN_SITE_GATE_BREACH=<name>` swaps one page
+for a broken twin with the same path; `gates/controls.ts` runs each one and expects exactly the
+matching gate to fail, for the right reason. The status first response warning shows as a
+workflow annotation and does not fail the job.
+
 ## Tests
 
 `pnpm --filter @drefyn/site test` runs the suite. `pnpm --filter @drefyn/site bench` renders a

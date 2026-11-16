@@ -73,6 +73,12 @@ export const egressAllowList = [
     only: [{ module: 'node:http', imports: ['createServer'] }],
   },
   {
+    path: 'packages/site/gates/server.ts',
+    reason:
+      'loopback static host for the public page gates; it serves rendered fixture pages on 127.0.0.1 and never opens a connection',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
     path: 'apps/dashboard/test/integration/support/echo.ts',
     reason:
       'loopback test server that stands in for Next behind the real wrapper; it accepts connections on 127.0.0.1 and never opens one',

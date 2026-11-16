@@ -1,6 +1,6 @@
 // @ts-check
 import js from '@eslint/js';
-import drefyn, { egressAllowList } from '@drefyn/lint-rules';
+import drefyn, { egressAllowList, PUBLIC_PATHS } from '@drefyn/lint-rules';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
@@ -123,6 +123,11 @@ export default tseslint.config(
     // Operator only: no web route may mint a sign in link or act for a bare user id.
     files: ['apps/**'],
     rules: { 'drefyn/no-operator-auth': 'error' },
+  },
+  {
+    // Public paths hold the published reader and nothing that can reach a draft.
+    files: [...PUBLIC_PATHS],
+    rules: { 'drefyn/published-reads-only': 'error' },
   },
   {
     // Everything people see is styled from tokens only.
