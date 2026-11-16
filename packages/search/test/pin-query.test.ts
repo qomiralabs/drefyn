@@ -87,21 +87,24 @@ describe('parseSearchQuery', () => {
     expect(parseSearchQuery('a\ud800b')).toEqual({ ok: false, reason: 'not_text' });
   });
 
+  // Plain boolean checks, not expect, inside the property: a shared CI runner made 3000 runs of
+  // expect calls pass the 5 s test timeout.
   it('for any input, an accepted query is short, clean and stable', () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary', maxLength: 300 }), (raw) => {
         const parsed = parseSearchQuery(raw);
-        if (!parsed.ok) {
-          expect(['empty', 'too_long', 'not_text']).toContain(parsed.reason);
-          return;
-        }
-        expect(bytes(raw)).toBeLessThanOrEqual(MAX_QUERY_BYTES);
-        expect(parsed.query).not.toMatch(/[\p{Cc}\p{Cf}]/u);
-        expect(parsed.query).toBe(parsed.query.trim());
-        expect(parsed.query).not.toBe('');
-        expect(parseSearchQuery(parsed.query)).toEqual(parsed);
+        if (!parsed.ok) return ['empty', 'too_long', 'not_text'].includes(parsed.reason);
+        const again = parseSearchQuery(parsed.query);
+        return (
+          bytes(raw) <= MAX_QUERY_BYTES &&
+          !/[\p{Cc}\p{Cf}]/u.test(parsed.query) &&
+          parsed.query === parsed.query.trim() &&
+          parsed.query !== '' &&
+          again.ok &&
+          again.query === parsed.query
+        );
       }),
       { numRuns: 3000 },
     );
-  });
+  }, 30_000);
 });
