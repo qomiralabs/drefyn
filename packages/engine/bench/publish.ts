@@ -71,9 +71,11 @@ async function seedAll(): Promise<number> {
       linkProtocols: ['https', 'http', 'mailto'],
       limits: DEFAULT_LIMITS,
     },
+    reader: true,
   });
   if (!answer.ok) throw new Error(`refused: ${answer.error.map((e) => e.code).join(' ')}`);
-  const chunks = chunkNode(answer.value.ast, {
+  if (answer.value.reader === undefined) throw new Error('the parse host sent no reader text');
+  const chunks = chunkNode(answer.value.reader, {
     targetChars: DEFAULT_ENGINE_CONFIG.chunkTargetChars,
     maxChars: DEFAULT_ENGINE_CONFIG.chunkMaxChars,
   });
@@ -135,9 +137,9 @@ function publishOne(at: number): Promise<Sample> {
     const started = performance.now();
     await sql`
       insert into app.published_versions (organization_id, project_id, node_id, version_id,
-          type_id, content, fields, is_current, render_policy_version)
+          type_id, content, fields, is_current, render_policy_version, visibility)
       select v.organization_id, v.project_id, v.node_id, v.id, ${typeId}::uuid, v.content,
-             v.fields, true, 1
+             v.fields, true, 1, 'public'
         from app.node_versions v
        where v.organization_id = ${tenant.organizationId}::uuid
          and v.project_id = ${tenant.projectId}::uuid and v.id = ${versionId}::uuid`.execute(tx);
