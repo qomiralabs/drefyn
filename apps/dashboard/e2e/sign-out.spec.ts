@@ -50,7 +50,14 @@ test('Sign out sends no Clear-Site-Data, stays uncached and goes to sign in', as
     .headersArray()
     .filter(({ name }) => name.toLowerCase() === 'set-cookie')
     .map(({ value }) => value.split('=')[0]);
-  expect(expired.sort()).toEqual(['drefyn_invite', 'drefyn_oauth', 'drefyn_pre', 'drefyn_session']);
+  // A sign in waiting on the second factor goes too.
+  expect(expired.sort()).toEqual([
+    'drefyn_factor',
+    'drefyn_invite',
+    'drefyn_oauth',
+    'drefyn_pre',
+    'drefyn_session',
+  ]);
 });
 
 test('Sign out ends the session, keeps the device and leaves sign in working', async ({ page }) => {

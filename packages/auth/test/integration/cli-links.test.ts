@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { randomBytes } from 'node:crypto';
 import { beforeAll, expect, it } from 'vitest';
 import { runAuthCommand } from '../../src/command.ts';
@@ -111,9 +112,9 @@ describeWithStack('drefyn auth link and its redemption', () => {
     const first = await links().redeem(browser(), token);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    expect(first.value.session.method).toBe('cli_link');
+    expect(asSignedIn(first.value).session.method).toBe('cli_link');
     const stored = await h.sql(
-      `select method from app.sessions where id = '${first.value.session.sessionId}';`,
+      `select method from app.sessions where id = '${asSignedIn(first.value).session.sessionId}';`,
     );
     expect(stored.trim()).toBe('cli_link');
     const again = await links().redeem(browser(), token);
