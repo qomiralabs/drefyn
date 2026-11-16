@@ -59,6 +59,7 @@ describe('the way into the parser', () => {
       './client',
       './package.json',
       './render',
+      './seal-thread',
     ]);
   });
 
@@ -66,10 +67,15 @@ describe('the way into the parser', () => {
     const parser = join(root, 'src/parse.ts');
     const pool = join(root, 'src/pool.ts');
     const printer = join(root, 'src/print.ts');
+    const seal = join(root, 'src/seal-thread.ts');
     for (const target of Object.values(manifest.exports)) {
       if (!target.endsWith('.ts')) continue;
-      const graph = reach(join(root, target));
-      expect(graph.size).toBeGreaterThan(1);
+      const entry = join(root, target);
+      const graph = reach(entry);
+      // The seal imports only builtins, so it alone reaches nothing else; every other entry
+      // reaching only itself would mean the import scan broke.
+      if (entry === seal) expect([...graph]).toEqual([seal]);
+      else expect(graph.size).toBeGreaterThan(1);
       expect(graph).not.toContain(parser);
       expect(graph).not.toContain(pool);
       expect(graph).not.toContain(printer);
