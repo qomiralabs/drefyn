@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { closeDatabase, type Database, type PublishedDatabase } from '@drefyn/db';
+import {
+  closeDatabase,
+  withPublishedReader,
+  type Database,
+  type PublishedDatabase,
+} from '@drefyn/db';
 import { idOf, type TenantRef } from '@drefyn/tenancy';
 import fc from 'fast-check';
+import { sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -11,6 +17,7 @@ import {
   publishedStore,
   storeTypes,
   type PublishedReader,
+  type PublishedTx,
 } from '../../src/index.ts';
 import { admin, database, seed, type Seeded } from '../support/fixture.ts';
 import { describeWithStack } from '../support/presence.ts';
@@ -31,28 +38,21 @@ let app: Database;
 let readerDb: PublishedDatabase;
 let reader: PublishedReader;
 
-// A bare session as the reader, so a test can try what the typed transaction would not even let
-// it write.
-async function asReader<T>(
-  context: { readonly org?: string; readonly project?: string },
-  work: (client: pg.Client) => Promise<T>,
-): Promise<T> {
+// A bare session as the reader, with no tenant set, so a test can try what the typed
+// transaction would not even let it send.
+async function asReader<T>(work: (client: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({ connectionString: urlFor('reader', database()) });
   await client.connect();
   try {
-    await client.query('begin');
-    if (context.org !== undefined) {
-      await client.query("select set_config('drefyn.organization_id', $1, true)", [context.org]);
-    }
-    if (context.project !== undefined) {
-      await client.query("select set_config('drefyn.project_id', $1, true)", [context.project]);
-    }
     return await work(client);
   } finally {
-    await client.query('rollback').catch(() => undefined);
     await client.end();
   }
 }
+
+// The real path: the reader role with the tenant set by withPublishedReader.
+const asTenant = <T>(seeded: Seeded, work: (tx: PublishedTx) => Promise<T>): Promise<T> =>
+  withPublishedReader(readerDb, seeded.tenant, work);
 
 const codeOf = async (work: Promise<unknown>): Promise<string | undefined> => {
   try {
@@ -107,8 +107,8 @@ describeWithStack('the published reader', () => {
       );
       expect(tables).toEqual(expect.arrayContaining([...PUBLISHED]));
       for (const table of drafts) {
-        const code = await asReader({ org: a.organization, project: a.project }, (client) =>
-          codeOf(client.query(`select 1 from app.${table} limit 1`)),
+        const code = await codeOf(
+          asTenant(a, (tx) => sql`select 1 from ${sql.table(`app.${table}`)} limit 1`.execute(tx)),
         );
         expect({ table, code }).toEqual({ table, code: '42501' });
       }
@@ -122,20 +122,19 @@ describeWithStack('the published reader', () => {
       ['update app.published_filter_rows set t1 = null where organization_id = $1'],
       ['delete from app.published_filter_rows where organization_id = $1'],
     ])('cannot write: %s', async (statement) => {
-      const code = await asReader({ org: a.organization, project: a.project }, (client) =>
-        codeOf(client.query(statement, [a.organization])),
-      );
+      // Refused by grant, so no tenant is needed to show it.
+      const code = await asReader((client) => codeOf(client.query(statement, [a.organization])));
       expect(code).toBe('42501');
     });
 
-    it('sees no published row without both settings', async () => {
-      for (const context of [{}, { org: a.organization }, { project: a.project }]) {
-        const rows = await asReader(context, async (client) => {
+    it('sees no published row with no tenant set', async () => {
+      {
+        const rows = await asReader(async (client) => {
           const versions = await client.query('select 1 from app.published_versions');
           const filters = await client.query('select 1 from app.published_filter_rows');
           return versions.rows.length + filters.rows.length;
         });
-        expect({ context, rows }).toEqual({ context, rows: 0 });
+        expect(rows).toBe(0);
       }
     });
   });
@@ -161,18 +160,14 @@ describeWithStack('the published reader', () => {
 
     it('reads only its own project rows, at the role', async () => {
       for (const seeded of [a, sibling, other]) {
-        const seen = await asReader(
-          { org: seeded.organization, project: seeded.project },
-          async (client) => {
-            const found = await client.query<{ node_id: string }>(
-              'select node_id from app.published_versions',
-            );
-            const rows = await client.query<{ node_id: string }>(
-              'select node_id from app.published_filter_rows',
-            );
-            return [...found.rows, ...rows.rows].map((row) => row.node_id);
-          },
-        );
+        // No where clause: the policy alone decides what comes back.
+        const seen = await asTenant(seeded, async (tx) => {
+          const found = await sql<{ node_id: string }>`
+            select node_id from app.published_versions`.execute(tx);
+          const rows = await sql<{ node_id: string }>`
+            select node_id from app.published_filter_rows`.execute(tx);
+          return [...found.rows, ...rows.rows].map((row) => row.node_id);
+        });
         const own = nodes.get(seeded)?.nodeId;
         expect(seen).toEqual([own, own]);
       }
