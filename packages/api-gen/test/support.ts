@@ -1,6 +1,7 @@
 import {
   asFieldId,
   asTypeId,
+  formatUnits,
   type ContentSchema,
   type FieldDef,
   type FieldId,
@@ -93,10 +94,15 @@ export const asset = (n: number, extra: Extra = {}): FieldDef => ({
   kind: 'asset',
   accept: ['image/png'],
 });
-export const reference = (n: number, many: boolean, extra: Extra = {}): FieldDef => ({
+export const reference = (
+  n: number,
+  many: boolean,
+  extra: Extra = {},
+  to: readonly TypeId[] = [tid(1)],
+): FieldDef => ({
   ...base(n, extra),
   kind: 'reference',
-  to: [tid(1)],
+  to,
   many,
 });
 export const list = (n: number, of: FieldDef, maxItems = 4, extra: Extra = {}): FieldDef => ({
@@ -223,3 +229,79 @@ export const schemaArb: fc.Arbitrary<ContentSchema> = fc
       ),
     );
   });
+
+const UUID = fc.uuid().map((id) => id.toLowerCase());
+
+// A value the field must accept, and the stored form it must come back as.
+export function validValue(field: FieldDef): fc.Arbitrary<{ input: unknown; stored: unknown }> {
+  const same = (arb: fc.Arbitrary<unknown>) => arb.map((input) => ({ input, stored: input }));
+  switch (field.kind) {
+    case 'text':
+      if (field.format === 'slug') {
+        return same(fc.stringMatching(/^[a-z0-9]{1,8}(-[a-z0-9]{1,8})?$/));
+      }
+      return same(fc.string({ unit: 'grapheme-ascii', maxLength: field.maxLength }));
+    case 'markdown':
+      return same(fc.string({ maxLength: 50 }).filter((s) => !s.includes('\u0000')));
+    case 'rich_text':
+      return same(fc.constant(EMPTY_TREE));
+    case 'number': {
+      const bounded = field.min !== undefined;
+      const limit = 10n ** BigInt(field.scale);
+      const units = bounded
+        ? fc.bigInt({ min: -50n * limit, max: 50n * limit })
+        : fc.bigInt({ min: -(10n ** 12n), max: 10n ** 12n });
+      return units.map((n) => ({
+        input: formatUnits(n, field.scale),
+        stored: formatUnits(n, field.scale),
+      }));
+    }
+    case 'boolean':
+      return same(fc.boolean());
+    case 'date': {
+      const day = fc.date({
+        min: new Date('1900-01-01T00:00:00Z'),
+        max: new Date('2200-01-01T00:00:00Z'),
+        noInvalidDate: true,
+      });
+      return field.withTime
+        ? day.map((d) => ({ input: d.toISOString(), stored: d.toISOString() }))
+        : same(day.map((d) => d.toISOString().slice(0, 10)));
+    }
+    case 'asset':
+      return same(UUID);
+    case 'reference':
+      return field.many ? same(fc.array(UUID, { minLength: 1, maxLength: 3 })) : same(UUID);
+    case 'list':
+      return fc
+        .array(validValue(field.of), { minLength: 1, maxLength: field.maxItems })
+        .map((items) => ({
+          input: items.map((item) => item.input),
+          stored: items.map((item) => item.stored),
+        }));
+    case 'object':
+      return validContent(field.fields);
+  }
+}
+
+export function validContent(
+  fields: readonly FieldDef[],
+): fc.Arbitrary<{ input: Record<string, unknown>; stored: Record<string, unknown> }> {
+  const parts = fields.map((field) =>
+    fc.record({
+      field: fc.constant(field),
+      present: field.required ? fc.constant(true) : fc.boolean(),
+      value: validValue(field),
+    }),
+  );
+  return fc.tuple(...parts).map((chosen) => {
+    const input: Record<string, unknown> = {};
+    const stored: Record<string, unknown> = {};
+    const kept = chosen.filter((part) => part.present);
+    for (const part of kept) input[part.field.apiName] = part.value.input;
+    for (const part of [...kept].sort((a, b) => (a.field.id < b.field.id ? -1 : 1))) {
+      stored[part.field.id] = part.value.stored;
+    }
+    return { input, stored };
+  });
+}
