@@ -37,6 +37,7 @@ describe('parseAuthConfig defaults', () => {
       invite: '__Host-drefyn_invite',
       device: '__Host-drefyn_device',
       lastMethod: '__Host-drefyn_last_method',
+      factor: '__Host-drefyn_factor',
     });
     expect(config.trustedProxyHops).toBe(0);
     expect(config.clientIpHeader).toBeNull();
@@ -174,6 +175,7 @@ describe('parseAuthConfig defaults', () => {
         invite: 'drefyn_invite',
         device: 'drefyn_device',
         lastMethod: 'drefyn_last_method',
+        factor: 'drefyn_factor',
       });
     }
   });

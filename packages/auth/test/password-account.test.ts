@@ -1,3 +1,4 @@
+import { asSignedIn } from './support.ts';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   AuthError,
@@ -28,6 +29,7 @@ import {
 } from './email-fixtures.ts';
 import { spyHasher } from './password-sign-in-fixtures.ts';
 import { smallHasher } from './password-fixtures.ts';
+import { RECOVERY, factorConfig, factorResponder } from './factor-fixtures.ts';
 import { validEnv } from './support.ts';
 
 const RIGHT = '48312097';
@@ -104,6 +106,7 @@ function recordingLogger() {
 const fakeSessions = (recent = true) => ({
   startSession: vi.fn<PasswordAccountSessions['startSession']>(() =>
     Promise.resolve({
+      kind: 'session' as const,
       session,
       setCookies: [{ name: config.cookies.session, value: 'v1.x', maxAgeSeconds: 60 }],
     }),
@@ -280,7 +283,7 @@ describe('completePasswordReset', () => {
     // The hash ran with no transaction open.
     expect(t.spy.calls.filter((c) => c.kind === 'hash').map((c) => c.open)).toEqual([0]);
     expect(t.mail.notices).toEqual([]);
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(t.mail.notices).toEqual([
       { to: session.email, notice: { kind: 'password_reset', at: CHANGED_AT } },
     ]);
@@ -415,7 +418,7 @@ describe('completePasswordReset', () => {
     const result = await t.account.completePasswordReset(browser(), input);
     if (!result.ok) throw result.error;
     t.mail.failNext();
-    await result.value.send?.();
+    await asSignedIn(result.value).send?.();
     expect(t.logs.map((l) => l.event)).toContain('auth.password_notice_failed');
     expect(JSON.stringify(t.logs)).not.toContain(ADDRESS);
   });
@@ -730,5 +733,145 @@ describe('the breached check on change and reset', () => {
         hasher: smallHasher(),
       }),
     ).toThrow(TypeError);
+  });
+});
+
+describe('completePasswordReset with a second factor', () => {
+  const input = { challenge: challengeArg, code: RIGHT, newPassword: NEW_PASSWORD };
+  const recovery = { kind: 'recovery_code' as const, code: RECOVERY[0]?.code ?? '' };
+
+  // The reset's statements, with the person's factor rows answered. late: the first read
+  // finds no factor and every later one does, as an enrolment landing in between would.
+  function enrolled(late = false, script: Script = {}): Responder {
+    const base = responder(script);
+    const credential = factorResponder();
+    let reads = 0;
+    return (s) => {
+      if (s.sql.includes('"totp_credentials"') && /^select/i.test(s.sql)) {
+        reads += 1;
+        return late && reads === 1 ? [] : credential(s);
+      }
+      if (s.sql.includes('"recovery_codes"') || /^update "totp_credentials"/i.test(s.sql)) {
+        return credential(s);
+      }
+      return base(s);
+    };
+  }
+
+  function factorWorld(respond: Responder, refuse?: (bucket: string) => boolean) {
+    const t = setup({}, { config: factorConfig, ...(refuse === undefined ? {} : { refuse }) });
+    t.scripted.respondWith(respond);
+    return t;
+  }
+
+  const index = (statements: readonly Statement[], match: (s: Statement) => boolean) =>
+    statements.findIndex(match);
+
+  it('answers AUTH_FACTOR_REQUIRED after a matched code, spending neither', async () => {
+    const t = factorWorld(enrolled());
+    const result = await t.account.completePasswordReset(browser(), input);
+    expect(codeOf(result)).toBe('AUTH_FACTOR_REQUIRED');
+    expect(t.spy.calls.filter((c) => c.kind === 'hash')).toEqual([]);
+    const writes = t.scripted.writes();
+    expect(writes.map((s) => s.sql.split(' ').slice(0, 2).join(' '))).toEqual([
+      'update "email_challenges"',
+    ]);
+    expect(writes[0]?.sql).not.toContain('"consumed_at" =');
+    expect(t.sessions.startSession).not.toHaveBeenCalled();
+  });
+
+  it('refuses a factor of the wrong shape before any statement', async () => {
+    const t = factorWorld(enrolled());
+    const result = await t.account.completePasswordReset(browser(), {
+      ...input,
+      factor: { kind: 'totp', code: '12' },
+    });
+    expect(codeOf(result)).toBe('AUTH_FACTOR_INVALID');
+    expect(t.scripted.statements()).toEqual([]);
+  });
+
+  it('hashes, spends the factor, spends the code, then writes the hash under the shared lock', async () => {
+    const t = factorWorld(enrolled());
+    const result = await t.account.completePasswordReset(browser(), { ...input, factor: recovery });
+    if (!result.ok) throw result.error;
+    const statements = t.scripted.statements();
+    const spend = index(statements, (s) => /^update "recovery_codes"/i.test(s.sql));
+    const consume = index(statements, (s) => s.sql.includes('"consumed_at" ='));
+    const write = index(statements, (s) => /^insert into "password_credentials"/i.test(s.sql));
+    expect(spend).toBeGreaterThan(-1);
+    expect(consume).toBeGreaterThan(spend);
+    expect(write).toBeGreaterThan(consume);
+    // The hash transaction takes the shared lock first. Holding a proof, it needs no second
+    // read; without one it reads again (the late enrolment case below).
+    expect(statements[write - 1]?.sql).toMatch(/^select pg_advisory_xact_lock_shared/);
+    expect(writesTo(statements, 'factor_challenges')).toHaveLength(1);
+    expect(t.spy.calls.filter((c) => c.kind === 'hash')).toHaveLength(1);
+    expect(callsOf(t.limiter).map(([bucket]) => bucket)).toEqual([
+      'code_verify',
+      'recovery_code_verify',
+      'recovery_code_verify_ip',
+    ]);
+    // The session starts with the proof, so it does not ask for the factor again.
+    const call = t.sessions.startSession.mock.calls[0]?.[1];
+    expect(call).toMatchObject({ userId: USER, method: 'email' });
+    expect(call?.factor).toBeDefined();
+  });
+
+  it('leaves the hash and the code alone when the factor is wrong', async () => {
+    const t = factorWorld(enrolled());
+    const result = await t.account.completePasswordReset(browser(), {
+      ...input,
+      factor: { kind: 'totp', code: '000000' },
+    });
+    expect(codeOf(result)).toBe('AUTH_FACTOR_INVALID');
+    const statements = t.scripted.statements();
+    expect(statements.some((s) => s.sql.includes('"consumed_at" ='))).toBe(false);
+    expect(writesTo(statements, 'password_credentials')).toEqual([]);
+    expect(t.logs.map((l) => l.event)).toContain('auth.factor_refused');
+  });
+
+  it('stops at the factor limit with nothing spent', async () => {
+    const t = factorWorld(enrolled(), (bucket) => bucket === 'recovery_code_verify');
+    const result = await t.account.completePasswordReset(browser(), { ...input, factor: recovery });
+    expect(codeOf(result)).toBe('AUTH_RATE_LIMITED');
+    expect(t.scripted.statements().some((s) => s.sql.includes('"consumed_at" ='))).toBe(false);
+  });
+
+  it('refuses an enrolment that landed after the first read, writing no hash', async () => {
+    const t = factorWorld(enrolled(true));
+    const result = await t.account.completePasswordReset(browser(), input);
+    expect(codeOf(result)).toBe('AUTH_FACTOR_REQUIRED');
+    expect(writesTo(t.scripted.statements(), 'password_credentials')).toEqual([]);
+    expect(t.scripted.events.at(-1)).toEqual({ kind: 'rollback' });
+  });
+
+  it('keeps the new hash and hands over to the challenge when enrolment lands after it', async () => {
+    const t = factorWorld(responder());
+    t.sessions.startSession.mockResolvedValueOnce({
+      kind: 'factor_required',
+      setCookies: [{ name: factorConfig.cookies.factor, value: 'v1.x', maxAgeSeconds: 600 }],
+    });
+    const result = await t.account.completePasswordReset(browser(), input);
+    if (!result.ok) throw result.error;
+    expect(result.value).toMatchObject({ kind: 'factor_required' });
+    expect(result.value.setCookies.map((c) => c.name)).toEqual([
+      factorConfig.cookies.factor,
+      factorConfig.cookies.device,
+    ]);
+  });
+
+  it('goes on without the factor when it was removed between the reads', async () => {
+    const base = enrolled();
+    let reads = 0;
+    const t = factorWorld((s) => {
+      if (s.sql.includes('"totp_credentials"') && /^select/i.test(s.sql)) {
+        reads += 1;
+        return reads === 1 ? base(s) : [];
+      }
+      return base(s);
+    });
+    const result = await t.account.completePasswordReset(browser(), { ...input, factor: recovery });
+    if (!result.ok) throw result.error;
+    expect(t.sessions.startSession.mock.calls[0]?.[1]).toEqual({ userId: USER, method: 'email' });
   });
 });

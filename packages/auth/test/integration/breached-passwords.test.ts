@@ -1,3 +1,4 @@
+import { asSignedIn } from '../support.ts';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,7 +39,7 @@ async function personWithoutPassword(flow: ReturnType<typeof passwordFlow>) {
     userId,
     method: 'email',
   });
-  return { email, session: started.session };
+  return { email, session: asSignedIn(started).session };
 }
 
 describeWithStack('the breached password list against Postgres', () => {
