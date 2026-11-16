@@ -351,12 +351,15 @@ export interface StepUpFacts {
   readonly email: boolean;
   readonly google: boolean;
   readonly github: boolean;
+  // Enrolled in the second factor, which then refuses every other way.
+  readonly factor?: boolean;
 }
 
-export type StepUpWay = 'password' | 'email' | 'google' | 'github';
+export type StepUpWay = 'password' | 'email' | 'google' | 'github' | 'factor';
 
 // GitHub proves only a live GitHub session, so it counts only when nothing else exists.
 export function stepUpWays(facts: StepUpFacts): readonly StepUpWay[] {
+  if (facts.factor === true) return ['factor'];
   const ways: StepUpWay[] = [];
   if (facts.password) ways.push('password');
   if (facts.email) ways.push('email');

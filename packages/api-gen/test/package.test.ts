@@ -12,7 +12,7 @@ const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as
   dependencies?: Record<string, string>;
 };
 
-const ALLOWED = ['@drefyn/mdx', '@drefyn/schema', '@drefyn/tenancy', 'zod'];
+const ALLOWED = ['@drefyn/mdx', '@drefyn/schema', '@drefyn/tenancy', 'graphql', 'zod'];
 
 describe('package layout', () => {
   // Pure: no engine, no database, no network. Whatever reaches the engine takes a shared one
@@ -35,14 +35,20 @@ describe('package layout', () => {
 
   it('exports exactly the public API', () => {
     expect(Object.keys(main).sort()).toEqual([
+      'CONTENT_ERROR_CODES',
+      'ContentApiError',
       'FIELD_ISSUE_CODES',
+      'GRAPHQL_ERROR_CODES',
+      'GRAPHQL_LIMITS',
       'MAX_FILTER_PARAM_LENGTH',
       'SchemaCacheBusyError',
       'compileValidator',
       'createSchemaCache',
       'emitOpenApi',
+      'graphqlEmitter',
       'parseFilterParam',
       'parseSchemaCacheConfig',
+      'runGraphql',
       'schemaCacheKey',
     ]);
   });

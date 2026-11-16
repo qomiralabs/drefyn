@@ -90,6 +90,24 @@ function parseJson(raw: string): { ok: true; value: unknown } | { ok: false } {
   }
 }
 
+// A filter tree already read from JSON or from a GraphQL `where`, with fields named by API
+// name. Both ways in end here, so the same tree gives the same `FilterNode` whichever API sent it.
+export function decodeFilter(
+  schema: ContentSchema,
+  value: unknown,
+): { ok: true; value: FilterNode } | { ok: false; error: FilterParamError } {
+  const walk: Walk = {
+    names: new Map(schema.fields.map((field) => [field.apiName, field.id])),
+    nodes: 0,
+  };
+  const mapped = mapNode(value, '', 1, walk);
+  if (!mapped.ok) return refused(mapped.code, mapped.path);
+  // Undeclared fields pass here; the engine knows the type's size and decides whether to scan.
+  const checked = checkFilter(schema, mapped.node, { itemCount: 0 });
+  if (!checked.ok) return refused(checked.error.code, checked.error.path);
+  return { ok: true, value: checked.value.filter };
+}
+
 // The `filter=` query parameter: the same closed tree GraphQL and saved views use, with fields
 // named by API name. Only top level fields can be named, as only they have a slot.
 export function parseFilterParam(
@@ -100,14 +118,5 @@ export function parseFilterParam(
   if (raw.length > MAX_FILTER_PARAM_LENGTH) return refused('filter.too_large');
   const parsed = parseJson(raw);
   if (!parsed.ok) return refused('filter.malformed');
-  const walk: Walk = {
-    names: new Map(schema.fields.map((field) => [field.apiName, field.id])),
-    nodes: 0,
-  };
-  const mapped = mapNode(parsed.value, '', 1, walk);
-  if (!mapped.ok) return refused(mapped.code, mapped.path);
-  // Undeclared fields pass here; the engine knows the type's size and decides whether to scan.
-  const checked = checkFilter(schema, mapped.node, { itemCount: 0 });
-  if (!checked.ok) return refused(checked.error.code, checked.error.path);
-  return { ok: true, value: checked.value.filter };
+  return decodeFilter(schema, parsed.value);
 }

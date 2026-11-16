@@ -32,6 +32,9 @@ const METHODS: MethodsFacts = {
   ],
 };
 
+const FACTOR_OFF = { available: true, enrolled: false, recoveryCodesLeft: 0 } as const;
+const FACTOR_ON = { available: true, enrolled: true, recoveryCodesLeft: 8 } as const;
+
 const SESSIONS: readonly SessionRow[] = [
   {
     id: 's1',
@@ -247,6 +250,30 @@ export const SETTINGS_STATES: Readonly<Record<string, Readonly<Record<string, ()
       password: () => <MethodsScreen facts={METHODS} open="password" />,
       'add-open': () => <MethodsScreen facts={METHODS} addOpen />,
       failed: () => <MethodsScreen facts={METHODS} providerFailed />,
+      'factor-off': () => <MethodsScreen facts={{ ...METHODS, factor: FACTOR_OFF }} />,
+      'factor-on': () => <MethodsScreen facts={{ ...METHODS, factor: FACTOR_ON }} />,
+      'factor-low': () => (
+        <MethodsScreen facts={{ ...METHODS, factor: { ...FACTOR_ON, recoveryCodesLeft: 0 } }} />
+      ),
+      'factor-unread': () => <MethodsScreen facts={{ ...METHODS, factor: 'failed' }} />,
+      'factor-confirm': () => (
+        <MethodsScreen
+          facts={{ ...METHODS, factor: FACTOR_OFF }}
+          factorNotice={{ problem: 'confirm' }}
+        />
+      ),
+      'factor-limited': () => (
+        <MethodsScreen
+          facts={{ ...METHODS, factor: FACTOR_ON }}
+          factorNotice={{ problem: 'limited', minutes: 4 }}
+        />
+      ),
+      'factor-replace': () => (
+        <MethodsScreen facts={{ ...METHODS, factor: FACTOR_ON }} factorOpen="replace" />
+      ),
+      'factor-remove': () => (
+        <MethodsScreen facts={{ ...METHODS, factor: FACTOR_ON }} factorOpen="remove" />
+      ),
     },
     sessions: {
       ready: () => <SessionsScreen sessions={SESSIONS} now={NOW} />,

@@ -9,6 +9,7 @@ import {
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { after } from 'next/server';
+import { factorKindOf } from '../auth/factor-kind.ts';
 import { noticeFor } from '../auth/outcomes.ts';
 import type {
   BlockState,
@@ -152,10 +153,14 @@ export const resetStep = publicAction(async ({ browser }, form): Promise<ResetSt
   const challenge = text(form, 'challenge');
   if (step === 'code') return { step: 'choose', code, challenge };
   const newPassword = text(form, 'password');
+  // Asked for only after the email code matched; never handed back in the state.
+  const factorCode = text(form, 'factor_code').trim();
+  const factor = factorCode === '' ? null : { kind: factorKindOf(factorCode), code: factorCode };
   const done = await auth.passwordAccount.completePasswordReset(browser, {
     code,
     newPassword,
     ...(challenge === '' ? {} : { challenge }),
+    ...(factor === null ? {} : { factor }),
   });
   if (done.ok) {
     const { value } = done;
@@ -173,11 +178,24 @@ export const resetStep = publicAction(async ({ browser }, form): Promise<ResetSt
   if (error.code === 'AUTH_PASSWORD_BREACHED') {
     return { step: 'choose', code, challenge, breached: true };
   }
+  if (error.code === 'AUTH_FACTOR_REQUIRED')
+    return { step: 'choose', code, challenge, factor: 'ask' };
+  if (error.code === 'AUTH_FACTOR_INVALID')
+    return { step: 'choose', code, challenge, factor: 'wrong' };
+  if (error.code === 'AUTH_FACTOR_DISABLED') {
+    return { step: 'choose', code, challenge, factor: 'disabled' };
+  }
   if (error.code === 'AUTH_CODE_INVALID') return { step: 'code', email: '', wrong: true };
   if (error.code === 'AUTH_CHALLENGE_EXPIRED' || error.code === 'AUTH_CHALLENGE_BINDING') {
     return { step: 'ask', email: '', expired: true };
   }
-  return { step: 'choose', code, challenge, notice: noticeOf(error, 'auth.reset_failed') };
+  return {
+    step: 'choose',
+    code,
+    challenge,
+    ...(factor === null ? {} : { factor: 'ask' as const }),
+    notice: noticeOf(error, 'auth.reset_failed'),
+  };
 });
 
 export const redeemCliLink = publicAction(async ({ browser }, form): Promise<CliState> => {
@@ -273,11 +291,14 @@ export const stopInvitations = publicAction(async (_context, form): Promise<Bloc
 // It ends through finishSignIn like every other sign in, so an invitation keeps its fresh
 // binding. The typed code never goes back into the returned state.
 export const completeFactor = publicAction(async ({ browser }, form): Promise<FactorState> => {
-  const kind = text(form, 'kind') === 'recovery_code' ? 'recovery_code' : 'totp';
+  // The page says which kind it asked for; a post without one is read from the shape.
+  const typed = text(form, 'kind');
+  const code = text(form, 'code');
+  const kind = typed === 'recovery_code' || typed === 'totp' ? typed : factorKindOf(code);
   const auth = await dashboardAuth();
   const done = await auth.factorChallenges.completeChallenge(browser, {
     kind,
-    code: text(form, 'code'),
+    code,
     csrf: text(form, 'csrf'),
   });
   if (done.ok) return finishSignIn(done.value);

@@ -1,6 +1,28 @@
 export { schemaCacheKey } from './cache-key.ts';
 export { parseSchemaCacheConfig, type SchemaCacheConfig } from './config.ts';
+export {
+  CONTENT_ERROR_CODES,
+  ContentApiError,
+  GRAPHQL_ERROR_CODES,
+  type ApiFieldCode,
+  type ApiFieldError,
+  type ContentErrorCode,
+  type GraphqlErrorCode,
+} from './errors.ts';
 export { MAX_FILTER_PARAM_LENGTH, parseFilterParam } from './filter.ts';
+export { graphqlEmitter } from './graphql-emit.ts';
+export { GRAPHQL_LIMITS, runGraphql } from './graphql-run.ts';
+export type {
+  ContentItem,
+  ContentPage,
+  GraphqlContext,
+  GraphqlEmitter,
+  GraphqlErrorOut,
+  GraphqlResult,
+  GraphqlRunOptions,
+  ListArgs,
+  ResolverSet,
+} from './graphql-types.ts';
 export { emitOpenApi } from './openapi.ts';
 export {
   SchemaCacheBusyError,

@@ -38,6 +38,7 @@ export const NOT_SHELL_ROUTES: Readonly<Record<string, string>> = {
   '/settings-states/[screen]/[state]': GALLERY,
   '/sign-in': SIGNED_OUT_PAGE,
   '/sign-in/cli': SIGNED_OUT_PAGE,
+  '/sign-in/factor': SIGNED_OUT_PAGE,
   '/sign-in/link': SIGNED_OUT_PAGE,
   '/sign-in/password': SIGNED_OUT_PAGE,
   '/sign-in/reset': SIGNED_OUT_PAGE,

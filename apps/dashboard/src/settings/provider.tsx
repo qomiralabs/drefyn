@@ -19,6 +19,9 @@ interface Settings {
   // Runs an action. When it needs a fresh sign in the prompt comes first and the same call
   // runs once more. `what` finishes the prompt's sentence: "Creating an API key needs...".
   readonly act: <T>(what: string, call: () => Promise<Answer<T>>) => Promise<Outcome<T>>;
+  // Asks for a fresh proof up front, for a step that always needs one: turning on the
+  // second factor accepts no sign in, however recent, as its proof.
+  readonly confirm: (what: string) => Promise<boolean>;
   // The failure as a toast, for a row that has no form to show it in.
   readonly complain: (title: string, problem: Problem) => void;
   readonly refresh: () => void;
@@ -44,14 +47,14 @@ export const wasCancelled = (outcome: Outcome<unknown>): boolean =>
 
 export function SettingsProvider({ children }: { children: ReactNode }): ReactNode {
   const router = useRouter();
-  const [prompt, setPrompt] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<{ what: string; always: boolean } | null>(null);
   const answer = useRef<((confirmed: boolean) => void) | null>(null);
 
   const ask = useCallback(
-    (what: string) =>
+    (what: string, always = false) =>
       new Promise<boolean>((resolve) => {
         answer.current = resolve;
-        setPrompt(what);
+        setPrompt({ what, always });
       }),
     [],
   );
@@ -75,6 +78,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactNo
   const value = useMemo<Settings>(
     () => ({
       act,
+      confirm: (what) => ask(what, true),
       complain: (title, problem) => {
         toast({ title, description: problemWords(problem), tone: 'error' });
       },
@@ -82,7 +86,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactNo
         router.refresh();
       },
     }),
-    [act, router],
+    [act, ask, router],
   );
 
   return (
@@ -90,7 +94,8 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactNo
       {children}
       {prompt === null ? null : (
         <StepUp
-          what={prompt}
+          what={prompt.what}
+          always={prompt.always}
           onClose={(confirmed) => {
             setPrompt(null);
             answer.current?.(confirmed);
