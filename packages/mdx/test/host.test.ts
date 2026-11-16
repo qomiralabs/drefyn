@@ -33,6 +33,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const workspace = resolve(here, '../../..');
 const hostMain = resolve(here, '../src/host-main.ts');
 const fixtureHost = resolve(here, 'fixtures/hosts/fixture-host.ts');
+// Past the fixture host's 200 ms parse limit, the way a thread waits on a loaded machine.
+const PROBE_HOLD_MS = 300;
 const PERMISSION = ['--permission', `--allow-fs-read=${workspace}`, '--allow-worker'];
 
 const hosts: ChildProcess[] = [];
@@ -164,7 +166,8 @@ describe('the parse host', () => {
     async () => {
       const { url } = start([fixtureHost, 'host-probe']);
       const client = createParseClient({ ...CLIENT, url: await url });
-      const result = await client.parse(page('x'));
+      // The probe holds its thread longer than the host's parse limit, as a loaded machine can.
+      const result = await client.parse(page(String(PROBE_HOLD_MS)));
       expect(result).toMatchObject({
         error: [{ code: 'mdx.probe:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:ERR_ACCESS_DENIED:0' }],
       });
