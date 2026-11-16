@@ -111,7 +111,10 @@ out of rotation pushes its load on to the others.
 Unset, `DREFYN_ENGINE_POOL_CEILING` is the pool minus 2 or a fifth of the pool, whichever is more,
 at least 1: 8 of 10, 3 of 5, 16 of 20. `databaseStore` throws at startup on a set value at or above
 `DREFYN_DATABASE_POOL_MAX`, naming both keys, and on a pool of 1, where nothing is left over. This is
-a limit on the machine and no plan sells it, so it is config and not an entitlement. Each process
+a limit on the machine and no plan sells it, so it is config and not an entitlement. A host that
+lazily builds its store can call `checkEngineConfig(env, poolMax)` at start instead: it connects to
+nothing and throws `EngineConfigError` (`code: 'ENGINE_CONFIG_INVALID'`, `key`) on the same pair, or
+on any engine key it cannot read. The message never holds a value. Each process
 has its own pool and its own gate. `DREFYN_DATABASE_POOL_MAX` also sizes the reader pool, so raising
 it for the engine raises that too.
 

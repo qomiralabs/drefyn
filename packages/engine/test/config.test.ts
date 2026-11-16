@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ENGINE_CONFIG, parseEngineConfig } from '../src/index.ts';
+import { checkEngineConfig, DEFAULT_ENGINE_CONFIG, parseEngineConfig } from '../src/index.ts';
 
 describe('the engine config', () => {
   it('defaults the source cap to the render policy and the tree cap to 5 MiB', () => {
@@ -111,5 +111,52 @@ describe('the pool protection limits', () => {
         DREFYN_ENGINE_SLOT_HOLD_MS: '20000',
       }).slotHoldMs,
     ).toBe(20_000);
+  });
+});
+
+describe('checkEngineConfig', () => {
+  const failure = (env: Record<string, string>, poolMax: number) => {
+    try {
+      checkEngineConfig(env, poolMax);
+    } catch (error) {
+      return error as { code?: unknown; key?: unknown; message?: unknown };
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('passes the defaults over the default pool', () => {
+    expect(() => {
+      checkEngineConfig({}, 10);
+    }).not.toThrow();
+  });
+
+  it('passes a set ceiling below the pool', () => {
+    expect(() => {
+      checkEngineConfig({ DREFYN_ENGINE_POOL_CEILING: '9' }, 10);
+    }).not.toThrow();
+  });
+
+  it('refuses a set ceiling equal to the pool, naming the key and no value', () => {
+    const error = failure({ DREFYN_ENGINE_POOL_CEILING: '10' }, 10);
+    expect(error.code).toBe('ENGINE_CONFIG_INVALID');
+    expect(error.key).toBe('DREFYN_ENGINE_POOL_CEILING');
+    expect(String(error.message)).not.toContain('10');
+  });
+
+  it('refuses a set ceiling above the pool', () => {
+    expect(failure({ DREFYN_ENGINE_POOL_CEILING: '40' }, 10).key).toBe(
+      'DREFYN_ENGINE_POOL_CEILING',
+    );
+  });
+
+  it('refuses a pool too small to leave anything over', () => {
+    expect(failure({}, 1).key).toBe('DREFYN_ENGINE_POOL_CEILING');
+  });
+
+  it('names the first bad key of an unreadable config, never its value', () => {
+    const error = failure({ DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT: 'secret-ish' }, 10);
+    expect(error.code).toBe('ENGINE_CONFIG_INVALID');
+    expect(error.key).toBe('DREFYN_ENGINE_QUERY_MAX_IN_FLIGHT');
+    expect(String(error.message)).not.toContain('secret-ish');
   });
 });

@@ -2,6 +2,7 @@ export { BACKFILL_BATCH, BACKFILL_PAUSE_MS, runFilterBackfill } from './backfill
 export { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
 export { astVersionOf, type NodeContent } from './content.ts';
 export { DEFAULT_ENGINE_CONFIG, parseEngineConfig, type EngineConfig } from './config.ts';
+export { checkEngineConfig, EngineConfigError } from './config-check.ts';
 export { createEngine, type Engine, type EngineDeps } from './engine.ts';
 export type { EngineError, EngineIssue, EngineResult } from './errors.ts';
 export {

@@ -8,12 +8,25 @@ const parseAuthConfig = vi.fn();
 const parseDatabaseConfig = vi.fn();
 const parseAuthDatabaseConfig = vi.fn();
 
+const checkEngineConfig = vi.fn();
+const databaseStore = vi.fn<(db: unknown, config: unknown) => object>(() => ({
+  gate: {},
+  tenant: vi.fn(),
+}));
+
 vi.mock('@drefyn/db', () => ({
   createDatabase,
   createAuthDatabase,
+  closeDatabase: () => Promise.resolve(),
   parseDatabaseConfig,
   parseAuthDatabaseConfig,
   withOrganization: vi.fn(),
+}));
+vi.mock('@drefyn/engine', () => ({
+  checkEngineConfig,
+  databaseStore,
+  createEngine: () => ({}),
+  parseEngineConfig: () => ({}),
 }));
 vi.mock('@drefyn/email/config', () => ({ parseEmailConfig: () => ({ ok: true }) }));
 vi.mock('@drefyn/auth', () => ({
@@ -56,10 +69,13 @@ const organizations = {
   ensureOrganizationFor: vi.fn(),
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
+  vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  (await import('../src/server/engine-holder.ts')).forgetDashboardData();
   parseAuthConfig.mockReturnValue(CONFIG);
+  parseDatabaseConfig.mockReturnValue({ poolMax: 10 });
   createDatabase.mockResolvedValue({});
   createAuthDatabase.mockResolvedValue({});
   createSessions.mockReturnValue(sessions);
@@ -145,6 +161,23 @@ describe('the composition root', () => {
     expect(auth.organizations.listMyOrganizations({} as never)).toBe(7);
   });
 
+  it('takes both handles from the engine holder, so auth and the engine share them', async () => {
+    const appDb = { app: true };
+    const authDb = { auth: true };
+    createDatabase.mockResolvedValueOnce(appDb);
+    createAuthDatabase.mockResolvedValueOnce(authDb);
+    const { dashboardAuth } = await load();
+    await dashboardAuth();
+    const deps = createSessions.mock.calls[0]?.[1] as { db: unknown; authDb: unknown };
+    expect(deps.db).toBe(appDb);
+    expect(deps.authDb).toBe(authDb);
+    expect(databaseStore.mock.calls[0]?.[0]).toBe(appDb);
+    vi.resetModules();
+    await (await load()).dashboardAuth();
+    expect(createDatabase).toHaveBeenCalledTimes(1);
+    expect(createAuthDatabase).toHaveBeenCalledTimes(1);
+  });
+
   it('drops a failed start, so the next request tries again', async () => {
     createDatabase.mockRejectedValueOnce(new Error('down'));
     const { dashboardAuth } = await load();
@@ -158,6 +191,8 @@ describe('the composition root', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const { dashboardAuth } = await load();
     await dashboardAuth();
+    // The holder's own lines are not the auth logger's.
+    info.mockClear();
     const { logger } = createSessions.mock.calls[0]?.[1] as {
       logger: {
         warn: (e: string, f: Record<string, unknown>) => void;
@@ -190,7 +225,18 @@ describe('the composition root', () => {
     expect(parseAuthConfig).toHaveBeenCalledWith(env);
     expect(parseDatabaseConfig).toHaveBeenCalledWith(env);
     expect(parseAuthDatabaseConfig).toHaveBeenCalledWith(env);
+    expect(checkEngineConfig).toHaveBeenCalledWith(env, 10);
     expect(createDatabase).not.toHaveBeenCalled();
+  });
+
+  it('lets a bad engine ceiling stop the boot', async () => {
+    checkEngineConfig.mockImplementationOnce(() => {
+      throw new Error('DREFYN_ENGINE_POOL_CEILING');
+    });
+    const { checkDashboardConfig } = await load();
+    expect(() => {
+      checkDashboardConfig({});
+    }).toThrow('DREFYN_ENGINE_POOL_CEILING');
   });
 
   it('lets a bad key stop the boot', async () => {

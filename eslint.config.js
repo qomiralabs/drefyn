@@ -23,6 +23,28 @@ const dynamicMotion = [
   },
 ];
 
+// The engine's gate counts per database handle, so a second handle or store in the dashboard
+// would count alone and never refuse. One module builds them, once per process.
+const holderMessage =
+  'Take handles, the store and the engine from dashboardData() in src/server/engine-holder.ts.';
+const engineBuilders = {
+  name: '@drefyn/engine',
+  importNames: ['databaseStore', 'createEngine'],
+  message: holderMessage,
+};
+const handleBuilders = {
+  name: '@drefyn/db',
+  importNames: ['createDatabase', 'createAuthDatabase'],
+  message: holderMessage,
+};
+const DASHBOARD_HOLDER = 'apps/dashboard/src/server/engine-holder.ts';
+// Scheduled jobs that open one connection pools of their own, so a slow run never takes a
+// connection from a request. Neither builds a store or an engine.
+const DASHBOARD_JOBS = [
+  'apps/dashboard/src/server/expiry-job.ts',
+  'apps/dashboard/src/server/sso-domain-recheck.ts',
+];
+
 const urlMessage =
   'Next builds request URLs from its own idea of the host. Use appUrl or requestPath from the origin module, which start from DREFYN_APP_ORIGIN.';
 const REQUEST_NAME = '/^(?:req|request|incoming)$/i';
@@ -188,6 +210,31 @@ export default tseslint.config(
     files: ['apps/dashboard/src/**'],
     ignores: ['apps/dashboard/src/server/origin.ts'],
     rules: { 'no-restricted-syntax': ['error', ...requestUrlReads] },
+  },
+  {
+    // Pages and components reach the engine through server modules only.
+    files: ['apps/dashboard/src/**', 'apps/dashboard/server.ts'],
+    ignores: ['apps/dashboard/src/server/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: '@drefyn/engine', message: 'The engine is server only: use src/server/.' },
+            handleBuilders,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/dashboard/src/server/**'],
+    ignores: [DASHBOARD_HOLDER, ...DASHBOARD_JOBS],
+    rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders, handleBuilders] }] },
+  },
+  {
+    files: DASHBOARD_JOBS,
+    rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders] }] },
   },
   {
     files: ['packages/auth/src/**'],

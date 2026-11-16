@@ -34,17 +34,14 @@ import {
   type Roles,
   type Sessions,
 } from '@drefyn/auth';
-import {
-  createAuthDatabase,
-  createDatabase,
-  parseAuthDatabaseConfig,
-  parseDatabaseConfig,
-} from '@drefyn/db';
+import { parseAuthDatabaseConfig, parseDatabaseConfig } from '@drefyn/db';
 import { parseEmailConfig } from '@drefyn/email/config';
+import { checkEngineConfig } from '@drefyn/engine';
 import { signInMethods, type SignInMethods } from '../auth/outcomes.ts';
 import { authLogger } from './auth-logger.ts';
 import { mailableOrganizationName, organizationNames } from './organization-name.ts';
 import { dashboardMail, noteEmailOff } from './auth-mailer.ts';
+import { dashboardData } from './engine-holder.ts';
 import { mailDeliveryEnabled } from './gate.ts';
 
 // Only what the dashboard calls. Each page issue adds what it needs, so nothing here is
@@ -110,8 +107,9 @@ export function sessionCookieName(): string {
 
 async function compose(): Promise<DashboardAuth> {
   const parsed = authConfig();
-  const db = await createDatabase(parseDatabaseConfig(process.env));
-  const authDb = await createAuthDatabase(parseAuthDatabaseConfig(process.env));
+  // The process's only handles, shared with the engine, so each Next layer that loads this
+  // module opens no pool of its own.
+  const { appDb: db, authDb } = await dashboardData();
   const mail = await dashboardMail({
     linkOrigin: new URL(parsed.appOrigin),
     organizationName: mailableOrganizationName(organizationNames(db)),
@@ -262,8 +260,9 @@ export function dashboardAuth(): Promise<DashboardAuth> {
 // At boot, connecting to nothing: a bad key stops the start and names the key.
 export function checkDashboardConfig(env: Env): void {
   parseAuthConfig(env);
-  parseDatabaseConfig(env);
+  const { poolMax } = parseDatabaseConfig(env);
   parseAuthDatabaseConfig(env);
+  checkEngineConfig(env, poolMax);
   const email = parseEmailConfig(env);
   if (!email.ok) throw new Error(`${email.error.key} ${email.error.reason}`);
 }

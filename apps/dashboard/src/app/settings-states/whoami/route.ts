@@ -1,7 +1,7 @@
 import { apiKeyErrorResponse, createApiKeyVerifier } from '@drefyn/auth';
-import { createDatabase, parseDatabaseConfig } from '@drefyn/db';
 import type { NextRequest } from 'next/server';
 import { visitorBrowser } from '../../../server/actions.ts';
+import { dashboardData } from '../../../server/engine-holder.ts';
 import { guardPublic } from '../../../server/guard.ts';
 import { logWarn } from '../../../server/log.ts';
 import { appUrl, requestPath } from '../../../server/origin.ts';
@@ -14,7 +14,7 @@ async function apiVerifier() {
   verifier ??= createApiKeyVerifier(
     { DREFYN_API_RATE_LIMIT_KEY },
     {
-      db: await createDatabase(parseDatabaseConfig(process.env)),
+      db: (await dashboardData()).appDb,
       logger: {
         info: () => undefined,
         warn: (event) => {

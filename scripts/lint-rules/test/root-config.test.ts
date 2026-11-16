@@ -345,3 +345,53 @@ export const e = (m: Map<string, string>) => m.get('name');
     ).toEqual([expect.stringContaining('Motion runs only')]);
   });
 });
+
+describe('the dashboard handle rule', () => {
+  const handle = "import { createDatabase } from '@drefyn/db';\nexport const a = createDatabase;\n";
+  const authHandle =
+    "import { createAuthDatabase } from '@drefyn/db';\nexport const a = createAuthDatabase;\n";
+  const store =
+    "import { databaseStore } from '@drefyn/engine';\nexport const a = databaseStore;\n";
+  const engine = "import { createEngine } from '@drefyn/engine';\nexport const a = createEngine;\n";
+  const holder = 'apps/dashboard/src/server/engine-holder.ts';
+
+  it.each([
+    ['a database handle', handle],
+    ['an auth database handle', authHandle],
+    ['a store', store],
+    ['an engine', engine],
+  ])('refuses %s built anywhere in the dashboard but the holder', async (_name, code) => {
+    for (const path of [
+      'apps/dashboard/src/server/pages-read.ts',
+      'apps/dashboard/src/app/x/route.ts',
+      'apps/dashboard/server.ts',
+    ]) {
+      // Outside src/server the engine import is refused whole, which says so instead.
+      expect(await lint(path, code), path).toEqual([
+        expect.stringMatching(/^error no-restricted-imports: .*(engine-holder|server only)/),
+      ]);
+    }
+  });
+
+  it('lets the holder build all four', async () => {
+    expect(await lint(holder, handle + authHandle.replace('a =', 'b =') + store + engine)).toEqual(
+      [],
+    );
+  });
+
+  it('lets the jobs open their own one connection pools, and no store or engine', async () => {
+    const job = 'apps/dashboard/src/server/expiry-job.ts';
+    expect(await lint(job, authHandle)).toEqual([]);
+    expect(await lint(job, engine)).toEqual([
+      expect.stringMatching(/^error no-restricted-imports: .*engine-holder/),
+    ]);
+  });
+
+  it('keeps the engine out of anything that is not a server module', async () => {
+    const types = "import type { Engine } from '@drefyn/engine';\nexport type A = Engine;\n";
+    expect(await lint('apps/dashboard/src/docs-pages/x.tsx', types)).toEqual([
+      expect.stringMatching(/^error no-restricted-imports: .*server only/),
+    ]);
+    expect(await lint('apps/dashboard/src/server/pages-read.ts', types)).toEqual([]);
+  });
+});
