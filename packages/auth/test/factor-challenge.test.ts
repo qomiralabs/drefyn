@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AuthError } from '../src/index.ts';
 import {
   CHALLENGE_SECRET,
+  FACTOR_NOW,
   RECOVERY,
   STEP,
   challengeRow,
@@ -450,5 +451,81 @@ describe('completeChallenge: failures', () => {
     const { challenges, scripted } = world();
     await challenges.completeChallenge(factorBrowser(), totp('1'));
     expect(scripted.statements().filter(isWrite)).toEqual([]);
+  });
+});
+
+describe('completeChallenge: notices', () => {
+  function noticeWorld(shape: WorldShape = {}) {
+    const tasks: (() => Promise<void>)[] = [];
+    const t = factorSetup(factorResponder(shape), factorConfig, {
+      later: (task) => tasks.push(task),
+    });
+    const drain = async () => {
+      for (const task of tasks.splice(0)) await task();
+    };
+    return { ...t, drain };
+  }
+
+  it('warns at the third TOTP failure in a row, without holding up the refusal', async () => {
+    const { challenges, sent, drain, limiter } = noticeWorld({ failedTo: 3 });
+    const result = await challenges.completeChallenge(factorBrowser(), totp(codeAt(STEP + 1)));
+    expect(errorCode(result)).toBe('AUTH_FACTOR_INVALID');
+    expect(sent).toEqual([]);
+    await drain();
+    expect(limiter.calls.at(-1)).toEqual(['second_factor_notice', [USER]]);
+    expect(sent).toEqual([
+      {
+        to: 'person@example.com',
+        notice: { kind: 'second_factor_failures', at: FACTOR_NOW },
+      },
+    ]);
+  });
+
+  it.each([1, 2, 4, 99])('stays quiet at failure %i', async (failedTo) => {
+    const { challenges, sent, drain } = noticeWorld({ failedTo });
+    await challenges.completeChallenge(factorBrowser(), totp(codeAt(STEP + 1)));
+    await drain();
+    expect(sent).toEqual([]);
+  });
+
+  it('says TOTP is off when the failures reach the ceiling', async () => {
+    const { challenges, sent, drain } = noticeWorld({ failedTo: 100 });
+    await challenges.completeChallenge(factorBrowser(), totp(codeAt(STEP + 1)));
+    await drain();
+    expect(sent.map((m) => (m as { notice: { kind: string } }).notice.kind)).toEqual([
+      'second_factor_disabled',
+    ]);
+  });
+
+  it('warns on a wrong recovery code', async () => {
+    const { challenges, sent, drain } = noticeWorld();
+    const result = await challenges.completeChallenge(
+      factorBrowser(),
+      recovery('aaaaaa-aaaaaa-aaaaaa-aaaaaa'),
+    );
+    expect(errorCode(result)).toBe('AUTH_FACTOR_INVALID');
+    await drain();
+    expect(sent.map((m) => (m as { notice: { kind: string } }).notice.kind)).toEqual([
+      'second_factor_failures',
+    ]);
+  });
+
+  it('tells the person a recovery code signed them in, and how many are left', async () => {
+    const { challenges, sent } = noticeWorld();
+    const result = await challenges.completeChallenge(factorBrowser(), recovery());
+    if (!result.ok) throw result.error;
+    await result.value.send?.();
+    expect(sent).toContainEqual({
+      to: 'person@example.com',
+      notice: { kind: 'recovery_code_used', codesLeft: 9, at: FACTOR_NOW },
+    });
+  });
+
+  it('a TOTP sign in sends no recovery notice', async () => {
+    const { challenges, sent } = noticeWorld();
+    const result = await challenges.completeChallenge(factorBrowser(), totp());
+    if (!result.ok) throw result.error;
+    await result.value.send?.();
+    expect(JSON.stringify(sent)).not.toContain('recovery_code_used');
   });
 });

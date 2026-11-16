@@ -273,6 +273,61 @@ describe('SSO domain notices', () => {
   });
 });
 
+describe('second factor notices', () => {
+  // Plain text wraps at the measure, so phrases are matched across line breaks.
+  const flat = (text: string) => text.replace(/\s+/g, ' ');
+
+  it('second_factor_added says API keys keep working and other sessions ended', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_added', at: AT }));
+    expect(mail.subject).toBe('Two step sign in was turned on for your Drefyn account');
+    expect(flat(mail.text)).toContain('Existing API keys keep working.');
+    expect(flat(mail.text)).toContain('Your other sessions were signed out.');
+    expect(flat(mail.html)).toContain('Existing API keys keep working.');
+  });
+
+  it('second_factor_removed says the code is no longer asked for', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_removed', at: AT }));
+    expect(mail.subject).toBe('Two step sign in was turned off for your Drefyn account');
+    expect(flat(mail.text)).toContain('no longer asks for a code');
+  });
+
+  it('recovery_code_used shows how many codes are left and says to re-enroll', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_code_used', at: AT, codesLeft: 3 }));
+    expect(mail.subject).toBe('A recovery code was used on your Drefyn account');
+    expect(mail.text).toMatch(/^Codes left: +3$/m);
+    expect(flat(mail.text)).toContain('set up your authenticator app again');
+  });
+
+  it('recovery_code_used says plainly when none are left', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_code_used', at: AT, codesLeft: 0 }));
+    expect(mail.text).toMatch(/^Codes left: +None$/m);
+  });
+
+  it.each([-1, 11, 1.5, Number.NaN])('refuses a codes left count of %s', async (codesLeft) => {
+    const result = await renderMail(notice({ kind: 'recovery_code_used', at: AT, codesLeft }), {
+      linkOrigin: ORIGIN,
+    });
+    expect(result.ok ? null : result.error.field).toBe('notice.codesLeft');
+  });
+
+  it('recovery_codes_replaced says the old codes stopped working', async () => {
+    const mail = await rendered(notice({ kind: 'recovery_codes_replaced', at: AT }));
+    expect(flat(mail.text)).toContain('Your old recovery codes no longer work.');
+  });
+
+  it('second_factor_failures says the first step passed and to change the password', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_failures', at: AT }));
+    expect(mail.subject).toBe('Wrong two step sign in codes on your Drefyn account');
+    expect(flat(mail.text)).toContain('got past the first step');
+    expect(flat(mail.text)).toContain('change your password');
+  });
+
+  it('second_factor_disabled says only a recovery code works now', async () => {
+    const mail = await rendered(notice({ kind: 'second_factor_disabled', at: AT }));
+    expect(flat(mail.text)).toContain('Only a recovery code can sign in now');
+  });
+});
+
 describe('invitation', () => {
   it('shows who invited whom as facts, with the expiry named', async () => {
     const mail = await rendered(invitation());

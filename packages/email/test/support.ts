@@ -162,6 +162,8 @@ const noticeArb: fc.Arbitrary<SecurityNoticeMail> = fc
       case 'sso_domain_verified':
       case 'sso_domain_unverified':
         return { ...f, kind, organizationName: a, domain: 'login.acme.example' };
+      case 'recovery_code_used':
+        return { ...f, kind, codesLeft: 7 };
       default:
         return { ...f, kind };
     }
