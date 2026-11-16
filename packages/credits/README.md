@@ -56,8 +56,8 @@ is public.
 
 ## AI budget
 
-`AiBudget` meters the AI work whose worth is known only after the run: stale page drafts
-and reader answers (`AI_OPERATIONS`: `stale_draft`, `reader_answer`). It charges first and
+`AiBudget` meters the AI work whose worth is known only after the run (`AI_OPERATIONS`:
+`stale_draft`, `reader_answer`, `translation_draft`, `incident_draft`, `generation`). It charges first and
 refunds when the run produced nothing, so an unanswered question costs nothing and a burst
 cannot spend credits the pool does not have.
 
@@ -99,6 +99,51 @@ and a fast-check property that under every interleaving of charge, refund and cr
 turn is charged at most once and refunded at most once. `make` returns
 `{ budget, ledger, tenant, creditsFor }` with a pool that starts empty for `tenant`. The
 entry needs `vitest` and `fast-check` in the consumer; production code never imports it.
+
+## Rates
+
+Each model burns credits at its own per token rate, read from one rate table that whoever
+runs the pool supplies. This
+package holds the table type, a strict parser and the integer math; it holds no rates, no
+model names and no figures.
+
+- `parseRateTable(value)` checks a table (usually parsed JSON) and returns a frozen
+  `RateTable` holding only the known fields, so it serializes back to an equal table. A
+  table has a `version`, `models`, `defaults` (one model per AI operation), a
+  `checkModel` and `reference` usage profiles. Each `ModelRate` has a `modelId`, a
+  `premium` flag and one or more `RateBand`s. A band has `upToPromptTokens` and a rate for
+  each token class (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`) as
+  `Millicredits` per million tokens: a millicredit is a thousandth of a credit.
+- Rules: model ids are unique and match `^[a-z0-9][a-z0-9.-]{0,62}$`; band bounds are
+  strictly ascending and only the last band, which must be there, has a null bound;
+  defaults name non premium models in the table; the check model is in the table; at most
+  one reference profile per operation, each with at least one call; every number is a
+  non negative safe integer; unknown fields are refused. At most 256 models, 16 bands per
+  model and 64 calls per profile or operation.
+- `estimateCredits(table, plannedCalls)` is the hold for one operation, an upper bound:
+  each prompt token at the dearest prompt rate of every band up to the one the largest
+  prompt lands in, each output token at the dearest output rate there, summed over the
+  calls (the check included) and rounded up. At least 1.
+- `creditsForUsage(table, calls)` is the charge once usage is known: every call of the
+  operation summed in millicredits and rounded once, half up. At least 1. The band is
+  picked per call from its whole prompt, cache tokens included, so 100,000 tokens stay
+  in a band that ends at 100,000 and 100,001 move to the next. Within the plan it never
+  exceeds the estimate.
+- `estimateMonthlyRuns(table, monthly, operation, modelId)` is "about N runs a month":
+  `monthly` over the charge of the operation's reference profile (main calls on
+  `modelId`, check calls on the check model), rounded down. `undefined` when the table
+  has no profile for the operation.
+- `RateTableError` has a `code`, a `path` such as `models[2].bands[0].output` or
+  `calls[1].modelId`, and a fixed message per code ending in that path. It never
+  carries a value from the table or the usage.
+
+| Code                 | Meaning                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `RATE_TABLE_INVALID` | The table breaks a rule above.                                          |
+| `RATE_MODEL_UNKNOWN` | A call names a model that is not in the table.                          |
+| `RATE_USAGE_INVALID` | A call, token count or operation is malformed, or the result is unsafe. |
+
+All arithmetic is in `BigInt`; no floating point touches a rate or a charge.
 
 ## Idempotency
 

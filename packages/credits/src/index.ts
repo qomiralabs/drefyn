@@ -20,3 +20,19 @@ export {
   type SpendReason,
 } from './ledger.ts';
 export { createMemoryLedger } from './memory.ts';
+export {
+  RateTableError,
+  creditsForUsage,
+  estimateCredits,
+  estimateMonthlyRuns,
+  parseRateTable,
+  type Millicredits,
+  type ModelCall,
+  type ModelRate,
+  type PlannedCall,
+  type RateBand,
+  type RateTable,
+  type RateTableErrorCode,
+  type ReferenceUsage,
+  type TokenUsage,
+} from './rates.ts';
