@@ -6,7 +6,7 @@ migrations as `drefyn_owner`.
 
 ## Tenant access
 
-There are five ways in: three need a tenant, one needs a signed in user and one is the sign in
+There are six ways in: four need a tenant, one needs a signed in user and one is the sign in
 path itself. Nothing exported hands out a pool, a client, a Kysely instance or a transaction
 without one of those.
 
@@ -50,6 +50,16 @@ without one of those.
 - `withPublishedReader(db, tenant, work, { timeoutMs })` needs a `TenantRef` and runs a read only
   transaction whose type holds only the tables on the published allow list. Default 2000 ms, up
   to 10000 ms.
+  The public reader sees only rows whose `visibility` is `'public'`: a restrictive
+  `published_public_only` policy on every published table guarantees it, whatever the query
+  asks for.
+- `createProtectedReaderDatabase(config, { logger })` opens the protected reader pool as
+  `drefyn_protected_reader`, with the same startup role check; any other role fails with
+  `DB_ROLE_UNSAFE`. `withProtectedReader(db, grant, work, { timeoutMs })` takes a grant whose
+  own `tenant` property is a `TenantRef` (the auth package's reader grant fits) and runs the
+  same read only transaction over the published tables, seeing protected rows as well as
+  public ones. Default 2000 ms, up to 10000 ms. The role has no draft table, no write and no
+  function beyond the two context readers.
 - `withUser(db, { userId }, work, { timeoutMs })` takes a `UserRef` and nothing else, for work
   that belongs to the person rather than an organization: their own rows and the organizations
   they belong to. It runs as `drefyn_app` with only `drefyn.user_id` set, so tenant tables read
@@ -144,7 +154,10 @@ project. A foreign key into a tenant table carries `organization_id`, and `proje
 when both tables have one, against a matching composite unique key; a reference across
 projects of one organization needs a reviewed entry in the allow list. A published table also gets an explicit `select` grant to
 `drefyn_public_reader` and the `published_read` policy, which needs both organization and
-project. It must be added to the published allow list in `src/allow-lists.ts`.
+project; a `visibility text not null` column with no default, checked to `'public'` or
+`'protected'`; the restrictive `published_public_only` policy, which keeps the public reader to
+public rows; and a `select` grant and `protected_read` policy for `drefyn_protected_reader`. It
+must be added to the published allow list in `src/allow-lists.ts`.
 
 A project table that a composite foreign key points at also needs
 `create statistics (ndistinct, dependencies) on organization_id, project_id`. Without it the
@@ -279,8 +292,17 @@ or `PUBLIC`; anything `drefyn_app` holds beyond `SELECT`, `INSERT`, `UPDATE` and
 tables (`TRUNCATE` ignores RLS), `USAGE` and `SELECT` on sequences and `EXECUTE` on its
 allow list, including grant options, `CREATE`, `TEMP`, ownership and default privileges; a
 foreign key into a tenant table without the tenant columns; and any persisted setting on
-`drefyn_app`, `drefyn_public_reader` or `drefyn_auth`, for all roles, or on the database
-beyond the bootstrap's.
+`drefyn_app`, `drefyn_public_reader`, `drefyn_auth` or `drefyn_protected_reader`, for all
+roles, or on the database beyond the bootstrap's.
+
+For published tables it also refuses (`published_visibility`): a missing `visibility` column, one
+that is nullable or has a default, and a `published_public_only` policy that is missing,
+permissive, or differs from `as restrictive for select to drefyn_public_reader using
+(visibility = 'public')`. None of these can be listed away. A published table without its
+`protected_read` policy fails `policy`. For `drefyn_protected_reader` (`protected_grant`) it
+refuses anything beyond `SELECT` on a published table, any grant option, a sequence, `EXECUTE`
+off the reader function list and anything beyond `USAGE` on schema `app`; default privileges
+to it fail `default_privileges`.
 
 For the identity tables it also refuses: any `drefyn_auth` grant on a table with
 `organization_id`, even one on the auth table list, unless that exact grant is on the auth tenant
@@ -334,14 +356,18 @@ with `is_local` false) in any tracked file.
 - `parsePublishedReaderConfig(env)`: reads `DREFYN_PUBLIC_READER_DATABASE_URL` with the same
   pool and SSL keys and a fixed 2000 ms statement timeout. It never falls back to
   `DREFYN_DATABASE_URL`.
+- `parseProtectedReaderConfig(env)`: reads `DREFYN_PROTECTED_READER_DATABASE_URL` the same way.
+  Needed only where protected pages are served, and it never falls back to another URL: a
+  missing key fails with `DB_CONFIG_INVALID` naming it.
 - `parseAuthDatabaseConfig(env)`: reads `DREFYN_AUTH_DATABASE_URL`,
   `DREFYN_AUTH_DATABASE_POOL_MAX` (4), `DREFYN_DATABASE_POOL_WAIT_MS` and `DREFYN_DATABASE_SSL`,
   with a fixed 2000 ms statement timeout. It never falls back to `DREFYN_DATABASE_URL`. This
   pool carries every address and password hash, so `require` and `disable` are refused unless
   the host is loopback (`localhost`, `127.0.0.0/8`, `[::1]`) or the compose service
   `postgres`; anywhere else it must be `verify-full`.
-- `createDatabase`, `createPublishedDatabase`, `createAuthDatabase`, `withTenant`,
-  `withOrganization`, `withPublishedReader`, `withUser`, `withAuth`, `closeDatabase`,
+- `createDatabase`, `createPublishedDatabase`, `createProtectedReaderDatabase`,
+  `createAuthDatabase`, `withTenant`, `withOrganization`, `withPublishedReader`,
+  `withProtectedReader`, `withUser`, `withAuth`, `closeDatabase`,
   `withApiKeyLimiter`, `toSafeInteger`, `newId`: see Tenant access. `AuthSchema`,
   `UserSchema` and `ApiKeyLimiterSchema` are the transaction types.
 - `reserveAuthRateWindows`, `reserveApiKeyFailureWindows`, `deleteExpired`,
@@ -469,10 +495,11 @@ Migrations never create or change an extension, because `drefyn_owner` owns neit
 extension nor its schema. The message gives the one statement to run as the superuser on
 compose or the master user on managed Postgres.
 
-The same check stops when a role added after the first bootstrap, today `drefyn_auth`, is
-missing or has no `CONNECT` on the database, before any migration that might grant to it.
-The message names the role and the upgrade: `bash scripts/selfhost.sh upgrade` on compose, or
-`deploy/postgres/upgrade/0001-auth-role.sql` run with psql by the master user.
+The same check stops when a role added after the first bootstrap, `drefyn_auth` or
+`drefyn_protected_reader`, is missing or has no `CONNECT` on the database, before any
+migration that might grant to it. The message names the role and the upgrade:
+`bash scripts/selfhost.sh upgrade` on compose, or its script in `deploy/postgres/upgrade/`
+run with psql by the master user with the role's password key set.
 
 ## `check:types`
 

@@ -31,6 +31,7 @@ import {
   AUTH_TIMEOUT_MAX_MS,
   READER_TIMEOUT_MAX_MS,
   assertWritableSettings,
+  grantSettings,
   organizationSettings,
   projectSettings,
   transactionDeadline,
@@ -43,6 +44,7 @@ import { toSafeInteger } from './integers.ts';
 declare const appBrand: unique symbol;
 declare const readerBrand: unique symbol;
 declare const authBrand: unique symbol;
+declare const protectedBrand: unique symbol;
 
 // Opaque: holds the pool and never hands it out.
 export interface Database {
@@ -56,6 +58,18 @@ export interface PublishedDatabase {
 export interface AuthDatabase {
   readonly [authBrand]: true;
 }
+
+export interface ProtectedReaderDatabase {
+  readonly [protectedBrand]: true;
+}
+
+// What proved a reader may see a site's protected pages. Structural, so the auth package's
+// branded grant fits without this package depending on auth; only the tenant is read here.
+export interface ProtectedReadGrant {
+  readonly tenant: TenantRef & { readonly userId?: never };
+}
+
+type AnyDatabase = Database | PublishedDatabase | AuthDatabase | ProtectedReaderDatabase;
 
 export interface TransactionOptions {
   readonly timeoutMs?: number;
@@ -93,24 +107,28 @@ const POOLS: Readonly<Record<PoolKind, WeakMap<object, PoolState>>> = {
   app: new WeakMap(),
   reader: new WeakMap(),
   auth: new WeakMap(),
+  protected: new WeakMap(),
 };
 
 const URL_KEYS: Readonly<Record<PoolKind, string>> = {
   app: 'DREFYN_DATABASE_URL',
   reader: 'DREFYN_PUBLIC_READER_DATABASE_URL',
   auth: 'DREFYN_AUTH_DATABASE_URL',
+  protected: 'DREFYN_PROTECTED_READER_DATABASE_URL',
 };
 
 const TIMEOUT_MAX: Readonly<Record<PoolKind, number>> = {
   app: APP_TIMEOUT_MAX_MS,
   reader: READER_TIMEOUT_MAX_MS,
   auth: AUTH_TIMEOUT_MAX_MS,
+  protected: READER_TIMEOUT_MAX_MS,
 };
 
 const APPLICATION_NAMES: Readonly<Record<PoolKind, string>> = {
   app: 'drefyn-app',
   reader: 'drefyn-public-reader',
   auth: 'drefyn-auth',
+  protected: 'drefyn-protected-reader',
 };
 
 // Bounds the startup role check, which runs outside any tenant transaction.
@@ -212,7 +230,7 @@ export function databaseOverPool(
   pool: pg.Pool,
   kind: PoolKind,
   options: { readonly statementTimeoutMs: number; readonly logger?: DbLogger },
-): Database | PublishedDatabase | AuthDatabase {
+): AnyDatabase {
   const handle = Object.freeze({});
   const state: PoolState = {
     kind,
@@ -223,7 +241,7 @@ export function databaseOverPool(
     closing: undefined,
   };
   POOLS[kind].set(handle, state);
-  return handle as Database | PublishedDatabase | AuthDatabase;
+  return handle as AnyDatabase;
 }
 
 async function open(config: DatabaseConfig, kind: PoolKind, deps: DatabaseDeps): Promise<object> {
@@ -276,6 +294,16 @@ export async function createPublishedDatabase(
   return (await open(config, 'reader', deps)) as PublishedDatabase;
 }
 
+// The same checks for drefyn_protected_reader, for pages a signed in reader may see. Every
+// other role is refused, so a URL pasted from the public reader fails at startup instead of
+// serving protected pages as empty.
+export async function createProtectedReaderDatabase(
+  config: DatabaseConfig,
+  deps: DatabaseDeps = {},
+): Promise<ProtectedReaderDatabase> {
+  return (await open(config, 'protected', deps)) as ProtectedReaderDatabase;
+}
+
 // The same checks for drefyn_auth, for the sign in path only. Every other role is refused,
 // so a misconfigured URL can never give sign in a role with tenant grants.
 export async function createAuthDatabase(
@@ -293,10 +321,9 @@ export function poolSizeOf(db: Database): number {
   return max;
 }
 
-export async function closeDatabase(
-  db: Database | PublishedDatabase | AuthDatabase,
-): Promise<void> {
-  const state = POOLS.app.get(db) ?? POOLS.reader.get(db) ?? POOLS.auth.get(db);
+export async function closeDatabase(db: AnyDatabase): Promise<void> {
+  const state =
+    POOLS.app.get(db) ?? POOLS.reader.get(db) ?? POOLS.auth.get(db) ?? POOLS.protected.get(db);
   if (state === undefined) return;
   state.closed = true;
   state.closing ??= state.pool.end();
@@ -562,7 +589,8 @@ async function runTransaction<DB, T>(
   try {
     // timeoutMs is a validated integer, so it can be part of the text. The settings go in
     // their own statements: one statement with the work was measured to be far slower.
-    const begin = state.kind === 'reader' ? 'begin read only' : 'begin';
+    const readOnly = state.kind === 'reader' || state.kind === 'protected';
+    const begin = readOnly ? 'begin read only' : 'begin';
     await client.query(`${begin}; set local statement_timeout = ${String(timeoutMs)}`);
     await client.query("select set_config('drefyn.organization_id', $1, true)", [
       settings.organizationId,
@@ -712,6 +740,25 @@ export async function withPublishedReader<T>(
 ): Promise<T> {
   const state = stateOf('reader', db, 'withPublishedReader');
   const settings = projectSettings(tenant);
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    READER_TIMEOUT_MAX_MS,
+  );
+  return runTransaction(state, settings, timeoutMs, work);
+}
+
+// Protected pages for a reader the grant vouches for. Runs as drefyn_protected_reader in a read
+// only transaction, with the grant's organization and project; the transaction type has only
+// the published tables, and that role sees protected rows as well as public ones.
+export async function withProtectedReader<T>(
+  db: ProtectedReaderDatabase,
+  grant: ProtectedReadGrant,
+  work: (tx: Transaction<PublishedSchema>) => Promise<T>,
+  options?: TransactionOptions,
+): Promise<T> {
+  const state = stateOf('protected', db, 'withProtectedReader');
+  const settings = grantSettings(grant);
   const timeoutMs = transactionTimeout(
     options?.timeoutMs,
     state.statementTimeoutMs,

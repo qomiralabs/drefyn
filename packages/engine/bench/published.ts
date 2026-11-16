@@ -104,16 +104,16 @@ insert into app.node_versions (organization_id, project_id, node_id, seq, schema
          '{}', sha256(id::text::bytea)
   from app.nodes;
 insert into app.published_versions (organization_id, project_id, node_id, version_id, type_id,
-    content, is_current, render_policy_version)
+    content, is_current, render_policy_version, visibility)
   select v.organization_id, v.project_id, v.node_id, v.id, n.type_id,
-         '{"type":"root","children":[]}', true, 1
+         '{"type":"root","children":[]}', true, 1, 'public'
   from app.node_versions v join app.nodes n on n.id = v.node_id
   order by random();
-insert into app.published_filter_rows (organization_id, project_id, type_id, node_id,
+insert into app.published_filter_rows (organization_id, project_id, type_id, node_id, visibility,
     ${slot(fields.category)}, ${slot(fields.status)}, ${slot(fields.segment)}, ${slot(fields.title)},
     ${slot(fields.tags)}, ${slot(fields.score)}, ${slot(fields.rank)}, ${slot(fields.size)},
     ${slot(fields.weight)}, ${slot(fields.region)}, ${slot(fields.created)}, ${slot(fields.updated)})
-  select organization_id, project_id, type_id, id,
+  select organization_id, project_id, type_id, id, 'public',
          'category ' || (random() * 9)::int,
          (array['active','active','active','active','held'])[1 + (random() * 4)::int],
          'segment ' || (random() * 999)::int,
@@ -123,8 +123,9 @@ insert into app.published_filter_rows (organization_id, project_id, type_id, nod
          (random() * 1000000)::bigint, (random() * 5)::bigint,
          now() - random() * interval '700 days', now() - random() * interval '30 days'
   from app.nodes where type_id = '${typeId}';
-insert into app.published_filter_rows (organization_id, project_id, type_id, node_id)
-  select organization_id, project_id, type_id, id from app.nodes where type_id <> '${typeId}';
+insert into app.published_filter_rows (organization_id, project_id, type_id, node_id, visibility)
+  select organization_id, project_id, type_id, id, 'public' from app.nodes
+   where type_id <> '${typeId}';
 vacuum analyze app.published_versions;
 vacuum analyze app.published_filter_rows;`,
     name,

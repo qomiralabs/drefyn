@@ -24,8 +24,22 @@ export interface RoleAccess {
 // Roles that came after the first bootstrap shipped. A database set up before then has none
 // of them, bootstrap.sql never runs twice, and drefyn_owner cannot create roles, so each has
 // an upgrade script run by whoever can.
-export const UPGRADE_ROLES: readonly { readonly role: string; readonly script: string }[] = [
-  { role: 'drefyn_auth', script: 'deploy/postgres/upgrade/0001-auth-role.sql' },
+export const UPGRADE_ROLES: readonly {
+  readonly role: string;
+  readonly script: string;
+  // The environment key the script reads the role's password from.
+  readonly password: string;
+}[] = [
+  {
+    role: 'drefyn_auth',
+    script: 'deploy/postgres/upgrade/0001-auth-role.sql',
+    password: 'DREFYN_AUTH_PASSWORD',
+  },
+  {
+    role: 'drefyn_protected_reader',
+    script: 'deploy/postgres/upgrade/0002-protected-reader-role.sql',
+    password: 'DREFYN_PROTECTED_READER_PASSWORD',
+  },
 ];
 
 export type PrerequisiteResult =
@@ -82,11 +96,11 @@ export function evaluatePrerequisites(vector: VectorExtension | undefined): Prer
   return { ok: true };
 }
 
-function upgradeSteps(script: string): string[] {
+function upgradeSteps(script: string, password: string): string[] {
   return [
     `Run ${script} as the superuser on compose or as the master user on managed Postgres, never as drefyn_owner. It is safe to run again.`,
     'On compose: bash scripts/selfhost.sh upgrade',
-    `On managed Postgres, as the master user with DREFYN_AUTH_PASSWORD set: psql --no-psqlrc --dbname drefyn --file ${script}`,
+    `On managed Postgres, as the master user with ${password} set: psql --no-psqlrc --dbname drefyn --file ${script}`,
   ];
 }
 
@@ -94,7 +108,7 @@ function upgradeSteps(script: string): string[] {
 // fails halfway on a database that predates it. A role the session did not report at all
 // counts as missing.
 export function evaluateRoles(roles: readonly RoleAccess[]): PrerequisiteResult {
-  for (const { role, script } of UPGRADE_ROLES) {
+  for (const { role, script, password } of UPGRADE_ROLES) {
     const access = roles.find((r) => r.role === role);
     if (access?.exists !== true) {
       return {
@@ -102,7 +116,7 @@ export function evaluateRoles(roles: readonly RoleAccess[]): PrerequisiteResult 
         problem: 'role_missing',
         message: [
           `Role ${role} does not exist; this database was set up before it was added.`,
-          ...upgradeSteps(script),
+          ...upgradeSteps(script, password),
         ].join('\n'),
       };
     }
@@ -112,7 +126,7 @@ export function evaluateRoles(roles: readonly RoleAccess[]): PrerequisiteResult 
         problem: 'role_cannot_connect',
         message: [
           `Role ${role} exists but has no CONNECT on this database. The upgrade grants it.`,
-          ...upgradeSteps(script),
+          ...upgradeSteps(script, password),
         ].join('\n'),
       };
     }

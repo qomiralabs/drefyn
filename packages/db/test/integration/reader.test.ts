@@ -33,7 +33,8 @@ const A2: TenantRef = { organizationId: ORG_A, projectId: PRJ_A2 };
 const B1: TenantRef = { organizationId: ORG_B, projectId: PRJ_B1 };
 
 const published = (org: string, project: string, body: string) => ({
-  text: 'insert into app.fixture_published (organization_id, project_id, body) values ($1, $2, $3)',
+  text: `insert into app.fixture_published (organization_id, project_id, body, visibility)
+         values ($1, $2, $3, 'public')`,
   values: [org, project, body],
 });
 const draft = (org: string, project: string, body: string) => ({

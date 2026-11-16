@@ -375,7 +375,8 @@ done
 canary="smokecanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 rerun="$("${compose[@]}" exec -T -e PGOPTIONS='-c log_statement=all' \
   -e DREFYN_OWNER_PASSWORD="$canary" -e DREFYN_APP_PASSWORD="$canary" \
-  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" -e DREFYN_AUTH_PASSWORD="$canary" postgres \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" -e DREFYN_AUTH_PASSWORD="$canary" \
+  -e DREFYN_PROTECTED_READER_PASSWORD="$canary" postgres \
   psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1 || true)"
 if [[ "$rerun" == *"the bootstrap has already run"* ]]; then
   pass "a second bootstrap stops before creating anything"

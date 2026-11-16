@@ -54,7 +54,10 @@ function fakeSession(state: FakeState = {}) {
     requiredRoles: () => {
       calls.push('roles');
       return Promise.resolve(
-        state.roles ?? [{ role: 'drefyn_auth', exists: true, canConnect: true }],
+        state.roles ?? [
+          { role: 'drefyn_auth', exists: true, canConnect: true },
+          { role: 'drefyn_protected_reader', exists: true, canConnect: true },
+        ],
       );
     },
     invalidIndexes: () => {

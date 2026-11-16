@@ -79,12 +79,24 @@ create policy tenant_isolation on ${table} to drefyn_app
   with check (${predicate});`;
 }
 
-// A tenant table the public reader may select from, by an explicit grant and a policy that
-// needs both organization and project context.
+// A tenant table both readers may select from, by explicit grants and policies that need
+// both organization and project context. Every row says whether it is public or protected,
+// with no default, and a restrictive policy keeps the public reader to public rows: permissive
+// policies are OR'd, so only a restrictive one can narrow published_read.
 export function publishedTableSql(spec: Omit<TenantTableSpec, 'scope'>): string {
   const table = `app.${identifier(spec.name, 'table name')}`;
-  return `${tenantTableSql({ ...spec, scope: 'project' })}
+  const predicate = tenantPredicate('project');
+  const columns = [
+    ...spec.columns,
+    "visibility text not null check (visibility in ('public', 'protected'))",
+  ];
+  return `${tenantTableSql({ ...spec, columns, scope: 'project' })}
 grant select on ${table} to drefyn_public_reader;
 create policy published_read on ${table} for select to drefyn_public_reader
-  using (organization_id = app.current_org() and project_id = app.current_project());`;
+  using (${predicate});
+create policy published_public_only on ${table} as restrictive for select to drefyn_public_reader
+  using (visibility = 'public');
+grant select on ${table} to drefyn_protected_reader;
+create policy protected_read on ${table} for select to drefyn_protected_reader
+  using (${predicate});`;
 }

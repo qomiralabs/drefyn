@@ -7,12 +7,15 @@ import {
   closeDatabase,
   createAuthDatabase,
   createDatabase,
+  createProtectedReaderDatabase,
   createPublishedDatabase,
   parseAuthDatabaseConfig,
   parseDatabaseConfig,
+  parseProtectedReaderConfig,
   parsePublishedReaderConfig,
   type AuthDatabase,
   type Database,
+  type ProtectedReaderDatabase,
   type PublishedDatabase,
 } from '../../../src/index.ts';
 import { publishedTableSql, tenantTableSql } from '../../../src/tenant-sql.ts';
@@ -163,6 +166,19 @@ export function authConfig(url: string, overrides: Readonly<Record<string, strin
   });
 }
 
+export function protectedConfig(url: string, overrides: Readonly<Record<string, string>> = {}) {
+  return parseProtectedReaderConfig({
+    DREFYN_PROTECTED_READER_DATABASE_URL: url,
+    DREFYN_DATABASE_SSL: 'disable',
+    ...overrides,
+  });
+}
+
+// The drefyn_protected_reader URL for a test database, read on demand like the auth one.
+export function protectedUrl(db: TestDatabase): string {
+  return urlFor('protected', db.name);
+}
+
 // The drefyn_auth URL for a test database. Not on TestDatabase, so its password is only read
 // by files that use it.
 export function authUrl(db: TestDatabase): string {
@@ -171,7 +187,7 @@ export function authUrl(db: TestDatabase): string {
 
 // Pools opened by a file, closed after it even when a test fails halfway.
 export function pools() {
-  const open: (Database | PublishedDatabase | AuthDatabase)[] = [];
+  const open: (Database | PublishedDatabase | AuthDatabase | ProtectedReaderDatabase)[] = [];
   afterAll(async () => {
     for (const db of open.splice(0)) await closeDatabase(db).catch(() => undefined);
   });
@@ -186,6 +202,14 @@ export function pools() {
       overrides: Readonly<Record<string, string>> = {},
     ): Promise<PublishedDatabase> {
       const db = await createPublishedDatabase(readerConfig(url, overrides));
+      open.push(db);
+      return db;
+    },
+    async protectedReader(
+      url: string,
+      overrides: Readonly<Record<string, string>> = {},
+    ): Promise<ProtectedReaderDatabase> {
+      const db = await createProtectedReaderDatabase(protectedConfig(url, overrides));
       open.push(db);
       return db;
     },
