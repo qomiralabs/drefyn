@@ -167,6 +167,63 @@ export interface FilterBackfillsTable {
   created_at: Generated<Date>;
 }
 
+// app.git_bindings
+export interface GitBindingsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  installation_id: number;
+  repository_id: number;
+  owner: string;
+  name: string;
+  branch: string;
+  folder: string;
+  last_synced_commit: string | null;
+  state: Generated<string>;
+  state_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.git_deliveries
+export interface GitDeliveriesTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  delivery_id: string;
+  head_sha: string | null;
+  received_at: Generated<Date>;
+  state: Generated<string>;
+  finished_at: Date | null;
+}
+
+// app.git_files
+export interface GitFilesTable {
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  path: string;
+  node_id: string;
+  blob_sha: string;
+  synced_version_id: string;
+  updated_at: Generated<Date>;
+}
+
+// app.git_outbound
+export interface GitOutboundTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  change_set_id: string;
+  binding_id: string;
+  state: Generated<string>;
+  commit_sha: string | null;
+  attempts: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.identities
 export interface IdentitiesTable {
   id: Generated<string>;
@@ -570,6 +627,10 @@ export interface Schema {
   engine_outbox: EngineOutboxTable;
   factor_challenges: FactorChallengesTable;
   filter_backfills: FilterBackfillsTable;
+  git_bindings: GitBindingsTable;
+  git_deliveries: GitDeliveriesTable;
+  git_files: GitFilesTable;
+  git_outbound: GitOutboundTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;
