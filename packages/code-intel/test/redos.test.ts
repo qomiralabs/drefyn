@@ -20,8 +20,13 @@ describe('linear time on crafted input', () => {
     const source = 'export function GET() { return new Response(); }\n';
     const path = `app/${'./app/'.repeat(8_400)}`;
     expect(path.length).toBeGreaterThan(50_000);
+    // Parser setup and the parse dominate on a busy runner, so a plain path of the same length
+    // is the baseline, timed after a first call has warmed the grammar.
+    const plain = 'a/'.repeat(path.length / 2);
+    extractFile('typescript', source, grammars, { path: plain });
+    const baseline = elapsed(() => extractFile('typescript', source, grammars, { path: plain }));
     const time = elapsed(() => extractFile('typescript', source, grammars, { path }));
-    expect(time).toBeLessThan(50);
+    expect(time).toBeLessThan(baseline * 2 + 50);
   });
 
   it('still finds the route when the path repeats app/ many times', () => {
