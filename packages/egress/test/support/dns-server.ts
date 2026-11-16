@@ -28,7 +28,7 @@ function readName(msg: Buffer, start: number): { name: string; end: number } {
 }
 
 function answer(query: Buffer, addresses: readonly string[] | undefined, next: () => string) {
-  const { name, end } = readName(query, 12);
+  const { end } = readName(query, 12);
   const qtype = query.readUInt16BE(end);
   const question = query.subarray(12, end + 4);
   const header = Buffer.alloc(12);
@@ -71,6 +71,11 @@ export async function startDnsFixture(
   return {
     port: socket.address().port,
     queries,
-    close: () => new Promise<void>((resolve) => socket.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) =>
+        socket.close(() => {
+          resolve();
+        }),
+      ),
   };
 }

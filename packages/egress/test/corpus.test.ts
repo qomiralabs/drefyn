@@ -106,7 +106,8 @@ const CORPUS: readonly Case[] = [
 ];
 
 describe('SSRF corpus with the monitor policy (any port, http allowed)', () => {
-  it.each(CORPUS)('%s returns %s', async (url, code, addressClass) => {
+  const rows = CORPUS.map(([url, code, addressClass]) => ({ url, code, addressClass }));
+  it.each(rows)('$url returns $code', async ({ url, code, addressClass }) => {
     const { runtime, dials } = fakeRuntime(NAMES);
     const result = await guardedFetchWith(runtime, url, {}, policyFor('monitor'));
     expect(result).toEqual({

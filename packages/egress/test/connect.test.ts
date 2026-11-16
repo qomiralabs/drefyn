@@ -11,7 +11,11 @@ const PUBLIC = '93.184.215.14';
 const servers: Server[] = [];
 
 async function tcpServer(onSocket: (socket: Socket) => void = (s) => s.end('hi')): Promise<number> {
-  const server = createServer(onSocket);
+  // Reading drains the request, so the server sees the client close and can shut down.
+  const server = createServer((socket) => {
+    socket.resume();
+    onSocket(socket);
+  });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -21,7 +25,14 @@ async function tcpServer(onSocket: (socket: Socket) => void = (s) => s.end('hi')
 
 afterEach(async () => {
   await Promise.all(
-    servers.splice(0).map((s) => new Promise<void>((resolve) => s.close(() => resolve()))),
+    servers.splice(0).map(
+      (s) =>
+        new Promise<void>((resolve) =>
+          s.close(() => {
+            resolve();
+          }),
+        ),
+    ),
   );
 });
 

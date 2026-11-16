@@ -1,4 +1,4 @@
-import { connect } from 'node:net';
+import { connect, createServer as createNetServer, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { guardedFetchWith } from '../src/fetch.ts';
 import { policyFor } from '../src/policy.ts';
@@ -571,18 +571,31 @@ describe('guardedFetch over HTTPS', () => {
   });
 
   it('counts the TLS handshake inside the connect timeout', async () => {
-    // A plain TCP listener that never answers the TLS hello.
-    const server = await serve(() => undefined);
-    const { runtime } = fakeRuntime(NAMES, { ca: certificate.cert });
-    const result = await guardedFetchWith(
-      runtime,
-      `https://fixture.test:${server.port}/`,
-      {},
-      monitor({ connectTimeoutMs: 100 }),
-    );
-    expect(result.ok).toBe(false);
-    expect(!result.ok && ['egress.connect_timeout', 'egress.network_failed']).toContain(
-      !result.ok && result.error.code,
-    );
+    // Accepts the TCP connection and never answers the TLS hello.
+    const held: Socket[] = [];
+    const server = createNetServer((socket) => {
+      socket.resume();
+      held.push(socket);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = address !== null && typeof address === 'object' ? address.port : 0;
+    try {
+      const { runtime } = fakeRuntime(NAMES, { ca: certificate.cert });
+      const result = await guardedFetchWith(
+        runtime,
+        `https://fixture.test:${String(port)}/`,
+        {},
+        monitor({ connectTimeoutMs: 100 }),
+      );
+      expect(result).toEqual({ ok: false, error: { code: 'egress.connect_timeout', hop: 0 } });
+    } finally {
+      for (const socket of held) socket.destroy();
+      await new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      );
+    }
   });
 });
