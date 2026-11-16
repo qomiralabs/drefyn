@@ -6,6 +6,7 @@ import {
   type MdxIssue,
   type MdxLimits,
   type MdxRoot,
+  type ReaderPage,
   type TreeProblem,
 } from '@drefyn/mdx';
 import type { ParseClient, PrintClientRequest } from '@drefyn/mdx/client';
@@ -34,6 +35,8 @@ export interface VerifiedContent {
   readonly sha256: Buffer;
   readonly astVersion: number;
   readonly bytes: number;
+  // Only when asked for, and then always: the text a reader of the stored tree gets.
+  readonly reader?: ReaderPage;
 }
 
 const OVERSIZED_TREE: ReadonlySet<TreeProblem['code']> = new Set([
@@ -57,6 +60,21 @@ const BUSY_HOST: ReadonlySet<MdxIssue['code']> = new Set([
   'mdx.project_limit',
   'mdx.parse_unavailable',
 ]);
+
+const hostPolicy = ({ parsePolicy, config }: VerifyDeps) => ({
+  ...parsePolicy,
+  components: new Set(parsePolicy.components),
+  limits: { ...DEFAULT_LIMITS, maxBytes: config.maxNodeBytes },
+});
+
+function answerRefused<T>(tenant: TenantRef, nodeId: NodeId, deps: VerifyDeps): EngineResult<T> {
+  deps.logger.warn('engine.parse_answer_refused', {
+    organization_id: tenant.organizationId,
+    project_id: tenant.projectId,
+    node_id: nodeId,
+  });
+  return refuse('engine.unavailable', [{ path: 'content', code: 'engine.parse_answer_invalid' }]);
+}
 
 const atContent = (path: string) => (path === '' ? 'content' : `content.${path}`);
 
@@ -101,8 +119,9 @@ export async function verifyContent(
   tenant: TenantRef,
   nodeId: NodeId,
   deps: VerifyDeps,
+  reader = false,
 ): Promise<EngineResult<VerifiedContent>> {
-  const { maxNodeBytes, maxTreeBytes } = deps.config;
+  const { maxTreeBytes } = deps.config;
   const treeLimits: MdxLimits = { ...DEFAULT_LIMITS, maxBytes: maxTreeBytes };
   const sent = validateTree(content, treeLimits);
   if (!sent.ok) return treeRefusal(sent.error);
@@ -113,11 +132,8 @@ export async function verifyContent(
     root: sent.value,
     // Someone is waiting on a save, so it goes ahead of this organization's own sync.
     priority: 'interactive',
-    policy: {
-      ...deps.parsePolicy,
-      components: new Set(deps.parsePolicy.components),
-      limits: { ...DEFAULT_LIMITS, maxBytes: maxNodeBytes },
-    },
+    policy: hostPolicy(deps),
+    reader,
   });
   if (!answer.ok) return pageRefusal(answer.error);
 
@@ -142,13 +158,9 @@ export async function verifyContent(
   if (!parsed.ok && parsed.error.some(({ code }) => OVERSIZED_TREE.has(code))) {
     return treeRefusal(parsed.error);
   }
-  if (!parsed.ok || !answerHolds(parsed.value, answer.value.text)) {
-    deps.logger.warn('engine.parse_answer_refused', {
-      organization_id: tenant.organizationId,
-      project_id: tenant.projectId,
-      node_id: nodeId,
-    });
-    return refuse('engine.unavailable', [{ path: 'content', code: 'engine.parse_answer_invalid' }]);
+  const readerMissing = reader && answer.value.reader === undefined;
+  if (!parsed.ok || !answerHolds(parsed.value, answer.value.text) || readerMissing) {
+    return answerRefused(tenant, nodeId, deps);
   }
 
   const json = JSON.stringify(parsed.value);
@@ -164,6 +176,33 @@ export async function verifyContent(
       sha256: createHash('sha256').update(json).digest(),
       astVersion: astVersionOf(parsed.value),
       bytes,
+      ...(reader ? { reader: answer.value.reader } : {}),
     },
   };
+}
+
+// Reader text for a tree already in history, for a rollback. It is asked for before the row lock,
+// as the host is a network call that can take seconds. A tree the host cannot print now, under
+// today's policy, has no reader text, and the rollback still goes ahead: what is stored is the
+// version being brought back, never this answer's tree.
+export async function readerOfStored(
+  json: string,
+  tenant: TenantRef,
+  nodeId: NodeId,
+  deps: VerifyDeps,
+): Promise<EngineResult<ReaderPage>> {
+  const answer = await deps.parse.print({
+    tenant,
+    path: `nodes/${nodeId}`,
+    root: JSON.parse(json) as MdxRoot,
+    priority: 'interactive',
+    policy: hostPolicy(deps),
+    reader: true,
+  });
+  if (!answer.ok) {
+    if (answer.error.some(({ code }) => BUSY_HOST.has(code))) return pageRefusal(answer.error);
+    return { ok: true, value: { state: 'not_renderable' } };
+  }
+  const { reader } = answer.value;
+  return reader === undefined ? answerRefused(tenant, nodeId, deps) : { ok: true, value: reader };
 }

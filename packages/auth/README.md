@@ -135,7 +135,10 @@ const api = parseApiAuthConfig(process.env); // API service
   associated data of a version label, the user id and the key id, joined by
   `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
   length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
-  with nothing from the row on the error. Key material lives in closures.
+  with nothing from the row on the error. Key material lives in closures. The crypto lives
+  in `@drefyn/seal`; this wraps it with the second factor labels (`drefyn.auth.totp.v1`,
+  `drefyn/auth/v1/totp`, `drefyn.totp_secret.v1`) and the user id as the one bound value,
+  so rows sealed before the move open unchanged.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
@@ -213,6 +216,50 @@ off. API keys stay outside it.
   `replayed`, `disabled`, `expired`, `rate_limited`, `unavailable`, and `kind`. Log
   `auth.factor_refused` with the same reason and the person's public id. No code, secret or
   cookie reaches either.
+
+## Second factor enrolment and step up
+
+`createSecondFactors(config, deps)` takes the usual `db` and `authDb` (or a store and
+limiter), a notice mailer, a `TotpFlag` (`isOn('auth.totp', { userId })`) and an optional
+`later` hook for notices that must not hold up a refusal.
+
+- `status(session)` gives `available` (a key and the flag), `enrolled` and
+  `recoveryCodesLeft`.
+- `startEnrollment(browser, session)` and `confirmEnrollment(browser, session, { code })`
+  answer `AUTH_NOT_FOUND` with `auth.totp` off. Both need a step up within 5 minutes:
+  `step_up_method` set and `authenticated_at` fresh, read with the session row. A `password`
+  step up counts only once `password_credentials.updated_at` is 24 hours old, because a
+  session can set or change its own password with recent auth alone. A failure is
+  `AUTH_RECENT_AUTH_REQUIRED`.
+- Start upserts exactly `pendingTotpRow` with `where confirmed_at is null`, so a confirmed row
+  is never overwritten (`AUTH_FACTOR_ALREADY_ENROLLED`), and returns `otpauthUri` and
+  `manualKey`. The QR is drawn by the caller from the URI. A pending row lives 15 minutes from
+  its seal.
+- Confirm reserves `totp_verify`, takes the factor lock exclusive and checks the step up
+  again. A wrong code answers `{ kind: 'mistyped', enrollment }` with the same secret, counts
+  the failure and mails nobody. A right one writes `confirmed_at`, `last_used_step` (so the
+  confirming code cannot sign in again) and `failed_attempts = 0`, writes 10 new recovery
+  codes, ends every other session, resets known devices and deletes the challenge, then
+  answers `{ kind: 'enrolled', recoveryCodes, setCookies, send }`. A repeat confirm is
+  `AUTH_FACTOR_ALREADY_ENROLLED` and shows no codes.
+- `removeFactor` and `replaceRecoveryCodes` need a code of either kind in the same request,
+  checked by the shared `verifyFactor` under the exclusive lock. Removal deletes the factor
+  and codes and ends the other sessions; replacement swaps every code in one transaction.
+  Both delete the challenge. Neither is gated by the flag.
+- `stepUpWithFactor(browser, session, { kind, code })` is the only step up once enrolled.
+  `stepUpWithPassword`, `startStepUpCode`, `verifyStepUpCode` and the OAuth step up answer
+  `AUTH_FACTOR_REQUIRED` at start, and again at verify under the shared lock, so one begun
+  before enrolment cannot finish after it. `changePassword` with `currentPassword` is refused
+  the same way; recent auth still works.
+- Notices: `second_factor_added`, `second_factor_removed` and `recovery_codes_replaced` come
+  back as `send`. `recovery_code_used` (with the count left) follows a recovery code at sign
+  in, reset and step up. `second_factor_failures` goes out when `failed_attempts` reaches 3
+  and on a failed recovery code, at most once per `second_factor_notice` window;
+  `second_factor_disabled` goes out at 100, outside the cap. Typos on a pending row never
+  mail. A failed send logs `auth.factor_notice_failed` and changes nothing.
+- Logs: `auth.totp_enrolled`, `auth.totp_removed` (`scope: self`),
+  `auth.recovery_codes_replaced` and `auth.factor_action_refused`, with public ids and closed
+  codes only.
 
 ## Rate limits
 

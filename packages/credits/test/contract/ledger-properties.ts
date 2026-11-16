@@ -6,6 +6,7 @@ import {
   ORG_A,
   PROPERTY_TIMEOUT_MS,
   runs,
+  signed,
   snapshot,
   sumOf,
   type LedgerFactory,
@@ -183,7 +184,10 @@ export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
             const before = await snapshot(ledger, ORG_A);
             const result: Result = await runOp(ledger, op, spends);
             const request = JSON.stringify({ ...op, key: undefined });
-            if (firstApplied !== undefined && request !== firstApplied && op.kind !== 'reversal') {
+            // A target index resolves against live spends, so two different indexes can
+            // name one entry and be the same request; only amount kinds are compared.
+            const targeted = op.kind === 'reversal' || op.kind === 'settlement';
+            if (firstApplied !== undefined && request !== firstApplied && !targeted) {
               expect(result).toBe('CREDIT_IDEMPOTENCY_CONFLICT');
               expect(await snapshot(ledger, ORG_A)).toEqual(before);
             }
@@ -238,10 +242,7 @@ export function ledgerPropertiesContract(makeLedger: LedgerFactory): void {
             expect(new Set(keys).size).toBe(keys.length);
             let running = 0;
             for (const entry of entries) {
-              running +=
-                entry.kind === 'grant' || entry.kind === 'reversal'
-                  ? entry.amount
-                  : 0 - entry.amount;
+              running += signed(entry);
               expect(running).toBeGreaterThanOrEqual(0);
             }
           }

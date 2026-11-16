@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
 # Smoke check for the self host compose stack. Run it against a stack that is already up
-# (scripts/selfhost.sh up). With --teardown it then removes the stack and its volume and
-# proves nothing is left behind.
+# (scripts/selfhost.sh up). With the parse profile on, it checks the parse host too; --parse
+# fails when that profile is off. --faults also runs scripts/selfhost-parse-test.sh, which
+# kills, floods and starves a parse host of its own, never the stack's. With --teardown it then
+# removes the stack and its volume and proves nothing is left behind.
 set -euo pipefail
 
 # shellcheck source=scripts/selfhost-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/selfhost-lib.sh"
+# shellcheck source=scripts/selfhost-parse-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/selfhost-parse-lib.sh"
 
 teardown=false
+want_parse=false
+faults=false
 for arg in "$@"; do
   case "$arg" in
     --teardown) teardown=true ;;
+    --parse) want_parse=true ;;
+    --faults)
+      want_parse=true
+      faults=true
+      ;;
     *)
-      echo "usage: $0 [--teardown]" >&2
+      echo "usage: $0 [--parse] [--faults] [--teardown]" >&2
       exit 64
       ;;
   esac
@@ -473,6 +484,42 @@ if jq -e '.services | has("api")' <<<"$config" >/dev/null; then
     if ! out="$("${compose[@]}" up --detach --wait --wait-timeout 60 api 2>&1)"; then
       fail "api starts again after the stop" "$(tail -n 3 <<<"$out")"
     fi
+  fi
+fi
+
+# The parse host, when its profile is on. Everything here only looks; the checks that kill or
+# flood a host run on one of their own.
+if jq -e '.services["parse-host"]' <<<"$config" >/dev/null; then
+  parse_container="$("${compose[@]}" ps -q parse-host 2>/dev/null || true)"
+  parse_health=""
+  if [ -n "$parse_container" ]; then
+    parse_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$parse_container")"
+  fi
+  if [ "$parse_health" = healthy ]; then
+    pass "the parse host is healthy"
+    env_file="$selfhost_root/deploy/.env"
+    parse_token="$(sed -n 's/^DREFYN_PARSE_HOST_TOKEN=//p' "$env_file" | tail -n 1)"
+    parse_hash="$(jq -r '.services["parse-host"].environment.DREFYN_PARSE_TOKEN_SHA256 // ""' <<<"$config")"
+    if [ -n "$parse_token" ] &&
+      [ "$(printf '%s' "$parse_token" | shasum -a 256 | cut -d' ' -f1)" = "$parse_hash" ]; then
+      pass "the parse host's token hash is the hash of the token in deploy/.env"
+    else
+      fail "the parse host's token hash is the hash of the token in deploy/.env" \
+        "set DREFYN_PARSE_HOST_TOKEN and its SHA-256 as DREFYN_PARSE_TOKEN_SHA256, then run restart"
+    fi
+    parse_memory="$(jq -r '.services["parse-host"].environment.DREFYN_PARSE_HOST_MEMORY_MB' <<<"$config")"
+    parse_boundary_checks "$parse_container" "$parse_token" "$parse_memory"
+  else
+    fail "the parse host is healthy" "${parse_health:-no running container}; run scripts/selfhost.sh up"
+  fi
+elif [ "$want_parse" = true ]; then
+  fail "the parse host is on" "set COMPOSE_PROFILES=parse in the shell or in deploy/.env, then run scripts/selfhost.sh up"
+fi
+if [ "$faults" = true ]; then
+  if bash "$selfhost_root/scripts/selfhost-parse-test.sh"; then
+    pass "the parse host survives its faults"
+  else
+    fail "the parse host survives its faults" "the failures are above"
   fi
 fi
 
