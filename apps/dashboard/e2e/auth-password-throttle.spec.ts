@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { expect, type Browser, type BrowserContext } from '@playwright/test';
-import { seedPerson, uniqueAddress } from './auth-helpers.ts';
+import { authSql, seedPerson, uniqueAddress } from './auth-helpers.ts';
 import { behindHop } from './hop.ts';
 import { countTo, nextMail } from './mailpit.ts';
 import { SIGNED_OUT } from './people.ts';
@@ -14,6 +14,11 @@ const PASSWORD = 'paper lantern over the harbour';
 const BUCKET = 10;
 // Longer than the next step takes, so a try that moves on before its answer loses the race.
 const SLOW_ANSWER_MS = 250;
+// The password_fail window. The limiter counts in fixed windows that start on multiples of
+// their length by the database clock, so tries either side of an edge land in two counts.
+const WINDOW_SECONDS = 15 * 60;
+// More than the tries and the right password take on a slow runner, about 15 s in CI.
+const ROOM_SECONDS = 45;
 const WRONG = 'That address and password do not match.';
 const LIMITED = 'Too many password tries for this address.';
 
@@ -34,16 +39,28 @@ async function slowAnswers(context: BrowserContext) {
   });
 }
 
+// Seconds until the current window ends, by the clock the limiter reads.
+async function windowLeft(): Promise<number> {
+  const w = String(WINDOW_SECONDS);
+  return Number(await authSql(`select ${w} - floor(extract(epoch from now()))::bigint % ${w}`));
+}
+
 test('a filled password bucket refuses the right password and leaves the email code', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
   const victim = uniqueAddress('throttled');
   await seedPerson(victim, PASSWORD);
-  // A /64 of this run's own for each attacker, so the per address limit is the only one
-  // that fills, however often the spec ran on this stack in the last ten minutes.
+  // A /64 of this run's own for each client, so the per address limit is the only one that
+  // fills, however often the spec ran on this stack in the last ten minutes.
   const run = randomBytes(2).toString('hex');
   const attackers = [`2001:db8:21:${run}::1`, `2001:db8:22:${run}::1`];
+  // A run that crossed an edge let the eleventh try and the right password through, so the
+  // tries start in a window with room for all of them.
+  await expect
+    .poll(windowLeft, { timeout: (ROOM_SECONDS + 5) * 1000, intervals: [1000] })
+    .toBeGreaterThan(ROOM_SECONDS);
+  const left = await windowLeft();
   let tries = 0;
   for (const ip of attackers) {
     const attacker = await client(browser, ip);
@@ -63,7 +80,7 @@ test('a filled password bucket refuses the right password and leaves the email c
     await attacker.close();
   }
 
-  const own = await client(browser, '2001:db8:a::2');
+  const own = await client(browser, `2001:db8:a:${run}::2`);
   const page = await own.newPage();
   await page.goto('/sign-in/password');
   await page.getByLabel('Email address').fill(victim);
@@ -71,6 +88,8 @@ test('a filled password bucket refuses the right password and leaves the email c
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByText(LIMITED)).toBeVisible();
   expect((await own.cookies()).some((c) => c.name.endsWith('session'))).toBe(false);
+  // Still the window the tries filled, or the refusal above proved nothing about one bucket.
+  expect(await windowLeft()).toBeLessThan(left);
 
   const seen = await countTo(victim);
   await page.goto('/sign-in');
