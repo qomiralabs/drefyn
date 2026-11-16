@@ -4,6 +4,14 @@
 //
 // Colours sit light and dark side by side so a change to one mode is reviewed next to the
 // other. Components read roles, never these hexes.
+//
+// One exception lives at the end of this file, for published docs sites only: the `docs`
+// family, the reader palette. It may use green, blue, amber and red for HTTP method badges and
+// the `required` badge, several colours for code, and 8 and 12 px corners on docs cards and
+// frames. None of those hues is a state there. To keep them apart from state, a method badge
+// always carries the method word, and a state always carries its word and icon. The family is
+// emitted only into the docs page CSS as --dr-docs-*, and a test keeps every other surface
+// from reading it.
 
 export type Hex = `#${string}`;
 export type Mode = 'light' | 'dark';
@@ -316,6 +324,185 @@ const layout = {
   safeArea: { bottom: 'safe-area-inset-bottom' },
 } as const;
 
+// Shadows here keep their own ink per mode: unlike the paper family, the reader shows its
+// floating panels in dark too, on black.
+export interface DocsShadow {
+  light: { ink: Hex; layers: readonly ShadowLayer[] };
+  dark: { ink: Hex; layers: readonly ShadowLayer[] };
+}
+
+const docsInk = { light: '#1C1E2B', dark: '#E9E9ED' } as const satisfies ModeColor;
+const docsRaised = { light: '#F8F9FE', dark: '#1D1F2E' } as const satisfies ModeColor;
+const docsSunken = { light: '#E3E6F6', dark: '#232532' } as const satisfies ModeColor;
+const docsRule = { light: '#D4D7E8', dark: '#2F3142' } as const satisfies ModeColor;
+const docsSecondary = { light: '#565A69', dark: '#A4A7BA' } as const satisfies ModeColor;
+const docsAccent = { light: '#5D5294', dark: '#B5ABFC' } as const satisfies ModeColor;
+const docsGreen = { light: '#116B3A', dark: '#7DE3AB' } as const satisfies ModeColor;
+const docsAmber = { light: '#8F4A08', dark: '#FBBF24' } as const satisfies ModeColor;
+const docsRed = { light: '#A61B1B', dark: '#FFB4B4' } as const satisfies ModeColor;
+const docsBlue = { light: '#1D4ED8', dark: '#93C5FD' } as const satisfies ModeColor;
+const docsViolet = { light: '#6D28D9', dark: '#C9B8FF' } as const satisfies ModeColor;
+const docsOnFill = { light: '#FFFFFF', dark: '#12121A' } as const satisfies ModeColor;
+const docsFloat = { light: docsRaised.light, dark: docsSunken.dark } as const satisfies ModeColor;
+
+// The reader palette, the default theme of a published docs site: lavender and navy grounds
+// with lighter cards. Published docs sites only; the dashboard, website and status pages keep
+// the families above.
+const docs = {
+  color: {
+    surface: {
+      ground: { light: '#ECEEFB', dark: '#161826' },
+      raised: docsRaised,
+      sunken: docsSunken,
+      hover: { light: '#E3E6F6', dark: '#2A2C3B' },
+      overlay: docsFloat,
+      card: docsFloat,
+      // Behind field names in parameter lists.
+      chip: docsFloat,
+    },
+    border: {
+      rule: docsRule,
+      ruleStrong: { light: '#C2C6DC', dark: '#3F424F' },
+      control: { light: '#7D8196', dark: '#7B7F93' },
+    },
+    text: {
+      ink: docsInk,
+      body: { light: '#2E3040', dark: '#CFD1DC' },
+      secondary: docsSecondary,
+      subtle: docsSecondary,
+    },
+    accent: {
+      ink: docsAccent,
+      press: { light: '#4A4178', dark: '#D2CEFD' },
+      on: docsOnFill,
+    },
+    focus: { ring: docsAccent },
+    skeleton: { fill: docsRule },
+    // State words in the reader, such as Verified and drift, always beside their icon.
+    state: {
+      fresh: { text: docsGreen },
+      stale: { text: docsAmber },
+      broken: { text: docsRed },
+      neutral: { text: docsSecondary },
+    },
+    code: {
+      bg: docsRaised,
+      text: { light: '#2E3040', dark: docsInk.dark },
+      key: docsBlue,
+      str: { light: docsRed.light, dark: '#F2B38A' },
+      num: docsGreen,
+      kw: docsViolet,
+      com: docsSecondary,
+      flag: docsBlue,
+    },
+    // Not state. A method badge always carries the method word, so a green GET never stands in
+    // for a green Verified. The fill is the soft pill; the colour itself is the text on it, or
+    // the solid pill of the active row with `on` for its word.
+    method: {
+      get: docsGreen,
+      getFill: { light: '#CFEBDB', dark: '#17382A' },
+      post: { light: docsBlue.light, dark: '#A8C7FF' },
+      postFill: { light: '#D6E2FB', dark: '#1E2F57' },
+      patch: { light: docsAmber.light, dark: '#FBC770' },
+      patchFill: { light: '#F6E0C4', dark: '#443113' },
+      delete: docsRed,
+      deleteFill: { light: '#F7D5D5', dark: '#4A2228' },
+      graphql: { light: docsAccent.light, dark: docsViolet.dark },
+      graphqlFill: { light: '#E1DDF6', dark: '#2F2A55' },
+      on: docsOnFill,
+    },
+    required: {
+      text: docsRed,
+      fill: { light: '#F7D5D5', dark: '#3F2229' },
+    },
+  },
+  // Translucent, so each is measured over the surfaces it lands on.
+  wash: {
+    accent: {
+      light: { base: docsAccent.light, alpha: 0.12 },
+      dark: { base: docsAccent.dark, alpha: 0.14 },
+    },
+    // The code line a hovered field points at.
+    codeHit: {
+      light: { base: docsAccent.light, alpha: 0.14 },
+      dark: { base: docsAccent.dark, alpha: 0.16 },
+    },
+    info: {
+      light: { base: docsAccent.light, alpha: 0.1 },
+      dark: { base: docsAccent.dark, alpha: 0.1 },
+    },
+    stale: {
+      light: { base: '#F59E0B', alpha: 0.14 },
+      dark: { base: docsAmber.dark, alpha: 0.1 },
+    },
+  },
+  overlay: {
+    scrim: {
+      light: { base: docsInk.light, alpha: 0.32 },
+      dark: { base: '#05060C', alpha: 0.6 },
+    },
+  },
+  shadow: {
+    1: {
+      light: {
+        ink: docsInk.light,
+        layers: [
+          { y: 1, blur: 2, alpha: 0.08 },
+          { y: 12, blur: 32, alpha: 0.14 },
+        ],
+      },
+      dark: { ink: '#000000', layers: [{ y: 12, blur: 32, alpha: 0.4 }] },
+    },
+    2: {
+      light: { ink: docsInk.light, layers: [{ y: 24, blur: 64, alpha: 0.24 }] },
+      dark: { ink: '#000000', layers: [{ y: 24, blur: 64, alpha: 0.55 }] },
+    },
+  },
+  // Chinese and Arabic carry on to these system faces, so no CJK or Arabic font downloads.
+  font: {
+    cjk: [
+      'PingFang SC',
+      'Hiragino Sans GB',
+      'Microsoft YaHei',
+      'Noto Sans CJK SC',
+      'Noto Sans SC',
+      'Source Han Sans SC',
+      'sans-serif',
+    ],
+    arabic: [
+      'SF Arabic',
+      'Geeza Pro',
+      'Segoe UI',
+      'Noto Sans Arabic',
+      'Noto Naskh Arabic',
+      'sans-serif',
+    ],
+  },
+  // Pixels at the default root size, shipped in rem: top bar, side navigation, example column,
+  // on this page, article, dialog, console width and height, popover.
+  layout: {
+    bar: 56,
+    side: 256,
+    right: 432,
+    toc: 224,
+    article: 736,
+    modal: 544,
+    console: 1216,
+    consoleHeight: 768,
+    pop: 352,
+  },
+  // Docs cards and frames only. In rem, unlike the shared radii, as the palette was approved.
+  radius: { card: 8, frame: 12 },
+} as const satisfies {
+  color: Record<string, Record<string, ModeColor | Record<string, ModeColor>>>;
+  wash: Record<string, Wash>;
+  overlay: Record<string, Wash>;
+  shadow: Record<number, DocsShadow>;
+  font: Record<string, readonly string[]>;
+  layout: Record<string, number>;
+  radius: Record<string, number>;
+};
+
 export const tokens = {
   color,
   wash,
@@ -332,6 +519,7 @@ export const tokens = {
   motion,
   timer,
   layout,
+  docs,
 } as const;
 
 export type Tokens = typeof tokens;
