@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { SHORTCUTS } from '../src/shell/shortcuts.ts';
 import { test } from './csp.ts';
-import { banner, openShell, ROUTES, shortcutsSheet } from './fixtures.ts';
+import { banner, openShell, ROUTES, routeChunk, shortcutsSheet } from './fixtures.ts';
 
 const account = (page: Page) => banner(page).getByRole('button', { name: /^MO/ });
 
@@ -24,6 +24,30 @@ test('Keyboard shortcuts in the account menu opens a sheet listing every registe
   for (const s of SHORTCUTS) {
     await expect(shortcutsSheet(page).locator(`[data-shortcut="${s.id}"]`)).toContainText(s.does);
   }
+  await page.keyboard.press('Escape');
+  await expect(shortcutsSheet(page)).toHaveCount(0);
+  await expect(account(page)).toBeFocused();
+});
+
+// Text only the sheet's chunk carries.
+const SHEET_MARK = 'G then a key, and the question mark';
+
+// The menu gives focus back to its button a frame after it closes. When the sheet's code lands
+// first, the sheet mounts with focus on the page, which is what the blur stands for here.
+test('Escape returns focus to the account button when the sheet opened before the menu let go', async ({
+  page,
+}) => {
+  const chunk = await routeChunk(page, SHEET_MARK, 'hold');
+  await openShell(page, ROUTES.overview);
+  await account(page).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: /Keyboard shortcuts/ }).click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  chunk.release();
+  await expect(shortcutsSheet(page).getByRole('switch')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(shortcutsSheet(page)).toHaveCount(0);
   await expect(account(page)).toBeFocused();

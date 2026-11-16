@@ -18,7 +18,8 @@ export const AUTH_STATES: Readonly<Record<string, readonly string[]>> = {
   'sign-up': ['ready', 'closed', 'invite-only', 'botcheck-down', 'last-email-code'],
   verify: ['ready', 'wrong', 'expired', 'link', 'elsewhere', 'reading', 'choose-password'],
   password: ['ready', 'wrong', 'limited', 'botcheck-down'],
-  reset: ['ask', 'code', 'choose', 'refused', 'breached', 'saved'],
+  factor: ['ready', 'recovery', 'wrong', 'disabled', 'limited', 'unavailable', 'expired'],
+  reset: ['ask', 'code', 'choose', 'refused', 'breached', 'factor', 'factor-wrong', 'saved'],
   link: ['ready', 'wrong'],
   cli: ['invalid', 'failed'],
   welcome: [

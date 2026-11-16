@@ -38,3 +38,22 @@ export const ENGINE_ERROR_CODES = Object.freeze([
   'engine.unavailable',
 ] as const);
 export type EngineErrorCode = (typeof ENGINE_ERROR_CODES)[number];
+
+// Separate from the engine's own codes, so a caller of publish handles exactly these.
+export const PUBLISH_ERROR_CODES = Object.freeze([
+  // Also for another tenant's ids.
+  'publish.not_found',
+  'publish.forbidden',
+  'publish.approval_required',
+  // Model drafted or approval gated content, and an actor that is not a person.
+  'publish.human_required',
+  'publish.version_conflict',
+  'publish.validation_failed',
+  // The same key with different input.
+  'publish.idempotency_conflict',
+  // Over limit after a downgrade: what is live stays live, and nothing new goes out.
+  'publish.read_only',
+  // The database is down or busy. Nothing was published; try again.
+  'publish.unavailable',
+] as const);
+export type PublishErrorCode = (typeof PUBLISH_ERROR_CODES)[number];

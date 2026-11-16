@@ -35,6 +35,9 @@ export interface NewVersion {
   // Only called once the version is certain to be written, so a replay or a conflict costs no
   // chunking. Empty when chunks are off.
   readonly chunksOf: () => readonly Chunk[];
+  // The render policy the chunks' text was made under, kept on each row so a policy change can
+  // find what to make again.
+  readonly renderPolicyVersion: number;
   // What a client sent, held to the type's definition under the lock, where that is read.
   readonly rawFields?: Readonly<Record<string, unknown>> | undefined;
   // Values already in history, for a rollback. They passed that check when first saved.
@@ -228,6 +231,7 @@ async function writeChunks(
   nodeId: NodeId,
   versionId: string,
   chunks: readonly Chunk[],
+  renderPolicyVersion: number,
 ): Promise<void> {
   if (chunks.length === 0) return;
   const rowsAt = (from: number) =>
@@ -240,6 +244,7 @@ async function writeChunks(
       heading_path: [...chunk.headingPath],
       body: chunk.body,
       body_sha256: createHash('sha256').update(chunk.body).digest(),
+      render_policy_version: renderPolicyVersion,
     }));
   const last = Math.floor((chunks.length - 1) / CHUNK_ROWS_PER_INSERT) * CHUNK_ROWS_PER_INSERT;
   for (let from = 0; from < last; from += CHUNK_ROWS_PER_INSERT) {
@@ -359,6 +364,6 @@ export async function appendVersion(
     const slots = parseSlotMap(known.slots);
     if (Object.keys(slots).length > 0) await writeSlots(tx, tenant, node, slots, fields);
   }
-  await writeChunks(tx, tenant, node.id, inserted.id, draft.chunksOf());
+  await writeChunks(tx, tenant, node.id, inserted.id, draft.chunksOf(), draft.renderPolicyVersion);
   return refOf(node.id, inserted);
 }

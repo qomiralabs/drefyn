@@ -46,6 +46,14 @@ export const SETTINGS_STATES: Readonly<Record<string, readonly string[]>> = {
     'password',
     'add-open',
     'failed',
+    'factor-off',
+    'factor-on',
+    'factor-low',
+    'factor-unread',
+    'factor-confirm',
+    'factor-limited',
+    'factor-replace',
+    'factor-remove',
   ],
   sessions: ['ready', 'loading', 'error', 'single', 'everywhere'],
   members: [
@@ -62,6 +70,9 @@ export const SETTINGS_STATES: Readonly<Record<string, readonly string[]>> = {
   ],
   keys: ['ready', 'loading', 'error', 'empty', 'member', 'filtered', 'create', 'shown', 'revoke'],
 };
+
+// The pages the enrolment routes answer with, outside the React shell.
+export const FACTOR_PAGES = ['enrol', 'mistyped', 'enrolled', 'replaced'] as const;
 
 export const settingsStatePaths = (): readonly (readonly [string, string])[] =>
   Object.entries(SETTINGS_STATES).flatMap(([screen, states]) =>

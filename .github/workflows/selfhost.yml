@@ -11,6 +11,7 @@ on:
       - packages/entitlements/src/**
       - packages/flags/src/**
       - packages/mdx/src/**
+      - packages/mdx/test/**
       - packages/tenancy/src/**
       - pnpm-lock.yaml
       - scripts/selfhost*.sh
@@ -26,6 +27,7 @@ on:
       - packages/entitlements/src/**
       - packages/flags/src/**
       - packages/mdx/src/**
+      - packages/mdx/test/**
       - packages/tenancy/src/**
       - pnpm-lock.yaml
       - scripts/selfhost*.sh
@@ -49,7 +51,8 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    # The parse host's faults include a crash loop's minute of cool off.
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -67,30 +70,33 @@ jobs:
         run: bash scripts/selfhost-password-test.sh
       - name: The installer generates the auth keys once and prints none
         run: bash scripts/selfhost-env-test.sh
-      # Built on its own, so the minute below measures startup and not the image build.
-      - name: Build the API image
+      # Built on their own, so the minute below measures startup and not the image builds. The
+      # placeholder ID only lets compose read the file; nothing is created here.
+      - name: Build the API and parse host images
         env:
+          COMPOSE_PROFILES: api,parse
           DREFYN_STACK_ID: build-only
-        run: docker compose -f deploy/compose.yaml --profile api build api
-      # The same commands a self hoster runs, from a clean runner with no volume, with the API and
-      # search profiles on. The wait matches the promise that a clean start is healthy within a
-      # minute.
+        run: docker compose -f deploy/compose.yaml build api parse-host
+      # The same commands a self hoster runs, from a clean runner with no volume, with the API,
+      # parse host and search profiles on. The wait matches the promise that a clean start is
+      # healthy within a minute.
       - name: Start
         env:
+          COMPOSE_PROFILES: api,parse,search
           DREFYN_SELFHOST_WAIT_SECONDS: 60
-          COMPOSE_PROFILES: api,search
         run: bash scripts/selfhost.sh up
-      - name: Smoke check
+      # --faults also kills, floods and starves a parse host of its own, never the stack's.
+      - name: Smoke check, with the parse host's faults
         env:
-          COMPOSE_PROFILES: api,search
-        run: bash scripts/selfhost-smoke.sh
+          COMPOSE_PROFILES: api,parse,search
+        run: bash scripts/selfhost-smoke.sh --faults
       - name: Restart keeps the data and the roles
         env:
+          COMPOSE_PROFILES: api,parse,search
           DREFYN_SELFHOST_WAIT_SECONDS: 60
-          COMPOSE_PROFILES: api,search
         run: |
           bash scripts/selfhost.sh restart
-          bash scripts/selfhost-smoke.sh
+          bash scripts/selfhost-smoke.sh --parse
       # Off by default, so it never starts with the stack; started here from its digest, as
       # the non root user, and removed again before the tear down checks the project.
       - name: Mailpit test profile is healthy from its pinned digest
@@ -102,13 +108,9 @@ jobs:
           docker image inspect --format 'digests {{.RepoDigests}}' "$(docker inspect --format '{{.Image}}' "$id")"
           curl -fsS --max-time 5 http://127.0.0.1:58025/readyz
           "${mailpit[@]}" rm --stop --force mailpit
-      # Off by default until the app tier joins the stack. Builds the image, so it runs here and
-      # not in the gate, and checks the boundary from real containers.
-      - name: Parse host is closed, and comes back when killed
-        run: bash scripts/selfhost-parse-test.sh
       - name: Tear down
         env:
-          COMPOSE_PROFILES: api,search
+          COMPOSE_PROFILES: api,parse,search
         run: bash scripts/selfhost-smoke.sh --teardown
       # The test scripts print their own stacks' logs when a check fails, because they remove
       # those stacks themselves. This covers the main stack. The placeholder ID always wins
@@ -116,6 +118,6 @@ jobs:
       - name: Logs
         if: failure()
         env:
+          COMPOSE_PROFILES: api,parse,search
           DREFYN_STACK_ID: logs-only
-          COMPOSE_PROFILES: api,search
         run: docker compose -f deploy/compose.yaml logs --no-color --timestamps

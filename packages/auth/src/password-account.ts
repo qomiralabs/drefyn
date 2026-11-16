@@ -30,7 +30,7 @@ import {
   type SessionInfo,
   type SessionStore,
 } from './session-support.ts';
-import type { FactorProof } from './factor-proof.ts';
+import { sendFactorAlert, sendFactorNotice, startNow, type Later } from './factor-notices.ts';
 import { dropChallenge, hasConfirmedFactor, lockFactor } from './factor-rows.ts';
 import {
   factorError,
@@ -38,6 +38,7 @@ import {
   reportFactor,
   reserveFactor,
   verifyFactor,
+  type FactorCheck,
   type FactorCode,
 } from './factor-verify.ts';
 import {
@@ -73,6 +74,8 @@ export interface PasswordAccountDeps {
   // The same check setPassword uses; change and reset go through the same step.
   readonly breachedPasswords?: BreachedPasswordCheck | undefined;
   readonly random?: (bytes: number) => Uint8Array;
+  // Where a failed factor's notice runs, so the refusal does not wait on mail.
+  readonly later?: Later;
 }
 
 export interface PasswordChanged {
@@ -108,7 +111,9 @@ export interface PasswordAccount {
       readonly factor?: FactorCode;
     },
   ): Promise<Result<SignedIn | FactorRequired, AuthError>>;
-  // The current password, or a sign in within 15 minutes. Ends the other sessions.
+  // The current password, or a sign in within 15 minutes. Ends the other sessions. Once a
+  // person has a second factor the current password alone is refused: it would be a step
+  // up that skips the factor.
   changePassword(
     b: BrowserContext,
     s: SessionInfo,
@@ -201,6 +206,8 @@ export function createPasswordAccount(
     ...(deps.random === undefined ? {} : { random: deps.random }),
   });
 
+  const later = deps.later ?? startNow;
+  const notices = { store, limiter, logger: deps.logger, mailer: deps.mailer };
   const userIds = (userId: UserId) => idFields({ userId: ['usr', userId] });
   const sessionIds = (s: SessionInfo) =>
     idFields({ userId: ['usr', s.userId], sessionId: ['ses', s.sessionId] });
@@ -251,7 +258,7 @@ export function createPasswordAccount(
     b: BrowserContext,
     userId: UserId,
     factor: FactorCode,
-  ): Promise<FactorProof | null | AuthError> {
+  ): Promise<Extract<FactorCheck, { ok: true }> | null | AuthError> {
     const report = (outcome: Parameters<typeof reportFactor>[2]) => {
       reportFactor({ logger: deps.logger, metrics: deps.metrics }, factor.kind, outcome, userId);
     };
@@ -268,11 +275,13 @@ export function createPasswordAccount(
     });
     if (checked.ok) {
       report(checked.previousStep ? 'matched_previous_step' : 'passed');
-      return checked.proof;
+      return checked;
     }
     // Removed since the first read: the hash transaction reads again and decides.
     if (checked.reason === 'not_enrolled') return null;
     report(checked.reason);
+    const alert = checked.alert;
+    if (alert !== null) later(() => sendFactorAlert(notices, userId, alert));
     return factorError(checked.reason);
   }
 
@@ -397,12 +406,13 @@ export function createPasswordAccount(
         // The hash comes before the code and the factor are spent, so a full hash queue
         // costs neither.
         const phc = await hasher.hash(password);
-        let proof: FactorProof | null = null;
+        let passed: Extract<FactorCheck, { ok: true }> | null = null;
         if (enrolled && factor !== null) {
           const spent = await spendFactor(b, userId, factor);
           if (spent instanceof AuthError) return fail(spent);
-          proof = spent;
+          passed = spent;
         }
+        const proof = passed?.proof ?? null;
         const consumed = await store.auth((tx) =>
           tx
             .updateTable('email_challenges')
@@ -453,11 +463,24 @@ export function createPasswordAccount(
         if (started.kind === 'factor_required') {
           return ok({ ...started, setCookies: [...started.setCookies, ...deviceCookies] });
         }
+        const reset = notice(started.session.email, userId, 'password_reset', at);
+        const codesLeft = passed?.codesLeft ?? null;
         return ok({
           session: started.session,
           setCookies: [...started.setCookies, ...deviceCookies],
           returnTo: '/',
-          send: notice(started.session.email, userId, 'password_reset', at),
+          send:
+            codesLeft === null || passed === null
+              ? reset
+              : async () => {
+                  await reset();
+                  await sendFactorNotice(
+                    notices,
+                    userId,
+                    { kind: 'recovery_code_used', codesLeft, at: passed.at },
+                    started.session.email,
+                  );
+                },
         });
       } catch (error) {
         if (error instanceof Refused) return refused(error.code);
@@ -474,6 +497,10 @@ export function createPasswordAccount(
           input.currentPassword === undefined
             ? undefined
             : normalizePassword(input.currentPassword);
+        // Asked before anything is counted, so the refusal costs the person nothing.
+        if (current !== undefined && (await store.user(s.userId, hasConfirmedFactor))) {
+          return refused('AUTH_FACTOR_REQUIRED', sessionIds(s));
+        }
         if (current !== undefined) {
           const address = normalizeAddress(s.email);
           if (address === null) throw new AuthError('AUTH_SESSION_INVALID');
@@ -503,6 +530,12 @@ export function createPasswordAccount(
         await admitted(password, s.email, sessionIds(s));
         const phc = await hasher.hash(password);
         const changed = await store.user(s.userId, async (tx) => {
+          // An enrolment that landed during the hash turns the current password into a
+          // step up the factor would refuse, so it is refused here too.
+          if (current !== undefined) {
+            await lockFactor(tx, s.userId, 'shared');
+            if (await hasConfirmedFactor(tx)) throw new Refused('AUTH_FACTOR_REQUIRED');
+          }
           const live = await tx
             .selectFrom('sessions')
             .select('id')

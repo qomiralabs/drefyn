@@ -175,6 +175,8 @@ describe('the shipped rules file', () => {
     'packages/auth/README.md',
     'packages/address/src/normalize.ts',
     'packages/address/README.md',
+    'packages/seal/src/index.ts',
+    'packages/seal/README.md',
     'packages/cli/src/main.ts',
     'packages/cli/src/index.ts',
     'packages/cli/README.md',

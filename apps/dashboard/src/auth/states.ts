@@ -58,6 +58,8 @@ export type ResetState =
       readonly challenge: string;
       readonly rules?: readonly string[];
       readonly breached?: boolean;
+      // The account has a second factor: ask for it, or say why the last one failed.
+      readonly factor?: 'ask' | 'wrong' | 'disabled';
       readonly notice?: FormNotice;
     }
   | { readonly step: 'saved'; readonly email: string; readonly returnTo: string };

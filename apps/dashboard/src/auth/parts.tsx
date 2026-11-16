@@ -252,11 +252,26 @@ interface CodeFieldProps {
   readonly hint?: string;
   readonly error?: string | undefined;
   readonly defaultValue?: string | undefined;
+  readonly label?: string;
+  readonly name?: string;
+  // A recovery code has letters and hyphens, so it gets the full keyboard and no slots.
+  readonly letters?: boolean;
+  // How many digits the slots under the field mark out.
+  readonly digits?: 6 | 8;
 }
 
 // One native input: paste, one time code autofill and typing with scripts off all work, and a
 // screen reader meets one field, not eight.
-export function CodeField({ id, hint, error, defaultValue }: CodeFieldProps): ReactNode {
+export function CodeField({
+  id,
+  hint,
+  error,
+  defaultValue,
+  label = '8 digit code',
+  name = 'code',
+  letters = false,
+  digits = 8,
+}: CodeFieldProps): ReactNode {
   const described = [
     hint === undefined ? null : `${id}-hint`,
     error === undefined ? null : `${id}-error`,
@@ -266,7 +281,7 @@ export function CodeField({ id, hint, error, defaultValue }: CodeFieldProps): Re
   return (
     <div className="flex flex-col gap-4">
       <label className="auth-code-label" htmlFor={id}>
-        8 digit code
+        {label}
       </label>
       {hint === undefined ? null : (
         <p className="auth-fine" id={`${id}-hint`}>
@@ -276,12 +291,13 @@ export function CodeField({ id, hint, error, defaultValue }: CodeFieldProps): Re
       <input
         className="auth-code"
         id={id}
-        name="code"
+        name={name}
         type="text"
-        inputMode="numeric"
+        inputMode={letters ? 'text' : 'numeric'}
         autoComplete="one-time-code"
-        pattern="[0-9 ]*"
-        maxLength={9}
+        pattern={letters ? undefined : '[0-9 ]*'}
+        maxLength={letters ? 40 : digits + 1}
+        data-slots={letters ? 'none' : String(digits)}
         spellCheck={false}
         required
         autoFocus

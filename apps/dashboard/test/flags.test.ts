@@ -67,6 +67,27 @@ describe('teamSsoFlag', () => {
   });
 });
 
+describe('totpFlag', () => {
+  const USER = idOf('usr', '01890a5d-ac96-774b-bcce-b302099a8091');
+
+  it('asks about the person, under the visitor organization', async () => {
+    const { totpFlag } = await flags();
+    isOn.mockResolvedValue(true);
+    expect(await totpFlag.isOn('auth.totp', { userId: USER })).toBe(true);
+    expect(isOn).toHaveBeenCalledExactlyOnceWith('auth.totp', {
+      organizationId: VISITOR_FLAG_ORGANIZATION,
+      userId: USER,
+    });
+  });
+
+  // Auth reads a throw as off, so the adapter passes it through untouched.
+  it('passes a failure through for auth to read as off', async () => {
+    const { totpFlag } = await flags();
+    isOn.mockRejectedValue(new Error('flagd'));
+    await expect(totpFlag.isOn('auth.totp', { userId: USER })).rejects.toThrow('flagd');
+  });
+});
+
 describe('mailDeliveryEnabled', () => {
   it('asks about nobody in particular and is off on any failure', async () => {
     const { mailDeliveryEnabled } = await flags();

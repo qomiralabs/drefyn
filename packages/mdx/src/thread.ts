@@ -22,6 +22,8 @@ export interface ParseJob {
   readonly source: string;
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
+  // Only a save with chunks on pays for a render.
+  readonly reader?: boolean;
 }
 
 export interface PrintJob {
@@ -29,6 +31,7 @@ export interface PrintJob {
   // a structured clone or a walk on the host's own thread.
   readonly tree: string;
   readonly policy: IsolatedPolicy;
+  readonly reader?: boolean;
 }
 
 export type ThreadJob = ParseJob | PrintJob;

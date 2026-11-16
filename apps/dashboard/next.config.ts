@@ -10,6 +10,7 @@ const config: NextConfig = {
     '@drefyn/email',
     '@drefyn/entitlements',
     '@drefyn/flags',
+    '@drefyn/seal',
     '@drefyn/tenancy',
     '@drefyn/ui',
   ],

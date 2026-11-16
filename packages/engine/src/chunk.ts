@@ -1,5 +1,4 @@
-import type { MdxBlock } from '@drefyn/mdx';
-import type { NodeContent } from './content.ts';
+import type { ReaderPage } from '@drefyn/mdx';
 
 export interface ChunkOptions {
   // Close a chunk before it passes this.
@@ -10,7 +9,8 @@ export interface ChunkOptions {
 
 export interface Chunk {
   readonly ord: number;
-  // The top level block the chunk starts at, and which part when one block was split: '3', '3.1'.
+  // The unit of the rendered page the chunk starts at, and which part when one unit was split:
+  // '3', '3.1'.
   readonly blockPath: string;
   readonly headingPath: readonly string[];
   readonly body: string;
@@ -36,70 +36,7 @@ const splitsPair = (text: string, at: number): boolean => {
 
 const cutPoint = (text: string, at: number): number => (splitsPair(text, at) ? at - 1 : at);
 
-const VALUE_NODES: ReadonlySet<string> = new Set(['text', 'inlineCode', 'code']);
-const ALT_NODES: ReadonlySet<string> = new Set(['image', 'imageReference']);
-
-// TODO(#416): chunk text has to come from the render. This list cannot see raw HTML that wraps
-// text across nodes, unknown components or orphan footnotes, so the chunk flag stays off.
-// Each node whose children are read, and what goes between them. A list and not a filter: a node
-// type added later stays out until someone adds it.
-const CONTAINERS: ReadonlyMap<string, string> = new Map([
-  ['paragraph', ''],
-  ['heading', ''],
-  ['emphasis', ''],
-  ['strong', ''],
-  ['delete', ''],
-  ['link', ''],
-  ['linkReference', ''],
-  ['tableCell', ''],
-  ['mdxJsxTextElement', ''],
-  ['tableRow', '\t'],
-  ['table', '\n'],
-  ['blockquote', '\n'],
-  ['list', '\n'],
-  ['listItem', '\n'],
-  ['footnoteDefinition', '\n'],
-  ['mdxJsxFlowElement', '\n'],
-]);
-
-interface WalkedNode {
-  readonly type?: unknown;
-  readonly value?: unknown;
-  readonly alt?: unknown;
-  readonly children?: unknown;
-}
-
-// Read off the tree, never off a block's source: that holds frontmatter, comments, raw HTML, link
-// targets and component props, and chunks go on to search, the assistant and MCP. Keeps its own
-// stack, as a rollback reads a tree nothing has walked in this process. Separators sit on the
-// stack with the nodes, so they come out in reading order.
-function visibleText(block: MdxBlock, limit = Infinity): string {
-  let text = '';
-  const stack: (WalkedNode | string)[] = [block];
-  while (stack.length > 0 && text.length < limit) {
-    const item = stack.pop();
-    if (typeof item === 'string') {
-      text += item;
-      continue;
-    }
-    const type = String(item?.type);
-    const { value, alt, children } = item ?? {};
-    const between = CONTAINERS.get(type);
-    if (VALUE_NODES.has(type) && typeof value === 'string') text += value;
-    else if (ALT_NODES.has(type) && typeof alt === 'string') text += alt;
-    else if (type === 'break') text += '\n';
-    else if (between !== undefined && Array.isArray(children)) {
-      for (let at = children.length - 1; at >= 0; at -= 1) {
-        stack.push(children[at] as WalkedNode);
-        if (at > 0 && between !== '') stack.push(between);
-      }
-    }
-  }
-  return text;
-}
-
-function headingText(block: MdxBlock): string {
-  const text = visibleText(block, MAX_HEADING_CHARS);
+function headingText(text: string): string {
   return text.length > MAX_HEADING_CHARS ? text.slice(0, cutPoint(text, MAX_HEADING_CHARS)) : text;
 }
 
@@ -147,17 +84,21 @@ function splitLong(text: string, { targetChars, maxChars }: ChunkOptions): strin
   return parts;
 }
 
-// Pure, so the same tree always gives the same chunks.
-// Boundaries follow blocks and restart at every heading: an edit can only move text within its
+// Pure, so the same page always gives the same chunks. It reads only the text the render keeps,
+// which the parse host hands back, so nothing here decides what a reader sees. Linear in that
+// text, as it runs on the engine's own thread.
+// Boundaries follow units and restart at every heading: an edit can only move text within its
 // own section, which is what keeps most chunks, and their embeddings, the same from one version
-// to the next. Sizes are UTF-16 units.
-export function chunkNode(content: NodeContent, options: ChunkOptions): readonly Chunk[] {
+// to the next. Sizes are UTF-16 units. A page the render refuses has no chunks.
+export function chunkNode(reader: ReaderPage, options: ChunkOptions): readonly Chunk[] {
   const { targetChars, maxChars } = options;
   // Two units is the least that can hold any character, and a smaller cap could not progress.
   if (targetChars < 1 || maxChars < 2 || targetChars > maxChars) {
     throw new RangeError('chunk sizes must satisfy 1 <= target <= max and 2 <= max');
   }
 
+  if (reader.state !== 'ok') return [];
+  const { units } = reader;
   const chunks: Chunk[] = [];
   const headings: { readonly depth: number; readonly text: string }[] = [];
   let open = '';
@@ -168,7 +109,7 @@ export function chunkNode(content: NodeContent, options: ChunkOptions): readonly
   // section makes cannot take a heading path off a chunk in another.
   const sectionBudget = Math.floor(
     MAX_HEADING_PATH_CHARS_PER_PAGE /
-      Math.max(1, content.children.filter(({ type }) => type === 'heading').length),
+      Math.max(1, units.filter(({ heading }) => heading !== undefined).length),
   );
   let headingBudget = sectionBudget;
 
@@ -200,16 +141,15 @@ export function chunkNode(content: NodeContent, options: ChunkOptions): readonly
     open += text;
   };
 
-  content.children.forEach((block, index) => {
-    if (block.type === 'heading') {
+  units.forEach(({ heading, text }, index) => {
+    if (heading !== undefined) {
       close();
-      while ((headings.at(-1)?.depth ?? 0) >= block.depth) headings.pop();
-      headings.push({ depth: block.depth, text: headingText(block) });
+      while ((headings.at(-1)?.depth ?? 0) >= heading.depth) headings.pop();
+      headings.push({ depth: heading.depth, text: headingText(heading.text) });
       openHeadings = headings.map(({ text }) => text);
       openHeadingsCost = openHeadings.reduce((sum, text) => sum + text.length + 1, 0);
       headingBudget = sectionBudget;
     }
-    const text = visibleText(block);
     if (text.trim() !== '') place(String(index), text);
   });
   close();
