@@ -11,7 +11,13 @@ import { ORG_A, SAFE_MAX, expectRejects, sumOf, type LedgerFactory } from '../su
 
 export function ledgerContract(makeLedger: LedgerFactory): void {
   // Written out here so the test does not take its cases from the code under test.
-  const AI_REASONS = ['generation', 'translation_draft', 'incident_draft'] as const;
+  const AI_REASONS = [
+    'generation',
+    'translation_draft',
+    'incident_draft',
+    'stale_draft',
+    'reader_answer',
+  ] as const;
 
   const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -37,7 +43,7 @@ export function ledgerContract(makeLedger: LedgerFactory): void {
       expect(Object.isFrozen(ENTRY_KINDS)).toBe(true);
     });
 
-    it('spends on AI work only: generation, translation drafts and incident drafts', () => {
+    it('spends on AI work only: generation, drafts and reader answers', () => {
       expect([...SPEND_REASONS]).toEqual([...AI_REASONS]);
       expect(Object.isFrozen(SPEND_REASONS)).toBe(true);
       for (const send of ['sms', 'voice', 'email', 'send']) {
