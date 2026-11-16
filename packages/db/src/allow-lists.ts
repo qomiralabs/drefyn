@@ -119,7 +119,18 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
 
 export const SECURITY_DEFINER_FUNCTIONS: readonly AllowEntry[] = [];
 
-export const PUBLISHED_TABLES: readonly AllowEntry[] = [];
+export const PUBLISHED_TABLES: readonly AllowEntry[] = [
+  {
+    name: 'app.published_versions',
+    reason:
+      'copies of published versions only, written by the publish transaction; no draft is ever here',
+  },
+  {
+    name: 'app.published_filter_rows',
+    reason:
+      'filter slots of the current published version only, so a public list never reads node_filter_rows',
+  },
+];
 
 export const READER_FUNCTIONS: readonly AllowEntry[] = [
   { name: 'app.current_org()', reason: 'reads the transaction setting the reader policies need' },
@@ -606,7 +617,7 @@ export const ALLOW_LISTS: AllowLists = {
 };
 
 // Published table names as the reader's transaction type sees them, without the schema.
-export type PublishedTableName = never;
+export type PublishedTableName = 'published_versions' | 'published_filter_rows';
 
 // The tables AuthSchema and UserSchema name, without the schema.
 export type AuthTableName =

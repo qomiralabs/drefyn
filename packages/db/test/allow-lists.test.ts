@@ -403,9 +403,15 @@ describe('allow lists', () => {
     expect(CROSS_PROJECT_FOREIGN_KEYS).toEqual([]);
   });
 
-  it('start with no SECURITY DEFINER function and no published table', () => {
+  it('start with no SECURITY DEFINER function', () => {
     expect(SECURITY_DEFINER_FUNCTIONS).toEqual([]);
-    expect(PUBLISHED_TABLES).toEqual([]);
+  });
+
+  it('publish exactly the two copies the publish transaction writes', () => {
+    expect(PUBLISHED_TABLES.map((entry) => entry.name)).toEqual([
+      'app.published_versions',
+      'app.published_filter_rows',
+    ]);
   });
 
   it.each<[string, (lists: AllowLists) => AllowLists]>([

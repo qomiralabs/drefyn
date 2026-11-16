@@ -237,6 +237,32 @@ key's size against the heap, one run at a time, and prints one JSON line of coun
 makes plans worse, and always rebuilds. The filter rows are shared by every tenant, so this is table
 work and never tenant work. The role sees other roles' transactions only with `pg_read_all_stats`.
 
+## Public reads
+
+Public paths read through `createPublishedReader({ store, types, logger })`, never through the
+engine. `publishedStore(db)` takes a `PublishedDatabase`, which runs as `drefyn_public_reader`. That
+role can select from `app.published_versions` and `app.published_filter_rows` and nothing else, so a
+draft table is a permission error and not an empty result. Both reads need a `TenantRef` with a
+project.
+
+| Call                                | Reads                                                      |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `getPublished(tenant, nodeId)`      | The node's current published version                       |
+| `getPublished(tenant, nodeId, pin)` | That published version, current or older; never a draft    |
+| `listPublished(tenant, query)`      | The `queryNodes` query shape, on the published filter rows |
+
+A version that was never published, another node's version and another tenant's node all answer
+`engine.not_found`. A list filters and sorts on the published slots with the same compiler as
+`queryNodes`. There is no scan here, so an undeclared field is `filter.not_declared`, and a field
+whose slot is still filling is `engine.filter_backfilling`: a published row may not hold its value
+yet. The reader has no grant on `content_types`, so the host passes `types`, usually
+`storeTypes(store)` built where the app role lives, and the reader parses both again. Wrap it in
+`cachedTypes(types)` so a list is one reader transaction: 1,000 entries, 10 seconds, keyed by
+organization, project and type.
+
+Publish is the only writer of the two tables. Until it lands, `test/support/published.ts` writes
+them as the superuser for tests.
+
 ## Configuration
 
 | Key                                       | Default | Meaning                                               |
@@ -279,3 +305,5 @@ only run that counts. Set `DREFYN_BENCH_NODES` for a smaller table, and `DREFYN_
 a shorter write run. A run above load 10 is void and fails. `bench/pool.ts` stalls a crowd of tree
 writes, lists and saves, and times what that costs a tenant that did nothing. It compares two
 builds and has no budget, so any server will do; it exits 1 if the quiet tenant saw a failure.
+`bench/published.ts` lists 200,000 published items as the public reader, filtered and sorted, with
+2,000 small tenants beside them, against p95 under 50 ms per shape.

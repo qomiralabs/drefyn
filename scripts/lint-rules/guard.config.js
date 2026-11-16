@@ -4,7 +4,7 @@
 // file, comment or package script in the tree can turn the rules off for itself.
 import process from 'node:process';
 import tseslint from 'typescript-eslint';
-import drefyn, { egressAllowList } from './src/index.ts';
+import drefyn, { egressAllowList, PUBLIC_PATHS } from './src/index.ts';
 
 export default [
   {
@@ -23,6 +23,10 @@ export default [
   {
     files: ['apps/**'],
     rules: { 'drefyn/no-operator-auth': 'error' },
+  },
+  {
+    files: [...PUBLIC_PATHS],
+    rules: { 'drefyn/published-reads-only': 'error' },
   },
   {
     files: ['**/*.{jsx,tsx}'],

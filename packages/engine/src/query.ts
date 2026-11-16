@@ -37,7 +37,7 @@ export function storedSchema(stored: unknown): ContentSchema | null {
 }
 
 // A type nothing was declared on has no fields, so every field a filter names is unknown.
-const emptySchema = (typeId: string): ContentSchema => ({
+export const emptySchema = (typeId: string): ContentSchema => ({
   typeId: typeId as TypeId,
   apiName: 'undeclared',
   version: 1,
@@ -58,13 +58,13 @@ async function readType(tx: EngineTx, tenant: TenantRef, typeId: string): Promis
   return { schema: storedSchema(row.content_schema), slots: parseSlotMap(row.filter_slots) };
 }
 
-function filterRefusal(error: FilterError): Refusal {
+export function filterRefusal(error: FilterError): Refusal {
   return new Refusal('engine.validation_failed', [
     { path: error.path === '' ? 'filter' : `filter.${error.path}`, code: error.code },
   ]);
 }
 
-function fieldsIn(node: FilterNode, into: Set<FieldId>): Set<FieldId> {
+export function fieldsIn(node: FilterNode, into: Set<FieldId>): Set<FieldId> {
   if ('and' in node) node.and.forEach((child) => fieldsIn(child, into));
   else if ('or' in node) node.or.forEach((child) => fieldsIn(child, into));
   else if ('not' in node) fieldsIn(node.not, into);
@@ -72,12 +72,12 @@ function fieldsIn(node: FilterNode, into: Set<FieldId>): Set<FieldId> {
   return into;
 }
 
-interface Sort {
+export interface Sort {
   readonly field: FieldDef;
   readonly direction: SortDirection;
 }
 
-function sortOf(
+export function sortOf(
   schema: ContentSchema | null,
   slots: SlotMap,
   sort: { readonly field: string; readonly direction: SortDirection } | undefined,
@@ -102,13 +102,17 @@ const cursorSchema = z.strictObject({
 });
 type Cursor = z.output<typeof cursorSchema>;
 
-const encodeCursor = (cursor: Cursor) =>
+export const encodeCursor = (cursor: Cursor) =>
   Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 
-const badCursor = () =>
+export const badCursor = () =>
   new Refusal('engine.validation_failed', [{ path: 'cursor', code: 'engine.cursor_invalid' }]);
 
-function decodeCursor(text: string | undefined, sort: Sort | null, direction: SortDirection) {
+export function decodeCursor(
+  text: string | undefined,
+  sort: Sort | null,
+  direction: SortDirection,
+) {
   if (text === undefined) return null;
   let raw: unknown;
   try {
@@ -139,13 +143,13 @@ function sortValue(sort: Sort, value: string): Raw {
   }
 }
 
-interface Position {
+export interface Position {
   readonly node: string;
   readonly value: string | null;
 }
 
 // Nulls come last in both directions, which a row comparison cannot say.
-function keyset(
+export function keyset(
   sort: Sort | null,
   x: Raw | null,
   id: Raw,
@@ -160,7 +164,7 @@ function keyset(
   return sql`(${after(x, value, d)} or (${x} = ${value} and ${after(id, node, d)}) or ${x} is null)`;
 }
 
-const ordering = (sort: Raw | null, id: Raw, d: SortDirection): Raw => {
+export const ordering = (sort: Raw | null, id: Raw, d: SortDirection): Raw => {
   const tail = d === 'asc' ? sql`${id} asc` : sql`${id} desc`;
   if (sort === null) return tail;
   return d === 'asc' ? sql`${sort} asc nulls last, ${tail}` : sql`${sort} desc nulls last, ${tail}`;
@@ -303,7 +307,7 @@ async function fitsScan(
   return (rows[0]?.items ?? 0) <= max;
 }
 
-const refuseScan = (undeclared: readonly FieldId[], filling: readonly FieldId[]): Refusal =>
+export const refuseScan = (undeclared: readonly FieldId[], filling: readonly FieldId[]): Refusal =>
   undeclared.length > 0
     ? new Refusal(
         'engine.filter_not_declared',

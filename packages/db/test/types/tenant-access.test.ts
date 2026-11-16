@@ -207,7 +207,6 @@ describe('tenant access types', () => {
   });
 
   it('build PublishedSchema from the published allow list only', () => {
-    // eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty until the first table is published
     expectTypeOf<PublishedSchema>().toEqualTypeOf<PublishedView<Schema, PublishedTableName>>();
     expectTypeOf<keyof FixturePublished>().toEqualTypeOf<'fixture_published'>();
     expectTypeOf<keyof OrganizationView<FixtureSchema>>().toEqualTypeOf<'fixture_drafts'>();

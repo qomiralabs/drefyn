@@ -6,6 +6,7 @@ import { noOperatorAuth } from './no-operator-auth.ts';
 import { noRawEgress } from './no-raw-egress.ts';
 import { noSelectAll } from './no-select-all.ts';
 import { noTierLiterals } from './no-tier-literals.ts';
+import { publishedReadsOnly } from './published-reads-only.ts';
 
 export {
   allowListProblems,
@@ -14,6 +15,7 @@ export {
 } from './egress-allow-entry.ts';
 export { egressAllowList } from './egress-allow-list.ts';
 export { classify, noArbitraryValues, type Problem } from './no-arbitrary-values.ts';
+export { PUBLIC_PATHS } from './published-reads-only.ts';
 
 const plugin = {
   meta: { name: '@drefyn/lint-rules' },
@@ -25,6 +27,7 @@ const plugin = {
     'no-raw-egress': noRawEgress,
     'no-select-all': noSelectAll,
     'no-tier-literals': noTierLiterals,
+    'published-reads-only': publishedReadsOnly,
   },
 } satisfies ESLint.Plugin;
 

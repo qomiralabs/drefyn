@@ -57,10 +57,11 @@ function envFile(): Record<string, string> {
   return values;
 }
 
-export type Role = 'owner' | 'app';
+export type Role = 'owner' | 'app' | 'reader';
 const ROLES: Readonly<Record<Role, [string, string]>> = {
   owner: ['drefyn_owner', 'DREFYN_OWNER_PASSWORD'],
   app: ['drefyn_app', 'DREFYN_APP_PASSWORD'],
+  reader: ['drefyn_public_reader', 'DREFYN_PUBLIC_READER_PASSWORD'],
 };
 
 export function urlFor(role: Role, database: string): string {

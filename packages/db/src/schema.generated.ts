@@ -356,6 +356,46 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.published_filter_rows
+export interface PublishedFilterRowsTable {
+  organization_id: string;
+  project_id: string;
+  type_id: string;
+  node_id: string;
+  t1: string | null;
+  t2: string | null;
+  t3: string | null;
+  t4: string | null;
+  t5: string | null;
+  l1: string[] | null;
+  l2: string[] | null;
+  l3: string[] | null;
+  l4: string[] | null;
+  l5: string[] | null;
+  i1: number | null;
+  i2: number | null;
+  i3: number | null;
+  i4: number | null;
+  i5: number | null;
+  d1: Date | null;
+  d2: Date | null;
+}
+
+// app.published_versions
+export interface PublishedVersionsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  type_id: string;
+  content: JsonValue;
+  fields: Generated<JsonValue>;
+  is_current: boolean;
+  render_policy_version: number;
+  published_at: Generated<Date>;
+}
+
 // app.recovery_codes
 export interface RecoveryCodesTable {
   id: Generated<string>;
@@ -507,6 +547,8 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  published_filter_rows: PublishedFilterRowsTable;
+  published_versions: PublishedVersionsTable;
   recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;

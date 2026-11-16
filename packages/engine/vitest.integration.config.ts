@@ -3,7 +3,11 @@ import { watchdogGlobalSetup, watchdogSetup } from '../../vitest.shared.ts';
 
 export default defineConfig({
   test: {
-    include: ['test/**/*.integration.test.ts', 'test/versions.property.test.ts'],
+    include: [
+      'test/**/*.integration.test.ts',
+      'test/integration/**/*.test.ts',
+      'test/versions.property.test.ts',
+    ],
     globalSetup: [watchdogGlobalSetup, 'test/support/global-setup.ts'],
     restoreMocks: true,
     setupFiles: [watchdogSetup],

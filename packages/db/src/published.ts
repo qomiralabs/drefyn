@@ -5,5 +5,4 @@ import type { Schema } from './schema.generated.ts';
 // reader's transaction can type.
 export type PublishedView<S, T extends string> = { [K in keyof S & T]: S[K] };
 
-// eslint-disable-next-line @typescript-eslint/no-generated-empty-object-type -- empty until the first table is published
 export type PublishedSchema = PublishedView<Schema, PublishedTableName>;
