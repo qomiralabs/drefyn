@@ -6,12 +6,14 @@ import { idempotencyContract } from './contract/idempotency.ts';
 import { isolationContract } from './contract/isolation.ts';
 import { ledgerPropertiesContract } from './contract/ledger-properties.ts';
 import { ledgerContract } from './contract/ledger.ts';
+import { settlementContract } from './contract/settlement.ts';
 
 const makeLedger = createMemoryLedger;
 
 entryAmountsContract(makeLedger);
 amountPropertiesContract(makeLedger);
 ledgerContract(makeLedger);
+settlementContract(makeLedger);
 idempotencyContract(makeLedger);
 isolationContract(makeLedger);
 concurrencyContract(makeLedger);

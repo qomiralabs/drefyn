@@ -19,7 +19,13 @@ import { aiBudgetContract } from '../src/testing.ts';
 import { ORG_A, PROPERTY_TIMEOUT_MS, asyncCodeOf, runs, tenantOf } from './support.ts';
 
 // Fixture costs for the tests only. Real costs are set by whoever runs the pool.
-const FIXTURE_COSTS: Readonly<Record<AiOperation, number>> = { stale_draft: 7, reader_answer: 3 };
+const FIXTURE_COSTS: Readonly<Record<AiOperation, number>> = {
+  stale_draft: 7,
+  reader_answer: 3,
+  translation_draft: 5,
+  incident_draft: 4,
+  generation: 11,
+};
 const TENANT = tenantOf(ORG_A, '01928c3e-7a9b-7c3d-8e4f-0123456789ff');
 
 aiBudgetContract(() => {
@@ -36,8 +42,15 @@ aiBudgetContract(() => {
 });
 
 describe('AI operations', () => {
-  it('are stale drafts and reader answers, frozen, and each is a spend reason', () => {
-    expect([...AI_OPERATIONS]).toEqual(['stale_draft', 'reader_answer']);
+  it('are every AI spend, frozen, and each is a spend reason', () => {
+    expect([...AI_OPERATIONS]).toEqual([
+      'stale_draft',
+      'reader_answer',
+      'translation_draft',
+      'incident_draft',
+      'generation',
+    ]);
+    expect([...AI_OPERATIONS].sort()).toEqual([...SPEND_REASONS].sort());
     expect(Object.isFrozen(AI_OPERATIONS)).toBe(true);
     for (const operation of AI_OPERATIONS) {
       expect(SPEND_REASONS as readonly string[]).toContain(operation);
@@ -81,7 +94,7 @@ describe('unmeteredBudget', () => {
     expect(await charge(TENANT, { idempotencyKey: '', operation: 'reader_answer' })).toBe(
       'CREDIT_KEY_INVALID',
     );
-    expect(await charge(TENANT, { idempotencyKey: 'k', operation: 'generation' })).toBe(
+    expect(await charge(TENANT, { idempotencyKey: 'k', operation: 'sms' })).toBe(
       'CREDIT_REASON_INVALID',
     );
     expect(
@@ -130,7 +143,7 @@ describe('createLedgerBudget', () => {
     const creditsFor = vi.fn(() => credits(1));
     const budget = createLedgerBudget({ ledger: createMemoryLedger(), creditsFor });
     await asyncCodeOf(() =>
-      budget.charge(TENANT, { idempotencyKey: 'a', operation: 'generation' as AiOperation }),
+      budget.charge(TENANT, { idempotencyKey: 'a', operation: 'sms' as AiOperation }),
     );
     expect(creditsFor).not.toHaveBeenCalled();
   });

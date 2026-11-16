@@ -81,6 +81,7 @@ export interface ChunksTable {
   body: string;
   body_sha256: Buffer;
   created_at: Generated<Date>;
+  render_policy_version: number | null;
 }
 
 // app.cli_sign_in_links

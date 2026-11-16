@@ -165,6 +165,47 @@ function modeEntries(t: Tokens, mode: Mode): Entry[] {
   return entries;
 }
 
+// The reader palette, for published docs pages only. Same walk as the shared colours, under
+// --dr-docs-, so nothing outside the docs CSS can pick a value up by its shared name.
+function docsModeEntries(t: Tokens, mode: Mode): Entry[] {
+  const d = t.docs;
+  const entries: Entry[] = [];
+  const walk = (node: unknown, path: string[]) => {
+    if (isModeColor(node)) {
+      entries.push([`--dr-docs-${path.map(kebab).join('-')}`, checked(node[mode])]);
+      return;
+    }
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      walk(child, [...path, key]);
+    }
+  };
+  walk(d.color, []);
+  for (const [k, w] of Object.entries(d.wash)) {
+    entries.push([`--dr-docs-wash-${kebab(k)}`, rgb(w[mode].base, w[mode].alpha)]);
+  }
+  for (const [k, w] of Object.entries(d.overlay)) {
+    entries.push([`--dr-docs-overlay-${kebab(k)}`, rgb(w[mode].base, w[mode].alpha)]);
+  }
+  for (const [level, s] of Object.entries(d.shadow)) {
+    entries.push([`--dr-docs-shadow-${level}`, shadow(s[mode].layers, s[mode].ink)]);
+  }
+  return entries;
+}
+
+function docsSharedEntries(t: Tokens): Entry[] {
+  const d = t.docs;
+  return [
+    ...Object.entries(d.font).map(([k, v]): Entry => [`--dr-docs-font-${kebab(k)}`, family(v)]),
+    ...Object.entries(d.layout).map(([k, v]): Entry => [`--dr-docs-layout-${kebab(k)}`, rem(v)]),
+    ...Object.entries(d.radius).map(([k, v]): Entry => [`--dr-docs-radius-${kebab(k)}`, rem(v)]),
+  ];
+}
+
+// Every custom property the docs family emits, for the tests that keep it on docs pages.
+export function docsPropertyNames(t: Tokens = source): string[] {
+  return [...docsModeEntries(t, 'light'), ...docsSharedEntries(t)].map(([name]) => name);
+}
+
 interface FontStacks {
   readonly sans: readonly string[];
   readonly mono: readonly string[];
@@ -258,19 +299,30 @@ function faceBlocks(faces: readonly (typeof fontFaces)[number][], path: string):
 }
 
 export function renderTokensCss(t: Tokens = source): string {
-  return tokensCss(t, faceBlocks(fontFaces, '../fonts/'), t.font);
+  return tokensCss(t, faceBlocks(fontFaces, '../fonts/'), t.font, false);
 }
 
 // Status names no web font at all, not even the local fallback: nothing may load, so a state
 // change can never move the layout.
 export function renderSurfaceTokensCss(surface: PublicSurface, t: Tokens = source): string {
-  if (surface === 'status') return tokensCss(t, [], statusFont);
-  return tokensCss(t, faceBlocks(docsFontFaces, publicFontPath), t.font);
+  if (surface === 'status') return tokensCss(t, [], statusFont, false);
+  return tokensCss(t, faceBlocks(docsFontFaces, publicFontPath), t.font, true);
 }
 
-function tokensCss(t: Tokens, faces: readonly string[], font: FontStacks): string {
+function tokensCss(
+  t: Tokens,
+  faces: readonly string[],
+  font: FontStacks,
+  withDocs: boolean,
+): string {
   validate(t);
-  const dark = ['color-scheme: dark', ...declarations(modeEntries(t, 'dark'))];
+  const docsLight = withDocs ? [...docsModeEntries(t, 'light'), ...docsSharedEntries(t)] : [];
+  const docsDark = withDocs ? docsModeEntries(t, 'dark') : [];
+  const dark = [
+    'color-scheme: dark',
+    ...declarations(modeEntries(t, 'dark')),
+    ...declarations(docsDark),
+  ];
   return [
     `/* ${HEADER} */\n`,
     ...faces,
@@ -278,6 +330,7 @@ function tokensCss(t: Tokens, faces: readonly string[], font: FontStacks): strin
       'color-scheme: light',
       ...declarations(modeEntries(t, 'light')),
       ...declarations(sharedEntries(t, font)),
+      ...declarations(docsLight),
     ]),
     // Numbers line up in tables, times and counters. :where keeps it overridable.
     block(':where(time, data, output, td, th, [data-numeric])', [

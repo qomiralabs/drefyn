@@ -372,3 +372,67 @@ describe('Docs limits waiting for calibration', () => {
     }
   });
 });
+
+describe('AI credits and model access', () => {
+  const AI_FEATURES: readonly (readonly [FeatureKey, HostedTier, boolean])[] = [
+    ['org.ai_model_picker', 'free', true],
+    ['org.ai_premium_models', 'starter', true],
+    ['org.ai_byom', 'growth', true],
+    ['org.ai_credit_packs', 'starter', false],
+  ];
+
+  it.each(AI_FEATURES)('starts %s at %s for the whole organization', (feature, since, openCore) => {
+    expect(featureInfo(feature)).toEqual({ feature, scope: 'org', since, openCore });
+    expect(withFeature(feature)).toEqual(from(since));
+    for (const tier of LADDER.slice(0, LADDER.indexOf(since))) {
+      expect(hasFeature(tier, feature), tier).toBe(false);
+    }
+    expect(hasFeature('self_hosted', feature)).toBe(openCore);
+  });
+
+  it('keeps tier order for every AI feature', () => {
+    const rung = fc.integer({ min: 0, max: LADDER.length - 1 });
+    fc.assert(
+      fc.property(fc.constantFrom(...AI_FEATURES), rung, rung, ([feature], a, b) => {
+        const [low, high] = a <= b ? [a, b] : [b, a];
+        const lowTier = LADDER[low];
+        const highTier = LADDER[high];
+        if (lowTier === undefined || highTier === undefined) throw new Error('rung out of range');
+        if (hasFeature(lowTier, feature)) expect(hasFeature(highTier, feature)).toBe(true);
+      }),
+    );
+  });
+
+  it('holds the monthly credit allowance at 0 on every hosted tier until calibration', () => {
+    expect(limitInfo('org.ai_credits_monthly')).toEqual({
+      key: 'org.ai_credits_monthly',
+      scope: 'org',
+      direction: 'max',
+      grace: false,
+    });
+    for (const tier of LADDER) {
+      expect(limitFor(tier, 'org.ai_credits_monthly'), tier).toBe(0);
+      expect(checkLimit(tier, 'org.ai_credits_monthly', 1), tier).toMatchObject({
+        status: 'not_entitled',
+        access: 'read_only',
+      });
+    }
+    expect(limitFor('self_hosted', 'org.ai_credits_monthly')).toBe(UNLIMITED);
+  });
+
+  it('lists the allowance as unset on every hosted tier', () => {
+    const entries = UNCALIBRATED.filter((entry) => entry.key === 'org.ai_credits_monthly');
+    expect(entries.map((entry) => entry.tier)).toEqual([...LADDER]);
+    for (const entry of entries) {
+      expect(entry.basis).toBe('unset');
+      expect(entry.value).toBe(0);
+    }
+  });
+
+  // Which models are premium lives with the rates, so no key may name a model.
+  it('names no model in any key', () => {
+    for (const key of [...FEATURE_KEYS, ...LIMIT_KEYS]) {
+      expect(key, key).not.toMatch(/claude|haiku|sonnet|opus|gpt|gemini|llama|mistral/i);
+    }
+  });
+});

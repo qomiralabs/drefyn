@@ -32,16 +32,38 @@ export type FactorOutcome =
 
 export type FactorRefusal = Exclude<FactorOutcome, 'passed' | 'matched_previous_step'> | 'origin';
 
+// What a failed attempt should tell the person: wrong codes after a first factor passed, or
+// TOTP shut off at the ceiling. Only confirmed rows ever reach here, so a typo while
+// enrolling never mails anyone.
+export interface FactorAlert {
+  readonly kind: 'second_factor_failures' | 'second_factor_disabled';
+  // Database time of the attempt.
+  readonly at: Date;
+}
+
 export type FactorCheck =
   | {
       readonly ok: true;
       readonly proof: FactorProof;
       readonly previousStep: boolean;
+      // Unused recovery codes left once this one is spent; null for TOTP.
+      readonly codesLeft: number | null;
+      readonly at: Date;
     }
   | {
       readonly ok: false;
       readonly reason: 'invalid' | 'replayed' | 'disabled' | 'unavailable' | 'not_enrolled';
+      readonly alert: FactorAlert | null;
     };
+
+// Failures in a row that first tell the person. Low enough to catch a patient guesser,
+// high enough that two typos stay quiet.
+export const FACTOR_FAILURE_NOTICE_AT = 3;
+
+const refusedCheck = (
+  reason: Exclude<FactorCheck, { ok: true }>['reason'],
+  alert: FactorAlert | null = null,
+): FactorCheck => ({ ok: false, reason, alert });
 
 const KINDS: ReadonlySet<unknown> = new Set<FactorKind>(['totp', 'recovery_code']);
 
@@ -92,17 +114,20 @@ export async function verifyFactor(
       sql<boolean>`confirmed_at is not null`.as('confirmed'),
       // Database time, so a skewed app clock cannot move the window.
       sql<number>`floor(extract(epoch from now()) / 30)::int`.as('step'),
+      sql<Date>`now()`.as('now'),
     ])
     .where('user_id', '=', sql<string>`app.current_user_id()`)
     .executeTakeFirst();
-  if (credential?.confirmed !== true) return { ok: false, reason: 'not_enrolled' };
-  if (input.kind === 'recovery_code') return spendRecoveryCode(tx, userId, input.code);
+  if (credential?.confirmed !== true) return refusedCheck('not_enrolled');
+  if (input.kind === 'recovery_code') {
+    return spendRecoveryCode(tx, userId, input.code, credential.now);
+  }
 
   const sealer = ctx.config.totp.sealer;
   const who = idFields({ userId: ['usr', userId] });
   if (sealer === null) {
     quietWarn(ctx.logger, 'auth.totp_key_absent', who);
-    return { ok: false, reason: 'unavailable' };
+    return refusedCheck('unavailable');
   }
   let secret: Buffer;
   try {
@@ -116,15 +141,14 @@ export async function verifyFactor(
     );
   } catch {
     quietWarn(ctx.logger, 'auth.totp_key_unreadable', who);
-    return { ok: false, reason: 'unavailable' };
+    return refusedCheck('unavailable');
   }
   const matched = matchTotp(secret, input.code, credential.step);
   secret.fill(0);
-  if (credential.failed_attempts >= FACTOR_FAILURE_CEILING)
-    return { ok: false, reason: 'disabled' };
+  if (credential.failed_attempts >= FACTOR_FAILURE_CEILING) return refusedCheck('disabled');
   if (matched === null) {
     // Saturates, so two failures at 99 both commit instead of one breaking the check.
-    await tx
+    const failed = await tx
       .updateTable('totp_credentials')
       .set({
         failed_attempts: sql<number>`least("failed_attempts" + 1, ${sql.lit(FACTOR_FAILURE_CEILING)})`,
@@ -133,7 +157,7 @@ export async function verifyFactor(
       .where('user_id', '=', sql<string>`app.current_user_id()`)
       .returning('failed_attempts')
       .executeTakeFirst();
-    return { ok: false, reason: 'invalid' };
+    return refusedCheck('invalid', failureAlert(failed?.failed_attempts, credential.now));
   }
   // Strictly forward: using a code ends it and every older one. No row back is a replay.
   const moved = await tx
@@ -148,18 +172,29 @@ export async function verifyFactor(
     .where((eb) => eb.or([eb('last_used_step', 'is', null), eb('last_used_step', '<', matched)]))
     .returning('user_id')
     .executeTakeFirst();
-  if (moved === undefined) return { ok: false, reason: 'replayed' };
+  if (moved === undefined) return refusedCheck('replayed');
   return {
     ok: true,
     proof: mintFactorProof(userId, 'totp'),
     previousStep: matched === credential.step - 1,
+    codesLeft: null,
+    at: credential.now,
   };
+}
+
+// The third failure in a run warns, and the one that reaches the ceiling says TOTP is off.
+// Exact counts, so a run of failures mails at those two points and not on every attempt.
+function failureAlert(failed: number | undefined, at: Date): FactorAlert | null {
+  if (failed === FACTOR_FAILURE_NOTICE_AT) return { kind: 'second_factor_failures', at };
+  if (failed === FACTOR_FAILURE_CEILING) return { kind: 'second_factor_disabled', at };
+  return null;
 }
 
 async function spendRecoveryCode(
   tx: Transaction<UserSchema>,
   userId: UserId,
   typed: string,
+  at: Date,
 ): Promise<FactorCheck> {
   const rows = await tx
     .selectFrom('recovery_codes')
@@ -174,7 +209,8 @@ async function spendRecoveryCode(
     typed,
     rows.map((row) => ({ id: row.id, codeHash: row.code_hash })),
   );
-  if (id === null) return { ok: false, reason: 'invalid' };
+  // A wrong recovery code is rare by mistake and worth a word every time, within the cap.
+  if (id === null) return refusedCheck('invalid', { kind: 'second_factor_failures', at });
   // Two tabs spending the same code: one gets the row, the other nothing.
   const spent = await tx
     .updateTable('recovery_codes')
@@ -184,14 +220,21 @@ async function spendRecoveryCode(
     .where('used_at', 'is', null)
     .returning('id')
     .executeTakeFirst();
-  if (spent === undefined) return { ok: false, reason: 'invalid' };
+  // Lost to a parallel use of the same code: that was the person, so nothing is sent.
+  if (spent === undefined) return refusedCheck('invalid');
   // A recovery code that works lifts a TOTP lockout.
   await tx
     .updateTable('totp_credentials')
     .set({ failed_attempts: 0, updated_at: sql<Date>`now()` })
     .where('user_id', '=', sql<string>`app.current_user_id()`)
     .execute();
-  return { ok: true, proof: mintFactorProof(userId, 'recovery_code'), previousStep: false };
+  return {
+    ok: true,
+    proof: mintFactorProof(userId, 'recovery_code'),
+    previousStep: false,
+    codesLeft: rows.length - 1,
+    at,
+  };
 }
 
 export const FACTOR_ERRORS: Readonly<Record<Exclude<FactorRefusal, 'origin'>, AuthErrorCode>> =
