@@ -1,29 +1,10 @@
 import { MAX_LIST_ITEMS, type ContentSchema, type FieldDef, type TypeId } from '@drefyn/schema';
 import { z } from 'zod';
+import { CONTENT_ERROR_CODES } from './errors.ts';
+import { DEFAULT_PAGE, MAX_DEPTH, MAX_PAGE } from './paging.ts';
 import type { JsonValue, OpenApiDocument, OpenApiOptions } from './types.ts';
 
 type JsonObject = Record<string, JsonValue>;
-
-// Every error code a /v1 content route can answer with. Adding one is additive; removing or
-// renaming one breaks clients.
-const ERROR_CODES = [
-  'api.filter_invalid',
-  'api.forbidden',
-  'api.idempotency_conflict',
-  'api.limit_reached',
-  'api.not_found',
-  'api.rate_limited',
-  'api.too_large',
-  'api.unauthorized',
-  'api.unavailable',
-  'api.validation_failed',
-  'api.version_conflict',
-];
-
-// Match the engine's page cap and the depth limit on reference expansion.
-const MAX_PAGE = 100;
-const DEFAULT_PAGE = 50;
-const MAX_DEPTH = 3;
 
 const options = z.strictObject({
   serverUrl: z.url({ protocol: /^https?$/ }),
@@ -285,7 +266,7 @@ const SHARED_SCHEMAS: JsonObject = {
         additionalProperties: false,
         required: ['code', 'message'],
         properties: {
-          code: { type: 'string', enum: ERROR_CODES },
+          code: { type: 'string', enum: [...CONTENT_ERROR_CODES] },
           message: { type: 'string' },
           fields: {
             type: 'array',
