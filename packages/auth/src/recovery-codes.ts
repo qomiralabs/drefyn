@@ -60,6 +60,11 @@ function cleaned(typed: string): string | null {
 const hashOf = (userId: UserId, plain: string) =>
   sha256(lengthPrefixed([HASH_LABEL, userId, plain]));
 
+// Whether the input could be a recovery code at all, whoever it belongs to.
+export function isRecoveryCodeShape(typed: string): boolean {
+  return cleaned(typed) !== null;
+}
+
 export function recoveryCodeHash(userId: UserId, typed: string): Buffer | null {
   const plain = cleaned(typed);
   return plain === null ? null : hashOf(userId, plain);

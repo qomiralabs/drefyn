@@ -13,6 +13,7 @@ import { noticeFor } from '../auth/outcomes.ts';
 import type {
   BlockState,
   CliState,
+  FactorState,
   InviteState,
   LinkState,
   PasswordState,
@@ -23,7 +24,13 @@ import type {
 import { publicAction, signedInAction } from './actions.ts';
 import { authConfig, dashboardAuth } from './auth.ts';
 import { currentSession } from './guard.ts';
-import { applyCookies, failureReference, finishSignIn } from './sign-in-support.ts';
+import {
+  applyCookies,
+  failureReference,
+  finishOrFactor,
+  finishSignIn,
+  toFactor,
+} from './sign-in-support.ts';
 
 const text = (form: FormData, name: string): string => {
   const value = form.get(name);
@@ -52,7 +59,7 @@ export const verifyCode = publicAction(async ({ browser }, form): Promise<TypedC
   const code = text(form, 'code');
   const auth = await dashboardAuth();
   const done = await auth.emailSignIn.verifyEmailCode(browser, { code });
-  if (done.ok) return finishSignIn(done.value);
+  if (done.ok) return finishOrFactor(done.value);
   switch (done.error.code) {
     case 'AUTH_CODE_INVALID':
       return { problem: 'wrong', code };
@@ -101,6 +108,7 @@ export const finishLink = publicAction(async ({ browser }, form): Promise<LinkSt
     return { kind: 'gone' };
   }
   const { value } = done;
+  if (value.kind === 'factor_required') return toFactor(value);
   if (value.kind === 'signed_in') return finishSignIn(value.signedIn);
   if (value.kind === 'choose_password') return { kind: 'choose', challenge, code };
   if (value.kind === 'email_changed') after(value.send);
@@ -117,7 +125,7 @@ export const signInPassword = publicAction(async ({ browser }, form): Promise<Pa
     csrf: text(form, 'csrf'),
     ...(next === '' ? {} : { returnTo: next }),
   });
-  if (done.ok) return finishSignIn(done.value);
+  if (done.ok) return finishOrFactor(done.value);
   if (done.error.code === 'AUTH_CREDENTIALS_INVALID' || done.error.code === 'AUTH_INPUT_INVALID') {
     return { wrong: true, email };
   }
@@ -150,13 +158,13 @@ export const resetStep = publicAction(async ({ browser }, form): Promise<ResetSt
     ...(challenge === '' ? {} : { challenge }),
   });
   if (done.ok) {
-    await applyCookies([
-      ...done.value.setCookies,
-      ...lastMethodCookie(authConfig(), done.value.session),
-    ]);
-    const { send } = done.value;
+    const { value } = done;
+    // The password is saved; signing in waits on the factor that enrolled meanwhile.
+    if ('kind' in value) return toFactor(value);
+    await applyCookies([...value.setCookies, ...lastMethodCookie(authConfig(), value.session)]);
+    const { send } = value;
     if (send !== undefined) after(send);
-    return { step: 'saved', returnTo: done.value.returnTo, email: done.value.session.email };
+    return { step: 'saved', returnTo: value.returnTo, email: value.session.email };
   }
   const { error } = done;
   if (error.code === 'AUTH_PASSWORD_WEAK') {
@@ -175,7 +183,10 @@ export const resetStep = publicAction(async ({ browser }, form): Promise<ResetSt
 export const redeemCliLink = publicAction(async ({ browser }, form): Promise<CliState> => {
   const auth = await dashboardAuth();
   const done = await auth.cliLinks.redeem(browser, text(form, 'token').trim());
-  if (done.ok) return finishSignIn({ setCookies: done.value.setCookies, returnTo: '/' });
+  if (done.ok) {
+    if (done.value.kind === 'factor_required') return toFactor(done.value);
+    return finishSignIn({ setCookies: done.value.setCookies, returnTo: '/' });
+  }
   if (done.error.code === 'AUTH_CLI_LINK_INVALID') return { kind: 'invalid' };
   return { kind: 'failed', notice: noticeOf(done.error, 'auth.cli_link_failed') };
 });
@@ -256,4 +267,28 @@ export const stopInvitations = publicAction(async (_context, form): Promise<Bloc
     return { kind: 'invalid' };
   }
   return { kind: 'done', organizationName: read.value.organizationName };
+});
+
+// The challenge form: a TOTP or recovery code for the sign in the factor cookie stands for.
+// It ends through finishSignIn like every other sign in, so an invitation keeps its fresh
+// binding. The typed code never goes back into the returned state.
+export const completeFactor = publicAction(async ({ browser }, form): Promise<FactorState> => {
+  const kind = text(form, 'kind') === 'recovery_code' ? 'recovery_code' : 'totp';
+  const auth = await dashboardAuth();
+  const done = await auth.factorChallenges.completeChallenge(browser, {
+    kind,
+    code: text(form, 'code'),
+    csrf: text(form, 'csrf'),
+  });
+  if (done.ok) return finishSignIn(done.value);
+  switch (done.error.code) {
+    case 'AUTH_FACTOR_INVALID':
+      return { problem: 'wrong', kind };
+    case 'AUTH_FACTOR_DISABLED':
+      return { problem: 'disabled', kind };
+    case 'AUTH_FACTOR_CHALLENGE_EXPIRED':
+      return { problem: 'expired', kind };
+    default:
+      return { kind, notice: noticeOf(done.error, 'auth.factor_failed') };
+  }
 });

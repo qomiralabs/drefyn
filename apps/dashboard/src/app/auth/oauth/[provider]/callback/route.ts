@@ -3,6 +3,7 @@ import { after, NextResponse, type NextRequest } from 'next/server';
 import { authConfig, dashboardAuth } from '../../../../../server/auth.ts';
 import { visitorBrowser } from '../../../../../server/actions.ts';
 import { arrival } from '../../../../../server/first-run.ts';
+import { FACTOR_PAGE } from '../../../../../server/sign-in-support.ts';
 import { currentSession, guardPublic } from '../../../../../server/guard.ts';
 import { appOrigin, appUrl, requestQuery } from '../../../../../server/origin.ts';
 
@@ -41,12 +42,15 @@ export async function GET(request: NextRequest, context: Context): Promise<Respo
   });
   if (!done.ok) return refuse(errorName(done.error.code));
   const outcome = done.value;
+  // A second factor comes next: no session yet, so no arrival page and no last method.
   const target =
-    outcome.kind === 'link_pending'
-      ? appUrl('/sign-in/link')
-      : outcome.kind === 'signed_in'
-        ? appUrl(await arrival(outcome.session, outcome.returnTo))
-        : appUrl(safeReturnTo(outcome.returnTo, appOrigin()));
+    outcome.kind === 'factor_required'
+      ? appUrl(FACTOR_PAGE)
+      : outcome.kind === 'link_pending'
+        ? appUrl('/sign-in/link')
+        : outcome.kind === 'signed_in'
+          ? appUrl(await arrival(outcome.session, outcome.returnTo))
+          : appUrl(safeReturnTo(outcome.returnTo, appOrigin()));
   const response = NextResponse.redirect(target, 303);
   const config = authConfig();
   // Linking or a step up is not a sign in, so only a signed in outcome marks the method.

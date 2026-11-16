@@ -1,3 +1,4 @@
+import { asSignedIn } from '../../support.ts';
 import { randomBytes } from 'node:crypto';
 import { newId, withOrganization } from '@drefyn/db';
 import type { OrganizationId, ProjectId } from '@drefyn/tenancy';
@@ -28,7 +29,12 @@ export async function signIn(h: Harness, email?: string) {
   const sessions = h.sessions();
   const user = await h.user(email);
   const started = await sessions.startSession(browser(), { userId: user, method: 'email' });
-  return { sessions, user, session: started.session, cookie: cookieOf(h, started.setCookies) };
+  return {
+    sessions,
+    user,
+    session: asSignedIn(started).session,
+    cookie: cookieOf(h, started.setCookies),
+  };
 }
 
 export interface Org {
