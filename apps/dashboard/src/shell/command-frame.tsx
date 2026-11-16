@@ -107,13 +107,16 @@ export function CommandFrame({
   };
   // When the loaded field takes the first one's place, focus rests on the page until the new
   // field takes it, and React Aria hears keys only inside the dialog. An Escape that lands
-  // there, handled by nothing, still closes it.
+  // there, handled by nothing, still closes it. The swap can also render inside the Escape's
+  // own dispatch, when an earlier listener sets state, and then React finds the key's field
+  // gone and runs no handler. A target no longer in the page means the same.
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       const active = document.activeElement;
-      if (active === null || active === document.body) onOpenChange(false);
+      const orphaned = event.target instanceof Node && !event.target.isConnected;
+      if (orphaned || active === null || active === document.body) onOpenChange(false);
     };
     document.addEventListener('keydown', onKey);
     return () => {

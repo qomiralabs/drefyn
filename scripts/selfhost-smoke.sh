@@ -413,6 +413,70 @@ else
   fail "the upgrade is a no op on a fresh stack" "$out"
 fi
 
+# The API service, when its profile is on (COMPOSE_PROFILES=api). It must come up with nothing
+# but this stack, hold no auth role or secret, answer health and readiness, refuse to start
+# beside an auth secret, and stop cleanly on SIGTERM.
+if jq -e '.services | has("api")' <<<"$config" >/dev/null; then
+  api="$("${compose[@]}" ps -q api 2>/dev/null || true)"
+  if [ -z "$api" ]; then
+    fail "api container is running" "the api profile is on but project $project has no api container"
+  else
+    api_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$api")"
+    if [ "$api_health" = "healthy" ]; then
+      pass "api is healthy"
+    else
+      fail "api is healthy" "health is $api_health: $(health_output "$api")"
+    fi
+    api_user="$(docker inspect --format '{{.Config.User}}' "$api")"
+    expect_rows "api runs as the node user, not root" "node" "$api_user"
+    read -r api_pids api_memory <<<"$(docker inspect --format '{{.HostConfig.PidsLimit}} {{.HostConfig.Memory}}' "$api")"
+    if [ "${api_pids:-0}" -gt 0 ] && [ "${api_memory:-0}" -gt 0 ]; then
+      pass "api has a process and a memory limit"
+    else
+      fail "api has a process and a memory limit" "pids limit ${api_pids:-none}, memory ${api_memory:-none}"
+    fi
+    # Names only: the values are never printed.
+    api_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$api" | cut -d= -f1)"
+    leaked="$(grep -E '^DREFYN_AUTH_|_PASSWORD$|_DATABASE_URL$|^DREFYN_API_RATE_LIMIT_KEY$' <<<"$api_env" || true)"
+    if [ -z "$leaked" ]; then
+      pass "api holds no auth setting, password, database URL or limiter key in its environment"
+    else
+      fail "api holds no auth setting, password, database URL or limiter key in its environment" \
+        "found: $(tr '\n' ' ' <<<"$leaked")"
+    fi
+    api_port="$("${compose[@]}" port api 3100 | sed 's/.*://')"
+    for path in healthz readyz; do
+      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$api_port/$path" || true)"
+      expect_rows "api answers /$path with 200" "200" "$code"
+    done
+    missing="$(curl -s --max-time 5 "http://127.0.0.1:$api_port/v1/nothing" || true)"
+    expect_rows "api answers an unknown path with the one error body" \
+      "api.not_found" "$(jq -r '.error.code' <<<"$missing" 2>/dev/null || true)"
+    # The image's own entry point, with an auth secret added: it must exit 1 naming the key.
+    refused_out="$("${compose[@]}" run --rm --no-deps -T -e DREFYN_AUTH_SECRET=smoke-not-a-secret \
+      api 2>&1)" && refused_code=0 || refused_code=$?
+    if [ "$refused_code" -eq 1 ] && [[ "$refused_out" == *'"key":"DREFYN_AUTH_SECRET"'* ]] &&
+      [[ "$refused_out" != *smoke-not-a-secret* ]]; then
+      pass "api refuses to start beside an auth secret, naming the key and never the value"
+    else
+      fail "api refuses to start beside an auth secret, naming the key and never the value" \
+        "exit $refused_code: $(tail -n 3 <<<"$refused_out")"
+    fi
+    "${compose[@]}" stop api >/dev/null 2>&1 || true
+    stopped="$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$api")"
+    # Read whole, not piped into grep -q: an early exit there would fail the pipe under pipefail.
+    api_log="$(docker logs "$api" 2>&1 || true)"
+    if [ "$stopped" = "exited 0" ] && [[ "$api_log" == *'"event":"api.stopped"'* ]]; then
+      pass "api drains and exits 0 on SIGTERM"
+    else
+      fail "api drains and exits 0 on SIGTERM" "state $stopped"
+    fi
+    if ! out="$("${compose[@]}" up --detach --wait --wait-timeout 60 api 2>&1)"; then
+      fail "api starts again after the stop" "$(tail -n 3 <<<"$out")"
+    fi
+  fi
+fi
+
 if [ "$teardown" = true ]; then
   if ! out="$("${compose[@]}" down --volumes --timeout 30 2>&1)"; then
     fail "down --volumes succeeds" "$out"

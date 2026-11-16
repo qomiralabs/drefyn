@@ -15,6 +15,7 @@ export {
   createDatabase,
   createProtectedReaderDatabase,
   createPublishedDatabase,
+  pingDatabase,
   poolSizeOf,
   withApiKeyLimiter,
   withAuth,

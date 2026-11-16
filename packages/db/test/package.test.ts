@@ -91,6 +91,7 @@ describe('package shape', () => {
         'parseMigrationConfig',
         'parseProtectedReaderConfig',
         'parsePublishedReaderConfig',
+        'pingDatabase',
         'poolSizeOf',
         'toSafeInteger',
         'withAuth',

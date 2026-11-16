@@ -217,8 +217,9 @@ esac
 case "$1" in
   up)
     warn_env_mode
-    # Pull first so the healthy time measures startup, not the network.
-    "${compose[@]}" pull --quiet
+    # Pull first so the healthy time measures startup, not the network. Images this checkout
+    # builds, such as the API under COMPOSE_PROFILES=api, are built by up instead.
+    "${compose[@]}" pull --quiet --ignore-buildable
     wait_healthy
     ;;
   down)
@@ -230,7 +231,7 @@ case "$1" in
     ;;
   upgrade)
     warn_env_mode
-    "${compose[@]}" pull --quiet
+    "${compose[@]}" pull --quiet --ignore-buildable
     # Recreating copies the new secrets into the container. It cannot be healthy yet, because
     # the healthcheck logs in as the roles the upgrade adds, so this waits for TCP only.
     "${compose[@]}" up --detach --force-recreate

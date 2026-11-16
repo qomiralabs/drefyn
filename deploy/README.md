@@ -3,8 +3,9 @@
 Docker Compose files for running Drefyn yourself. Today the stack is Postgres with pgvector;
 other services join it as they are built.
 
-The parse host is the one service that does not start with the stack. It is off behind the
-`parse` compose profile until the app tier joins it. See [The parse host](#the-parse-host).
+The parse host and the API service do not start with the stack. They are off behind the
+`parse` and `api` compose profiles until the app tier joins it. See
+[The API service](#the-api-service) and [The parse host](#the-parse-host).
 
 ## Requirements
 
@@ -523,6 +524,40 @@ stack, labelled with the compose file path, can only be removed: `reset --yes` d
 Set `COMPOSE_PROJECT_NAME` (in the shell or in `deploy/.env`) and a different
 `DREFYN_POSTGRES_PORT` to run this stack beside another one, for example from another
 worktree.
+
+## The API service
+
+`/v1` runs in its own process, built from this checkout. One command starts it with the
+stack, with nothing outside this machine:
+
+```sh
+COMPOSE_PROFILES=api bash scripts/selfhost.sh up
+COMPOSE_PROFILES=api bash scripts/selfhost-smoke.sh   # adds the API checks
+curl http://127.0.0.1:3100/readyz
+```
+
+Keep `COMPOSE_PROFILES=api` on every later command, `down` and `reset` included, so they reach
+the API container too.
+
+| Setting      | Value                                                                   |
+| ------------ | ----------------------------------------------------------------------- |
+| Image        | `drefyn-api:local`, built by `up` from `deploy/api/Dockerfile`          |
+| Host port    | `127.0.0.1:3100` (`DREFYN_API_PORT`), never on other interfaces         |
+| Public URL   | `DREFYN_API_PUBLIC_URL`, default `http://127.0.0.1:3100`                |
+| Limits       | 128 processes, 512 MB memory (`DREFYN_API_MEMORY_LIMIT`)                |
+| Health       | `GET /healthz` (process up), `GET /readyz` (both database pools answer) |
+| Request body | at most `DREFYN_API_MAX_BODY_BYTES`, default 1048576                    |
+
+It connects as `drefyn_app` and `drefyn_public_reader` and holds no auth role and no auth
+secret: it refuses to start if `DREFYN_AUTH_DATABASE_URL` or any `DREFYN_AUTH_` secret is set.
+The two passwords and `DREFYN_API_RATE_LIMIT_KEY` reach it as secret files, never as
+environment, so `docker inspect` shows none of them. The URLs carry the passwords unescaped, so
+they may hold letters, digits and `. _ ~ -` only; the generated ones are hex.
+
+On `SIGTERM` it stops taking connections, lets requests in flight finish for up to 8 seconds,
+then closes its pools and exits 0. Behind a proxy, set `DREFYN_TRUSTED_PROXY_HOPS` as for the
+dashboard (see [Behind a reverse proxy](#behind-a-reverse-proxy)), or every client shares the
+proxy's failure limit.
 
 ## The parse host
 

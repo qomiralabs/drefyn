@@ -35,6 +35,10 @@ without one of those.
   the transaction is rolled back and the call fails with that first failure.
 - `poolSizeOf(db)` reads the pool size, for limits that must stay below it.
   `DREFYN_DATABASE_POOL_MAX` sizes the reader pool as well, so raising it raises both.
+- `pingDatabase(db, timeoutMs = 1000)` sends `select 1` on an app or reader pool, outside any
+  transaction, for a readiness check. It fails with `DB_UNAVAILABLE` when no connection comes
+  within the pool wait or the answer does not come within `timeoutMs` (1 to 10000), and it
+  refuses an auth handle.
 - `withOrganization(db, org, work, { timeoutMs })` takes an `OrganizationRef` with no
   `projectId` key at all, for organization work such as members, plans and the credit
   ledger. Its transaction type holds only tables without `project_id`, and project tables
@@ -367,7 +371,7 @@ with `is_local` false) in any tracked file.
   `postgres`; anywhere else it must be `verify-full`.
 - `createDatabase`, `createPublishedDatabase`, `createProtectedReaderDatabase`,
   `createAuthDatabase`, `withTenant`, `withOrganization`, `withPublishedReader`,
-  `withProtectedReader`, `withUser`, `withAuth`, `closeDatabase`,
+  `withProtectedReader`, `withUser`, `withAuth`, `closeDatabase`, `pingDatabase`,
   `withApiKeyLimiter`, `toSafeInteger`, `newId`: see Tenant access. `AuthSchema`,
   `UserSchema` and `ApiKeyLimiterSchema` are the transaction types.
 - `reserveAuthRateWindows`, `reserveApiKeyFailureWindows`, `deleteExpired`,
