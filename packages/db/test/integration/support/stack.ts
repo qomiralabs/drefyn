@@ -136,3 +136,21 @@ export async function schemaDump(
     .filter((line) => !/^\\(un)?restrict /.test(line))
     .join('\n');
 }
+
+// Dumps one database into another, schema and data, inside the container: a plain dump read
+// back by psql, as a self host backup is restored.
+export async function dumpInto(source: string, target: string): Promise<void> {
+  for (const name of [source, target]) {
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) throw new Error(`unsafe database name ${name}`);
+  }
+  const result = await compose([
+    'exec',
+    '-T',
+    'postgres',
+    'sh',
+    '-c',
+    `pg_dump -U postgres -d ${source} | psql --no-psqlrc -q -v ON_ERROR_STOP=1 -U postgres -d ${target}`,
+  ]);
+  if (result.code !== 0)
+    throw new Error(`dump of ${source} into ${target} failed: ${result.stderr}`);
+}

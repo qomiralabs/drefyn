@@ -73,6 +73,16 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'retrieval.v1',
+    kind: 'release',
+    owner: 'Divine572',
+    description:
+      'Publish copies chunks and ranking terms for retrieval, and the retrieval API reads them.',
+    created: '2026-11-16',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

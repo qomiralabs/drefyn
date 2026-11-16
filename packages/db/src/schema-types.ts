@@ -46,6 +46,8 @@ const SCALARS: Readonly<Record<string, string>> = {
   // pgvector's text form, '[1,2,3]', until a parser is registered for it.
   vector: 'string',
   halfvec: 'string',
+  // The text form, '''word'':1,3'; only Postgres reads it, as ranking runs in SQL.
+  tsvector: 'string',
   date: 'Date',
   timestamp: 'Date',
   timestamptz: 'Date',
