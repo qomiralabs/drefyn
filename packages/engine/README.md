@@ -300,6 +300,24 @@ address.
 A filter backfill also fills the published slot of items already live, from the fields they were
 published with, so a slot turning `ready` covers them.
 
+### Published chunks
+
+With `retrieval.v1` on, off in production, publish also copies the version's chunks into
+`app.published_chunks` in the same transaction, with the page path (the slug chain from the root,
+a node id where a node has no slug), the title (the version's `title` field, else its first
+heading, else the slug) and the visibility resolved then. Older versions keep their rows with
+`is_current` off, so a pin can still name them; republishing one turns its rows back on. A failed
+flag read refuses the publish as `publish.unavailable` rather than skipping the copy.
+
+The same transaction keeps three ranking tables equal to the public current chunks:
+`published_project_term_totals` (chunk count and total length), `published_term_stats` (document
+frequency per lexeme) and `published_chunk_terms` (term frequency per lexeme and chunk). Only
+public current chunks have rows there, so tightening a page removes its postings in the
+transaction that flips it, and a word on a protected page never shows up in a count. Publishes
+that move public chunks in one project queue on a transaction lock, then apply the change in one
+statement, upserts in lexeme order. A chunk that stays public and current keeps its postings.
+The log line carries chunk, posting and lexeme counts, never text or lexemes.
+
 ## Configuration
 
 | Key                                       | Default | Meaning                                               |
@@ -324,7 +342,11 @@ alone allows far larger rows. Both limits answer `engine.too_large`.
 pnpm --filter @drefyn/engine test
 COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine test:integration
 COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench
+COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench -- publish
 ```
+
+`bench` runs every bench in turn; names after `--` run only those (`chunk`, `save`, `query`,
+`tree`, `published`, `publish`).
 
 Integration files end in `.integration.test.ts` and need a stack from `scripts/selfhost.sh up`.
 `test/versions.property.test.ts` is one too. They start a real parse host, skip with the reason

@@ -8,6 +8,7 @@ import type { StoredFields } from './fields.ts';
 import { parseSlotMap, slotRowOf, SLOT_COLUMNS } from './filter-slots.ts';
 import { assertWritable } from './limits.ts';
 import { publishRefusal, STRICT_WORKFLOW, type PublishWorkflow } from './publish-rules.ts';
+import { writePublishedChunks, type ChunkCopy } from './published-chunks.ts';
 import type { EngineTx } from './store.ts';
 import type {
   Actor,
@@ -244,6 +245,13 @@ async function writeVersion(
           published_at = now()`.execute(tx);
 }
 
+export interface ChunkCopyOptions {
+  // Off writes no chunk or term row, so publish behaves as it did before retrieval.
+  readonly copyChunks: boolean;
+  // Told the counts once the copy is written, for the log line.
+  readonly copied?: (copy: ChunkCopy) => void;
+}
+
 // The whole publish, in the caller's transaction. Checks run before any write: the key, then
 // the gate, then the head. A refusal at any point leaves nothing behind.
 export async function publishVersion(
@@ -251,6 +259,7 @@ export async function publishVersion(
   tenant: TenantRef,
   input: PublishInput,
   renderPolicyVersion: number,
+  chunks: ChunkCopyOptions = { copyChunks: false },
 ): Promise<PublishReceipt> {
   const node = await lockNode(tx, tenant, input.nodeId);
   const prior = await tx
@@ -321,6 +330,15 @@ export async function publishVersion(
 
   await writeVersion(tx, tenant, node.typeId, input, renderPolicyVersion);
   await writeFilterRow(tx, tenant, node.typeId, input, facts);
+  if (chunks.copyChunks) {
+    // TODO(#383): copy the effective visibility once publish computes it; every page is public
+    // until a node can be protected.
+    const copy = await writePublishedChunks(tx, tenant, input.nodeId, {
+      versionId: input.versionId,
+      visibility: 'public',
+    });
+    chunks.copied?.(copy);
+  }
   await tx
     .updateTable('nodes')
     .set({ lifecycle: 'published', published_version_id: input.versionId, updated_at: new Date() })

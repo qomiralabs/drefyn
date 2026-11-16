@@ -2,7 +2,24 @@ import { closeDatabase, type Database } from '@drefyn/db';
 import { idOf } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { admin, buildEngine, save, seed, type Built, type Seeded } from '../support/fixture.ts';
+import {
+  databaseStore,
+  DEFAULT_ENGINE_CONFIG,
+  type EngineStore,
+  type NodeId,
+  type VersionId,
+} from '../../src/index.ts';
+import {
+  ACTOR,
+  admin,
+  buildEngine,
+  key,
+  newNode,
+  save,
+  seed,
+  type Built,
+  type Seeded,
+} from '../support/fixture.ts';
 import { describeWithStack } from '../support/presence.ts';
 import { openApp } from '../support/published.ts';
 import {
@@ -42,6 +59,15 @@ select (select count(*) from app.published_versions where ${scope}) || ' ' ||
 
 class Injected extends Error {}
 
+const publishInput = (seeded: Seeded, nodeId: NodeId, versionId: VersionId) => ({
+  tenant: seeded.tenant,
+  nodeId,
+  versionId,
+  expectedHeadVersionId: versionId,
+  actor: ACTOR,
+  idempotencyKey: key(),
+});
+
 describeWithStack('publish copies chunks', () => {
   beforeAll(async () => {
     app = await openApp();
@@ -65,22 +91,17 @@ describeWithStack('publish copies chunks', () => {
     if (!made.ok) throw new Error(made.error.code);
     const nodeId = made.value.nodeId;
     const saved = await save(built, seeded, nodeId, null, PAGE);
-    const copy = await publishChunks(app, seeded, nodeId, {
-      versionId: saved.versionId,
-      visibility: 'public',
-    });
+    const done = await built.engine.publish(publishInput(seeded, nodeId, saved.versionId));
+    expect(done.ok).toBe(true);
     const drafts = await admin(`
 select ord || '|' || array_to_string(heading_path, '>') || '|' || encode(body_sha256, 'hex')
   from app.chunks where version_id = '${saved.versionId}' order by ord;`);
     const copies = await admin(`
 select ord || '|' || array_to_string(heading_path, '>') || '|' || encode(body_sha256, 'hex')
   from app.published_chunks where version_id = '${saved.versionId}' order by ord;`);
-    expect(drafts.trim().split('\n').length).toBeGreaterThanOrEqual(3);
+    const rows = drafts.trim().split('\n');
+    expect(rows.length).toBeGreaterThanOrEqual(3);
     expect(copies).toBe(drafts);
-    expect(copy).toMatchObject({
-      chunks: drafts.trim().split('\n').length,
-      publicChunks: copy.chunks,
-    });
     const resolved = await admin(`
 select distinct page_path || '|' || title || '|' || visibility || '|' || is_current
   from app.published_chunks where version_id = '${saved.versionId}';`);
@@ -89,7 +110,79 @@ select distinct page_path || '|' || title || '|' || visibility || '|' || is_curr
 select count(*) from app.published_chunks p join app.chunks c
     on c.version_id = p.version_id and c.ord = p.ord and c.body = p.body
  where p.version_id = '${saved.versionId}';`);
-    expect(same.trim()).toBe(String(copy.chunks));
+    expect(same.trim()).toBe(String(rows.length));
+    // The version row and the chunks came from one publish.
+    const version = await admin(
+      `select is_current from app.published_versions where version_id = '${saved.versionId}';`,
+    );
+    expect(version.trim()).toBe('t');
+    expect(await storedTerms(app, seeded.tenant)).toEqual(
+      await recomputedTerms(app, seeded.tenant),
+    );
+  });
+
+  it('republishing through publish flips the old rows and keeps them', async () => {
+    const seeded = await seed();
+    const nodeId = await newNode(built.engine, seeded);
+    const first = await save(built, seeded, nodeId, null, '# One\n\nFirst words.\n');
+    expect((await built.engine.publish(publishInput(seeded, nodeId, first.versionId))).ok).toBe(
+      true,
+    );
+    const second = await save(built, seeded, nodeId, first.versionId, '# Two\n\nSecond words.\n');
+    expect((await built.engine.publish(publishInput(seeded, nodeId, second.versionId))).ok).toBe(
+      true,
+    );
+    const rows = await chunkRows(seeded.tenant, nodeId);
+    expect(
+      rows.filter((r) => r.startsWith(first.versionId)).every((r) => r.includes(' false ')),
+    ).toBe(true);
+    expect(
+      rows.filter((r) => r.startsWith(second.versionId)).every((r) => r.includes(' true ')),
+    ).toBe(true);
+    expect(rows.some((r) => r.startsWith(first.versionId))).toBe(true);
+    expect(await storedTerms(app, seeded.tenant)).toEqual(
+      await recomputedTerms(app, seeded.tenant),
+    );
+  });
+
+  it('writes no chunk or term row with retrieval.v1 off, and publishes as before', async () => {
+    const off = buildEngine(app, {
+      flags: { evaluate: (name) => Promise.resolve({ value: name !== 'retrieval.v1' }) },
+    });
+    const seeded = await seed();
+    const nodeId = await newNode(off.engine, seeded);
+    const saved = await save(off, seeded, nodeId, null, PAGE);
+    const done = await off.engine.publish(publishInput(seeded, nodeId, saved.versionId));
+    expect(done.ok).toBe(true);
+    expect(await counts(seeded)).toBe('1 0 0 0 0');
+  });
+
+  it('leaves no version, chunk or term row when the publish transaction fails at the end', async () => {
+    const real = databaseStore(app, DEFAULT_ENGINE_CONFIG);
+    const failing: EngineStore = {
+      gate: real.gate,
+      tenant: (tenant, work, options) =>
+        real.tenant(
+          tenant,
+          async (tx) => {
+            const value = await work(tx);
+            // Only a publish wrote these; fail it after its last write.
+            const { rows } = await sql<{ n: string }>`
+              select count(*)::text as n from app.published_chunk_terms`.execute(tx);
+            if (Number(rows[0]?.n ?? 0) > 0) throw new Injected('after the publish');
+            return value;
+          },
+          options,
+        ),
+    };
+    const failingEngine = buildEngine(app, { store: failing });
+    const seeded = await seed();
+    const nodeId = await newNode(failingEngine.engine, seeded);
+    const saved = await save(failingEngine, seeded, nodeId, null, PAGE);
+    await expect(
+      failingEngine.engine.publish(publishInput(seeded, nodeId, saved.versionId)),
+    ).rejects.toBeInstanceOf(Injected);
+    expect(await counts(seeded)).toBe('0 0 0 0 0');
   });
 
   it('prefers the title field and falls back to the slug, and stands a node id in for a missing slug', async () => {
