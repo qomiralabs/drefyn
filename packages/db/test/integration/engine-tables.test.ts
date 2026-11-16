@@ -958,6 +958,9 @@ describeWithStack('the engine tables', () => {
         'content_types|content_types_tenant_stats|{d,f}',
         'node_versions|node_versions_tenant_stats|{d,f}',
         'nodes|nodes_tenant_stats|{d,f}',
+        // Not foreign key targets: the reader's own lists plan on these.
+        'published_filter_rows|published_filter_rows_tenant_stats|{d,f}',
+        'published_versions|published_versions_tenant_stats|{d,f}',
       ]);
     });
 
