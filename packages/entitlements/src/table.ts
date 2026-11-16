@@ -69,6 +69,9 @@ export const LIMITS = {
   'org.status_pages': row('org', [1, 2, 5, 20, atLeast(20)]),
   // Free allows one public page only; from Starter a page may be of any type.
   'org.private_status_pages': row('org', [0, 2, 5, 20, atLeast(20)]),
+  // Credits granted each period, one pool per organization. A self host runs its own
+  // models, so nothing meters it.
+  'org.ai_credits_monthly': row('org', [unset, unset, unset, unset, unset]),
 
   'docs.pages': row('docs', [50, 300, atLeast(300), atLeast(300), atLeast(300)]),
   'docs.storage_bytes': row('docs', [
@@ -234,6 +237,13 @@ export const FEATURES = {
 
   'org.sso_saml': feature('org', 'enterprise'),
   'org.audit_logs': feature('org', 'enterprise'),
+  // Model access is gated by kind, never by name: which models are premium is decided
+  // with their rates, so a new model needs no plan change.
+  'org.ai_model_picker': feature('org', 'free'),
+  'org.ai_premium_models': feature('org', 'starter'),
+  'org.ai_byom': feature('org', 'growth'),
+  // Top up packs are sold by the hosted service; a self host brings its own key instead.
+  'org.ai_credit_packs': feature('org', 'starter', false),
 } as const satisfies Record<string, FeatureRow>;
 
 export type FeatureKey = keyof typeof FEATURES;

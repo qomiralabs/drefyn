@@ -9,6 +9,7 @@ import { newDeviceNotice, recordDevice } from './devices.ts';
 import type { AuthNoticeMailer } from './email-change.ts';
 import type { SignedIn } from './email-sign-in.ts';
 import { AuthError } from './errors.ts';
+import { sendFactorAlert, sendFactorNotice, startNow, type Later } from './factor-notices.ts';
 import { FACTOR_CHALLENGE_ATTEMPTS, lockFactor } from './factor-rows.ts';
 import {
   factorError,
@@ -53,8 +54,11 @@ export interface FactorChallengesDeps {
   readonly authDb?: AuthDatabase;
   readonly store?: SessionStore;
   readonly logger: AuthLogger;
-  // For the new device notice, which waits until the factor has passed.
+  // For the new device notice, which waits until the factor has passed, and the factor's
+  // own notices.
   readonly mailer: Partial<AuthNoticeMailer>;
+  // Where a failed attempt's notice runs, so the refusal does not wait on mail.
+  readonly later?: Later;
   readonly limiter?: RateLimiter;
   readonly metrics?: AuthMetrics;
   readonly random?: (bytes: number) => Uint8Array;
@@ -125,6 +129,8 @@ export function createFactorChallenges(
         }));
   const random = deps.random ?? ((n: number) => randomBytes(n));
   const devices = { store, logger: deps.logger, random };
+  const later = deps.later ?? startNow;
+  const notices = { store, limiter, logger: deps.logger, mailer: deps.mailer };
   const { idleDays, absoluteDays } = config.session;
   const clear = (name: string): CookieSpec => ({ name, value: '', maxAgeSeconds: 0 });
   const report = (kind: FactorKind, outcome: FactorOutcome | 'origin', userId?: UserId) => {
@@ -246,15 +252,36 @@ export function createFactorChallenges(
             secretHash: sha256(secret),
             absoluteDays,
           });
-          return { ok: true as const, session, previousStep: checked.previousStep };
+          return { ok: true as const, session, check: checked };
         });
         if (!outcome.ok) {
           const reason = outcome.reason === 'not_enrolled' ? 'expired' : outcome.reason;
           report(kind, reason, userId);
+          const alert = outcome.reason === 'expired' ? null : outcome.alert;
+          if (alert !== null) later(() => sendFactorAlert(notices, userId, alert));
           return fail(factorError(reason));
         }
-        report(kind, outcome.previousStep ? 'matched_previous_step' : 'passed', userId);
-        return ok(await signedIn(b, outcome.session, secret, proved));
+        const { check } = outcome;
+        report(kind, check.previousStep ? 'matched_previous_step' : 'passed', userId);
+        const done = await signedIn(b, outcome.session, secret, proved);
+        if (check.codesLeft === null) return ok(done);
+        // A recovery code at sign in usually means a lost phone, so the person hears it
+        // and how many codes remain.
+        const used = () =>
+          sendFactorNotice(
+            notices,
+            userId,
+            { kind: 'recovery_code_used', codesLeft: check.codesLeft ?? 0, at: check.at },
+            outcome.session.email,
+          );
+        const device = done.send;
+        return ok({
+          ...done,
+          send: async () => {
+            await device?.();
+            await used();
+          },
+        });
       } catch (error) {
         if (error instanceof Rollback) {
           report(kind, 'expired', userId);

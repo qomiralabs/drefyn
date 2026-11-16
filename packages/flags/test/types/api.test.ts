@@ -46,6 +46,7 @@ describe('flag names', () => {
       | 'status.control_checks'
       | 'status.majority_default'
       | 'status.auto_apply_default'
+      | 'auth.totp'
     >();
   });
 

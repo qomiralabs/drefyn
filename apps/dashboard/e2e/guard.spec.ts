@@ -120,6 +120,9 @@ async function barEntries(page: Parameters<typeof openShell>[0]): Promise<string
   await openShell(page, '/acme');
   await page.keyboard.press('ControlOrMeta+k');
   await expect(commandBar(page)).toBeVisible();
+  // The frame shows before its results code lands, with skeleton rows and no options. The
+  // loaded field is the combobox, and it arrives with the list in one render.
+  await expect(commandBar(page).getByRole('combobox')).toBeVisible();
   return commandBar(page).getByRole('option').allTextContents();
 }
 

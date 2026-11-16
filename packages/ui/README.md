@@ -40,6 +40,14 @@ The tests fail if they drift.
 - `surfaceTokensCss`: `docs` loads Inter 400 and 600 and JetBrains Mono 400 from `/fonts/`, with
   Chinese and Arabic following Inter through the reader's system fonts. `status` loads no font:
   `--dr-font-sans` and `--dr-font-mono` are system stacks, and figures stay tabular.
+- The `docs` family (`tokens.docs`, `--dr-docs-*`) is the reader palette for published docs
+  sites only: surfaces, rules, text, accent, state text, code colours, HTTP method colours and
+  fills, the `required` badge, docs layout measures and the 8 and 12 px card and frame radii, in
+  light and dark. Only `docs` in `surfaceTokensCss` carries it, and only `apps/docs-site` and
+  the docs templates in `@drefyn/site` may read it (`test/tokens-docs-scope.test.ts`). Method
+  and `required` colours are not state: a method badge always carries the method word, and a
+  state always carries its word and icon. `docsPairs` in `src/tokens/pairs.ts` holds every
+  docs pair to WCAG 2.2 AA in both schemes.
 - `echartsThemes`, `chartMotion(reducedMotion)`, `cubicBezier`: chart themes, and the motion
   options to apply with `chart.setOption(chartMotion(reduced))`. Reduced motion turns chart
   animation off.
@@ -126,7 +134,8 @@ The tests fail if they drift.
 - The reading measure sets 68 to 72 characters per line on average, and no line over 78,
   measured with the shipped Inter.
 - Under reduced motion nothing travels and no fade runs past 120 ms. Timers are untouched.
-- `tokens.css` stays under 2.5 KB gzipped.
+- `tokens.css` and the status CSS stay under 2.5 KB gzipped; the docs CSS, with the reader
+  palette, under 4.5 KB. Pages are pruned to the properties they read before they ship.
 - Fonts are Latin subsets with their full OFL licences beside them in `src/fonts`. Each file has
   its source tarball, version and SHA-256 in `ASSETS.md`, and the tests check all three, plus
   the weight class against the file name.

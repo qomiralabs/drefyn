@@ -97,6 +97,8 @@ export interface OAuthTables {
   readonly email_challenges: Row[];
   readonly password_credentials: Row[];
   readonly sessions: Row[];
+  // A row here is a confirmed second factor; the store reads no other column of it.
+  readonly totp_credentials: Row[];
 }
 
 export function oauthStore() {
@@ -107,6 +109,7 @@ export function oauthStore() {
     email_challenges: [],
     password_credentials: [],
     sessions: [],
+    totp_credentials: [],
   };
   // The user context of the transaction in flight, for app.current_user_id().
   let currentUser: string | undefined;

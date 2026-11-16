@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { refused } from './result.ts';
 import { rootSchema } from './root-schema.ts';
 import type { JobResult } from './result.ts';
-import type { MdxRoot, ParseResult, PrintResult } from './types.ts';
+import type { MdxRoot, ParseResult, PrintResult, ReaderPage } from './types.ts';
 
 const blockBytes = z.looseObject({
   source: z.looseObject({ raw: z.string(), gapBefore: z.string() }),
@@ -37,21 +37,62 @@ const printedSchema = z.looseObject({
   timing: timingSchema.optional(),
 });
 
+const unitSchema = z.strictObject({
+  heading: z.strictObject({ depth: z.int().min(1).max(6), text: z.string() }).optional(),
+  text: z.string(),
+});
+const readerSchema = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('ok'), units: z.array(unitSchema) }),
+  z.strictObject({ state: z.literal('not_renderable') }),
+]);
+
+// A render keeps no more text than the page holds, plus a back reference for each footnote.
+export const maxReaderChars = (maxBytes: number) => maxBytes * 2 + 65_536;
+
+export interface ReaderAsk {
+  readonly asked: boolean;
+  readonly maxBytes: number;
+}
+
+// Reader text goes on to search, the assistant and MCP, and it comes from where hostile pages
+// run. A heading's text is its unit's text, so it is checked and not counted twice.
+function readerHolds(reader: unknown, maxBytes: number): reader is ReaderPage {
+  const checked = readerSchema.safeParse(reader);
+  if (!checked.success) return false;
+  if (checked.data.state === 'not_renderable') return true;
+  let chars = 0;
+  for (const { heading, text } of checked.data.units) {
+    if (heading !== undefined && heading.text !== text) return false;
+    chars += text.length;
+  }
+  return chars <= maxReaderChars(maxBytes);
+}
+
+// Text the caller did not ask for goes, so nothing unchecked can be stored by mistake.
+function withReader<T extends ParseResult | PrintResult>(answer: T, ask: ReaderAsk): T {
+  if (!answer.ok) return answer;
+  const { reader, ...value } = answer.value;
+  if (!ask.asked) return reader === undefined ? answer : { ...answer, value };
+  return readerHolds(reader, ask.maxBytes) ? answer : (refused('mdx.parse_failed') as T);
+}
+
+const NOT_ASKED: ReaderAsk = { asked: false, maxBytes: 0 };
+
 // A caller stores what these hand back, so a malformed answer must not look like a success.
-export function checkParsed(answer: JobResult, source: string): ParseResult {
+export function checkParsed(answer: JobResult, source: string, ask = NOT_ASKED): ParseResult {
   if (!answer.ok) return answer;
   const parsed = parsedSchema.safeParse(answer.value);
   if (!parsed.success) return refused('mdx.parse_failed');
   const tree = parsed.data.ast as unknown as MdxRoot;
-  return bytesOfTree(tree) === source ? answer : refused('mdx.parse_failed');
+  if (bytesOfTree(tree) !== source) return refused('mdx.parse_failed');
+  return withReader(answer as ParseResult, ask);
 }
 
-export function checkPrinted(answer: JobResult): PrintResult {
+export function checkPrinted(answer: JobResult, ask = NOT_ASKED): PrintResult {
   if (!answer.ok) return answer;
   const printed = printedSchema.safeParse(answer.value);
   if (!printed.success) return refused('mdx.parse_failed');
   const tree = printed.data.ast as unknown as MdxRoot;
-  return bytesOfTree(tree) === printed.data.text
-    ? (answer as PrintResult)
-    : refused('mdx.parse_failed');
+  if (bytesOfTree(tree) !== printed.data.text) return refused('mdx.parse_failed');
+  return withReader(answer as PrintResult, ask);
 }

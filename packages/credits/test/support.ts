@@ -87,6 +87,7 @@ export function signed(entry: CreditEntry): number {
   switch (entry.kind) {
     case 'grant':
     case 'reversal':
+    case 'settlement':
       return entry.amount;
     case 'spend':
     case 'expiry':
@@ -99,7 +100,8 @@ export function sumOf(entries: readonly CreditEntry[]): number {
 }
 
 // The ledger's whole observable state for one organization. Generated IDs differ between
-// two ledgers, so each entry ID is replaced by its position and a reversal by its target's.
+// two ledgers, so each entry ID is replaced by its position, and a reversal or settlement
+// target by its target's.
 export async function snapshot(
   ledger: CreditLedger,
   org: OrganizationRef,
@@ -111,6 +113,7 @@ export async function snapshot(
     entries: entries.map((entry, index) => {
       const copy: Record<string, unknown> = { ...entry, id: index };
       if (entry.kind === 'reversal') copy['reverses'] = position.get(entry.reverses) ?? 'missing';
+      if (entry.kind === 'settlement') copy['settles'] = position.get(entry.settles) ?? 'missing';
       return copy;
     }),
   };

@@ -26,6 +26,7 @@
     "@drefyn/address": "workspace:*",
     "@drefyn/db": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
+    "@drefyn/seal": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "kysely": "0.29.7",
     "openid-client": "6.8.8",
