@@ -142,7 +142,6 @@ type Transform = (raw: unknown, state: RunState) => unknown;
 
 interface Build {
   readonly resolvers: ResolverSet;
-  readonly all: readonly ContentSchema[];
   readonly entities: ReadonlyMap<TypeId, GraphQLObjectType>;
 }
 
@@ -171,13 +170,11 @@ class TypeBuilder {
 
   // An empty target list means any type in the project.
   #target(field: FieldDef & { kind: 'reference' }, path: readonly string[]): Target {
-    const known =
-      field.to.length === 0
-        ? this.#build.all
-        : this.#build.all.filter((type) => field.to.includes(type.typeId));
-    const types = known.flatMap((type) => {
-      const entity = this.#build.entities.get(type.typeId);
-      return entity === undefined ? [] : [{ id: type.typeId, entity }];
+    const entities = this.#build.entities;
+    const ids = field.to.length === 0 ? [...entities.keys()] : field.to;
+    const types = ids.flatMap((id) => {
+      const entity = entities.get(id);
+      return entity === undefined ? [] : [{ id, entity }];
     });
     const allowed = new Set(types.map((type) => type.id));
     const [only] = types;
@@ -494,7 +491,7 @@ function emit<C extends GraphqlContext>(
     seen.add(folded);
   }
   const entities = new Map<TypeId, GraphQLObjectType>();
-  const build: Build = { resolvers, all: sorted, entities };
+  const build: Build = { resolvers, entities };
   const builders = sorted.map((type) => new TypeBuilder(build, type));
   for (const [index, builder] of builders.entries()) {
     const type = sorted[index];
