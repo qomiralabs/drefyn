@@ -6,6 +6,7 @@ import type { Server } from 'node:http';
 import next from 'next';
 import { startExpiryJob } from './src/server/expiry-job.ts';
 import { logInfo } from './src/server/log.ts';
+import { startSsoDomainRecheckJob } from './src/server/sso-domain-recheck.ts';
 import { drainMailer } from './src/server/mail-holder.ts';
 import { markClientIpWrapper } from './src/server/wrapper-marker.ts';
 import { createWrapper, startWrapper } from './src/server/wrapper.ts';
@@ -50,6 +51,9 @@ server.listen(Number(rawPort), hostname, () => {
 // Here and not in Next's instrumentation, so it runs only in the production server and stops
 // with it. Every server starts one; the database picks who does the work.
 const expiryJob = startExpiryJob(process.env);
+// The same: every server ticks, each domain is looked up at most once a day, and nothing
+// runs while auth.team_sso is off.
+const ssoRecheck = startSsoDomainRecheckJob(process.env);
 
 // Inside compose's default 10 s stop grace.
 const MAIL_DRAIN_MS = 8000;
@@ -59,6 +63,7 @@ const MAIL_DRAIN_MS = 8000;
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     expiryJob.stop();
+    ssoRecheck.stop();
     server.close(() => {
       void drainMailer(MAIL_DRAIN_MS).then(({ dropped }) => {
         if (dropped > 0) logInfo('dashboard.email_dropped', { dropped });

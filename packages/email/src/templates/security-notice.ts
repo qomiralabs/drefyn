@@ -31,7 +31,17 @@ const CHECK_PASSWORD =
 const CHECK_MEMBERS =
   'If you did not expect this, review the members in your organization settings.';
 
+const CHECK_SSO =
+  'If you did not expect this, review single sign on in your organization settings.';
+
 const noRows = () => [];
+
+const domainRows = (
+  notice: NoticeOf<'sso_domain_claimed' | 'sso_domain_verified' | 'sso_domain_unverified'>,
+) => [
+  { label: 'Organization', value: notice.organizationName },
+  { label: 'Domain', value: notice.domain },
+];
 
 const identityRows = (notice: NoticeOf<'identity_linked' | 'identity_unlinked'>) => [
   { label: 'Provider', value: PROVIDER[notice.provider] },
@@ -182,6 +192,36 @@ export const NOTICE_TEMPLATES: NoticeTemplates = {
       'A member changed to a role that cannot hold API keys, so their keys were revoked. Anything using those keys has stopped working.',
     rows: memberRows,
     next: CHECK_MEMBERS,
+    fineprint: OWNER_FINEPRINT,
+  },
+  sso_domain_claimed: {
+    subject: 'A domain was claimed for single sign on in your Drefyn organization',
+    preheader: OWNER_PREHEADER,
+    heading: 'A domain was claimed for single sign on',
+    lead: () =>
+      'Someone in this organization started proving that it controls this domain. Nothing changes until its DNS record is in place and the domain is verified.',
+    rows: domainRows,
+    next: CHECK_SSO,
+    fineprint: OWNER_FINEPRINT,
+  },
+  sso_domain_verified: {
+    subject: 'A domain was verified for single sign on in your Drefyn organization',
+    preheader: OWNER_PREHEADER,
+    heading: 'A domain was verified for single sign on',
+    lead: () =>
+      "People with an address at this domain can now be sent to this organization's identity provider to sign in.",
+    rows: domainRows,
+    next: CHECK_SSO,
+    fineprint: OWNER_FINEPRINT,
+  },
+  sso_domain_unverified: {
+    subject: 'A domain lost its single sign on verification in your Drefyn organization',
+    preheader: OWNER_PREHEADER,
+    heading: 'A domain is no longer verified',
+    lead: () =>
+      'The DNS record that proved this domain was missing on three daily checks in a row, so the domain is no longer verified. Single sign on stops for addresses at this domain until it is verified again.',
+    rows: domainRows,
+    next: 'If you still use this domain, publish its DNS record again and verify it in your organization settings.',
     fineprint: OWNER_FINEPRINT,
   },
 };
