@@ -168,7 +168,8 @@ commands so `deploy/.env` is ready when it does.
 
 `up` also writes three dashboard keys to `deploy/.env`, each exactly 32 random bytes in
 unpadded base64url: `DREFYN_AUTH_SECRET`, `DREFYN_AUTH_INVITATION_BLOCK_KEY` and
-`DREFYN_API_RATE_LIMIT_KEY`. It never prints them. A `deploy/.env` from before a key existed
+`DREFYN_API_RATE_LIMIT_KEY`. It writes a fourth, `DREFYN_AUTH_TOTP_KEYS`, as one
+`<id>:<key>` entry with a random 8 character hex id. It never prints them. A `deploy/.env` from before a key existed
 gets that key appended by `up` or `upgrade`; one already there is never replaced. To make one
 by hand:
 
@@ -200,6 +201,14 @@ lifts every block at once, and people who asked not to be invited again can be. 
 if it leaked, knowing that cost: replace the value and restart. There is no previous key for
 it. Keep it in the same backups as the database, because a restored database with a lost key
 has the same effect.
+
+### `DREFYN_AUTH_TOTP_KEYS` lives outside the database backups
+
+It seals each person's authenticator secret. The first key seals and every listed key opens,
+so a rotation prepends a key. Unset, nobody can turn on authenticator codes and everything
+else works. Unlike the block key, keep a copy of it **outside** the database backups: a backup
+holding both gives up every enrolled person's secret. Lose it, and people enrolled under it
+need their recovery codes.
 
 ### Rotating `DREFYN_API_RATE_LIMIT_KEY`
 

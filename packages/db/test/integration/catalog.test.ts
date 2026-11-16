@@ -940,6 +940,15 @@ create policy membership_insert_origin on app.memberships as restrictive for ins
 create policy organization_insert_tier on app.organizations as permissive for insert to drefyn_app
   with check ((plan_tier = app.install_tier()) and (read_only_since is null));`,
   },
+  // Without the enforcement terms a new organization could start with SSO required.
+  'the organization insert guard without its enforcement terms': {
+    rule: 'restrictive_policy',
+    object: 'app.organizations',
+    mentions: ['organization_insert_tier', 'WITH CHECK'],
+    up: () => `drop policy organization_insert_tier on app.organizations;
+create policy organization_insert_tier on app.organizations as restrictive for insert to drefyn_app
+  with check ((plan_tier = app.install_tier()) and (read_only_since is null));`,
+  },
   'app.install_tier() off the app function allow list': {
     rule: 'app_privilege',
     object: 'app.install_tier()',

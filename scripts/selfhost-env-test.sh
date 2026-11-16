@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Proves the installer generates the auth keys once, in the right shape, and never prints a
-# value. Needs no Docker: a fake docker on PATH fails every call, so up stops at the project
-# guard, right after it wrote deploy/.env. Runs in a scratch copy of the checkout, so the
+# value, and that upgrade adds a missing second factor keyring but never replaces one. Needs
+# no Docker: a fake docker on PATH fails every call, so up and upgrade stop at the project
+# guard, right after they wrote deploy/.env. Runs in a scratch copy of the checkout, so the
 # real deploy/.env is never read or written.
 set -euo pipefail
 
@@ -17,6 +18,7 @@ printf '#!/bin/sh\necho "fake docker: not available in this test" >&2\nexit 1\n'
 chmod +x "$scratch/bin/docker"
 
 KEYS="DREFYN_AUTH_SECRET DREFYN_AUTH_INVITATION_BLOCK_KEY DREFYN_API_RATE_LIMIT_KEY"
+TOTP=DREFYN_AUTH_TOTP_KEYS
 
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
@@ -26,13 +28,15 @@ fail() {
   failures=$((failures + 1))
 }
 
-# up with only the fake docker. Output goes to a file so every case can search it.
-up() {
-  local out="$1"
-  if PATH="$scratch/bin:$PATH" bash "$root/scripts/selfhost.sh" up >"$out" 2>&1; then
-    fail "up stops at the guard when docker fails" "it exited 0"
+# up or upgrade with only the fake docker. Output goes to a file so every case can search it.
+run() {
+  local command="$1" out="$2"
+  if PATH="$scratch/bin:$PATH" bash "$root/scripts/selfhost.sh" "$command" >"$out" 2>&1; then
+    fail "$command stops at the guard when docker fails" "it exited 0"
   fi
 }
+up() { run up "$1"; }
+upgrade() { run upgrade "$1"; }
 
 value_of() { sed -n "s/^$1=//p" "$env_file"; }
 
@@ -45,11 +49,18 @@ is_key() {
   [ "$bytes" = 32 ]
 }
 
+# One keyring entry: an id the key_id column accepts, a colon, then one key as above.
+is_keyring() {
+  [[ "$1" =~ ^[a-z0-9]{1,8}:(.*)$ ]] && is_key "${BASH_REMATCH[1]}"
+}
+
 # Any generated value in any output fails, whole or as its first 12 characters.
 no_value_in() {
   local file="$1" key v leaked=""
-  for key in $KEYS DREFYN_AUTH_PASSWORD; do
+  for key in $KEYS $TOTP DREFYN_AUTH_PASSWORD; do
     v="$(value_of "$key")"
+    # The keyring's id is not secret; its key starts after the colon.
+    v="${v#*:}"
     if [ -n "$v" ] && grep -qF -- "${v:0:12}" "$file"; then leaked+=" $key"; fi
   done
   [ -z "$leaked" ] || {
@@ -75,11 +86,21 @@ for key in $KEYS; do
   fi
 done
 
-distinct="$(for key in $KEYS; do value_of "$key"; done | sort -u | grep -c . || true)"
-if [ "$distinct" = 3 ]; then
-  pass "the three keys differ from one another"
+v="$(value_of "$TOTP")"
+if [ "$(grep -c "^$TOTP=" "$env_file")" = 1 ] && is_keyring "$v"; then
+  pass "$TOTP is generated once as one <id>:<key> entry"
 else
-  fail "the three keys differ from one another"
+  fail "$TOTP is generated once as one <id>:<key> entry" "length ${#v}"
+fi
+
+distinct="$(
+  for key in $KEYS; do value_of "$key"; done
+  value_of "$TOTP" | sed 's/^[^:]*://'
+)"
+if [ "$(sort -u <<<"$distinct" | grep -c . || true)" = 4 ]; then
+  pass "the four keys differ from one another"
+else
+  fail "the four keys differ from one another"
 fi
 
 if leaked="$(no_value_in "$out1")"; then
@@ -99,7 +120,7 @@ fi
 
 # A deploy/.env from before these keys existed: up appends them and changes nothing else.
 old="$scratch/old.env"
-grep -vE "^(DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY)=" \
+grep -vE "^(DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|$TOTP)=" \
   "$env_file" >"$old"
 cp "$old" "$env_file"
 chmod 600 "$env_file"
@@ -114,10 +135,11 @@ added=0
 for key in $KEYS; do
   if is_key "$(value_of "$key")"; then added=$((added + 1)); fi
 done
-if [ "$added" = 3 ] && grep -q "added a generated" "$out3"; then
-  pass "an older deploy/.env gets the three keys appended, named in the output"
+if is_keyring "$(value_of "$TOTP")"; then added=$((added + 1)); fi
+if [ "$added" = 4 ] && grep -q "added a generated" "$out3"; then
+  pass "an older deploy/.env gets the four keys appended, named in the output"
 else
-  fail "an older deploy/.env gets the three keys appended, named in the output" "$(cat "$out3")"
+  fail "an older deploy/.env gets the four keys appended, named in the output" "$(cat "$out3")"
 fi
 if leaked="$(no_value_in "$out3")"; then
   pass "appending keys prints no value"
@@ -132,6 +154,46 @@ if [ "$(value_of DREFYN_AUTH_INVITATION_BLOCK_KEY)" = "$block" ]; then
   pass "an existing block key is never regenerated"
 else
   fail "an existing block key is never regenerated"
+fi
+
+# upgrade on a deploy/.env from before the keyring: the keyring is appended and nothing else
+# moves. Then upgrade again, which must leave the keyring exactly as it was.
+grep -v "^$TOTP=" "$env_file" >"$old"
+cp "$old" "$env_file"
+chmod 600 "$env_file"
+out4="$scratch/upgrade.out"
+upgrade "$out4"
+if [ "$(head -n "$(wc -l <"$old")" "$env_file" | cksum)" = "$(cksum <"$old")" ] &&
+  is_keyring "$(value_of "$TOTP")" && grep -q "added a generated $TOTP" "$out4"; then
+  pass "upgrade appends a missing $TOTP and keeps every other line"
+else
+  fail "upgrade appends a missing $TOTP and keeps every other line" "$(cat "$out4")"
+fi
+if leaked="$(no_value_in "$out4")"; then
+  pass "upgrade prints no value"
+else
+  fail "upgrade prints no value" "found:$leaked"
+fi
+keyring="$(value_of "$TOTP")"
+before="$(cksum <"$env_file")"
+upgrade "$scratch/upgrade-again.out"
+if [ "$(value_of "$TOTP")" = "$keyring" ] && [ "$(cksum <"$env_file")" = "$before" ]; then
+  pass "upgrade keeps an existing $TOTP unchanged"
+else
+  fail "upgrade keeps an existing $TOTP unchanged"
+fi
+
+# An operator's own keyring, rotated to two entries, is never touched either.
+own="$(value_of "$TOTP" | sed 's/^[^:]*:/new:/'),$keyring"
+grep -v "^$TOTP=" "$env_file" >"$old"
+printf '%s=%s\n' "$TOTP" "$own" >>"$old"
+cp "$old" "$env_file"
+upgrade "$scratch/upgrade-own.out"
+up "$scratch/up-own.out"
+if [ "$(value_of "$TOTP")" = "$own" ] && [ "$(cksum <"$env_file")" = "$(cksum <"$old")" ]; then
+  pass "up and upgrade keep an operator's rotated $TOTP as written"
+else
+  fail "up and upgrade keep an operator's rotated $TOTP as written"
 fi
 
 if [ "$failures" -gt 0 ]; then
