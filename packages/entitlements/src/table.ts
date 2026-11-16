@@ -164,6 +164,21 @@ export const FEATURES = {
   'docs.support_integrations': feature('docs', 'scale'),
   'docs.advanced_roles': feature('docs', 'scale'),
   'docs.advanced_analytics': feature('docs', 'scale'),
+  // The pull request check grows by tier. Its staleness part reads docs.staleness_basic,
+  // and its style part reads the style keys, so no tier is decided twice.
+  'docs.pr_check': feature('docs', 'free'),
+  'docs.pr_check_blocking': feature('docs', 'growth'),
+  'docs.style_guide': feature('docs', 'starter'),
+  'docs.style_tone_rules': feature('docs', 'growth'),
+  // llms.txt, project instructions and agent notes. Protected pages never reach them.
+  'docs.agent_context': feature('docs', 'free'),
+  'docs.navigation': feature('docs', 'free'),
+  // Templates and chunk health share a key because the check and the editor warn alike.
+  'docs.page_templates': feature('docs', 'free'),
+  'docs.content_gaps': feature('docs', 'growth'),
+  // Each run spends credits; what a run costs is set in calibration, not here.
+  'docs.answer_checks': feature('docs', 'scale'),
+  // The accuracy check on AI drafts has no key: it rides with the draft on every tier.
 
   'studio.schema_builder': feature('studio', 'free'),
   'studio.rest_api': feature('studio', 'free'),

@@ -479,9 +479,10 @@ export const RESTRICTIVE_POLICIES: readonly PolicyEntry[] = [
     command: 'insert',
     roles: ['drefyn_app'],
     using: null,
-    withCheck: '((plan_tier = app.install_tier()) AND (read_only_since IS NULL))',
+    withCheck:
+      "((plan_tier = app.install_tier()) AND (read_only_since IS NULL) AND (sso_enforcement = 'off'::text) AND (sso_enforcement_since IS NULL))",
     reason:
-      'a new organization starts on the install tier and writable; only billing changes either later',
+      'a new organization starts on the install tier, writable and without SSO enforcement; only billing changes the first two and only the settings flow the third',
   },
   {
     name: 'app.project_roles.project_role_delete_actor',

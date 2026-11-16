@@ -122,9 +122,50 @@ const api = parseApiAuthConfig(process.env); // API service
   `emailMac(organizationId, address)` is the stored form of a blocked address, and
   `linkTag(parts)` and `verifyLinkTag(parts, tag)` sign the block link. Neither key can be
   read back from the config.
+- `config.totp` holds the second factor keyring from `DREFYN_AUTH_TOTP_KEYS`, a comma list
+  of `<id>:<key>` (id 1 to 8 lowercase letters or digits, key at least 32 bytes in canonical
+  unpadded base64url, at most 8 entries, no repeated id). Unset, `available` is false,
+  `sealer` is null and startup succeeds. It is apart from `DREFYN_AUTH_SECRET` because a TOTP
+  secret has to be read back for as long as the factor exists, and that secret's rotation
+  drops the old value after a day. `issuer` is `DREFYN_AUTH_TOTP_ISSUER`, 1 to 64 printable
+  ASCII characters with no colon, default `Drefyn`.
+- `aesGcmSealer(keys)` is the open core `SecretSealer`. `seal(plain, { userId })` uses the
+  first key: AES-256-GCM under an HKDF-SHA256 subkey, a random 96 bit nonce per call, and
+  associated data of a version label, the user id and the key id, joined by
+  `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
+  length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
+  with nothing from the row on the error. Key material lives in closures.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.
+
+## Second factor core
+
+Pure functions on `node:crypto`; nothing here reads the database or config.
+
+- `totpCode(secret, step)`: RFC 6238 HMAC-SHA1, 6 digits, 30 second steps, for the 160 bit
+  secret `newTotpSecret()` makes. `matchTotp(secret, typed, currentStep)` accepts the steps in
+  `ACCEPTED_TOTP_STEPS`, the current one and the one before, and returns the step that
+  matched or null; the higher one when both match. Both are always computed and compared
+  with `constantTimeEqual`. Typed spaces are dropped; anything but six ASCII digits is
+  refused. The step set is a constant and no setting reaches it. A code is accepted for up
+  to 60 seconds, a recorded deviation from ASVS 6.5.5; the replay guard (`last_used_step`)
+  is the compensating control.
+- `base32Encode(bytes)` is RFC 4648 base32, upper case and unpadded.
+  `otpauthUri({ issuer, account, secret })` builds the key URI with each label part escaped.
+  The URI holds the secret and the address: never log, store or link it.
+- `newRecoveryCodes(userId)` makes `RECOVERY_CODE_COUNT` (10) codes of 15 random bytes,
+  shown as 24 lowercase Crockford characters in four groups of six, each with its SHA-256
+  hash over a version label, the user id and the code. `recoveryCodeHash(userId, typed)`
+  drops hyphens and gaps and lowercases first. `matchRecoveryCode(userId, typed, rows)`
+  compares every row, with no early exit, and returns the matching row id.
+- `factorVerifyLimits(kind, { userId, ip })` lists the reservations one attempt makes:
+  `totp_verify` on the person, or `recovery_code_verify` on the person and network plus
+  `recovery_code_verify_ip`. Recovery codes have no person wide ceiling, so nobody elsewhere
+  can fill the owner's budget. `factorNoticeLimit(userId)` is the `second_factor_notice` cap.
+- `pendingTotpRow(userId, sealed)` is the row enrolment inserts, unconfirmed and unused.
+- `pnpm bench:factor` times open plus `matchTotp`, and a recovery match over 10 rows, and
+  exits 1 if either p99 reaches 1 ms.
 
 ## Rate limits
 
