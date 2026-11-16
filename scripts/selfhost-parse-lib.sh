@@ -113,7 +113,7 @@ parse_app_reaches() {
 # and answers the app tier.
 parse_boundary_checks() {
   local id="$1" token="$2" memory_mb="$3" network limit swap gateway bridge_gateway listener=""
-  local outside_port=18790 keys extra address open target reached machine
+  local outside_port=18790 keys extra address open target reached machine targets
   network="$(parse_network_of "$id")"
 
   if [[ "$network" != *" "* ]] && [ -n "$network" ]; then
@@ -170,18 +170,22 @@ parse_boundary_checks() {
     if [ "${#machine[@]}" -gt 0 ]; then break; fi
     sleep 1
   done
+  # With inhibit_ipv4 the network may have no gateway at all, and an empty host would mean
+  # loopback inside the container.
+  targets=(${machine[@]+"${machine[@]}"})
+  if [ -n "$gateway" ]; then targets+=("$gateway"); fi
   reached=""
-  if [ "${#machine[@]}" -gt 0 ]; then
-    for target in "$gateway" "${machine[@]}"; do
-      if parse_reaches_from_inside "$id" "$target" "$outside_port"; then reached+=" $target"; fi
-    done
-  fi
   if [ "${#machine[@]}" = 0 ]; then
     fail "control: the host network answers from the default bridge"
-  elif [ -n "$reached" ]; then
-    fail "no connect to the host network from inside" "reached$reached"
   else
-    pass "no connect to the host network from inside (tried $gateway ${machine[*]})"
+    for target in "${targets[@]}"; do
+      if parse_reaches_from_inside "$id" "$target" "$outside_port"; then reached+=" $target"; fi
+    done
+    if [ -n "$reached" ]; then
+      fail "no connect to the host network from inside" "reached$reached"
+    else
+      pass "no connect to the host network from inside (tried ${targets[*]})"
+    fi
   fi
   kill "$listener" 2>/dev/null || true
   wait "$listener" 2>/dev/null || true
