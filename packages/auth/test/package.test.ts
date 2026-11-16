@@ -125,6 +125,7 @@ describe('the main entry', () => {
         'AUTH_CONFIG_KEYS',
         'ApiKeyReplayError',
         'AuthError',
+        'aesGcmSealer',
         'BREACHED_RECORD_BYTES',
         'BREACH_CHECK_TIMEOUT_MS',
         'CLI_LINK_PATH',
