@@ -35,12 +35,17 @@ random_key() {
 
 # The keys the installer generates once. The invitation block key is never rotated with
 # DREFYN_AUTH_SECRET: blocks are stored as an HMAC under it, so a new one lifts them all.
-KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY'
+# The second factor keyring is a list of <id>:<key>, so it starts as one entry. Its id only
+# has to differ from the ids an operator adds later, and random hex does.
+KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS'
 
 # generated_value <key>: a fresh value of the right shape for that key, checked, on stdout.
 generated_value() {
   local value want=48
-  if [[ "$1" =~ ^($KEY_NAMES)$ ]]; then
+  if [ "$1" = DREFYN_AUTH_TOTP_KEYS ]; then
+    value="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n'):$(random_key)"
+    want=52
+  elif [[ "$1" =~ ^($KEY_NAMES)$ ]]; then
     value="$(random_key)"
     want=43
   else
@@ -79,8 +84,8 @@ ensure_env() {
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
     [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
-    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 3 ]; then
-    say <<<"selfhost: $example does not list the stack ID, the five passwords and the three auth keys; nothing was written."
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ]; then
+    say <<<"selfhost: $example does not list the stack ID, the five passwords and the four auth keys; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's

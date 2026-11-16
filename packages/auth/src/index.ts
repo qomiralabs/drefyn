@@ -20,6 +20,14 @@ export {
 } from './config.ts';
 export { SecretValue } from './secret-value.ts';
 export {
+  aesGcmSealer,
+  type SealContext,
+  type SealedRow,
+  type SealedSecret,
+  type SealingKey,
+  type SecretSealer,
+} from './secret-sealer.ts';
+export {
   INVITE_MAX_AGE_SECONDS,
   PRE_MAX_AGE_SECONDS,
   cookieNames,
