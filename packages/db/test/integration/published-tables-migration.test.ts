@@ -44,8 +44,12 @@ describeWithStack('the published tables migration', () => {
     expect(await readerGrants(db)).toBe(TABLES.map((t) => `${t} SELECT`).join(','));
     expect(await policies(db)).toBe(
       [
+        'published_filter_rows protected_read SELECT drefyn_protected_reader',
+        'published_filter_rows published_public_only SELECT drefyn_public_reader',
         'published_filter_rows published_read SELECT drefyn_public_reader',
         'published_filter_rows tenant_isolation ALL drefyn_app',
+        'published_versions protected_read SELECT drefyn_protected_reader',
+        'published_versions published_public_only SELECT drefyn_public_reader',
         'published_versions published_read SELECT drefyn_public_reader',
         'published_versions tenant_isolation ALL drefyn_app',
       ].join(','),

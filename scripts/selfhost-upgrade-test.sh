@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Proves a volume made before drefyn_auth existed gets the role through the upgrade, and that
-# its password never reaches the server log or pg_stat_statements on the way. The volume is
+# Proves a volume made before drefyn_auth and drefyn_protected_reader existed gets both roles
+# through the upgrade, and that their passwords never reach the server log or
+# pg_stat_statements on the way. The volume is
 # made by the stack as it shipped at DREFYN_UPGRADE_FROM, a commit before the role, with every
 # statement logged and pg_stat_statements loaded for the whole server, so a leak has every
 # chance to show. Then the current files replace the old ones in the same checkout, as a
@@ -22,7 +23,7 @@ export DREFYN_POSTGRES_PORT="${DREFYN_UPGRADE_TEST_PORT:-55437}"
 export DREFYN_SELFHOST_WAIT_SECONDS="${DREFYN_UPGRADE_TEST_WAIT_SECONDS:-90}"
 # Passwords come from the deploy/.env the old up writes, never from the caller's shell.
 unset DREFYN_STACK_ID DREFYN_POSTGRES_PASSWORD DREFYN_OWNER_PASSWORD DREFYN_APP_PASSWORD \
-  DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD
+  DREFYN_PUBLIC_READER_PASSWORD DREFYN_AUTH_PASSWORD DREFYN_PROTECTED_READER_PASSWORD
 scratch="$(mktemp -d)"
 root="$scratch/checkout"
 mkdir -p "$root"
@@ -126,6 +127,13 @@ else
   fail "up on the old volume fails, naming drefyn_auth and the upgrade command" "$out"
 fi
 auth_password="$(env_value DREFYN_AUTH_PASSWORD)"
+protected_password="$(env_value DREFYN_PROTECTED_READER_PASSWORD)"
+if [ "${#protected_password}" = 48 ]; then
+  pass "up added a generated DREFYN_PROTECTED_READER_PASSWORD to the existing deploy/.env"
+else
+  fail "up added a generated DREFYN_PROTECTED_READER_PASSWORD to the existing deploy/.env" \
+    "length ${#protected_password}"
+fi
 if [ "${#auth_password}" = 48 ]; then
   pass "up added a generated DREFYN_AUTH_PASSWORD to the existing deploy/.env"
 else
@@ -161,15 +169,17 @@ for run in 1 2; do
 
   if [ "$run" = 1 ]; then
     first_oid="$(auth_oid)"
-    expected="created drefyn_auth"
+    expected=("created drefyn_auth" "created drefyn_protected_reader")
   else
-    expected="drefyn_auth already exists"
+    expected=("drefyn_auth already exists" "drefyn_protected_reader already exists")
   fi
-  if [[ "$out" == *"$expected"* ]]; then
-    pass "upgrade run $run says: $expected"
-  else
-    fail "upgrade run $run says: $expected" "$out"
-  fi
+  for line in "${expected[@]}"; do
+    if [[ "$out" == *"$line"* ]]; then
+      pass "upgrade run $run says: $line"
+    else
+      fail "upgrade run $run says: $line" "$out"
+    fi
+  done
 done
 if [ "$(cksum <"$root/deploy/.env")" = "$env_before" ]; then
   pass "both upgrade runs left deploy/.env as up wrote it"
@@ -192,28 +202,30 @@ else
   fail "the second run left the role the first one made" "oid $first_oid, then $(auth_oid)"
 fi
 
-attributes="$(superuser_sql <<'SQL'
+for role in drefyn_auth drefyn_protected_reader; do
+  attributes="$(superuser_sql <<SQL
 select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolinherit, rolreplication,
   rolconfig is null, (select count(*) from pg_db_role_setting where setrole = r.oid),
   (select count(*) from pg_auth_members where member = r.oid),
   has_database_privilege(r.oid, 'drefyn', 'CONNECT')
-from pg_roles r where rolname = 'drefyn_auth';
+from pg_roles r where rolname = '$role';
 SQL
-)"
-if [ "$attributes" = "t|f|f|f|f|f|f|t|0|0|t" ]; then
-  pass "drefyn_auth has exactly the listed attributes and CONNECT on drefyn"
-else
-  fail "drefyn_auth has exactly the listed attributes and CONNECT on drefyn" "$attributes"
-fi
-# shellcheck disable=SC2016
-whoami="$("${compose[@]}" exec -T postgres sh -c \
-  'PGPASSWORD="$(cat /run/secrets/drefyn_auth_password)" exec psql --no-psqlrc -qtA \
-    --host 127.0.0.1 --username drefyn_auth --dbname drefyn -c "select current_user"' 2>&1 || true)"
-if [ "$whoami" = drefyn_auth ]; then
-  pass "drefyn_auth logs in over TCP with the generated password"
-else
-  fail "drefyn_auth logs in over TCP with the generated password" "$whoami"
-fi
+  )"
+  if [ "$attributes" = "t|f|f|f|f|f|f|t|0|0|t" ]; then
+    pass "$role has exactly the listed attributes and CONNECT on drefyn"
+  else
+    fail "$role has exactly the listed attributes and CONNECT on drefyn" "$attributes"
+  fi
+  # shellcheck disable=SC2016
+  whoami="$("${compose[@]}" exec -T -e ROLE="$role" postgres sh -c \
+    'PGPASSWORD="$(cat "/run/secrets/${ROLE}_password")" exec psql --no-psqlrc -qtA \
+      --host 127.0.0.1 --username "$ROLE" --dbname drefyn -c "select current_user"' 2>&1 || true)"
+  if [ "$whoami" = "$role" ]; then
+    pass "$role logs in over TCP with the generated password"
+  else
+    fail "$role logs in over TCP with the generated password" "$whoami"
+  fi
+done
 kept="$(superuser_sql <<<'select note from app.upgrade_probe;')"
 if [ "$kept" = kept ]; then
   pass "the data on the old volume is still there"
@@ -270,6 +282,8 @@ else
   fail "the server really logs statements" "no statement: lines in the log"
 fi
 expect_no_leak "after two upgrades" "$auth_password" 'create role|alter role|password[[:space:]]+(:|E?'"'"')'
+expect_no_leak "after two upgrades, the protected reader" "$protected_password" \
+  'create role|alter role|password[[:space:]]+(:|E?'"'"')'
 
 # The same create, from a session that asks for every kind of logging the preamble knows.
 superuser_sql <<'SQL' >/dev/null

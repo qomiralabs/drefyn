@@ -63,6 +63,15 @@ export function projectSettings(ctx: unknown): TenantSettings {
   return { organizationId: organization, projectId: project, userId: '', actorUserId: '' };
 }
 
+// For withProtectedReader. The grant is whatever proved the reader may see this site, so it
+// carries more than the tenant; only its own tenant data property is read, never a getter.
+export function grantSettings(grant: unknown): TenantSettings {
+  if (typeof grant !== 'object' || grant === null) throw missing('has no reader grant');
+  const tenant = dataValue(Object.getOwnPropertyDescriptor(grant, 'tenant'));
+  if (tenant === undefined) throw missing('has no tenant on its reader grant');
+  return projectSettings(tenant);
+}
+
 // For withOrganization. Any own projectId, even undefined, means the caller holds a project
 // context and asked for the wider scope by mistake. An actor, when given, must be a user id:
 // an empty or broken one would quietly mean nobody acts.

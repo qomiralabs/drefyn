@@ -4,21 +4,25 @@ import { describe, expect, it } from 'vitest';
 import {
   parseAuthDatabaseConfig,
   parseDatabaseConfig,
+  parseProtectedReaderConfig,
   parsePublishedReaderConfig,
 } from '../src/config.ts';
 import {
   closeDatabase,
   createAuthDatabase,
   createDatabase,
+  createProtectedReaderDatabase,
   createPublishedDatabase,
   databaseOverPool,
   poolConfig,
   withApiKeyLimiter,
   withAuth,
+  withProtectedReader,
   withPublishedReader,
   withTenant,
   type AuthDatabase,
   type Database,
+  type ProtectedReaderDatabase,
   type PublishedDatabase,
 } from '../src/database.ts';
 import { DbError } from '../src/errors.ts';
@@ -50,6 +54,24 @@ describe('createDatabase before connecting', () => {
       statementTimeoutMs: 10_001,
     };
     expect(await code(createPublishedDatabase(config))).toBe('DB_CONFIG_INVALID');
+  });
+
+  it('refuses a protected reader statement timeout above 10 s', async () => {
+    const config = {
+      ...parseProtectedReaderConfig({ DREFYN_PROTECTED_READER_DATABASE_URL: URL }),
+      statementTimeoutMs: 10_001,
+    };
+    expect(await code(createProtectedReaderDatabase(config))).toBe('DB_CONFIG_INVALID');
+  });
+
+  it('fails an unreachable protected reader database with DB_UNAVAILABLE', async () => {
+    const config = parseProtectedReaderConfig({
+      DREFYN_PROTECTED_READER_DATABASE_URL: URL,
+      DREFYN_DATABASE_POOL_WAIT_MS: '200',
+    });
+    const error = await rejected(createProtectedReaderDatabase(config));
+    expect((error as DbError).code).toBe('DB_UNAVAILABLE');
+    expect((error as DbError).message).not.toContain('Sup3r-Secret-Pa55word');
   });
 
   it('refuses an auth statement timeout above 10 s', async () => {
@@ -93,6 +115,29 @@ describe('handles that did not come from the constructors', () => {
     expect(await code(withPublishedReader(fake, tenant, () => Promise.resolve(1)))).toBe(
       'DB_CONFIG_INVALID',
     );
+  });
+
+  it('refuse a protected reader handle that was never opened', async () => {
+    const fake = Object.freeze({}) as ProtectedReaderDatabase;
+    const grant = { tenant: { organizationId: ORG, projectId: PROJECT } };
+    expect(await code(withProtectedReader(fake, grant, () => Promise.resolve(1)))).toBe(
+      'DB_CONFIG_INVALID',
+    );
+  });
+
+  // Each handle only opens its own kind of transaction, so a public reader handle can never
+  // be passed where protected reads are expected.
+  it('refuse a public reader handle for protected reads', async () => {
+    const pool = { connect: () => Promise.reject(new Error('never')) } as unknown as pg.Pool;
+    const publicHandle = databaseOverPool(pool, 'reader', { statementTimeoutMs: 2000 });
+    const grant = { tenant: { organizationId: ORG, projectId: PROJECT } };
+    expect(
+      await code(
+        withProtectedReader(publicHandle as unknown as ProtectedReaderDatabase, grant, () =>
+          Promise.resolve(1),
+        ),
+      ),
+    ).toBe('DB_CONFIG_INVALID');
   });
 
   it('refuse an auth handle that was never opened', async () => {
@@ -257,5 +302,89 @@ describe('a reservation inside a limiter or sign in transaction', () => {
     );
     expect(String(failed)).toContain('work failed');
     await expect(reserveAuthRateWindows(auth.db as AuthDatabase, request)).resolves.toHaveLength(1);
+  });
+});
+
+// A scripted pool that records every statement, so the transaction shape can be read back.
+function recording() {
+  const sent: { text: string; values: readonly unknown[] }[] = [];
+  const ok = { command: 'SELECT', rows: [], rowCount: 0 };
+  const client = {
+    on: () => client,
+    removeListener: () => client,
+    release: () => undefined,
+    query: (text: string, values: readonly unknown[] = []) => {
+      sent.push({ text, values });
+      return Promise.resolve(ok);
+    },
+  };
+  const pool = { connect: () => Promise.resolve(client), end: () => Promise.resolve() };
+  const db = databaseOverPool(pool as unknown as pg.Pool, 'protected', {
+    statementTimeoutMs: 2000,
+  }) as ProtectedReaderDatabase;
+  return { db, sent };
+}
+
+describe('withProtectedReader', () => {
+  it('runs read only with the grant tenant set for the transaction only', async () => {
+    const { db, sent } = recording();
+    const grant = { tenant: { organizationId: ORG, projectId: PROJECT } };
+    expect(await withProtectedReader(db, grant, () => Promise.resolve('done'))).toBe('done');
+    expect(sent[0]?.text).toBe('begin read only; set local statement_timeout = 2000');
+    expect(sent.slice(1, 3).map((s) => s.values)).toEqual([[ORG], [PROJECT]]);
+    expect(sent.some((s) => s.text.includes('commit'))).toBe(true);
+  });
+
+  it('keeps the timeout under the reader ceiling', async () => {
+    const { db, sent } = recording();
+    const grant = { tenant: { organizationId: ORG, projectId: PROJECT } };
+    await withProtectedReader(db, grant, () => Promise.resolve(1), { timeoutMs: 500 });
+    expect(sent[0]?.text).toBe('begin read only; set local statement_timeout = 500');
+    expect(
+      await code(withProtectedReader(db, grant, () => Promise.resolve(1), { timeoutMs: 10_001 })),
+    ).toBe('DB_CONFIG_INVALID');
+  });
+
+  it('refuses a grant without a project before any statement', async () => {
+    const { db, sent } = recording();
+    const grant = { tenant: { organizationId: ORG } } as unknown as Parameters<
+      typeof withProtectedReader
+    >[1];
+    expect(await code(withProtectedReader(db, grant, () => Promise.resolve(1)))).toBe(
+      'DB_TENANT_CONTEXT_MISSING',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  // A getter could pass the check and then hand back another tenant.
+  it.each<[string, unknown]>([
+    ['no grant', undefined],
+    ['a grant with no tenant', {}],
+    [
+      'a tenant behind a getter',
+      Object.defineProperty({}, 'tenant', {
+        get: () => ({ organizationId: ORG, projectId: PROJECT }),
+        enumerable: true,
+      }),
+    ],
+  ])('refuses %s before any statement', async (_label, grant) => {
+    const { db, sent } = recording();
+    expect(
+      await code(
+        withProtectedReader(db, grant as Parameters<typeof withProtectedReader>[1], () =>
+          Promise.resolve(1),
+        ),
+      ),
+    ).toBe('DB_TENANT_CONTEXT_MISSING');
+    expect(sent).toEqual([]);
+  });
+
+  it('closes the protected handle like any other', async () => {
+    const { db } = recording();
+    await closeDatabase(db);
+    const grant = { tenant: { organizationId: ORG, projectId: PROJECT } };
+    expect(await code(withProtectedReader(db, grant, () => Promise.resolve(1)))).toBe(
+      'DB_UNAVAILABLE',
+    );
   });
 });
