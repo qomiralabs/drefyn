@@ -120,6 +120,9 @@ export async function connect(
   const client = new Client({ name: 'test', version: '0.0.0' });
   await server.connect(serverSide);
   await client.connect(clientSide);
+  // The client keeps each tool's output schema from the list and checks every result against
+  // it, as stock clients do.
+  await client.listTools();
   return {
     client,
     close: async () => {

@@ -43,11 +43,13 @@ const keys = fakeKeys({
   'Bearer no-scope': actor({ scopes: ['studio:content.read'], projectIds: [DOCS_PROJECT] }),
 });
 
-const selfHosted = TIERS.find(
-  (tier) => limitFor(tier, 'docs.mcp_requests_per_month') === UNLIMITED,
-);
-const shut = TIERS.find((tier) => limitFor(tier, 'docs.mcp_requests_per_month') === 0);
-if (selfHosted === undefined || shut === undefined) throw new Error('plan table changed');
+function tierWith(limit: number | typeof UNLIMITED): Tier {
+  const found = TIERS.find((tier) => limitFor(tier, 'docs.mcp_requests_per_month') === limit);
+  if (found === undefined) throw new Error('plan table changed');
+  return found;
+}
+const selfHosted = tierWith(UNLIMITED);
+const shut = tierWith(0);
 
 const SEARCH: RetrieveResult = {
   pin: { version: 'latest', publishedAt: '2026-11-17T09:00:00.000Z' },
@@ -63,6 +65,7 @@ interface Setup {
   readonly hasFeature?: (tier: Tier, feature: 'docs.mcp') => boolean;
   readonly host?: string | null;
   readonly maxBodyBytes?: number;
+  readonly retrieveThrows?: boolean;
 }
 
 function setup(over: Setup = {}) {
@@ -70,6 +73,7 @@ function setup(over: Setup = {}) {
   const retrieval: McpRetrieval = {
     retrieve: (tenant, input) => {
       calls.push({ tenant, input });
+      if (over.retrieveThrows === true) return Promise.reject(new Error('pool detail'));
       return Promise.resolve({ ok: true, value: SEARCH });
     },
     getPage: () => Promise.resolve({ ok: false, error: 'retrieval.not_found' }),
@@ -82,8 +86,8 @@ function setup(over: Setup = {}) {
   const projects =
     over.projects ??
     new Map<string, McpProject>([
-      [`${ORG}:${DOCS_PROJECT}`, { product: 'docs', tier: selfHosted as Tier }],
-      [`${ORG}:${PROJECT}`, { product: 'studio', tier: selfHosted as Tier }],
+      [`${ORG}:${DOCS_PROJECT}`, { product: 'docs', tier: selfHosted }],
+      [`${ORG}:${PROJECT}`, { product: 'studio', tier: selfHosted }],
     ]);
   const lookups: { organizationId: OrganizationId; projectId: ProjectId }[] = [];
   const store: McpStore = {
@@ -202,6 +206,28 @@ describe('POST /mcp with a key for one docs project', () => {
     const result = await client.callTool({ name: 'get_page', arguments: { path: '/x' } });
     expect(result.structuredContent).toEqual({ code: 'retrieval.not_found' });
     await client.close();
+  });
+
+  it('turns a library that throws into a tool error and a warning with ids only', async () => {
+    const { app, logs } = setup({ retrieveThrows: true });
+    const called = await send(app, { key: MCP, body: search('question-canary-66') });
+    expect(called.status).toBe(200);
+    const result = called.json?.['result'] as { isError: boolean; structuredContent: unknown };
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: { code: 'retrieval.unavailable' },
+    });
+    expect(logs).toContainEqual({
+      level: 'warn',
+      event: 'mcp.tool_failed',
+      fields: {
+        organizationId: ORG,
+        projectId: DOCS_PROJECT,
+        tool: 'search_docs',
+        error: 'Error',
+      },
+    });
+    expect(JSON.stringify(logs)).not.toContain('question-canary');
   });
 
   it('logs ids and the route, never the question', async () => {
@@ -350,6 +376,15 @@ describe('plan', () => {
       expect.objectContaining({ organizationId: ORG, projectId: DOCS_PROJECT }),
       selfHosted,
     );
+  });
+
+  it('a meter that fails answers 503, never serving uncounted', async () => {
+    const { app, calls } = setup({
+      meter: { count: () => Promise.reject(new Error('counter down')) },
+    });
+    const answer = await send(app, { key: MCP, body: search('x') });
+    expect([answer.status, answer.code]).toEqual([503, 'api.unavailable']);
+    expect(calls).toEqual([]);
   });
 
   it('the plan meter lets an unlimited plan through without counting', async () => {

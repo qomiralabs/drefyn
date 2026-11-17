@@ -20,6 +20,7 @@ export const FLAG_AREAS = Object.freeze([
   'billing',
   'github',
   'dashboard',
+  'mcp',
 ] as const);
 export type FlagArea = (typeof FLAG_AREAS)[number];
 

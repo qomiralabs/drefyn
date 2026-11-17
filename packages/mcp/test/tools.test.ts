@@ -60,6 +60,31 @@ describe('tool list', () => {
     expect(Object.isFrozen(MCP_TOOLS)).toBe(true);
   });
 
+  it('lets a refusal through the output schema, with the library codes only', async () => {
+    const client = await open(fakeRetrieval().retrieval);
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      const anyOf = tool.outputSchema?.['anyOf'] as { properties?: unknown }[] | undefined;
+      expect(anyOf?.[1]).toEqual({
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            enum: [
+              'retrieval.bad_input',
+              'retrieval.version_not_found',
+              'retrieval.not_found',
+              'retrieval.busy',
+              'retrieval.unavailable',
+            ],
+          },
+        },
+        required: ['code'],
+        additionalProperties: false,
+      });
+    }
+  });
+
   it('marks every tool read only, idempotent and closed world, with both schemas', async () => {
     const client = await open(fakeRetrieval().retrieval);
     const { tools } = await client.listTools();
@@ -85,10 +110,13 @@ describe('tool list', () => {
       query: { type: 'string' },
       version: { type: 'string', minLength: 1, maxLength: 100 },
       limit: { type: 'integer', minimum: 1, maximum: 20 },
-      pathPrefix: { type: 'string', maxLength: 256, pattern: '^/' },
+      pathPrefix: { type: 'string', maxLength: 256, pattern: '^\\/' },
     });
     expect(search?.description).toContain('any word, ranked by relevance');
-    expect(search?.outputSchema?.required).toEqual(['pin', 'ranking', 'hits']);
+    expect(search?.outputSchema?.['anyOf']).toMatchObject([
+      { required: ['pin', 'ranking', 'hits'] },
+      { required: ['code'] },
+    ]);
   });
 
   it('describes get_page and list_versions input', async () => {
@@ -101,17 +129,16 @@ describe('tool list', () => {
       'path',
       'version',
     ]);
-    expect(page?.outputSchema?.required).toEqual([
-      'pin',
-      'nodeId',
-      'versionId',
-      'path',
-      'title',
-      'sections',
+    expect(page?.outputSchema?.['anyOf']).toMatchObject([
+      { required: ['pin', 'nodeId', 'versionId', 'path', 'title', 'sections'] },
+      { required: ['code'] },
     ]);
     const versions = tools.find((tool) => tool.name === 'list_versions');
     expect(versions?.inputSchema.properties ?? {}).toEqual({});
-    expect(versions?.outputSchema?.required).toEqual(['versions']);
+    expect(versions?.outputSchema?.['anyOf']).toMatchObject([
+      { required: ['versions'] },
+      { required: ['code'] },
+    ]);
   });
 
   it('never offers a field for the tenant', async () => {

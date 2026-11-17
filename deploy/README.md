@@ -552,6 +552,7 @@ the API container too.
 | Limits       | 128 processes, 512 MB memory (`DREFYN_API_MEMORY_LIMIT`)                |
 | Health       | `GET /healthz` (process up), `GET /readyz` (both database pools answer) |
 | Request body | at most `DREFYN_API_MAX_BODY_BYTES`, default 1048576                    |
+| MCP          | `POST /mcp`, body at most `DREFYN_MCP_MAX_BODY_BYTES`, default 65536    |
 
 It connects as `drefyn_app` and `drefyn_public_reader` and holds no auth role and no auth
 secret: it refuses to start if `DREFYN_AUTH_DATABASE_URL` or any `DREFYN_AUTH_` secret is set.
@@ -563,6 +564,12 @@ On `SIGTERM` it stops taking connections, lets requests in flight finish for up 
 then closes its pools and exits 0. Behind a proxy, set `DREFYN_TRUSTED_PROXY_HOPS` as for the
 dashboard (see [Behind a reverse proxy](#behind-a-reverse-proxy)), or every client shares the
 proxy's failure limit.
+
+Assistants such as Claude, Cursor and Copilot read your published docs through the MCP server
+at `POST /mcp`, with an API key that lists exactly one docs project and holds the
+`docs:pages.read` scope. It is off until the `mcp.v1` flag and the `mcp.serve` kill switch are
+both on in your flag file, and it reads published, public pages only, through the reader role.
+Set `DREFYN_MCP_HOST` to a host name to serve it at `/` on that host as well.
 
 ## Search
 

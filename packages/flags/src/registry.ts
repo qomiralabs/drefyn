@@ -146,6 +146,24 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'mcp.v1',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'The API serves the docs MCP server at /mcp for project scoped keys.',
+    created: '2026-11-17',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
+  {
+    name: 'mcp.serve',
+    kind: 'kill_switch',
+    owner: 'Divine572',
+    description: 'MCP requests are served. Off answers every MCP request 503 without a deploy.',
+    created: '2026-11-17',
+    removeBy: '2027-12-31',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

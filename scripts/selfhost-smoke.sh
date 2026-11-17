@@ -467,6 +467,58 @@ if jq -e '.services | has("api")' <<<"$config" >/dev/null; then
     missing="$(curl -s --max-time 5 "http://127.0.0.1:$api_port/v1/nothing" || true)"
     expect_rows "api answers an unknown path with the one error body" \
       "api.not_found" "$(jq -r '.error.code' <<<"$missing" 2>/dev/null || true)"
+    # The MCP server is mounted and checks the key before anything else; a GET has nothing to
+    # resume in a stateless server.
+    mcp_get="$(curl -s --max-time 5 "http://127.0.0.1:$api_port/mcp" || true)"
+    expect_rows "api answers GET /mcp with 405" \
+      "api.method_not_allowed" "$(jq -r '.error.code' <<<"$mcp_get" 2>/dev/null || true)"
+    mcp_post="$(curl -s --max-time 5 -X POST -H 'content-type: application/json' \
+      -H 'accept: application/json, text/event-stream' \
+      --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+      "http://127.0.0.1:$api_port/mcp" || true)"
+    # up does not migrate, so the failure limiter's table may not exist yet and the refusal is
+    # auth.unavailable instead of auth.api_key_invalid. Either way the key check ran first.
+    mcp_code="$(jq -r '.error.code' <<<"$mcp_post" 2>/dev/null || true)"
+    case "$mcp_code" in
+      auth.api_key_invalid | auth.unavailable) pass "api checks the key first on POST /mcp" ;;
+      *) fail "api checks the key first on POST /mcp" "got [$mcp_code]" ;;
+    esac
+    # Every socket the API holds, other than clients on its own port, must reach Postgres or
+    # itself. Closed sockets linger in TIME_WAIT, so a call out made while serving the requests
+    # above still shows here.
+    peers="$(docker exec "$api" node -e '
+const fs = require("node:fs");
+const ip4 = (hex) => hex.match(/../g).reverse().map((b) => parseInt(b, 16)).join(".");
+const seen = new Set();
+for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+  for (const line of text.trim().split("\n").slice(1)) {
+    const [, local, remote, state] = line.trim().split(/\s+/);
+    if (state === "0A" || local.endsWith(":0C1C")) continue;
+    const addr = remote.split(":")[0];
+    if (addr.length === 8) { seen.add(ip4(addr)); continue; }
+    const words = addr.match(/.{8}/g).map((w) => w.match(/../g).reverse().join("")).join("");
+    const mapped = words.startsWith("00000000000000000000ffff");
+    seen.add(mapped ? words.slice(24).match(/../g).map((b) => parseInt(b, 16)).join(".") : words);
+  }
+}
+process.stdout.write([...seen].sort().join("\n"));
+' 2>&1 || true)"
+    pg_ips="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$container")"
+    strangers=""
+    while IFS= read -r peer; do
+      [ -z "$peer" ] && continue
+      case " $pg_ips 127.0.0.1 0.0.0.0 00000000000000000000000000000000 00000000000000000000000000000001 " in
+        *" $peer "*) ;;
+        *) strangers="$strangers $peer" ;;
+      esac
+    done <<<"$peers"
+    if [ -z "$strangers" ]; then
+      pass "api holds no connection beyond Postgres after serving MCP"
+    else
+      fail "api holds no connection beyond Postgres after serving MCP" "peers:$strangers"
+    fi
     # The image's own entry point, with an auth secret added: it must exit 1 naming the key.
     refused_out="$("${compose[@]}" run --rm --no-deps -T -e DREFYN_AUTH_SECRET=smoke-not-a-secret \
       api 2>&1)" && refused_code=0 || refused_code=$?

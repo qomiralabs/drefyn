@@ -35,7 +35,7 @@ function served(maxBodyBytes = 65_536) {
   const { retrieval, calls } = fakeRetrieval();
   const server = createMcpServer({ retrieval, tenant: TENANT });
   const closed = vi.fn();
-  server.onclose = closed;
+  server.server.onclose = closed;
   return {
     calls,
     closed,

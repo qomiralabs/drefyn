@@ -165,6 +165,9 @@ services:
       # The compose network never leaves the machine.
       DREFYN_DATABASE_SSL: disable
       DREFYN_TRUSTED_PROXY_HOPS: ${DREFYN_TRUSTED_PROXY_HOPS:-0}
+      # Empty means unset: MCP stays at /mcp only, with the default body cap.
+      DREFYN_MCP_HOST: ${DREFYN_MCP_HOST:-}
+      DREFYN_MCP_MAX_BODY_BYTES: ${DREFYN_MCP_MAX_BODY_BYTES:-}
     secrets:
       - drefyn_app_password
       - drefyn_public_reader_password

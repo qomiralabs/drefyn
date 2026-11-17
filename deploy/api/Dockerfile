@@ -11,6 +11,8 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/db/package.json packages/db/
 COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/flags/package.json packages/flags/
+COPY packages/mcp/package.json packages/mcp/
+COPY packages/retrieval/package.json packages/retrieval/
 COPY packages/seal/package.json packages/seal/
 COPY packages/tenancy/package.json packages/tenancy/
 RUN corepack enable \
@@ -24,6 +26,8 @@ COPY --from=deps /app/apps/api/node_modules apps/api/node_modules
 COPY --from=deps /app/packages/auth/node_modules packages/auth/node_modules
 COPY --from=deps /app/packages/db/node_modules packages/db/node_modules
 COPY --from=deps /app/packages/flags/node_modules packages/flags/node_modules
+COPY --from=deps /app/packages/mcp/node_modules packages/mcp/node_modules
+COPY --from=deps /app/packages/retrieval/node_modules packages/retrieval/node_modules
 COPY package.json ./
 COPY apps/api/package.json apps/api/server.ts apps/api/
 COPY apps/api/src apps/api/src
@@ -38,6 +42,10 @@ COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/entitlements/src packages/entitlements/src
 COPY packages/flags/package.json packages/flags/
 COPY packages/flags/src packages/flags/src
+COPY packages/mcp/package.json packages/mcp/
+COPY packages/mcp/src packages/mcp/src
+COPY packages/retrieval/package.json packages/retrieval/
+COPY packages/retrieval/src packages/retrieval/src
 COPY packages/seal/package.json packages/seal/
 COPY packages/seal/src packages/seal/src
 COPY packages/tenancy/package.json packages/tenancy/

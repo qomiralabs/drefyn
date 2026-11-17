@@ -70,6 +70,9 @@ jobs:
       # organizations, the plan and a statement timeout on a database of its own.
       - name: Retrieval integration tests
         run: pnpm --filter @drefyn/retrieval test:integration
+      # A stock MCP client over HTTP and stdio, and one project's server against two tenants.
+      - name: MCP integration tests
+        run: pnpm --filter @drefyn/mcp test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the

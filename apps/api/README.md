@@ -1,7 +1,7 @@
 # @drefyn/api
 
-The `/v1` service: one Node process on Hono that checks API keys and, later, serves content,
-retrieval and probe ingest. It holds `drefyn_app` and `drefyn_public_reader`, and never the auth
+The `/v1` service: one Node process on Hono that checks API keys, serves the docs MCP server
+and, later, content, retrieval and probe ingest. It holds `drefyn_app` and `drefyn_public_reader`, and never the auth
 role or an auth secret.
 
 ## Run
@@ -27,6 +27,9 @@ Or with the self host stack: `COMPOSE_PROFILES=api bash scripts/selfhost.sh up`.
 | `DREFYN_TRUSTED_PROXY_HOPS`         | Proxies in front; 0 reads the socket                       | `0`                      |
 | `DREFYN_CLIENT_IP_HEADER`           | `cloudfront-viewer-address` from the trusted hop, or unset | unset                    |
 | `DREFYN_FLAGS_*`                    | Flag source, as in `@drefyn/flags`                         | `/etc/drefyn/flags.json` |
+| `DREFYN_MCP_MAX_BODY_BYTES`         | Largest MCP request body, 1 to 67108864                    | `65536`                  |
+| `DREFYN_MCP_HOST`                   | Host name that also serves MCP at `/`                      | unset                    |
+| `DREFYN_RETRIEVAL_*`                | Retrieval caps, as in `@drefyn/retrieval`                  | its defaults             |
 
 It exits 1 with one `api.start_failed` line naming the key when a setting is wrong, and when
 `DREFYN_AUTH_DATABASE_URL` or any auth secret is set.
@@ -36,6 +39,11 @@ It exits 1 with one `api.start_failed` line naming the key when a setting is wro
 - `GET /healthz`: 200 while the process is up. Touches no database.
 - `GET /readyz`: 200 when both pools answer within a second, else 503 `api.unavailable`.
 
+- `POST /mcp`: the docs MCP server, stateless Streamable HTTP answered in JSON (see below).
+  `GET`, `DELETE` and every other method are 405 `api.method_not_allowed` with `Allow: POST`.
+  When the request's host is `DREFYN_MCP_HOST`, `/` answers the same way; on any other host `/`
+  is 404.
+
 Every `/v1/projects/:projectId/...` route sits behind `guard(deps, { scope, flag?, limit? })`,
 which runs, in order: client address through the trusted hops, the key (a key in the query
 string is refused), the scope, the project under the key's organization (another
@@ -44,27 +52,41 @@ release flag (off is 404), the plan limit, then the handler. Handlers read the p
 with `tenantOf(c)`. Every refusal after the key is proved counts against the client in the same
 failure limiter as a bad key.
 
+## MCP
+
+`POST /mcp` runs, in order: the MCP body cap, the key, the scope `docs:pages.read`, the
+project, `mcp.v1` (off is 404), the `mcp.serve` kill switch (off is 503 with `Retry-After: 60`),
+the `docs.mcp` feature (403 `api.not_entitled`), the monthly cap
+`docs.mcp_requests_per_month` (429 `api.limit_reached`), then one MCP server for that project.
+The project is the one the key lists; a key for every project or for several is 403
+`auth.api_key_scope`, as is one whose project is not a docs project, and each of those counts
+against the client like a bad key. Unlimited plans are not counted; a cap of 0 refuses; a
+numbered cap fails closed and logs `api.mcp_meter_missing` until a stored monthly counter
+exists. Tool results and refusals are as in `@drefyn/mcp`.
+
 ## Errors
 
 One body: `{ "error": { "code": "...", "message": "..." } }`, with `cache-control: no-store`
 and `Retry-After` on 429 and 503.
 
-| Status | Code                   | When                                     |
-| ------ | ---------------------- | ---------------------------------------- |
-| 401    | `auth.api_key_invalid` | No key, a bad key, or a key in the query |
-| 403    | `auth.api_key_scope`   | The key lacks the scope or the project   |
-| 404    | `api.not_found`        | No such route or project, or flag off    |
-| 413    | `api.too_large`        | Body over `DREFYN_API_MAX_BODY_BYTES`    |
-| 429    | `auth.rate_limited`    | Too many failed checks from one client   |
-| 429    | `api.limit_reached`    | The plan limit for the request           |
-| 503    | `auth.unavailable`     | Keys cannot be checked                   |
-| 503    | `api.unavailable`      | A pool is down                           |
-| 500    | `api.internal`         | Anything else                            |
+| Status | Code                     | When                                     |
+| ------ | ------------------------ | ---------------------------------------- |
+| 401    | `auth.api_key_invalid`   | No key, a bad key, or a key in the query |
+| 403    | `auth.api_key_scope`     | The key lacks the scope or the project   |
+| 403    | `api.not_entitled`       | The plan lacks the feature               |
+| 404    | `api.not_found`          | No such route or project, or flag off    |
+| 405    | `api.method_not_allowed` | Not `POST` on an MCP path                |
+| 413    | `api.too_large`          | Body over `DREFYN_API_MAX_BODY_BYTES`    |
+| 429    | `auth.rate_limited`      | Too many failed checks from one client   |
+| 429    | `api.limit_reached`      | The plan limit for the request           |
+| 503    | `auth.unavailable`       | Keys cannot be checked                   |
+| 503    | `api.unavailable`        | A pool is down                           |
+| 500    | `api.internal`           | Anything else                            |
 
 ## Scopes
 
 `studio:content.read`, `studio:content.read_drafts` and `studio:content.write`, each granted by
-`studio.read`.
+`studio.read`, and `docs:pages.read`, granted by `docs.read`.
 
 ## Logs
 

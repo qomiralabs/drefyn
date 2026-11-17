@@ -1,5 +1,3 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { Retrieval } from '@drefyn/retrieval';
 import type { TenantRef } from '@drefyn/tenancy';
@@ -7,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { beforeAll, expect, it } from 'vitest';
 import { createMcpServer, handleMcpHttp, MCP_TOOLS } from '../../src/index.ts';
 import {
   describeWithStack,
@@ -23,33 +21,13 @@ const open = pools();
 let retrieval: Retrieval;
 let tenant: TenantRef;
 let pages: SeededPage[];
-let http: Server;
-let url: URL;
 
-async function body(request: IncomingMessage): Promise<Buffer> {
-  const parts: Buffer[] = [];
-  for await (const part of request) parts.push(part as Buffer);
-  return Buffer.concat(parts);
-}
-
-// The package handler behind a plain Node server, one MCP server per request as the API runs it.
-async function serve(incoming: IncomingMessage, outgoing: ServerResponse) {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(incoming.headers)) {
-    if (typeof value === 'string') headers.set(name, value);
-  }
-  const raw = await body(incoming);
-  const request = new Request(`http://127.0.0.1${incoming.url ?? '/'}`, {
-    method: incoming.method ?? 'GET',
-    headers,
-    ...(raw.length === 0 ? {} : { body: raw }),
-  });
-  const response = await handleMcpHttp(request, createMcpServer({ retrieval, tenant }), {
+// The stock client's own Streamable HTTP transport, with its fetch answered by the package
+// handler: real requests and responses, one MCP server per request as the API runs it.
+const answer = (input: string | URL | Request, init?: RequestInit) =>
+  handleMcpHttp(new Request(input, init), createMcpServer({ retrieval, tenant }), {
     maxBodyBytes: 65_536,
   });
-  outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-  outgoing.end(Buffer.from(await response.arrayBuffer()));
-}
 
 describeWithStack('a stock MCP client lists and calls every tool', () => {
   beforeAll(async () => {
@@ -62,17 +40,6 @@ describeWithStack('a stock MCP client lists and calls every tool', () => {
       { slug: 'install', versions: [{ state: 'current', body: 'Install the cli with pnpm.' }] },
       { slug: 'deploy', versions: [{ state: 'current', body: 'Deploy with the cli and pnpm.' }] },
     ]);
-    http = createServer((incoming, outgoing) => {
-      serve(incoming, outgoing).catch(() => {
-        outgoing.writeHead(500).end();
-      });
-    });
-    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
-    url = new URL(`http://127.0.0.1:${String((http.address() as AddressInfo).port)}/mcp`);
-  });
-
-  afterAll(async () => {
-    await new Promise((resolve) => http.close(resolve));
   });
 
   // Every call goes through the client's own output schema check as well as ours.
@@ -108,7 +75,9 @@ describeWithStack('a stock MCP client lists and calls every tool', () => {
   }
 
   it('over Streamable HTTP, stateless, with JSON answers', async () => {
-    await exercise(new StreamableHTTPClientTransport(url));
+    await exercise(
+      new StreamableHTTPClientTransport(new URL('http://mcp.test/mcp'), { fetch: answer }),
+    );
   });
 
   it('over stdio', async () => {

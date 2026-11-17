@@ -8,12 +8,14 @@ export type ApiErrorCode =
   | 'auth.rate_limited'
   | 'auth.unavailable'
   | 'api.not_found'
+  | 'api.not_entitled'
+  | 'api.method_not_allowed'
   | 'api.too_large'
   | 'api.limit_reached'
   | 'api.unavailable'
   | 'api.internal';
 
-export type ApiErrorStatus = 401 | 403 | 404 | 413 | 429 | 500 | 503;
+export type ApiErrorStatus = 401 | 403 | 404 | 405 | 413 | 429 | 500 | 503;
 
 interface CodeInfo {
   readonly status: ApiErrorStatus;
@@ -27,6 +29,8 @@ const CODES: Readonly<Record<ApiErrorCode, CodeInfo>> = {
   'auth.rate_limited': { status: 429, message: 'Too many failed requests. Try again later.' },
   'auth.unavailable': { status: 503, message: 'Keys cannot be checked right now. Try again.' },
   'api.not_found': { status: 404, message: 'Not found.' },
+  'api.not_entitled': { status: 403, message: 'The plan does not include this feature.' },
+  'api.method_not_allowed': { status: 405, message: 'This method is not allowed here.' },
   'api.too_large': { status: 413, message: 'The request body is too large.' },
   'api.limit_reached': { status: 429, message: 'The plan limit for this request is reached.' },
   'api.unavailable': { status: 503, message: 'The service is unavailable. Try again.' },

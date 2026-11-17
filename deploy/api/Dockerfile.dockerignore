@@ -19,6 +19,10 @@
 !packages/entitlements/src
 !packages/flags/package.json
 !packages/flags/src
+!packages/mcp/package.json
+!packages/mcp/src
+!packages/retrieval/package.json
+!packages/retrieval/src
 !packages/seal/package.json
 !packages/seal/src
 !packages/tenancy/package.json

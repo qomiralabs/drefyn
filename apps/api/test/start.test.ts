@@ -118,8 +118,9 @@ describe('startApi', () => {
     expect(opened).toEqual([]);
   });
 
-  // Flags are off in these seams, so a keyed call would be 404; no key is refused first.
-  it('serves MCP at /mcp, refusing GET and a call with no key', async () => {
+  // The seam pools are not databases, so the key check cannot count the failure and answers
+  // auth.unavailable: the route is there and checks the key first.
+  it('serves MCP at /mcp, refusing GET and checking the key on POST', async () => {
     const { options } = seams();
     const api = await start(ENV, options);
     expect((await fetch(url(api, '/mcp'))).status).toBe(405);
@@ -128,7 +129,8 @@ describe('startApi', () => {
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
-    expect(posted.status).toBe(401);
+    expect(posted.status).toBe(503);
+    expect(await posted.json()).toMatchObject({ error: { code: 'auth.unavailable' } });
   });
 
   it('serves health on the chosen port and says where it listens', async () => {

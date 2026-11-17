@@ -19,6 +19,15 @@ export {
   type ReleaseFlagName,
 } from './guard.ts';
 export { createJsonLogger, type ApiLogger, type LineWriter, type LogFields } from './log.ts';
+export {
+  appMcpStore,
+  mountMcp,
+  planMeter,
+  type McpMeter,
+  type McpProject,
+  type McpRouteOptions,
+  type McpStore,
+} from './mcp.ts';
 export { API_SCOPES, apiScopes, productOf, type ApiScope } from './scopes.ts';
 export {
   DRAIN_MS,

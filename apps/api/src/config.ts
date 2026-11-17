@@ -11,6 +11,10 @@ export interface ApiConfig {
   readonly hops: number;
   // Read CloudFront-Viewer-Address from the trusted hop instead of the chain.
   readonly viewerHeader: boolean;
+  // The body cap on MCP requests, under the service wide one: a tool call is a few hundred bytes.
+  readonly mcpMaxBodyBytes: number;
+  // The host that also serves MCP at /, lower case. Null serves it at /mcp only.
+  readonly mcpHost: string | null;
 }
 
 export class ApiConfigError extends Error {
@@ -26,6 +30,11 @@ Object.defineProperty(ApiConfigError.prototype, 'name', { value: 'ApiConfigError
 
 const DEFAULT_PORT = 3100;
 const DEFAULT_BODY_BYTES = 1_048_576;
+const DEFAULT_MCP_BODY_BYTES = 65_536;
+// Labels of 1 to 63 letters, digits and inner hyphens. No scheme, port, path or trailing dot:
+// the value is compared with the request's host name and nothing else.
+const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOST_NAME = new RegExp(`^${LABEL}(?:\\.${LABEL})*$`);
 const MAX_BODY_BYTES = 64 * 1_048_576;
 const MAX_HOPS = 10;
 const LOOPBACK_NAMES: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -124,5 +133,24 @@ export function parseApiConfig(env: Env): ApiConfig {
       'is read only from a trusted hop, so it needs hops of 1 or more',
     );
   }
-  return { port, host, publicUrl, maxBodyBytes, hops, viewerHeader };
+  const mcpMaxBodyBytes = take(
+    env,
+    'DREFYN_MCP_MAX_BODY_BYTES',
+    whole(1, MAX_BODY_BYTES),
+    DEFAULT_MCP_BODY_BYTES,
+    `must be a whole number from 1 to ${String(MAX_BODY_BYTES)}`,
+  );
+  const mcpHost = take(
+    env,
+    'DREFYN_MCP_HOST',
+    z
+      .string()
+      .max(253)
+      .transform((value) => value.toLowerCase())
+      .pipe(z.string().regex(HOST_NAME))
+      .nullable(),
+    null,
+    'must be a bare host name such as mcp.example.com',
+  );
+  return { port, host, publicUrl, maxBodyBytes, hops, viewerHeader, mcpMaxBodyBytes, mcpHost };
 }
