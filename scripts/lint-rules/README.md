@@ -139,6 +139,20 @@ JavaScript or runs it, and customer MDX is never compiled or run; `@drefyn/mdx` 
 Type only imports pass because they load nothing. A require made by `createRequire` is out
 of its reach. It runs in the root config and in the guard, like the other boundary rules.
 
+### `drefyn/no-direct-model-call`
+
+Model calls cost money per token, carry customer text and a provider key, and must stop
+when the `ai.model_calls` kill switch is off. `@drefyn/ai` handles all of that, so the
+rule reports, outside `@drefyn/ai`, any string or template that names a model API host
+(`api.anthropic.com`, `api.openai.com`, Azure OpenAI, Gemini, Vertex, Bedrock, Mistral,
+Cohere, Groq, OpenRouter, Together, DeepSeek, Fireworks, xAI), a model API path
+(`/v1/messages`, `/chat/completions`, `/v1/completions`) or an `anthropic-version` or
+`anthropic-beta` header name. It reports imports of vendor model SDKs (`@anthropic-ai/*`,
+`openai`, `@google/genai`, `ai`, `@ai-sdk/*`, LangChain, Ollama and others) everywhere,
+`@drefyn/ai` included, in static and dynamic imports, re-exports, `require` and
+`import x = require()`. Strings built at run time are out of reach; `no-raw-egress` still
+holds every raw socket. The fixture is `test/fixtures/models`.
+
 ### `drefyn/no-select-all`
 
 Refuses `selectAll()` and `returningAll()` on a table whose grants are per column, because the

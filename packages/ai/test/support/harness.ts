@@ -65,32 +65,50 @@ export interface TestDeps extends ModelDeps {
   }[];
 }
 
+export interface TestDepsOptions {
+  // Leave out the recorded sleep, the fixed jitter or the metrics sink, to test the defaults.
+  readonly realSleep?: boolean;
+  readonly realRandom?: boolean;
+  readonly noMetrics?: boolean;
+}
+
 // Backoff waits are recorded, not slept, so retry tests run in milliseconds.
-export function testDeps(overrides: Partial<ModelDeps> = {}): TestDeps {
+export function testDeps(
+  overrides: Partial<ModelDeps> = {},
+  options: TestDepsOptions = {},
+): TestDeps {
   const sleeps: number[] = [];
   const metricsSeen: { name: string; labels: Readonly<Record<string, string>> }[] = [];
   const logger = capturingLogger();
   const callGate = gate(true);
-  return {
+  const deps: TestDeps = {
     logger,
     gate: callGate,
     sleeps,
     metricsSeen,
-    random: () => 0.5,
-    sleep: (ms) => {
-      sleeps.push(ms);
-      return Promise.resolve();
-    },
-    metrics: {
-      increment: (name, labels) => {
-        metricsSeen.push({ name, labels });
-      },
-      observe: (name, _value, labels) => {
-        metricsSeen.push({ name, labels });
-      },
-    },
-    ...overrides,
-  } as TestDeps;
+    ...(options.realRandom === true ? {} : { random: () => 0.5 }),
+    ...(options.realSleep === true
+      ? {}
+      : {
+          sleep: (ms: number) => {
+            sleeps.push(ms);
+            return Promise.resolve();
+          },
+        }),
+    ...(options.noMetrics === true
+      ? {}
+      : {
+          metrics: {
+            increment: (name: string, labels: Readonly<Record<string, string>>) => {
+              metricsSeen.push({ name, labels });
+            },
+            observe: (name: string, _value: number, labels: Readonly<Record<string, string>>) => {
+              metricsSeen.push({ name, labels });
+            },
+          },
+        }),
+  };
+  return { ...deps, ...overrides } as TestDeps;
 }
 
 export const signal = (): AbortSignal => new AbortController().signal;

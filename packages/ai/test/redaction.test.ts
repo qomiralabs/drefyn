@@ -200,7 +200,7 @@ describe('what leaves through logs, errors and metrics', () => {
   });
 
   it('works with no metrics sink', async () => {
-    const { metrics: _metrics, ...deps } = testDeps();
+    const deps = testDeps({}, { noMetrics: true });
     const p = createAnthropicProvider(
       {
         baseUrl: fake.origin,
@@ -243,7 +243,6 @@ describe('the key object', () => {
   it('prints, serialises and inspects as redacted, and shows only its last four characters as a hint', () => {
     const key = new ModelKey(KEY);
     expect(String(key)).toBe('[redacted]');
-    expect(`${key}`).toBe('[redacted]');
     expect(JSON.stringify({ key })).toBe('{"key":"[redacted]"}');
     expect(inspect({ key })).not.toContain(KEY);
     expect(key.hint).toBe(HINT);
@@ -251,7 +250,7 @@ describe('the key object', () => {
   });
 
   it('refuses a value that cannot be a key without saying what the value was', () => {
-    for (const bad of ['', 'short', 'has space inside it', `${'x'.repeat(513)}`, 'tab\there123']) {
+    for (const bad of ['', 'short', 'has space inside it', 'x'.repeat(513), 'tab\there123']) {
       let thrown: unknown;
       try {
         new ModelKey(bad);

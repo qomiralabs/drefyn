@@ -135,11 +135,12 @@ describe('the Anthropic adapter', () => {
     const deps = testDeps();
     fake.reply(anthropicMessage(ANSWER));
     await provider('anthropic', deps).complete(request(), signal());
-    const { system: _system, messages: _messages, ...rest } = request();
-    await provider('anthropic', deps).complete(
-      { ...rest, messages: [{ role: 'user', text: PROMPT }] },
-      signal(),
-    );
+    const bare: ModelRequest = {
+      tenant: TENANT,
+      messages: [{ role: 'user', text: PROMPT }],
+      maxOutputTokens: 1500,
+    };
+    await provider('anthropic', deps).complete(bare, signal());
     expect(fake.requests[0]?.body).toMatchObject({ system: [{ type: 'text', text: SYSTEM }] });
     expect(Reflect.get(fake.requests[0]?.body as object, 'system')).toEqual([
       { type: 'text', text: SYSTEM },
@@ -155,7 +156,7 @@ describe('the Anthropic adapter', () => {
       signal(),
     );
     await provider('anthropic', deps).complete(request({ model: 'claude-opus-5-5' }), signal());
-    expect(fake.requests.map((r) => Reflect.get(r.body as object, 'model'))).toEqual([
+    expect(fake.requests.map((r): unknown => Reflect.get(r.body as object, 'model'))).toEqual([
       'claude-haiku-5-5',
       'claude-opus-5-5',
     ]);
@@ -669,6 +670,7 @@ describe('with nothing configured', () => {
       {
         kind: 'openai_compatible',
         baseUrl: `${fake.origin}/v1`,
+        key: undefined,
         model: 'llama3.1:8b',
         allowPrivateCidrs: LOOPBACK,
       },
@@ -789,10 +791,10 @@ describe('abort signals', () => {
   });
 
   it('waits on the real clock by default and wakes early on abort', async () => {
-    const { sleep: _sleep, ...deps } = testDeps({ random: () => 1 });
+    const deps = testDeps({ random: () => 1 }, { realSleep: true });
     const controller = new AbortController();
     fake.reply(error('anthropic', 529, 'overloaded_error'), ok('anthropic'));
-    const pending = provider('anthropic', deps as TestDeps).complete(request(), controller.signal);
+    const pending = provider('anthropic', deps).complete(request(), controller.signal);
     while (fake.requests.length === 0) await new Promise((r) => setTimeout(r, 5));
     setTimeout(() => {
       controller.abort();
@@ -803,9 +805,9 @@ describe('abort signals', () => {
   });
 
   it('retries on the real clock when nothing aborts', async () => {
-    const { sleep: _sleep, random: _random, ...deps } = testDeps();
+    const deps = testDeps({}, { realSleep: true, realRandom: true });
     fake.reply(error('anthropic', 529, 'overloaded_error'), ok('anthropic'));
-    const result = await provider('anthropic', deps as TestDeps).complete(request(), signal());
+    const result = await provider('anthropic', deps).complete(request(), signal());
     expect(result.ok && result.value.attempts).toBe(2);
   });
 });

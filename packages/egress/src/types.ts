@@ -2,7 +2,7 @@ export type Result<T, E> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
 
 export type EgressPurpose =
-  'monitor' | 'webhook' | 'feed' | 'import' | 'spec_fetch' | 'try_it' | 'media_import';
+  'monitor' | 'webhook' | 'feed' | 'import' | 'spec_fetch' | 'try_it' | 'media_import' | 'model';
 
 export interface EgressPolicy {
   readonly purpose: EgressPurpose;

@@ -12,6 +12,12 @@ export const egressAllowList = [
       'GitHub API client for the review gate in CI; the host is api.github.com or GITHUB_API_URL from the Actions runner, never customer input',
   },
   {
+    path: 'packages/ai/test/support/fake-provider.ts',
+    reason:
+      'loopback fake model provider for the adapter tests, never imported by src; it accepts connections on 127.0.0.1 and never opens one, so no test can reach a real provider',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
     path: 'packages/email/test/support/servers.ts',
     reason:
       'loopback test servers only, never imported by src; binds and reads 127.0.0.1 for the SMTP tests and the Mailpit API, never customer input',

@@ -29,8 +29,9 @@ Everything other packages may use is exported from `src/index.ts`, plus the test
   `dashboard.shell`, `email.smtp_delivery`, `engine.writes`, `engine.chunk_at_write`,
   `docs.git_sync`, `auth.team_sso`, `auth.totp`, `status.control_checks`,
   `status.majority_default`, `status.auto_apply_default` and `retrieval.v1`, all release
-  flags, and the kill switch `status.auto_state_changes` with safe value off, which makes
-  every status rule propose only. `FlagName` is the union of their names, so an unregistered
+  flags, the kill switch `status.auto_state_changes` with safe value off, which makes
+  every status rule propose only, and the kill switch `ai.model_calls` with safe value
+  off, which stops every model call. `FlagName` is the union of their names, so an unregistered
   name fails typecheck.
 
 ### Client
