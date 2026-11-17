@@ -23,6 +23,7 @@ const widgets: CatalogColumn[] = [
   col({ table: 'widgets', column: 'payload', type: 'jsonb', nullable: true }),
   col({ table: 'widgets', column: 'embedding', type: 'vector', nullable: true }),
   col({ table: 'widgets', column: 'half', type: 'halfvec' }),
+  col({ table: 'widgets', column: 'search', type: 'tsvector', nullable: true, hasDefault: true }),
   col({ table: 'widgets', column: 'tags', type: '_text', elementType: 'text' }),
   col({ table: 'widgets', column: 'state', type: 'widget_state', enumLabels: ['on', 'off'] }),
   col({ table: 'widgets', column: 'odd name', type: 'bool' }),
@@ -41,6 +42,7 @@ describe('renderSchema', () => {
         '  payload: JsonValue | null;',
         '  embedding: string | null;',
         '  half: string;',
+        '  search: Generated<string | null>;',
         '  tags: string[];',
         "  state: 'on' | 'off';",
         "  'odd name': boolean;",
@@ -144,11 +146,11 @@ describe('renderSchema refuses types it cannot map', () => {
 
   it('names every unmapped column at once, in order', () => {
     const error = refusal([
-      col({ table: 'b', column: 'x', type: 'tsvector' }),
+      col({ table: 'b', column: 'x', type: 'tsquery' }),
       col({ table: 'a', column: 'ok', type: 'text' }),
       col({ table: 'a', column: 'y', type: 'point' }),
     ]);
-    expect(error.message).toMatch(/app\.a\.y \(point\)[\s\S]*app\.b\.x \(tsvector\)/);
+    expect(error.message).toMatch(/app\.a\.y \(point\)[\s\S]*app\.b\.x \(tsquery\)/);
     expect(error.message).not.toContain('app.a.ok');
   });
 

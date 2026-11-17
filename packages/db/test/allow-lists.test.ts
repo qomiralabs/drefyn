@@ -94,14 +94,19 @@ describe('allow lists', () => {
     ]);
   });
 
-  it('let drefyn_app execute the four context readers and the install tier', () => {
+  it('let drefyn_app execute the four context readers, the install tier and the heading text', () => {
     expect(APP_FUNCTIONS.map((f) => f.name).sort()).toEqual([
       'app.current_actor_id()',
       'app.current_org()',
       'app.current_project()',
       'app.current_user_id()',
+      'app.heading_text(text[])',
       'app.install_tier()',
     ]);
+  });
+
+  it('keep the heading text away from the public reader, which never computes the column', () => {
+    expect(READER_FUNCTIONS.map((f) => f.name)).not.toContain('app.heading_text(text[])');
   });
 
   it('keep the install tier away from the public reader', () => {
@@ -407,10 +412,14 @@ describe('allow lists', () => {
     expect(SECURITY_DEFINER_FUNCTIONS).toEqual([]);
   });
 
-  it('publish exactly the two copies the publish transaction writes', () => {
+  it('publish exactly the copies and term tables the publish transaction writes', () => {
     expect(PUBLISHED_TABLES.map((entry) => entry.name)).toEqual([
       'app.published_versions',
       'app.published_filter_rows',
+      'app.published_chunks',
+      'app.published_project_term_totals',
+      'app.published_term_stats',
+      'app.published_chunk_terms',
     ]);
   });
 

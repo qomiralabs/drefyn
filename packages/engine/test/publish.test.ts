@@ -423,6 +423,127 @@ describe('publish', () => {
   });
 });
 
+const CHUNK_TABLES = [
+  'published_chunks',
+  'published_chunk_terms',
+  'published_term_stats',
+  'published_project_term_totals',
+];
+
+const touchesChunks = (statement: Statement) => CHUNK_TABLES.some((table) => has(statement, table));
+
+const CHUNK_ID = '01890a5d-ac96-774b-bcce-b302099a8020';
+
+describe('publish with retrieval.v1', () => {
+  const only = (on: boolean) => ({
+    evaluate: (name: string) => Promise.resolve({ value: name === 'retrieval.v1' ? on : true }),
+  });
+
+  it('copies the version chunks after both copies, in the same transaction, when on', async () => {
+    const evaluated: string[] = [];
+    const { engine, statements, ends } = build(scripted(), {
+      flags: {
+        evaluate: (name: string) => {
+          evaluated.push(name);
+          return Promise.resolve({ value: true });
+        },
+      },
+    });
+    expect((await engine.publish(input())).ok).toBe(true);
+    expect(evaluated).toContain('retrieval.v1');
+    expect(ends).toEqual(['commit']);
+    const order = statements.map((s) =>
+      has(s, 'insert into app.published_filter_rows')
+        ? 'filter'
+        : has(s, 'insert into app.published_chunks')
+          ? 'chunks'
+          : null,
+    );
+    expect(order.filter((o) => o !== null)).toEqual(['filter', 'chunks']);
+    const copy = statements.find((s) => has(s, 'insert into app.published_chunks'));
+    expect(copy?.parameters).toEqual(expect.arrayContaining([NODE, HEAD, 'public']));
+  });
+
+  it('writes no chunk or term row when off, and publishes as before', async () => {
+    const { engine, statements, ends } = build(scripted(), { flags: only(false) });
+    expect((await engine.publish(input())).ok).toBe(true);
+    expect(statements.filter(touchesChunks)).toEqual([]);
+    expect(wrote(statements).map((s) => WRITES.find((w) => has(s, w)))).toEqual(WRITES);
+    expect(ends).toEqual(['commit']);
+  });
+
+  it('refuses as retryable before any statement when the flag cannot be read', async () => {
+    const { lines, logger } = capture();
+    const { engine, statements } = build(scripted(), {
+      logger,
+      flags: {
+        evaluate: (name: string) =>
+          name === 'retrieval.v1'
+            ? Promise.reject(new Error('flagd is down'))
+            : Promise.resolve({ value: true }),
+      },
+    });
+    const done = await engine.publish(input());
+    expect(done.ok || done.error).toEqual({
+      code: 'publish.unavailable',
+      retryable: true,
+      issues: [],
+    });
+    expect(statements).toEqual([]);
+    expect(lines.find((l) => l.event === 'engine.flag_read_failed')?.fields).toMatchObject({
+      flag: 'retrieval.v1',
+      code: 'FLAG_GENERAL',
+    });
+  });
+
+  it('logs chunk and posting counts, never text', async () => {
+    const { lines, logger } = capture();
+    const respond: Responder = (statement) => {
+      if (has(statement, 'insert into app.published_chunks')) {
+        return [{ id: CHUNK_ID, visibility: 'public' }];
+      }
+      if (has(statement, 'with gone as')) return [{ removed: '0', added: '12', lexemes: '9' }];
+      return scripted()(statement);
+    };
+    const { engine } = build(respond, { logger });
+    expect((await engine.publish(input())).ok).toBe(true);
+    expect(lines.find((l) => l.event === 'engine.publish')?.fields).toMatchObject({
+      chunks: 1,
+      public_chunks: 1,
+      postings_added: 12,
+      postings_removed: 0,
+      lexemes_changed: 9,
+    });
+  });
+
+  it('leaves the counts out of the log line when the copy is off', async () => {
+    const { lines, logger } = capture();
+    const { engine } = build(scripted(), { logger, flags: only(false) });
+    await engine.publish(input());
+    expect(lines.find((l) => l.event === 'engine.publish')?.fields).not.toHaveProperty('chunks');
+  });
+
+  it('copies nothing on a replay', async () => {
+    const { engine, statements } = build(scripted({ prior: logRow() }));
+    expect((await engine.publish(input())).ok).toBe(true);
+    expect(statements.filter(touchesChunks)).toEqual([]);
+  });
+
+  it('rolls the whole publish back when the term write fails', async () => {
+    const respond: Responder = (statement) => {
+      if (has(statement, 'insert into app.published_chunks')) {
+        return [{ id: CHUNK_ID, visibility: 'public' }];
+      }
+      if (has(statement, 'with gone as')) throw new DbError('DB_TIMEOUT', 'x');
+      return scripted()(statement);
+    };
+    const { engine, ends } = build(respond);
+    const done = await engine.publish(input());
+    expect(done.ok || done.error.code).toBe('publish.unavailable');
+    expect(ends).toEqual(['rollback']);
+  });
+});
+
 describe('approve', () => {
   const approval = (over: Partial<ApproveInput> = {}): ApproveInput => ({
     tenant,

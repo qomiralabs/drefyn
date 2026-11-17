@@ -452,6 +452,36 @@ export interface PublishWorkflowsTable {
   updated_at: Generated<Date>;
 }
 
+// app.published_chunk_terms
+export interface PublishedChunkTermsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  lexeme: string;
+  chunk_id: string;
+  visibility: string;
+  tf: number;
+  chunk_length: number;
+}
+
+// app.published_chunks
+export interface PublishedChunksTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  ord: number;
+  page_path: string;
+  title: string;
+  heading_path: string[];
+  body: string;
+  body_sha256: Buffer;
+  visibility: string;
+  is_current: boolean;
+  search: Generated<string | null>;
+}
+
 // app.published_filter_rows
 export interface PublishedFilterRowsTable {
   organization_id: string;
@@ -476,6 +506,26 @@ export interface PublishedFilterRowsTable {
   d1: Date | null;
   d2: Date | null;
   visibility: string;
+}
+
+// app.published_project_term_totals
+export interface PublishedProjectTermTotalsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  visibility: string;
+  chunk_count: number;
+  total_length: number;
+}
+
+// app.published_term_stats
+export interface PublishedTermStatsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  lexeme: string;
+  visibility: string;
+  df: number;
 }
 
 // app.published_versions
@@ -652,7 +702,11 @@ export interface Schema {
   publish_approvals: PublishApprovalsTable;
   publish_log: PublishLogTable;
   publish_workflows: PublishWorkflowsTable;
+  published_chunk_terms: PublishedChunkTermsTable;
+  published_chunks: PublishedChunksTable;
   published_filter_rows: PublishedFilterRowsTable;
+  published_project_term_totals: PublishedProjectTermTotalsTable;
+  published_term_stats: PublishedTermStatsTable;
   published_versions: PublishedVersionsTable;
   recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;

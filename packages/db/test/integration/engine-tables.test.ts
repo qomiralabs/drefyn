@@ -959,8 +959,12 @@ describeWithStack('the engine tables', () => {
         'git_bindings|git_bindings_tenant_stats|{d,f}',
         'node_versions|node_versions_tenant_stats|{d,f}',
         'nodes|nodes_tenant_stats|{d,f}',
+        // Postings are not a foreign key target: their candidate reads plan on these.
+        'published_chunk_terms|published_chunk_terms_tenant_stats|{d,f}',
+        'published_chunks|published_chunks_tenant_stats|{d,f}',
         // Not foreign key targets: the reader's own lists plan on these.
         'published_filter_rows|published_filter_rows_tenant_stats|{d,f}',
+        'published_term_stats|published_term_stats_tenant_stats|{d,f}',
         'published_versions|published_versions_tenant_stats|{d,f}',
       ]);
     });
@@ -1171,8 +1175,8 @@ describeWithStack('the engine tables', () => {
       const versions = await superuser(`select count(*) from app.node_versions;`, fresh.name);
       expect(versions.trim()).toBe('3');
       // The down also reverts the later SSO tables, whose grants the check would miss, the
-      // just in time arm of the membership insert policy, which ends both arms before it, and
-      // the enforcement terms of the organization insert guard.
+      // just in time arm of the membership insert policy, which ends both arms before it, the
+      // enforcement terms of the organization insert guard, and the published chunks guard.
       const jitArm = " OR ((role = 'member'::text)";
       const ssoTerms = " AND (sso_enforcement = 'off'::text)";
       const beforeSso = {
@@ -1180,16 +1184,18 @@ describeWithStack('the engine tables', () => {
         authTenantGrants: ALLOW_LISTS.authTenantGrants.filter(
           (g) => !g.name.startsWith('app.sso_'),
         ),
-        restrictivePolicies: ALLOW_LISTS.restrictivePolicies.map((p) => {
-          if (p.withCheck === null) return p;
-          if (p.name === 'app.memberships.membership_insert_origin') {
-            return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(jitArm))}))` };
-          }
-          if (p.name === 'app.organizations.organization_insert_tier') {
-            return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(ssoTerms))})` };
-          }
-          return p;
-        }),
+        restrictivePolicies: ALLOW_LISTS.restrictivePolicies
+          .filter((p) => !p.name.startsWith('app.published_chunks.'))
+          .map((p) => {
+            if (p.withCheck === null) return p;
+            if (p.name === 'app.memberships.membership_insert_origin') {
+              return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(jitArm))}))` };
+            }
+            if (p.name === 'app.organizations.organization_insert_tier') {
+              return { ...p, withCheck: `${p.withCheck.slice(0, p.withCheck.indexOf(ssoTerms))})` };
+            }
+            return p;
+          }),
       };
       expect(await catalogProblems(fresh.owner, beforeSso)).toEqual([]);
 

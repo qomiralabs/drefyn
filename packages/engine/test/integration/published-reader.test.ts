@@ -32,7 +32,14 @@ import {
 } from '../support/published.ts';
 import { urlFor } from '../support/stack.ts';
 
-const PUBLISHED = new Set(['published_versions', 'published_filter_rows']);
+const PUBLISHED = new Set([
+  'published_versions',
+  'published_filter_rows',
+  'published_chunks',
+  'published_project_term_totals',
+  'published_term_stats',
+  'published_chunk_terms',
+]);
 
 let app: Database;
 let readerDb: PublishedDatabase;

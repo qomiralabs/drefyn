@@ -34,6 +34,7 @@ import {
   type PublishResult,
 } from './publish.ts';
 import { approverOf } from './publish-rules.ts';
+import type { ChunkCopy } from './published-chunks.ts';
 import { backfillStep } from './backfill.ts';
 import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
@@ -216,7 +217,10 @@ export function createEngine(deps: EngineDeps): Engine {
   const writingTree = <T>(tenant: TenantRef, work: (tx: EngineTx) => Promise<T>) =>
     noted(tenant, () => gate.treeWrite(tenant, () => store.tenant(tenant, work, held)));
 
-  const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
+  const read = async (
+    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1',
+    tenant: TenantRef,
+  ) => {
     try {
       return await flags.evaluate(name, {
         organizationId: tenant.organizationId,
@@ -231,10 +235,13 @@ export function createEngine(deps: EngineDeps): Engine {
     const { value, errorCode } = await read('engine.writes', tenant);
     return value && errorCode === undefined;
   };
-  // A failed read must not count as off: the version would commit with no chunks, and nothing
-  // would ever notice. Null refuses the write, and the caller can try again.
-  const chunkingOn = async (tenant: TenantRef): Promise<boolean | null> => {
-    const name = 'engine.chunk_at_write';
+  // A failed read must not count as off: the version would commit with no chunks, or a publish
+  // with no published chunks, and nothing would ever notice. Null refuses the write, and the
+  // caller can try again.
+  const strictlyOn = async (
+    name: 'engine.chunk_at_write' | 'retrieval.v1',
+    tenant: TenantRef,
+  ): Promise<boolean | null> => {
     const { value, errorCode } = await read(name, tenant);
     if (errorCode === undefined) return value;
     logger.warn('engine.flag_read_failed', {
@@ -244,6 +251,7 @@ export function createEngine(deps: EngineDeps): Engine {
     });
     return null;
   };
+  const chunkingOn = (tenant: TenantRef) => strictlyOn('engine.chunk_at_write', tenant);
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
   const logged = async <T, E extends { readonly code: string }>(
@@ -632,18 +640,35 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return publishInvalid(input.error.issues);
       const { tenant, nodeId, versionId, actor } = input.value;
       if (!(await writesOn(tenant))) return refusePublish('publish.forbidden');
+      const copyChunks = await strictlyOn('retrieval.v1', tenant);
+      if (copyChunks === null) return refusePublish('publish.unavailable');
+      let copy: ChunkCopy | undefined;
       return logged(
         'engine.publish',
         { ...tenantFields(tenant), node_id: nodeId, version_id: versionId, ...actorFields(actor) },
         () =>
           publishSettled(() =>
             writing(tenant, (tx) =>
-              publishVersion(tx, tenant, input.value, deps.parsePolicy.version),
+              publishVersion(tx, tenant, input.value, deps.parsePolicy.version, {
+                copyChunks,
+                copied: (counts) => {
+                  copy = counts;
+                },
+              }),
             ),
           ),
         (value) => ({
           previous_version_id: value.previousVersionId ?? 'none',
           render_policy_version: value.renderPolicyVersion,
+          ...(copy === undefined
+            ? {}
+            : {
+                chunks: copy.chunks,
+                public_chunks: copy.publicChunks,
+                postings_added: copy.postingsAdded,
+                postings_removed: copy.postingsRemoved,
+                lexemes_changed: copy.lexemesChanged,
+              }),
         }),
       );
     },

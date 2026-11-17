@@ -48,6 +48,7 @@ describe('flag names', () => {
       | 'status.majority_default'
       | 'status.auto_apply_default'
       | 'auth.totp'
+      | 'retrieval.v1'
     >();
   });
 

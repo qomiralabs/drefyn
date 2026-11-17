@@ -8,6 +8,16 @@ const dbs = databases();
 
 const TABLES = ['published_filter_rows', 'published_versions'];
 
+// Every table the reader may select from once all migrations ran, later ones included.
+const READER_TABLES = [
+  'published_chunk_terms',
+  'published_chunks',
+  'published_filter_rows',
+  'published_project_term_totals',
+  'published_term_stats',
+  'published_versions',
+];
+
 // Every table in app the reader may touch, with what it may do there.
 const readerGrants = (db: TestDatabase) =>
   superuser(
@@ -22,7 +32,8 @@ const policies = (db: TestDatabase) =>
   superuser(
     `select coalesce(string_agg(tablename || ' ' || policyname || ' ' || cmd || ' ' ||
        array_to_string(roles, '+'), ',' order by tablename, policyname), '')
-     from pg_policies where schemaname = 'app' and tablename like 'published_%';`,
+     from pg_policies where schemaname = 'app'
+       and tablename in (${TABLES.map((t) => `'${t}'`).join(', ')});`,
     db.name,
   ).then((text) => text.trim());
 
@@ -41,7 +52,7 @@ function stepsBack(): number {
 describeWithStack('the published tables migration', () => {
   it('grants the reader select on both tables and nothing else, under its own policy', async () => {
     const db = await dbs.fresh('migrated');
-    expect(await readerGrants(db)).toBe(TABLES.map((t) => `${t} SELECT`).join(','));
+    expect(await readerGrants(db)).toBe(READER_TABLES.map((t) => `${t} SELECT`).join(','));
     expect(await policies(db)).toBe(
       [
         'published_filter_rows protected_read SELECT drefyn_protected_reader',
@@ -91,6 +102,6 @@ describeWithStack('the published tables migration', () => {
     expect(left.trim()).toBe('0');
     expect(await readerGrants(db)).toBe('');
     await step(db, ['migrate', 'up']);
-    expect(await readerGrants(db)).toBe(TABLES.map((t) => `${t} SELECT`).join(','));
+    expect(await readerGrants(db)).toBe(READER_TABLES.map((t) => `${t} SELECT`).join(','));
   });
 });
