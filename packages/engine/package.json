@@ -13,6 +13,7 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:process": "vitest run --config vitest.process.config.ts",
     "bench": "node bench/run.ts"
   },
   "dependencies": {
