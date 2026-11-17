@@ -158,6 +158,16 @@ describe('the faults found in the stock printer', () => {
     expect(print(`${once}\n`)).toBe(once);
   });
 
+  it('settles a tight item holding a footnote with more than one block', () => {
+    const once = print('- one\n  - a\n  [^1]: n\n      - a\n');
+    expect(once).toBe('- one\n\n  - a\n\n  [^1]: n\n\n      - a');
+    expect(print(`${once}\n`)).toBe(once);
+    // A quote hides its blank lines from the item, but not one beside the footnote.
+    const quoted = print('- > one\n  [^1]: n\n      - a\n');
+    expect(quoted).toBe('- > one\n\n  [^1]: n\n\n      - a');
+    expect(print(`${quoted}\n`)).toBe(quoted);
+  });
+
   it('does not put a blank line between jsx children in a tight list', () => {
     const source = '- <A>\n    <B />\n    <C />\n  </A>\n- d\n';
     expect(print(source, 'mdx')).toBe(source.trimEnd());
