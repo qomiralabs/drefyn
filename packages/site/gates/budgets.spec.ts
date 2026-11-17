@@ -20,6 +20,14 @@ const DEBUG_PORT = 9334;
 const REPORTS = fileURLToPath(new URL('../test-results/lighthouse/', import.meta.url));
 const gzip = (body: Buffer | string) => gzipSync(body, { level: 9 }).length;
 
+// Which element Lighthouse timed, so a page that meets the LCP budget by painting something
+// smaller first says so in the log.
+function lcpElement(lhr: { audits: Record<string, { details?: unknown }> }): string {
+  const details = lhr.audits['largest-contentful-paint-element']?.details as
+    { items?: { items?: { node?: { selector?: string } }[] }[] } | undefined;
+  return details?.items?.[0]?.items?.[0]?.node?.selector ?? 'an unknown element';
+}
+
 // The project runs one test at a time, since a score is noise when a neighbour shares the
 // CPU. Not serial: one page over budget must not hide the pages after it.
 test.describe.configure({ mode: 'default' });
@@ -67,7 +75,7 @@ test.describe('Lighthouse mobile', () => {
         .filter((audit) => audit.score !== null && audit.score < 1)
         .map((audit) => audit.id);
       console.log(
-        `lighthouse ${target.id}: ${LIGHTHOUSE_CATEGORIES.map((c) => `${c} ${String(scores[c])}`).join(', ')}, LCP ${String(Math.round(lcp))} ms`,
+        `lighthouse ${target.id}: ${LIGHTHOUSE_CATEGORIES.map((c) => `${c} ${String(scores[c])}`).join(', ')}, LCP ${String(Math.round(lcp))} ms on ${lcpElement(lhr)}`,
       );
       expect(
         lighthouseProblems(target.surface, scores, lcp),

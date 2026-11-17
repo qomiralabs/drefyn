@@ -7,7 +7,7 @@ import {
   lighthouseProblems,
   type Scores,
 } from '../gates/budgets.ts';
-import { CONTROLS, judge, outcomes } from '../gates/controls.ts';
+import { CONTROLS, judge, measured, outcomes } from '../gates/controls.ts';
 import {
   BREACH_ENV,
   BREACHES,
@@ -191,6 +191,38 @@ describe('controls', () => {
     };
     expect(outcomes({ suites: [warned] })[0]?.warned).toBe(true);
     expect(outcomes({})).toEqual([]);
+  });
+
+  it('keeps only the Lighthouse lines a run printed', () => {
+    const printed = {
+      suites: [
+        {
+          specs: [
+            {
+              title: 't',
+              tests: [
+                {
+                  status: 'expected',
+                  results: [
+                    {
+                      stdout: [
+                        { text: 'lighthouse status-home: performance 99, LCP 812 ms on img\n' },
+                        { text: 'js status-home: 4100 gzipped bytes\n' },
+                        {},
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(measured(printed)).toEqual([
+      'lighthouse status-home: performance 99, LCP 812 ms on img',
+    ]);
+    expect(measured({})).toEqual([]);
   });
 
   it('accepts only the expected test failing for the expected reason', () => {
