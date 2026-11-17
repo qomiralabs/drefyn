@@ -1,6 +1,7 @@
 import type { ESLint } from 'eslint';
 import { noArbitraryValues } from './no-arbitrary-values.ts';
 import { noCrossPackageInternals } from './no-cross-package-internals.ts';
+import { noDirectModelCall } from './no-direct-model-call.ts';
 import { noMdxEvaluate } from './no-mdx-evaluate.ts';
 import { noOperatorAuth } from './no-operator-auth.ts';
 import { noRawEgress } from './no-raw-egress.ts';
@@ -22,6 +23,7 @@ const plugin = {
   rules: {
     'no-arbitrary-values': noArbitraryValues,
     'no-cross-package-internals': noCrossPackageInternals,
+    'no-direct-model-call': noDirectModelCall,
     'no-mdx-evaluate': noMdxEvaluate,
     'no-operator-auth': noOperatorAuth,
     'no-raw-egress': noRawEgress,

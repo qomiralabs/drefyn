@@ -146,6 +146,15 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'ai.model_calls',
+    kind: 'kill_switch',
+    owner: 'Divine572',
+    description: 'Features may call the configured model provider. Off stops every model call.',
+    created: '2026-11-17',
+    removeBy: '2027-12-31',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

@@ -117,6 +117,7 @@ export default tseslint.config(
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       'drefyn/no-cross-package-internals': 'error',
       'drefyn/no-raw-egress': ['error', { allow: egressAllowList }],
+      'drefyn/no-direct-model-call': 'error',
       'drefyn/no-mdx-evaluate': 'error',
       'drefyn/no-tier-literals': 'error',
       // The column controlled tables of @drefyn/db (COLUMN_GRANT_TABLES): select * fails on a

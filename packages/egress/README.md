@@ -1,8 +1,8 @@
 # `@drefyn/egress`
 
 The one way out to a URL or host a customer chose. Spec fetch, feeds, imports, webhooks,
-the try it proxy and monitors all go through it, and the `drefyn/no-raw-egress` lint rule
-fails any network call made anywhere else.
+the try it proxy, monitors and model calls all go through it, and the
+`drefyn/no-raw-egress` lint rule fails any network call made anywhere else.
 
 Fetching a customer's URL is how a server gets tricked into reaching its own network:
 cloud metadata, the database, a container next door. The guard closes that by checking
@@ -79,16 +79,21 @@ headers; a caller's values for them are dropped.
 | `feed`                                 | https       | 443       | 3         | 10 s          | 1 MiB     |
 | `import`, `spec_fetch`, `media_import` | https       | 443       | 3         | 30 s          | 20 MiB    |
 | `try_it`                               | https, http | any       | 0         | 15 s          | 5 MiB     |
+| `model`                                | https       | 443       | 0         | 120 s         | 4 MiB     |
 
 The connect timeout is 5 s for every purpose.
 
 ## Self hosting
 
-Two options exist for installs on a private network. Both are off unless the caller
-passes them, and the hosted service passes neither.
+Three options exist for installs on a private network. All are off unless the caller
+passes them, and the hosted service passes none.
 
 - `policyFor('webhook', { webhookAllowHttp: true })` lets webhooks go out over plain
   http. The app turns it on from `DREFYN_WEBHOOK_ALLOW_HTTP=true`.
+- `policyFor('model', { modelLocal: true, allowPrivateCidrs: ['10.20.0.0/16'] })` lets a
+  model server on the operator's network answer over plain http on any port. It needs a
+  private range; without one the flag is ignored. `@drefyn/ai` turns it on only when
+  `DREFYN_MODEL_ALLOW_PRIVATE_CIDRS` is set.
 - `policyFor(purpose, { allowPrivateCidrs: ['10.20.0.0/16'] })` lets the listed ranges
   through, for example an internal API whose spec lives on the private network. With a
   list set, names such as `api.internal` are resolved instead of refused, and their

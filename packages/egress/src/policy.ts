@@ -9,6 +9,7 @@ export const EGRESS_PURPOSES: readonly EgressPurpose[] = Object.freeze([
   'spec_fetch',
   'try_it',
   'media_import',
+  'model',
 ]);
 
 const KIB = 1024;
@@ -57,6 +58,15 @@ const DEFAULTS: Readonly<Record<EgressPurpose, Defaults>> = {
     totalTimeoutMs: 15_000,
     maxResponseBytes: 5 * MIB,
   },
+  // One buffered answer. Long outputs on the larger models take minutes, and a provider
+  // that redirects is not one we meant to call.
+  model: {
+    schemes: ['https'],
+    ports: [443],
+    maxRedirects: 0,
+    totalTimeoutMs: 120_000,
+    maxResponseBytes: 4 * MIB,
+  },
 };
 
 export interface PolicyOptions {
@@ -64,21 +74,29 @@ export interface PolicyOptions {
   readonly webhookAllowHttp?: boolean;
   /** Private probes and self hosted installs only: ranges that may be reached. */
   readonly allowPrivateCidrs?: readonly string[];
+  /**
+   * Self host only: a model server on the operator's own network (DREFYN_MODEL_*), which
+   * usually speaks plain http on its own port. Needs allowPrivateCidrs, and only the
+   * model purpose reads it.
+   */
+  readonly modelLocal?: boolean;
 }
 
 /** The default policy for a purpose. Spread it to tighten one field for a call site. */
 export function policyFor(purpose: EgressPurpose, options: PolicyOptions = {}): EgressPolicy {
   const defaults = DEFAULTS[purpose];
+  const cidrs = options.allowPrivateCidrs ?? [];
+  const local = purpose === 'model' && options.modelLocal === true && cidrs.length > 0;
   const schemes =
-    purpose === 'webhook' && options.webhookAllowHttp === true
+    (purpose === 'webhook' && options.webhookAllowHttp === true) || local
       ? (['https', 'http'] as const)
       : defaults.schemes;
-  const cidrs = options.allowPrivateCidrs ?? [];
+  const ports = local ? 'any' : defaults.ports;
   const policy: EgressPolicy = {
     purpose,
     allowPrivate: cidrs.length === 0 ? false : { cidrs: [...cidrs] },
     schemes: [...schemes],
-    ports: defaults.ports === 'any' ? 'any' : [...defaults.ports],
+    ports: ports === 'any' ? 'any' : [...ports],
     maxRedirects: defaults.maxRedirects,
     connectTimeoutMs: CONNECT_TIMEOUT_MS,
     totalTimeoutMs: defaults.totalTimeoutMs,

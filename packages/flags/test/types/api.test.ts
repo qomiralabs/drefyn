@@ -50,6 +50,7 @@ describe('flag names', () => {
       | 'auth.totp'
       | 'docs.site'
       | 'retrieval.v1'
+      | 'ai.model_calls'
     >();
   });
 

@@ -258,6 +258,24 @@ describe('the MDX compiler ban', () => {
   );
 });
 
+describe('the model provider rule', () => {
+  it.each(['eslint.config.js', 'scripts/lint-rules/guard.config.js'])(
+    'is on in %s for packages and apps alike',
+    async (config) => {
+      const eslint = new ESLint({
+        cwd: repoRoot,
+        overrideConfigFile: join(repoRoot, config),
+      });
+      for (const path of ['packages/ai/src/index.ts', 'apps/dashboard/src/shell.tsx']) {
+        const resolved = (await eslint.calculateConfigForFile(join(repoRoot, path))) as {
+          rules?: Linter.RulesRecord;
+        };
+        expect(resolved.rules?.['drefyn/no-direct-model-call'], path).toEqual([2]);
+      }
+    },
+  );
+});
+
 // The list in eslint.config.js is hand written because the config cannot load @drefyn/db. The
 // allow list is read as source for the same reason, and because the db entry does not export it.
 describe('the no-select-all table list', () => {
