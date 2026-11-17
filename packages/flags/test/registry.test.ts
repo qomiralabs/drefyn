@@ -41,6 +41,18 @@ describe('the registry', () => {
     for (const flag of status) expect(flag).toMatchObject({ safeValue: false });
   });
 
+  it('holds the ai.model_calls kill switch, which stops every model call when off', () => {
+    expect(flags.find((flag) => flag.name === 'ai.model_calls')).toEqual({
+      name: 'ai.model_calls',
+      kind: 'kill_switch',
+      owner: 'Divine572',
+      description: 'Features may call the configured model provider. Off stops every model call.',
+      created: '2026-11-17',
+      removeBy: '2027-12-31',
+      safeValue: false,
+    });
+  });
+
   it('gives every flag an owner, a description and a removal date after it was created', () => {
     for (const flag of flags) {
       expect(flag.owner.trim(), flag.name).not.toBe('');

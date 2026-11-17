@@ -15,6 +15,7 @@ describe('policyFor', () => {
       'spec_fetch',
       'try_it',
       'media_import',
+      'model',
     ]);
   });
 
@@ -26,6 +27,7 @@ describe('policyFor', () => {
     ['spec_fetch', ['https'], [443], 3, 30_000, 20 * MIB],
     ['media_import', ['https'], [443], 3, 30_000, 20 * MIB],
     ['try_it', ['https', 'http'], 'any', 0, 15_000, 5 * MIB],
+    ['model', ['https'], [443], 0, 120_000, 4 * MIB],
   ] as const)('gives %s its defaults', (purpose, schemes, ports, redirects, total, bytes) => {
     const policy = policyFor(purpose);
     expect(policy).toEqual({
@@ -47,6 +49,23 @@ describe('policyFor', () => {
   it('lets a self hosted install send webhooks over plain http when it opts in', () => {
     expect(policyFor('webhook', { webhookAllowHttp: true }).schemes).toEqual(['https', 'http']);
     expect(policyFor('feed', { webhookAllowHttp: true }).schemes).toEqual(['https']);
+  });
+
+  it('lets a self hosted model on a listed private range use plain http and any port', () => {
+    const local = policyFor('model', { modelLocal: true, allowPrivateCidrs: ['127.0.0.0/8'] });
+    expect(local.schemes).toEqual(['https', 'http']);
+    expect(local.ports).toBe('any');
+    expect(local.allowPrivate).toEqual({ cidrs: ['127.0.0.0/8'] });
+  });
+
+  it('ignores modelLocal without a private range, and for every other purpose', () => {
+    expect(policyFor('model', { modelLocal: true })).toEqual(policyFor('model'));
+    expect(
+      policyFor('feed', { modelLocal: true, allowPrivateCidrs: ['10.0.0.0/8'] }).schemes,
+    ).toEqual(['https']);
+    expect(
+      policyFor('feed', { modelLocal: true, allowPrivateCidrs: ['10.0.0.0/8'] }).ports,
+    ).toEqual([443]);
   });
 
   it('passes private ranges through only when they are given', () => {

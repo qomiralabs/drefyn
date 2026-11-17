@@ -1,0 +1,5 @@
+{
+  "name": "@drefyn/lint-rules",
+  "private": true,
+  "type": "module"
+}

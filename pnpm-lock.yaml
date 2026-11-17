@@ -188,6 +188,28 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  packages/ai:
+    dependencies:
+      '@drefyn/credits':
+        specifier: workspace:*
+        version: link:../credits
+      '@drefyn/egress':
+        specifier: workspace:*
+        version: link:../egress
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/api-gen:
     dependencies:
       '@drefyn/mdx':
