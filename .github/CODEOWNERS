@@ -23,6 +23,8 @@
 /scripts/lint-rules/guard.config.js @Divine572
 # Everything here may open raw network connections, so every change is a security change.
 /packages/egress/          @Divine572
+# Holds the model provider keys and reports the token usage that settles credits.
+/packages/ai/              @Divine572
 # Migrations set grants, policies and row level security, so every change is a security change.
 /packages/db/migrations/   @Divine572
 # The drefyn binary runs migrations as the owner and prints sign in links.

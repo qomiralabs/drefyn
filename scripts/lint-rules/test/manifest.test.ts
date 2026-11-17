@@ -545,6 +545,21 @@ describe('migrations need security review', () => {
   });
 });
 
+describe('the model package needs security review', () => {
+  // It holds the provider keys and reports the token usage that settles credits.
+  it('I2: packages/ai/ asks for security review and has a code owner', () => {
+    const rules = JSON.parse(
+      readFileSync(join(repoRoot, 'scripts/review-gate/rules.json'), 'utf8'),
+    ) as { paths: { security: { prefixes: string[] } } };
+    expect(rules.paths.security.prefixes).toContain('packages/ai/');
+    const owners = readFileSync(join(repoRoot, '.github/CODEOWNERS'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+      .map((line) => line.split(/\s+/)[0]);
+    expect(owners).toContain('/packages/ai/');
+  });
+});
+
 describe('manifest checker on inline disables of the boundary rules', () => {
   beforeEach(() => {
     ws.manifest('packages/a', goodPackage('a'));

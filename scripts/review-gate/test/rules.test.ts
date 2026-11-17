@@ -190,6 +190,11 @@ describe('the shipped rules file', () => {
     'packages/flags/src/client.ts',
     'packages/flags/test/evaluation.test.ts',
     'packages/flags/README.md',
+    'packages/ai/src/call.ts',
+    'packages/ai/src/providers/anthropic.ts',
+    'packages/ai/package.json',
+    'packages/ai/README.md',
+    'packages/ai/test/call.test.ts',
   ])('puts %s in tier A', (file) => {
     expect(tier(file)).toBe('A');
     expect(reviewersFor([file])).toEqual(
@@ -205,6 +210,9 @@ describe('the shipped rules file', () => {
     ['packages/egress-old/src/index.ts', false],
     ['packages/db/migrations-old/x.sql', false],
     ['packages/flags-old/src/index.ts', false],
+    ['packages/ai-tools/src/x.ts', false],
+    ['packages/aix/src/x.ts', false],
+    ['apps/ai/src/x.ts', true],
     ['packages/ui/src/tokens.ts', true],
     ['packages/ui/README.md', true],
     ['packages/email/src/welcome.ts', true],
