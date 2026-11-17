@@ -18,6 +18,17 @@ export {
   type ProvedTenant,
   type ReleaseFlagName,
 } from './guard.ts';
+export { buildOpenApi, RETRIEVE_OPERATION_PATH, retrieveResponse } from './openapi.ts';
+export { planFeature } from './plan.ts';
+export {
+  mountRetrieval,
+  parseRetrieveQuery,
+  RETRIEVE_PATH,
+  RETRIEVE_SCOPE,
+  retrievalError,
+  retrieveBody,
+  type RetrieveService,
+} from './retrieve.ts';
 export { createJsonLogger, type ApiLogger, type LineWriter, type LogFields } from './log.ts';
 export { API_SCOPES, apiScopes, productOf, type ApiScope } from './scopes.ts';
 export {

@@ -42,6 +42,11 @@ describe('error mapping', () => {
       'api.limit_reached': 429,
       'api.unavailable': 503,
       'api.internal': 500,
+      'api.not_entitled': 403,
+      'retrieval.bad_input': 400,
+      'retrieval.version_not_found': 404,
+      'retrieval.busy': 503,
+      'retrieval.unavailable': 503,
     });
   });
 
@@ -52,6 +57,10 @@ describe('error mapping', () => {
     expect(zero.headers.get('retry-after')).toBe('1');
     expect(errorResponse(new ApiError('api.unavailable')).headers.get('retry-after')).toBe('1');
     expect(errorResponse(new ApiError('api.not_found')).headers.get('retry-after')).toBeNull();
+    expect(errorResponse(new ApiError('retrieval.busy')).headers.get('retry-after')).toBe('1');
+    expect(errorResponse(new ApiError('retrieval.bad_input')).headers.get('retry-after')).toBe(
+      null,
+    );
   });
 
   // Keys already answer with these through apiKeyErrorResponse; this service must agree.

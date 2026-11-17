@@ -1,0 +1,481 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Drefyn API",
+    "version": "1",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.drefyn.com",
+      "description": "Hosted"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An organization API key with project scope. Retrieval needs docs:pages.read."
+      }
+    }
+  },
+  "paths": {
+    "/v1/projects/{projectId}/retrieve": {
+      "get": {
+        "operationId": "retrieve",
+        "summary": "Retrieve passages from published docs",
+        "description": "Any word, ranked by relevance. Reads only published, public pages: protected pages, drafts and replaced versions are never returned. A question with no words (punctuation only) returns no hits, not an error.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^prj_[0-9a-hjkmnp-tv-z]{26}$"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "description": "1 to 512 characters after trimming.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "A published version label. Only latest exists today.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "default": "latest"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 8
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ranked passages from the published docs, pinned to a version.",
+            "headers": {
+              "cache-control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pin": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string"
+                        },
+                        "publishedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "description": "The newest publish in the set read, ISO 8601."
+                        }
+                      },
+                      "required": ["version", "publishedAt"],
+                      "additionalProperties": false
+                    },
+                    "ranking": {
+                      "type": "string",
+                      "enum": ["lexical", "hybrid"]
+                    },
+                    "hits": {
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chunkId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "nodeId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "versionId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "description": "The published page version the text came from."
+                          },
+                          "path": {
+                            "type": "string",
+                            "description": "Page path at publish."
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "headingPath": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "text": {
+                            "type": "string",
+                            "description": "Reader text only, never source or HTML."
+                          },
+                          "rank": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20,
+                            "description": "1 based position. Scores are not exposed, so ranking can change."
+                          }
+                        },
+                        "required": [
+                          "chunkId",
+                          "nodeId",
+                          "versionId",
+                          "path",
+                          "title",
+                          "headingPath",
+                          "text",
+                          "rank"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["pin", "ranking", "hits"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is missing, repeated, unknown or out of range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["retrieval.bad_input"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "retrieval.bad_input",
+                    "message": "The request parameters are not valid."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key, a bad, revoked or expired key, or a key in the query string.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["auth.api_key_invalid"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "auth.api_key_invalid",
+                    "message": "The API key is missing or not valid."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key lacks the scope or the project, or the plan lacks the feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["auth.api_key_scope", "api.not_entitled"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "auth.api_key_scope",
+                    "message": "The API key does not allow this request."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project for this key, the feature is off, or no such version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["api.not_found", "retrieval.version_not_found"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "api.not_found",
+                    "message": "Not found."
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["api.too_large"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "api.too_large",
+                    "message": "The request body is too large."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed requests from this client. Honour Retry-After.",
+            "headers": {
+              "retry-after": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["auth.rate_limited"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "auth.rate_limited",
+                    "message": "Too many failed requests. Try again later."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": ["api.internal"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "api.internal",
+                    "message": "Something went wrong on our side."
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Try again after the Retry-After header.",
+            "headers": {
+              "retry-after": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "auth.unavailable",
+                            "api.unavailable",
+                            "retrieval.busy",
+                            "retrieval.unavailable"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "auth.unavailable",
+                    "message": "Keys cannot be checked right now. Try again."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

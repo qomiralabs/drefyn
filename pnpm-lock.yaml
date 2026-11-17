@@ -65,6 +65,9 @@ importers:
       '@drefyn/flags':
         specifier: workspace:*
         version: link:../../packages/flags
+      '@drefyn/retrieval':
+        specifier: workspace:*
+        version: link:../../packages/retrieval
       '@drefyn/tenancy':
         specifier: workspace:*
         version: link:../../packages/tenancy
