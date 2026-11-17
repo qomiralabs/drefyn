@@ -327,6 +327,7 @@ describe('the area list', () => {
         'github',
         'dashboard',
         'engine',
+        'mcp',
       ].sort(),
     );
   });

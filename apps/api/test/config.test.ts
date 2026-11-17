@@ -20,6 +20,8 @@ describe('parseApiConfig', () => {
       maxBodyBytes: 1_048_576,
       hops: 0,
       viewerHeader: false,
+      mcpMaxBodyBytes: 65_536,
+      mcpHost: null,
     });
   });
 
@@ -45,6 +47,8 @@ describe('parseApiConfig', () => {
         DREFYN_API_MAX_BODY_BYTES: '2048',
         DREFYN_TRUSTED_PROXY_HOPS: '2',
         DREFYN_CLIENT_IP_HEADER: 'cloudfront-viewer-address',
+        DREFYN_MCP_MAX_BODY_BYTES: '4096',
+        DREFYN_MCP_HOST: 'MCP.Example.com',
       }),
     ).toEqual({
       port: 8080,
@@ -53,7 +57,28 @@ describe('parseApiConfig', () => {
       maxBodyBytes: 2048,
       hops: 2,
       viewerHeader: true,
+      mcpMaxBodyBytes: 4096,
+      mcpHost: 'mcp.example.com',
     });
+  });
+
+  it.each(['0', '-1', '1.5', '67108865', 'lots'])(
+    'refuses DREFYN_MCP_MAX_BODY_BYTES %s',
+    (value) => {
+      expect(keyOf({ DREFYN_MCP_MAX_BODY_BYTES: value })).toBe('DREFYN_MCP_MAX_BODY_BYTES');
+    },
+  );
+
+  it.each([
+    'https://mcp.example.com',
+    'mcp.example.com:443',
+    'mcp.example.com/',
+    'mcp example.com',
+    '-mcp.example.com',
+    'mcp..example.com',
+    `${'a'.repeat(64)}.example.com`,
+  ])('refuses DREFYN_MCP_HOST %s, which is not a bare host name', (value) => {
+    expect(keyOf({ DREFYN_MCP_HOST: value })).toBe('DREFYN_MCP_HOST');
   });
 
   it('defaults the public URL to the chosen port', () => {

@@ -38,6 +38,8 @@ describe('error mapping', () => {
       'auth.rate_limited': 429,
       'auth.unavailable': 503,
       'api.not_found': 404,
+      'api.not_entitled': 403,
+      'api.method_not_allowed': 405,
       'api.too_large': 413,
       'api.limit_reached': 429,
       'api.unavailable': 503,

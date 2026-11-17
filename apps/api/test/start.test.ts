@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AuthError } from '@drefyn/auth';
 import { DbError, type Database, type PublishedDatabase } from '@drefyn/db';
 import { FlagError, loadFlagConfig, type FlagClient } from '@drefyn/flags';
+import { RetrievalConfigError } from '@drefyn/retrieval';
 import { organizationId } from '@drefyn/tenancy';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiConfigError } from '../src/config.ts';
@@ -107,6 +108,27 @@ describe('startApi', () => {
       startApi({ ...ENV, DREFYN_FLAGS_SOURCE: 'remote' }, options),
     ).rejects.toBeInstanceOf(FlagError);
     expect(opened).toEqual([]);
+  });
+
+  it('refuses a bad retrieval setting before opening any pool', async () => {
+    const { options, opened } = seams();
+    await expect(
+      startApi({ ...ENV, DREFYN_RETRIEVAL_TIMEOUT_MS: '0' }, options),
+    ).rejects.toBeInstanceOf(RetrievalConfigError);
+    expect(opened).toEqual([]);
+  });
+
+  // Flags are off in these seams, so a keyed call would be 404; no key is refused first.
+  it('serves MCP at /mcp, refusing GET and a call with no key', async () => {
+    const { options } = seams();
+    const api = await start(ENV, options);
+    expect((await fetch(url(api, '/mcp'))).status).toBe(405);
+    const posted = await fetch(url(api, '/mcp'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(posted.status).toBe(401);
   });
 
   it('serves health on the chosen port and says where it listens', async () => {
@@ -226,6 +248,13 @@ describe('describeStartFailure', () => {
     expect(describeStartFailure(new FlagError('FLAG_DEFINITION_INVALID'))).toEqual({
       error: 'FlagError',
       code: 'FLAG_DEFINITION_INVALID',
+    });
+    expect(
+      describeStartFailure(new RetrievalConfigError('DREFYN_RETRIEVAL_TIMEOUT_MS', 'is too big')),
+    ).toEqual({
+      error: 'RetrievalConfigError',
+      code: 'config.invalid',
+      key: 'DREFYN_RETRIEVAL_TIMEOUT_MS',
     });
   });
 

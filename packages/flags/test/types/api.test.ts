@@ -50,6 +50,8 @@ describe('flag names', () => {
       | 'auth.totp'
       | 'docs.site'
       | 'retrieval.v1'
+      | 'mcp.v1'
+      | 'mcp.serve'
     >();
   });
 

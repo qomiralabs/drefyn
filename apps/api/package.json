@@ -20,12 +20,15 @@
     "@drefyn/db": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
+    "@drefyn/mcp": "workspace:*",
+    "@drefyn/retrieval": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "@hono/node-server": "2.1.6",
     "hono": "4.13.17",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "fast-check": "4.10.2",
     "typescript": "6.0.3"
   }

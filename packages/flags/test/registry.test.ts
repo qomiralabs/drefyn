@@ -53,6 +53,30 @@ describe('the registry', () => {
     for (const flag of status) expect(flag).toMatchObject({ safeValue: false });
   });
 
+  it('holds the MCP flags: the release flag and a kill switch that stops serving when unread', () => {
+    const mcp = registry.filter((flag) => flag.name.startsWith('mcp.'));
+    expect(mcp).toEqual([
+      {
+        name: 'mcp.v1',
+        kind: 'release',
+        owner: 'Divine572',
+        description: 'The API serves the docs MCP server at /mcp for project scoped keys.',
+        created: '2026-11-17',
+        removeBy: '2027-06-30',
+        safeValue: false,
+      },
+      {
+        name: 'mcp.serve',
+        kind: 'kill_switch',
+        owner: 'Divine572',
+        description: 'MCP requests are served. Off answers every MCP request 503 without a deploy.',
+        created: '2026-11-17',
+        removeBy: '2027-12-31',
+        safeValue: false,
+      },
+    ]);
+  });
+
   it('gives every flag an owner, a description and a removal date after it was created', () => {
     for (const flag of flags) {
       expect(flag.owner.trim(), flag.name).not.toBe('');
