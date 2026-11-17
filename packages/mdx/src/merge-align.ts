@@ -100,12 +100,13 @@ export function shareHeld(slot: Entry, block: Entry, budget: Budget): number {
 }
 
 // Whether a side took words out of one base block and put them into another, as a join or a
-// split does: words `was` had and `now` lost, which `into` has and `before` did not.
+// split does: words `was` had and `now` lost, which `into` has and `before` did not. A block the
+// side wrote new had nothing before.
 export function carried(
   was: Entry,
   now: Entry | null,
   into: Entry,
-  before: Entry,
+  before: Entry | null,
   budget: Budget,
 ): boolean {
   const words = wordsOf(was);
@@ -113,7 +114,7 @@ export function carried(
   if (budget.left < 0) return false;
   const kept = now === null ? new Set<string>() : wordsOf(now);
   const gained = wordsOf(into);
-  const had = wordsOf(before);
+  const had = before === null ? new Set<string>() : wordsOf(before);
   for (const word of words) {
     if (!kept.has(word) && gained.has(word) && !had.has(word)) return true;
   }
