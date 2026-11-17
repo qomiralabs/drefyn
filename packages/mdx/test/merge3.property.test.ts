@@ -392,6 +392,24 @@ describe('merge3 over generated edits', () => {
     expect(failureIn(input)).toBeUndefined();
   });
 
+  // Found by the gate on a fresh seed, -1606907093, shrunk.
+  it('keeps the order of a split and move beside an insert, a move and an append', () => {
+    const input = {
+      page: { seed: 1999999994 },
+      crlf: false,
+      ours: [
+        { kind: 'split', at: 388729, choice: 156957 },
+        { kind: 'move', at: 776761, choice: 566600 },
+      ],
+      theirs: [
+        { kind: 'insert', at: 210001, choice: 13 },
+        { kind: 'move', at: 72148, choice: 0 },
+        { kind: 'append', at: 0, choice: 0 },
+      ],
+    } as unknown as MergeCase;
+    expect(failureIn(input)).toBeUndefined();
+  });
+
   // The worst case has its own run: one side deletes a block, the other changes its kind and a word.
   it(
     'never lets a delete pass a block the other side retyped',
