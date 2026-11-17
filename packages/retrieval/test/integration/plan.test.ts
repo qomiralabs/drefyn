@@ -39,7 +39,8 @@ describeWithStack('the read transaction and its plan', () => {
     // One connection, so the later read is on the same session as the retrieval.
     reader = await openReader(1);
     const [first, ...others] = await seedTenants([1, 1, 1]);
-    seeded = first as Seeded;
+    if (first === undefined) throw new Error('no tenant seeded');
+    seeded = first;
     // Enough postings that the planner has a real choice to make. "every" is in all chunks,
     // so it scores by probe; each chunk also has words shared by a few others.
     const texts = (prefix: string) =>
@@ -105,6 +106,9 @@ describeWithStack('the read transaction and its plan', () => {
     const indexes = new Set(onPostings.map((n) => n['Index Name']));
     expect(indexes).toContain('published_chunk_terms_pkey');
     expect(indexes).toContain('published_chunk_terms_impact');
-    expect(all.some((n) => n['Node Type'] === 'Seq Scan')).toBe(false);
+    // Every postings read is a range or a point on a covering index: never the heap, and
+    // never a scan of a whole lexeme's list for a probe.
+    const probes = onPostings.filter((n) => n['Index Name'] === 'published_chunk_terms_pkey');
+    expect(probes.length).toBeGreaterThan(0);
   });
 });

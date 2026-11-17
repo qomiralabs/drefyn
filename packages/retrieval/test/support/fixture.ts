@@ -24,7 +24,13 @@ import {
 } from '../../src/index.ts';
 import { superuser, urlFor } from './stack.ts';
 
-export const database = () => inject('retrievalDatabase');
+// A file that would disturb the others, such as one that locks a table, moves to a database
+// of its own. Module state, so it holds for that file only.
+let own: string | null = null;
+export const useDatabase = (name: string | null) => {
+  own = name;
+};
+export const database = () => own ?? inject('retrievalDatabase');
 export const admin = (text: string) => superuser(text, database());
 
 export const openApp = (): Promise<Database> =>

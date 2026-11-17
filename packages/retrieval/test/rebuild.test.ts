@@ -10,12 +10,12 @@ const TENANT: TenantRef = {
 
 const kind = ({ sql }: Statement) => {
   if (sql.includes('pg_advisory_xact_lock')) return 'lock';
-  if (/delete from app\.published_chunk_terms/.test(sql)) return 'clear postings';
-  if (/delete from app\.published_term_stats/.test(sql)) return 'clear stats';
-  if (/delete from app\.published_project_term_totals/.test(sql)) return 'clear totals';
-  if (/insert into app\.published_chunk_terms/.test(sql)) return 'postings';
-  if (/insert into app\.published_term_stats/.test(sql)) return 'stats';
-  if (/insert into app\.published_project_term_totals/.test(sql)) return 'totals';
+  if (sql.includes('delete from app.published_chunk_terms')) return 'clear postings';
+  if (sql.includes('delete from app.published_term_stats')) return 'clear stats';
+  if (sql.includes('delete from app.published_project_term_totals')) return 'clear totals';
+  if (sql.includes('insert into app.published_chunk_terms')) return 'postings';
+  if (sql.includes('insert into app.published_term_stats')) return 'stats';
+  if (sql.includes('insert into app.published_project_term_totals')) return 'totals';
   return 'other';
 };
 

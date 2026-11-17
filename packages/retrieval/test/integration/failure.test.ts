@@ -10,9 +10,11 @@ import {
   retrievalOver,
   seedPages,
   seedTenants,
+  useDatabase,
   type Seeded,
 } from '../support/fixture.ts';
 import { describeWithStack } from '../support/presence.ts';
+import { migratedDatabase } from '../support/global-setup.ts';
 import { capturedLogger } from '../support/scripted.ts';
 import { composeArgs } from '../support/stack.ts';
 
@@ -20,8 +22,13 @@ describeWithStack('failure behaviour', () => {
   let app: Database;
   let reader: PublishedDatabase;
   let seeded: Seeded;
+  let drop: () => Promise<string>;
 
   beforeAll(async () => {
+    // The timeout case locks a table, which would stall every other file on a shared database.
+    const mine = await migratedDatabase('drefyn_retrievalfail');
+    drop = mine.drop;
+    useDatabase(mine.name);
     app = await openApp();
     reader = await openReader();
     [seeded] = (await seedTenants([1])) as [Seeded];
@@ -31,6 +38,8 @@ describeWithStack('failure behaviour', () => {
   afterAll(async () => {
     await closeDatabase(reader);
     await closeDatabase(app);
+    useDatabase(null);
+    await drop();
   });
 
   it('a statement past its timeout is busy, with no partial result', async () => {
@@ -50,7 +59,11 @@ describeWithStack('failure behaviour', () => {
       '-c',
       'begin; lock table app.published_project_term_totals in access exclusive mode; select pg_sleep(5); commit;',
     ]);
-    const finished = new Promise<void>((resolve) => holder.on('close', () => resolve()));
+    const finished = new Promise<void>((resolve) =>
+      holder.on('close', () => {
+        resolve();
+      }),
+    );
     try {
       for (let tries = 0; tries < 100; tries += 1) {
         const held = await admin(`

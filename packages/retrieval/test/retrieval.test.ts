@@ -296,15 +296,22 @@ describe('failures', () => {
   });
 
   it('refuses past the in flight limit for one organization, and frees the slot after', async () => {
-    let release = () => undefined as void;
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
+    });
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
     });
     const scripted = scriptedReader(answering(() => searchRow()));
     const retrieval = createRetrieval({
       reader: {
         read: async (tenant, timeoutMs, work) => {
-          if (tenant.organizationId === TENANT.organizationId) await held;
+          if (tenant.organizationId === TENANT.organizationId) {
+            entered();
+            await held;
+          }
           return scripted.reader.read(tenant, timeoutMs, work);
         },
       },
@@ -312,9 +319,8 @@ describe('failures', () => {
       flags: on,
     });
     const first = retrieval.retrieve(TENANT, { query: QUERY });
-    // Let the first one reach the reader and hold its slot.
-    await Promise.resolve();
-    await Promise.resolve();
+    // The first one holds its slot from here until release.
+    await reached;
     expect(await retrieval.retrieve(TENANT, { query: QUERY })).toEqual({
       ok: false,
       error: 'retrieval.busy',

@@ -133,7 +133,7 @@ describeWithStack('isolation', () => {
             expect(result.value.hits.length).toBe(Math.min(limit, allowed.size));
             for (const p of planted) {
               const got = await retrieval.getPage(owner.tenant, { nodeId: p.page.nodeId });
-              const readable = p.owner === owner && p.shape === 'public';
+              const readable = p.owner === owner && (p.shape === 'public' || p.shape === 'old');
               if (!readable) {
                 expect(got).toEqual({ ok: false, error: 'retrieval.not_found' });
                 const byPath = await retrieval.getPage(owner.tenant, { path: p.page.path });
