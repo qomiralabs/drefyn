@@ -34,6 +34,7 @@ interface Tree {
   readonly below?: { readonly height: number; readonly rows: number };
   readonly anchor?: readonly Record<string, unknown>[];
   readonly next?: readonly Record<string, unknown>[];
+  readonly visibility?: Record<string, unknown>;
 }
 
 const walkOf = (statement: Statement) => {
@@ -50,8 +51,10 @@ const treeOf =
     below = { height: 1, rows: 1 },
     anchor = [{ id: ANCHOR, order_key: 'a0' }],
     next = [{ id: NEXT, order_key: 'a2' }],
+    visibility = { own: null, before: 'public', after: 'public' },
   }: Tree = {}): Responder =>
   (statement) => {
+    if (has(statement, 'as own')) return [visibility];
     if (has(statement, 'pg_advisory_xact_lock')) return [{}];
     if (has(statement, 'for update')) {
       return [{ id: NODE, family: 'docs_page', type_id: TYPE, head_version_id: null }];
@@ -352,6 +355,59 @@ describe('moveNode', () => {
     expect(await engine.moveNode(move)).toMatchObject({
       ok: false,
       error: { code: 'engine.unavailable', retryable: true },
+    });
+  });
+
+  describe('visibility', () => {
+    const pinned = (statements: readonly Statement[]) =>
+      statements.find((statement) => has(statement, 'update "nodes"'));
+
+    it('pins a node that followed a protected branch when it lands under a public one', async () => {
+      const visibility = { own: null, before: 'protected', after: 'public' };
+      const { engine, statements, info } = build(treeOf({ visibility }));
+      expect(await engine.moveNode(move)).toEqual({ ok: true, value: undefined });
+      expect(pinned(statements)?.sql).toContain('"visibility_override" = $');
+      expect(pinned(statements)?.parameters).toContain('protected');
+      expect(info).toHaveBeenCalledWith(
+        'engine.move',
+        expect.objectContaining({ visibility_pinned: true }),
+      );
+    });
+
+    it.each([
+      ['its own override', { own: 'public', before: 'public', after: 'public' }],
+      ['an override that kept it shut', { own: 'protected', before: 'protected', after: 'public' }],
+      ['a move that tightens', { own: null, before: 'public', after: 'protected' }],
+      ['a move within a shut branch', { own: null, before: 'protected', after: 'protected' }],
+      ['a move within an open branch', { own: null, before: 'public', after: 'public' }],
+    ])('leaves the override alone for %s', async (_name, visibility) => {
+      const { engine, statements, info } = build(treeOf({ visibility }));
+      expect(await engine.moveNode(move)).toMatchObject({ ok: true });
+      expect(pinned(statements)?.sql).not.toContain('visibility_override');
+      expect(JSON.stringify(info.mock.calls)).not.toContain('visibility_pinned');
+    });
+
+    it('reads both sides of the move by tenant, and the root side as the site default', async () => {
+      const { engine, statements } = build(treeOf());
+      await engine.moveNode({ ...move, parentId: null, afterId: null });
+      const read = statements.find((statement) => has(statement, 'as own'));
+      expect(read?.sql).toContain('app.site_access');
+      expect(read?.parameters).toEqual(
+        expect.arrayContaining([tenant.organizationId, tenant.projectId, NODE, null]),
+      );
+    });
+
+    it.each([
+      ['no row', null],
+      ['a value that is not a visibility', { own: null, before: 'secret', after: 'public' }],
+    ])('fails the move and keeps nothing on %s', async (_name, visibility) => {
+      const respond = treeOf();
+      const { engine, statements, ends } = build((statement) =>
+        has(statement, 'as own') ? (visibility === null ? [] : [visibility]) : respond(statement),
+      );
+      await expect(engine.moveNode(move)).rejects.toThrow('visibility unreadable');
+      expect(pinned(statements)).toBeUndefined();
+      expect(ends).toEqual(['rollback']);
     });
   });
 

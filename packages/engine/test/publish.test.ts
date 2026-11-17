@@ -94,6 +94,8 @@ interface Script {
   readonly plan?: Record<string, unknown>;
   readonly logged?: Record<string, unknown> | null;
   readonly fail?: (statement: Statement) => Error | null;
+  readonly visibility?: Record<string, unknown> | null;
+  readonly flipped?: Record<string, unknown>;
 }
 
 const scripted =
@@ -101,6 +103,15 @@ const scripted =
   (statement) => {
     const failure = script.fail?.(statement) ?? null;
     if (failure !== null) throw failure;
+    if (has(statement, 'as held')) {
+      return script.visibility === null
+        ? []
+        : [{ visibility: 'public', held: false, ...script.visibility }];
+    }
+    if (has(statement, 'as gone')) return [{ nodes: 0, gone: [], added: [], ...script.flipped }];
+    if (has(statement, 'select "visibility" from "published_versions"')) {
+      return [{ visibility: 'public' }];
+    }
     if (has(statement, 'from "nodes"') && has(statement, 'for update')) {
       return script.node === null ? [] : [{ ...NODE_ROW, ...script.node }];
     }
@@ -169,6 +180,7 @@ describe('publish', () => {
         versionId: HEAD,
         previousVersionId: null,
         renderPolicyVersion: 3,
+        visibility: 'public',
         publishedAt: AT,
       },
     });
@@ -356,9 +368,11 @@ describe('publish', () => {
       versionId: HEAD,
       previousVersionId: EARLIER,
       renderPolicyVersion: 3,
+      visibility: 'public',
       publishedAt: AT,
     });
     expect(wrote(statements)).toEqual([]);
+    expect(statements.some((s) => has(s, 'as held') || has(s, 'as gone'))).toBe(false);
     expect(ends).toEqual(['commit']);
   });
 
@@ -464,10 +478,12 @@ describe('publish with retrieval.v1', () => {
     expect(copy?.parameters).toEqual(expect.arrayContaining([NODE, HEAD, 'public']));
   });
 
-  it('writes no chunk or term row when off, and publishes as before', async () => {
+  it('copies no chunk and writes no term row when off, and publishes as before', async () => {
     const { engine, statements, ends } = build(scripted(), { flags: only(false) });
     expect((await engine.publish(input())).ok).toBe(true);
-    expect(statements.filter(touchesChunks)).toEqual([]);
+    // The visibility flip still reaches rows a past publish copied; nothing else does.
+    const flips = (statement: Statement) => has(statement, 'as gone');
+    expect(statements.filter((s) => touchesChunks(s) && !flips(s))).toEqual([]);
     expect(wrote(statements).map((s) => WRITES.find((w) => has(s, w)))).toEqual(WRITES);
     expect(ends).toEqual(['commit']);
   });
