@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, verify } from 'node:crypto';
+import { join } from 'node:path';
 import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { loadAppSigner } from '../src/private-key.ts';
@@ -52,14 +54,16 @@ describe('loadAppSigner', () => {
     ],
     [
       'an RSA key under 2048 bits',
-      () =>
-        keys.write(
-          'small.pem',
-          generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({
-            type: 'pkcs1',
-            format: 'pem',
-          }),
-        ),
+      // Made outside the codebase: the weak key is the input the reader must refuse.
+      () => {
+        const file = join(keys.dir, 'small.pem');
+        execFileSync(
+          'openssl',
+          ['genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:1024', '-out', file],
+          { stdio: 'ignore' },
+        );
+        return file;
+      },
     ],
     [
       'a public key',
