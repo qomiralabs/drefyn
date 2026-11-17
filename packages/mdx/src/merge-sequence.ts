@@ -237,23 +237,33 @@ export function mergeSequence(
     return false;
   };
 
-  // An edit can only follow a move while it stays inside its own block. A join or split with a
-  // neighbour carries words across the slot edge, and taking them along with the move would put
-  // them past blocks both sides kept on the other side of them. With no budget left, assume so.
+  // An edit can only follow a move while it stays inside its own block. A join or split carries
+  // words across the slot edge, into a neighbour or into a block of its own, and taking them along
+  // with the move would put them past blocks both sides kept on the other side of them. The side's
+  // run of touched slots bounds where those words can have gone. With no budget left, assume so.
   const crossBudget: Budget = { left: SIMILARITY_BUDGET };
   const crossesEdge = (index: number, editor: Alignment, entry: Entry) => {
+    const was = at(base, index);
+    const leftFor = (spot: number) =>
+      at(editor.after, spot).some(
+        (insert) =>
+          insert.movedFrom === undefined && carried(was, entry, insert, null, crossBudget),
+      );
+    if (leftFor(index) || leftFor(index + 1)) return true;
     for (const step of [-1, 1]) {
       for (let near = index + step; near >= 0 && near < base.length; near += step) {
         const slot = at(editor.slots, near);
-        if (slot.state !== 'changed' && slot.state !== 'deleted') break;
+        if (slot.state === 'same') break;
         const kept = entryOf(slot);
-        const into =
-          kept !== null && carried(at(base, index), entry, kept, at(base, near), crossBudget);
-        if (into || carried(at(base, near), kept, entry, at(base, index), crossBudget)) return true;
+        if (slot.state !== 'moved') {
+          const into = kept !== null && carried(was, entry, kept, at(base, near), crossBudget);
+          if (into || carried(at(base, near), kept, entry, was, crossBudget)) return true;
+        }
+        if (leftFor(step < 0 ? near : near + 1)) return true;
         if (crossBudget.left < 0) return true;
       }
     }
-    return false;
+    return crossBudget.left < 0;
   };
 
   const oneMoved = (index: number, slot: Entry, a: Slot, c: Slot) => {
