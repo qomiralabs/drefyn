@@ -630,6 +630,37 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(@vitest/coverage-v8@5.0.3)(happy-dom@21.0.4)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
+  packages/retrieval:
+    dependencies:
+      '@drefyn/db':
+        specifier: workspace:*
+        version: link:../db
+      '@drefyn/flags':
+        specifier: workspace:*
+        version: link:../flags
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+      kysely:
+        specifier: 0.29.7
+        version: 0.29.7
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/schema:
     dependencies:
       zod:

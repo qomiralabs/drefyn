@@ -66,6 +66,10 @@ jobs:
       # against the stack's own Typesense.
       - name: Search integration tests
         run: pnpm --filter @drefyn/search test:integration
+      # BM25 against a reference, caps at their limits, versions, isolation across two
+      # organizations, the plan and a statement timeout on a database of its own.
+      - name: Retrieval integration tests
+        run: pnpm --filter @drefyn/retrieval test:integration
       - name: check:sources passes on the shipped migrations and the repository
         run: pnpm --filter @drefyn/db check:sources
       # check:types migrates what it is given, so each run gets a fresh copy of the
