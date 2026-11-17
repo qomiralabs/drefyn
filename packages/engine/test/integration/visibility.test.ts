@@ -363,12 +363,9 @@ update app.organizations set read_only_since = null, plan_tier = 'free'
       const at = await page(seeded);
       await shut(seeded, at);
       const refused = await admin(`
-set role drefyn_app;
-select set_config('drefyn.organization_id', '${seeded.organization}', false),
-       set_config('drefyn.project_id', '${seeded.project}', false);
-select has_table_privilege('app.visibility_log', 'update') || ' ' ||
-       has_table_privilege('app.visibility_log', 'delete');`);
-      expect(refused.trim().split('\n').at(-1)).toBe('false false');
+select has_table_privilege('drefyn_app', 'app.visibility_log', 'update') || ' ' ||
+       has_table_privilege('drefyn_app', 'app.visibility_log', 'delete');`);
+      expect(refused.trim()).toBe('false false');
     });
   });
 

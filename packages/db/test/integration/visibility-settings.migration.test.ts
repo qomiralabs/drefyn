@@ -44,10 +44,12 @@ function stepsBack(): number {
 // error text, or the output after the tenant line.
 const asApp = (db: TestDatabase, org: string, project: string, text: string) =>
   superuser(
-    `set role drefyn_app;
-     select set_config('drefyn.organization_id', '${org}', false),
-            set_config('drefyn.project_id', '${project}', false);
-     ${text}`,
+    `begin;
+     set local role drefyn_app;
+     select set_config('drefyn.organization_id', '${org}', true),
+            set_config('drefyn.project_id', '${project}', true);
+     ${text}
+     commit;`,
     db.name,
   ).then(
     (out) => lines(out).slice(1).join('\n'),
