@@ -321,6 +321,43 @@ describe('merge3 scenarios', () => {
     );
   });
 
+  // The tail of First now lives in Second's slot. Carrying it along with the move would put it
+  // below Third and Fourth, where neither side has it.
+  it('move vs a join that pulled words in from the block above: a conflict', () => {
+    const moved = 'Second paragraph with several other words here.';
+    const ours = replaced(
+      `First paragraph with several plain words here.\n\n${moved}`,
+      `First paragraph with several\n\nplain words here. ${moved}`,
+    );
+    const theirs = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);
+    for (const [a, c] of [
+      [ours, theirs],
+      [theirs, ours],
+    ] as const) {
+      const list = conflicts(outcomeOf(BASE, a, c));
+      expect(list.map(({ baseIndex, reason }) => [baseIndex, reason])).toEqual([
+        [2, 'move_vs_edit'],
+      ]);
+    }
+  });
+
+  it('move vs a join that took in the whole block above: a conflict', () => {
+    const moved = 'Second paragraph with several other words here.';
+    const ours = replaced(
+      `First paragraph with several plain words here.\n\n${moved}`,
+      `First paragraph with several plain words here. ${moved}`,
+    );
+    const theirs = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);
+    for (const [a, c] of [
+      [ours, theirs],
+      [theirs, ours],
+    ] as const) {
+      expect(conflicts(outcomeOf(BASE, a, c)).map(({ reason }) => reason)).toContain(
+        'move_vs_edit',
+      );
+    }
+  });
+
   it('move vs edit, with an insert beside the moved block: a conflict', () => {
     const moved = 'Second paragraph with several other words here.';
     const ours = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);

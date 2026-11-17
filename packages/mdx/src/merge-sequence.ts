@@ -1,5 +1,5 @@
 import { rawOf } from './canonical.ts';
-import { align, SAME_BLOCK, shareHeld, SIMILARITY_BUDGET } from './merge-align.ts';
+import { align, carried, SAME_BLOCK, shareHeld, SIMILARITY_BUDGET } from './merge-align.ts';
 import type { Alignment, Budget, Entry, Inserted, MergeNode, Slot } from './merge-align.ts';
 import { at } from './merge-diff.ts';
 import {
@@ -237,6 +237,25 @@ export function mergeSequence(
     return false;
   };
 
+  // An edit can only follow a move while it stays inside its own block. A join or split with a
+  // neighbour carries words across the slot edge, and taking them along with the move would put
+  // them past blocks both sides kept on the other side of them. With no budget left, assume so.
+  const crossBudget: Budget = { left: SIMILARITY_BUDGET };
+  const crossesEdge = (index: number, editor: Alignment, entry: Entry) => {
+    for (const step of [-1, 1]) {
+      for (let near = index + step; near >= 0 && near < base.length; near += step) {
+        const slot = at(editor.slots, near);
+        if (slot.state !== 'changed' && slot.state !== 'deleted') break;
+        const kept = entryOf(slot);
+        const into =
+          kept !== null && carried(at(base, index), entry, kept, at(base, near), crossBudget);
+        if (into || carried(at(base, near), kept, entry, at(base, index), crossBudget)) return true;
+        if (crossBudget.left < 0) return true;
+      }
+    }
+    return false;
+  };
+
   const oneMoved = (index: number, slot: Entry, a: Slot, c: Slot) => {
     const oursMoved = moved(a);
     const move = (oursMoved ? a : c) as Moved;
@@ -246,7 +265,7 @@ export function mergeSequence(
       conflict(index, 'move_vs_edit', entryOf(a), entryOf(c));
     }
     if (other.state === 'same') return;
-    if (other.state !== 'changed') {
+    if (other.state !== 'changed' || crossesEdge(index, oursMoved ? theirs : ours, other.entry)) {
       conflict(index, 'move_vs_edit', entryOf(a), entryOf(c));
       return;
     }

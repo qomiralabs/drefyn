@@ -99,6 +99,27 @@ export function shareHeld(slot: Entry, block: Entry, budget: Budget): number {
   return shared / words.size;
 }
 
+// Whether a side took words out of one base block and put them into another, as a join or a
+// split does: words `was` had and `now` lost, which `into` has and `before` did not.
+export function carried(
+  was: Entry,
+  now: Entry | null,
+  into: Entry,
+  before: Entry,
+  budget: Budget,
+): boolean {
+  const words = wordsOf(was);
+  budget.left -= words.size + 1;
+  if (budget.left < 0) return false;
+  const kept = now === null ? new Set<string>() : wordsOf(now);
+  const gained = wordsOf(into);
+  const had = wordsOf(before);
+  for (const word of words) {
+    if (!kept.has(word) && gained.has(word) && !had.has(word)) return true;
+  }
+  return false;
+}
+
 // Half the words in common is about where a person stops calling two blocks one block.
 export const SAME_BLOCK = 0.5;
 
