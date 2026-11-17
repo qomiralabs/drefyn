@@ -11,9 +11,15 @@ export type ApiErrorCode =
   | 'api.too_large'
   | 'api.limit_reached'
   | 'api.unavailable'
-  | 'api.internal';
+  | 'api.internal'
+  | 'github.signature_invalid'
+  | 'github.delivery_invalid'
+  | 'github.payload_invalid'
+  | 'github.delivery_replayed'
+  | 'github.too_large'
+  | 'github.unavailable';
 
-export type ApiErrorStatus = 401 | 403 | 404 | 413 | 429 | 500 | 503;
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503;
 
 interface CodeInfo {
   readonly status: ApiErrorStatus;
@@ -31,6 +37,21 @@ const CODES: Readonly<Record<ApiErrorCode, CodeInfo>> = {
   'api.limit_reached': { status: 429, message: 'The plan limit for this request is reached.' },
   'api.unavailable': { status: 503, message: 'The service is unavailable. Try again.' },
   'api.internal': { status: 500, message: 'Something went wrong on our side.' },
+  'github.signature_invalid': {
+    status: 401,
+    message: 'The webhook signature is missing or not valid.',
+  },
+  'github.delivery_invalid': {
+    status: 400,
+    message: 'The delivery id or event header is missing or not valid.',
+  },
+  'github.payload_invalid': { status: 400, message: 'The webhook body is not valid.' },
+  'github.delivery_replayed': { status: 409, message: 'This delivery was already received.' },
+  'github.too_large': { status: 413, message: 'The webhook body is too large.' },
+  'github.unavailable': {
+    status: 503,
+    message: 'The webhook cannot be taken right now. Redeliver it later.',
+  },
 };
 
 export const API_ERROR_CODES: readonly ApiErrorCode[] = Object.freeze(

@@ -16,6 +16,7 @@ import {
   databaseOverPool,
   poolConfig,
   withApiKeyLimiter,
+  withWebhookLedger,
   withAuth,
   withProtectedReader,
   withPublishedReader,
@@ -239,6 +240,7 @@ describe('a reservation inside a limiter or sign in transaction', () => {
   const holders: readonly (readonly [string, Hold])[] = [
     ['withAuth', (work) => withAuth(auth.db as AuthDatabase, work)],
     ['withApiKeyLimiter', (work) => withApiKeyLimiter(app.db as Database, work)],
+    ['withWebhookLedger', (work) => withWebhookLedger(app.db as Database, work)],
   ];
   const reservers: readonly (readonly [string, Reserve])[] = [
     ['reserveAuthRateWindows', () => reserveAuthRateWindows(auth.db as AuthDatabase, request)],

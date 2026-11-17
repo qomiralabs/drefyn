@@ -90,3 +90,6 @@ export type UserSchema = ReadOnlyTables<
 
 // The one table the API key failure limiter writes, before any key or organization is proved.
 export type ApiKeyLimiterSchema = NamedTables<Schema, 'api_key_failures'>;
+
+// The one table the GitHub webhook receiver writes, before it knows any tenant.
+export type WebhookLedgerSchema = NamedTables<Schema, 'github_webhook_deliveries'>;

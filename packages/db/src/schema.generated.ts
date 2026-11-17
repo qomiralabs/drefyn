@@ -224,6 +224,26 @@ export interface GitOutboundTable {
   updated_at: Generated<Date>;
 }
 
+// app.github_installations
+export interface GithubInstallationsTable {
+  organization_id: string;
+  project_id: string;
+  installation_id: number;
+  account_id: number;
+  repository_ids: number[];
+  suspended_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.github_webhook_deliveries
+export interface GithubWebhookDeliveriesTable {
+  delivery_id: string;
+  body_sha256: Buffer;
+  event: string;
+  received_at: Generated<Date>;
+}
+
 // app.identities
 export interface IdentitiesTable {
   id: Generated<string>;
@@ -684,6 +704,8 @@ export interface Schema {
   git_deliveries: GitDeliveriesTable;
   git_files: GitFilesTable;
   git_outbound: GitOutboundTable;
+  github_installations: GithubInstallationsTable;
+  github_webhook_deliveries: GithubWebhookDeliveriesTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;

@@ -9,6 +9,7 @@ export const EGRESS_PURPOSES: readonly EgressPurpose[] = Object.freeze([
   'spec_fetch',
   'try_it',
   'media_import',
+  'github',
 ]);
 
 const KIB = 1024;
@@ -56,6 +57,15 @@ const DEFAULTS: Readonly<Record<EgressPurpose, Defaults>> = {
     maxRedirects: 0,
     totalTimeoutMs: 15_000,
     maxResponseBytes: 5 * MIB,
+  },
+  // The GitHub App's REST calls. No redirect, so a token never follows a Location anywhere;
+  // the cap fits a recursive tree listing, and token calls tighten it.
+  github: {
+    schemes: ['https'],
+    ports: [443],
+    maxRedirects: 0,
+    totalTimeoutMs: 15_000,
+    maxResponseBytes: 8 * MIB,
   },
 };
 

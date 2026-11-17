@@ -24,10 +24,18 @@ import {
   type FlagClient,
   type FlagConfig,
 } from '@drefyn/flags';
+import {
+  createDeliveryLedger,
+  createWebhookReceiver,
+  GitHubConfigError,
+  parseGitHubWebhookConfig,
+  readWebhookSecret,
+} from '@drefyn/github';
 import { createAdaptorServer } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp, type ApiDeps, type ApiEnv } from './app.ts';
 import { ApiConfigError, parseApiConfig, type Env } from './config.ts';
+import { mountGitHubWebhook } from './github-webhook.ts';
 import { createJsonLogger, type ApiLogger, type LogFields } from './log.ts';
 
 // Inside compose's default 10 s stop grace, so requests finish before the kill.
@@ -104,6 +112,9 @@ export async function startApi(env: Env, options: StartOptions = {}): Promise<Ru
   // Refuses the auth database URL and every auth secret before anything connects.
   const authConfig = parseApiAuthConfig(env);
   const flagConfig = loadFlagConfig(env);
+  // Read before any pool opens, so a missing or short secret stops the start with its key.
+  const githubWebhook = parseGitHubWebhookConfig(env);
+  const githubSecret = githubWebhook === null ? null : readWebhookSecret(githubWebhook.secretFile);
 
   const db = await (options.openDatabase ?? openApp)(env, logger);
   let published: PublishedDatabase;
@@ -130,6 +141,13 @@ export async function startApi(env: Env, options: StartOptions = {}): Promise<Ru
     },
   };
   const app = createApp(deps);
+  // Only an install with a GitHub App has the route; without one it is a 404 like any other.
+  if (githubSecret !== null) {
+    mountGitHubWebhook(
+      app,
+      createWebhookReceiver({ secret: githubSecret, ledger: createDeliveryLedger({ db }), logger }),
+    );
+  }
   options.mount?.(app, deps);
 
   // Global Request and Response stay Node's own, so nothing else in the process sees a swap.
@@ -201,6 +219,7 @@ export function describeStartFailure(error: unknown): LogFields {
       ...(error.key === undefined ? {} : { key: error.key }),
     };
   }
+  if (error instanceof GitHubConfigError) return { error: error.name, key: error.key };
   if (error instanceof DbError)
     return { error: error.name, code: error.code, reason: error.message };
   if (error instanceof FlagError) {

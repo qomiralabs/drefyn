@@ -91,6 +91,18 @@ export const egressAllowList = [
     only: [{ global: 'fetch' }],
   },
   {
+    path: 'apps/api/test/github-webhook.test.ts',
+    reason:
+      'posts to an API server the same test started on 127.0.0.1 to prove the webhook route is mounted only with its secret; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    // Whole file: the scoped forms cover node:http only, and the guard needs TLS to talk to it.
+    path: 'packages/github/test/support/fake-github.ts',
+    reason:
+      'fake GitHub API for the broker tests, never imported by src; it accepts TLS connections on 127.0.0.1 and never opens one, and adds its throwaway certificate to the trusted list of the test process only',
+  },
+  {
     path: 'apps/docs-site/test/start.test.ts',
     reason:
       'calls a docs site server the same test started on 127.0.0.1, through localhost, to prove forged forwarded headers are ignored; never customer input',

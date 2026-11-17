@@ -15,10 +15,14 @@
 !packages/auth/data
 !packages/db/package.json
 !packages/db/src
+!packages/egress/package.json
+!packages/egress/src
 !packages/entitlements/package.json
 !packages/entitlements/src
 !packages/flags/package.json
 !packages/flags/src
+!packages/github/package.json
+!packages/github/src
 !packages/seal/package.json
 !packages/seal/src
 !packages/tenancy/package.json

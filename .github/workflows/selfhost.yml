@@ -8,8 +8,10 @@ on:
       - packages/address/src/**
       - packages/auth/src/**
       - packages/db/src/**
+      - packages/egress/src/**
       - packages/entitlements/src/**
       - packages/flags/src/**
+      - packages/github/src/**
       - packages/mdx/src/**
       - packages/mdx/test/**
       - packages/tenancy/src/**
@@ -24,8 +26,10 @@ on:
       - packages/address/src/**
       - packages/auth/src/**
       - packages/db/src/**
+      - packages/egress/src/**
       - packages/entitlements/src/**
       - packages/flags/src/**
+      - packages/github/src/**
       - packages/mdx/src/**
       - packages/mdx/test/**
       - packages/tenancy/src/**

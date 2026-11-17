@@ -79,8 +79,11 @@ headers; a caller's values for them are dropped.
 | `feed`                                 | https       | 443       | 3         | 10 s          | 1 MiB     |
 | `import`, `spec_fetch`, `media_import` | https       | 443       | 3         | 30 s          | 20 MiB    |
 | `try_it`                               | https, http | any       | 0         | 15 s          | 5 MiB     |
+| `github`                               | https       | 443       | 0         | 15 s          | 8 MiB     |
 
-The connect timeout is 5 s for every purpose.
+The connect timeout is 5 s for every purpose. `github` is for the GitHub App's REST calls
+from `@drefyn/github`, which narrows it to the port of the configured API and to 64 KiB for
+token calls.
 
 ## Self hosting
 

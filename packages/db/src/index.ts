@@ -24,6 +24,7 @@ export {
   withPublishedReader,
   withTenant,
   withUser,
+  withWebhookLedger,
   type AuthDatabase,
   type Database,
   type DatabaseDeps,
@@ -37,7 +38,12 @@ export {
 } from './database.ts';
 export { toSafeInteger, type SafeIntegerOptions } from './integers.ts';
 export { newId } from './new-id.ts';
-export type { ApiKeyLimiterSchema, AuthSchema, UserSchema } from './contexts.ts';
+export type {
+  ApiKeyLimiterSchema,
+  AuthSchema,
+  UserSchema,
+  WebhookLedgerSchema,
+} from './contexts.ts';
 export {
   API_KEY_EXPIRY_RULES,
   AUTH_EXPIRY_RULES,

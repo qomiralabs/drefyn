@@ -59,6 +59,9 @@ jobs:
       # Queue, claim lock and reconcile against the same stack, with store coverage held to 95.
       - name: Git sync integration tests
         run: pnpm --filter @drefyn/git-sync test:integration
+      # Installation isolation and the webhook delivery ledger, with both stores held to 95.
+      - name: GitHub integration tests
+        run: pnpm --filter @drefyn/github test:integration
       # Key checks, tenancy, readiness and graceful stop, with real keys on databases of their own.
       - name: API integration tests
         run: pnpm --filter @drefyn/api test:integration
