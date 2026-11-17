@@ -40,7 +40,9 @@ Everything other packages may use is exported from `src/index.ts`.
 - `createTypesenseClient({ url })`: 2 s deadline, no redirects, a 1 MiB cap on answers, and one
   jittered retry for idempotent calls only.
 - `createMemoryRateLimiter()` and the `RateLimiter` port. The memory limiter counts per process;
-  a host with several processes plugs in a shared store.
+  a host with several processes plugs in a shared store. Windows are fixed per key and open at
+  the first request after the last one ended, so a client can get up to twice the limit through
+  in one window's length when it straddles a boundary.
 - `parseSearchQuery`, `parseSearchPin`, `publishedFilter`, `publicCollectionFor`,
   `generateScopedKey` for hosts and tests.
 

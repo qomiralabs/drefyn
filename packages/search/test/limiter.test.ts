@@ -3,6 +3,87 @@ import { describe, expect, it } from 'vitest';
 import { clientBucket, createMemoryRateLimiter, createRateKeys } from '../src/limiter.ts';
 import { TENANT_A, TENANT_B } from './support.ts';
 
+const LIMIT = 5;
+const WINDOW_MS = 10_000;
+
+// Counterexamples the merge queue found against a sliding bound: each lets six through in one
+// window length, five in one fixed window and the rest just after it rolls over.
+const BOUNDARY_BURSTS: [string, number][][] = [
+  [
+    ['c', 0],
+    ['c', 1211],
+    ['c', 2900],
+    ['c', 765],
+    ['a', 922],
+    ['c', 1815],
+    ['c', 2387],
+    ['c', 0],
+  ],
+  [
+    ['c', 0],
+    ['a', 486],
+    ['c', 4094],
+    ['c', 222],
+    ['a', 3],
+    ['c', 9],
+    ['c', 1902],
+    ['c', 3284],
+    ['c', 0],
+  ],
+  [
+    ['a', 0],
+    ['a', 3830],
+    ['a', 913],
+    ['a', 1337],
+    ['a', 1910],
+    ['a', 409],
+    ['a', 1601],
+    ['a', 0],
+  ],
+];
+
+// What a fixed window promises: at most the limit per window the limiter opens, refusal
+// exactly when that window is full, Retry-After at its end, and so at most twice the limit
+// in any span of one window length.
+function fixedWindowProperty() {
+  const limit = LIMIT;
+  const windowMs = WINDOW_MS;
+  return fc.asyncProperty(
+    fc.array(fc.tuple(fc.constantFrom('a', 'b', 'c'), fc.integer({ min: 0, max: 5000 })), {
+      maxLength: 200,
+    }),
+    async (steps) => {
+      let now = 0;
+      const limiter = createMemoryRateLimiter({ limit, windowMs, now: () => now });
+      // A window opens at the first take after the last one ran out, allowed or not.
+      const opened = new Map<string, number>();
+      const allowed = new Map<string, { at: number; window: number }[]>();
+      for (const [key, gap] of steps) {
+        now += gap;
+        const start = opened.get(key);
+        const window = start === undefined || now - start >= windowMs ? now : start;
+        opened.set(key, window);
+        const sofar = (allowed.get(key) ?? []).filter((u) => u.window === window).length;
+        const decision = await limiter.take(key);
+        // Refused exactly when the window is full, and told to come back when it ends.
+        expect(decision.ok).toBe(sofar < limit);
+        if (decision.ok) allowed.set(key, [...(allowed.get(key) ?? []), { at: now, window }]);
+        else {
+          expect(decision.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+          expect(decision.retryAfterSeconds).toBe(Math.ceil((window + windowMs - now) / 1000));
+        }
+      }
+      for (const takes of allowed.values()) {
+        for (const { at, window } of takes) {
+          expect(takes.filter((u) => u.window === window).length).toBeLessThanOrEqual(limit);
+          const span = takes.filter((u) => u.at >= at && u.at < at + windowMs);
+          expect(span.length).toBeLessThanOrEqual(2 * limit);
+        }
+      }
+    },
+  );
+}
+
 describe('createMemoryRateLimiter', () => {
   it('allows 30 a minute by default, then says when to come back', async () => {
     let now = 1_000_000;
@@ -32,31 +113,67 @@ describe('createMemoryRateLimiter', () => {
     expect((await limiter.take('a')).ok).toBe(false);
   });
 
+  // Found by seed -512014843 in the merge queue. Fixed windows let up to twice the limit
+  // through across a boundary: five at 0 to 7613, then two more at 10000 in a fresh window,
+  // so the span from 1211 holds six. That is the promise, not a leak.
+  it('lets a burst through at a window boundary, never more than the limit per window', async () => {
+    let now = 0;
+    const limiter = createMemoryRateLimiter({ limit: 5, windowMs: 10_000, now: () => now });
+    const steps = BOUNDARY_BURSTS[0] ?? [];
+    const seen: [string, number, boolean][] = [];
+    for (const [key, gap] of steps) {
+      now += gap;
+      seen.push([key, now, (await limiter.take(key)).ok]);
+    }
+    expect(seen).toEqual([
+      ['c', 0, true],
+      ['c', 1211, true],
+      ['c', 4111, true],
+      ['c', 4876, true],
+      ['a', 5798, true],
+      ['c', 7613, true],
+      ['c', 10_000, true],
+      ['c', 10_000, true],
+    ]);
+    expect((await limiter.take('c')).ok).toBe(true);
+    expect((await limiter.take('c')).ok).toBe(true);
+    expect((await limiter.take('c')).ok).toBe(true);
+    expect(await limiter.take('c')).toEqual({ ok: false, retryAfterSeconds: 10 });
+  });
+
   it('never lets more than the limit through in one window, for any sequence', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(fc.tuple(fc.constantFrom('a', 'b', 'c'), fc.integer({ min: 0, max: 5000 })), {
-          maxLength: 200,
-        }),
-        async (steps) => {
-          let now = 0;
-          const limiter = createMemoryRateLimiter({ limit: 5, windowMs: 10_000, now: () => now });
-          const allowed = new Map<string, number[]>();
-          for (const [key, gap] of steps) {
-            now += gap;
-            const decision = await limiter.take(key);
-            if (decision.ok) allowed.set(key, [...(allowed.get(key) ?? []), now]);
-            else expect(decision.retryAfterSeconds).toBeGreaterThanOrEqual(1);
-          }
-          for (const times of allowed.values()) {
-            for (const t of times) {
-              expect(times.filter((u) => u >= t && u < t + 10_000).length).toBeLessThanOrEqual(5);
-            }
-          }
-        },
-      ),
-      { numRuns: 200 },
-    );
+    await fc.assert(fixedWindowProperty(), {
+      numRuns: 200,
+      examples: BOUNDARY_BURSTS.map((steps) => [steps]),
+    });
+  });
+
+  it.each(BOUNDARY_BURSTS.map((steps, i) => [i, steps] as const))(
+    'pinned burst %i puts six through in one window length',
+    async (_, steps) => {
+      let now = 0;
+      const limiter = createMemoryRateLimiter({
+        limit: LIMIT,
+        windowMs: WINDOW_MS,
+        now: () => now,
+      });
+      const allowed = new Map<string, number[]>();
+      for (const [key, gap] of steps) {
+        now += gap;
+        if ((await limiter.take(key)).ok) allowed.set(key, [...(allowed.get(key) ?? []), now]);
+      }
+      const widest = Math.max(
+        ...[...allowed.values()].flatMap((times) =>
+          times.map((t) => times.filter((u) => u >= t && u < t + WINDOW_MS).length),
+        ),
+      );
+      expect(widest).toBe(LIMIT + 1);
+    },
+  );
+
+  // Each of these seeds turned a gate red under the old sliding bound.
+  it.each([-512014843, 1375364650, -1827718576])('holds for seed %i', async (seed) => {
+    await fc.assert(fixedWindowProperty(), { numRuns: 200, seed });
   });
 
   it('refuses bad options', () => {
