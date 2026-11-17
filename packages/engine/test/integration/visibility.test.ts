@@ -235,7 +235,7 @@ describeWithStack('visibility', () => {
         afterId: null,
         actor: GIT,
       });
-      expect(moved.ok).toBe(true);
+      expect(moved.ok || moved.error.code).toBe(true);
       expect(
         (
           await admin(`select visibility_override from app.nodes where id = '${child.nodeId}';`)

@@ -39,7 +39,11 @@ export async function page(
   const versionIds = made.versionIds.map((id) => idOf('ver', id));
   const head = versionIds.at(-1);
   if (head === undefined) throw new Error('a page needs a version');
-  await admin(`update app.nodes set head_version_id = '${head}' where id = '${made.nodeId}';`);
+  // The shared seeder's order keys come from a uuid and about one in sixteen is not a legal key,
+  // which leaves a move no room beside it. Ties sort by id, so one legal key serves every page.
+  await admin(
+    `update app.nodes set head_version_id = '${head}', order_key = 'a0' where id = '${made.nodeId}';`,
+  );
   return { nodeId: idOf('nod', made.nodeId), versionIds, head };
 }
 
