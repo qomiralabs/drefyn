@@ -9,8 +9,10 @@ COPY apps/api/package.json apps/api/
 COPY packages/address/package.json packages/address/
 COPY packages/auth/package.json packages/auth/
 COPY packages/db/package.json packages/db/
+COPY packages/egress/package.json packages/egress/
 COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/flags/package.json packages/flags/
+COPY packages/github/package.json packages/github/
 COPY packages/seal/package.json packages/seal/
 COPY packages/tenancy/package.json packages/tenancy/
 RUN corepack enable \
@@ -24,6 +26,7 @@ COPY --from=deps /app/apps/api/node_modules apps/api/node_modules
 COPY --from=deps /app/packages/auth/node_modules packages/auth/node_modules
 COPY --from=deps /app/packages/db/node_modules packages/db/node_modules
 COPY --from=deps /app/packages/flags/node_modules packages/flags/node_modules
+COPY --from=deps /app/packages/github/node_modules packages/github/node_modules
 COPY package.json ./
 COPY apps/api/package.json apps/api/server.ts apps/api/
 COPY apps/api/src apps/api/src
@@ -34,10 +37,14 @@ COPY packages/auth/src packages/auth/src
 COPY packages/auth/data packages/auth/data
 COPY packages/db/package.json packages/db/
 COPY packages/db/src packages/db/src
+COPY packages/egress/package.json packages/egress/
+COPY packages/egress/src packages/egress/src
 COPY packages/entitlements/package.json packages/entitlements/
 COPY packages/entitlements/src packages/entitlements/src
 COPY packages/flags/package.json packages/flags/
 COPY packages/flags/src packages/flags/src
+COPY packages/github/package.json packages/github/
+COPY packages/github/src packages/github/src
 COPY packages/seal/package.json packages/seal/
 COPY packages/seal/src packages/seal/src
 COPY packages/tenancy/package.json packages/tenancy/
