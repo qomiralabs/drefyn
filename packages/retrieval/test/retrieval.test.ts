@@ -146,7 +146,8 @@ describe('retrieve', () => {
     await retrieval.retrieve(TENANT, { query: QUERY });
     const [prepare, search] = statements;
     expect(prepare?.sql).toContain("set_config('plan_cache_mode', 'force_custom_plan', true)");
-    expect(prepare?.sql).toContain("set_config('statement_timeout'");
+    // Local, with the value as a parameter.
+    expect(prepare?.sql).toContain("'statement_timeout', $1, true)");
     expect(prepare?.parameters).toEqual(['900']);
     expect(search?.sql).not.toMatch(/ts_rank/);
     expect(search?.sql).not.toMatch(/to_tsquery|websearch_to_tsquery|plainto_tsquery/);
