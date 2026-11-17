@@ -139,35 +139,58 @@ function outsideSection(before: ReaderPage, after: ReaderPage, home: number): nu
     .length;
 }
 
-async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, readonly Edit[]>> {
-  const edits: Record<ChangeName, Edit[]> = { short: [], long: [], sentence: [] };
-  for (const file of readdirSync(corpus).sort()) {
-    const dialect: Dialect = file.endsWith('.mdx.txt') ? 'mdx' : 'md';
-    const text = readFileSync(join(corpus, file), 'utf8');
-    const page = await parsed(client, text, dialect);
-    if (page === null) continue;
-    const root = page.ast;
-    const before = bodiesOf(chunkNode(page.reader, options));
-    const positions = before.length >= LONG_PAGE_CHUNKS ? LONG_PAGE_POSITIONS : POSITIONS;
-    for (const position of positions) {
-      const target = targetIn(root, position);
-      if (target === null) continue;
-      const { index, from, raw } = target;
-      if (!text.startsWith(raw, from))
-        throw new Error(`${file}: the block is not where it adds up`);
-      for (const name of Object.keys(CHANGES) as ChangeName[]) {
-        const next = text.slice(0, from) + CHANGES[name](raw) + text.slice(from + raw.length);
-        const after = await parsed(client, next, dialect);
-        if (after === null) continue;
-        const bodies = bodiesOf(chunkNode(after.reader, options));
-        edits[name].push({
+// Pages in flight at once. One round trip at a time left both pool threads idle while each
+// request and answer waited for a turn on a busy runner, which cost ten times the parse work.
+// Four keeps both threads fed and stays far inside every queue bound of the default host.
+const PAGES_IN_FLIGHT = 4;
+
+type PageEdits = readonly (readonly [ChangeName, Edit])[];
+
+async function editsOnPage(client: ParseClient, file: string): Promise<PageEdits> {
+  const dialect: Dialect = file.endsWith('.mdx.txt') ? 'mdx' : 'md';
+  const text = readFileSync(join(corpus, file), 'utf8');
+  const page = await parsed(client, text, dialect);
+  if (page === null) return [];
+  const root = page.ast;
+  const before = bodiesOf(chunkNode(page.reader, options));
+  const positions = before.length >= LONG_PAGE_CHUNKS ? LONG_PAGE_POSITIONS : POSITIONS;
+  const found: [ChangeName, Edit][] = [];
+  for (const position of positions) {
+    const target = targetIn(root, position);
+    if (target === null) continue;
+    const { index, from, raw } = target;
+    if (!text.startsWith(raw, from)) throw new Error(`${file}: the block is not where it adds up`);
+    for (const name of Object.keys(CHANGES) as ChangeName[]) {
+      const next = text.slice(0, from) + CHANGES[name](raw) + text.slice(from + raw.length);
+      const after = await parsed(client, next, dialect);
+      if (after === null) continue;
+      const bodies = bodiesOf(chunkNode(after.reader, options));
+      found.push([
+        name,
+        {
           chunks: bodies.length,
           changed: newBodies(before, bodies),
           outside: outsideSection(page.reader, after.reader, sectionOf(root, index)),
-        });
-      }
+        },
+      ]);
     }
   }
+  return found;
+}
+
+// Results land by file index, so the sample is the same whatever order the answers come in.
+async function editsOnCorpus(client: ParseClient): Promise<Record<ChangeName, readonly Edit[]>> {
+  const files = readdirSync(corpus).sort();
+  const pages: PageEdits[] = files.map(() => []);
+  let next = 0;
+  const lane = async () => {
+    for (let index = next++; index < files.length; index = next++) {
+      pages[index] = await editsOnPage(client, files[index] ?? '');
+    }
+  };
+  await Promise.all(Array.from({ length: PAGES_IN_FLIGHT }, lane));
+  const edits: Record<ChangeName, Edit[]> = { short: [], long: [], sentence: [] };
+  for (const [name, edit] of pages.flat()) edits[name].push(edit);
   return edits;
 }
 
@@ -186,8 +209,18 @@ describe('an edit on the corpus', () => {
   let edits: Record<ChangeName, readonly Edit[]>;
 
   beforeAll(async () => {
+    const started = performance.now();
     running = await startHost();
+    const listening = performance.now();
     edits = await editsOnCorpus(createParseClient(parseClientConfig(running.url)));
+    // CI keeps this line, so setup time can be read off any run against the hook budget.
+    console.info(
+      JSON.stringify({
+        event: 'chunk_stability.setup',
+        hostStartMs: Math.round(listening - started),
+        corpusMs: Math.round(performance.now() - listening),
+      }),
+    );
   }, HOST_START_MS + CORPUS_MS);
 
   afterAll(() => {
