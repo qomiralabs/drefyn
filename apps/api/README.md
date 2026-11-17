@@ -27,6 +27,7 @@ Or with the self host stack: `COMPOSE_PROFILES=api bash scripts/selfhost.sh up`.
 | `DREFYN_TRUSTED_PROXY_HOPS`         | Proxies in front; 0 reads the socket                       | `0`                      |
 | `DREFYN_CLIENT_IP_HEADER`           | `cloudfront-viewer-address` from the trusted hop, or unset | unset                    |
 | `DREFYN_FLAGS_*`                    | Flag source, as in `@drefyn/flags`                         | `/etc/drefyn/flags.json` |
+| `DREFYN_GITHUB_WEBHOOK_SECRET_FILE` | GitHub App webhook secret file; unset mounts no route      | unset                    |
 
 It exits 1 with one `api.start_failed` line naming the key when a setting is wrong, and when
 `DREFYN_AUTH_DATABASE_URL` or any auth secret is set.
@@ -35,6 +36,9 @@ It exits 1 with one `api.start_failed` line naming the key when a setting is wro
 
 - `GET /healthz`: 200 while the process is up. Touches no database.
 - `GET /readyz`: 200 when both pools answer within a second, else 503 `api.unavailable`.
+- `POST /webhooks/github`: GitHub App deliveries, only when `DREFYN_GITHUB_WEBHOOK_SECRET_FILE`
+  is set. No API key: `@drefyn/github` checks the HMAC over the raw body before reading
+  anything else and takes each delivery once. 202 on success.
 
 Every `/v1/projects/:projectId/...` route sits behind `guard(deps, { scope, flag?, limit? })`,
 which runs, in order: client address through the trusted hops, the key (a key in the query
@@ -49,17 +53,23 @@ failure limiter as a bad key.
 One body: `{ "error": { "code": "...", "message": "..." } }`, with `cache-control: no-store`
 and `Retry-After` on 429 and 503.
 
-| Status | Code                   | When                                     |
-| ------ | ---------------------- | ---------------------------------------- |
-| 401    | `auth.api_key_invalid` | No key, a bad key, or a key in the query |
-| 403    | `auth.api_key_scope`   | The key lacks the scope or the project   |
-| 404    | `api.not_found`        | No such route or project, or flag off    |
-| 413    | `api.too_large`        | Body over `DREFYN_API_MAX_BODY_BYTES`    |
-| 429    | `auth.rate_limited`    | Too many failed checks from one client   |
-| 429    | `api.limit_reached`    | The plan limit for the request           |
-| 503    | `auth.unavailable`     | Keys cannot be checked                   |
-| 503    | `api.unavailable`      | A pool is down                           |
-| 500    | `api.internal`         | Anything else                            |
+| Status | Code                       | When                                     |
+| ------ | -------------------------- | ---------------------------------------- |
+| 401    | `auth.api_key_invalid`     | No key, a bad key, or a key in the query |
+| 403    | `auth.api_key_scope`       | The key lacks the scope or the project   |
+| 404    | `api.not_found`            | No such route or project, or flag off    |
+| 413    | `api.too_large`            | Body over `DREFYN_API_MAX_BODY_BYTES`    |
+| 429    | `auth.rate_limited`        | Too many failed checks from one client   |
+| 429    | `api.limit_reached`        | The plan limit for the request           |
+| 503    | `auth.unavailable`         | Keys cannot be checked                   |
+| 503    | `api.unavailable`          | A pool is down                           |
+| 500    | `api.internal`             | Anything else                            |
+| 400    | `github.delivery_invalid`  | Delivery id or event header malformed    |
+| 400    | `github.payload_invalid`   | Signed body is not a valid payload       |
+| 401    | `github.signature_invalid` | Missing or wrong webhook signature       |
+| 409    | `github.delivery_replayed` | Delivery id or body taken before         |
+| 413    | `github.too_large`         | Webhook body over 5 MiB                  |
+| 503    | `github.unavailable`       | The delivery could not be taken          |
 
 ## Scopes
 

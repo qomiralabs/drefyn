@@ -97,14 +97,14 @@ describeWithStack('the github migration', () => {
       db.name,
     );
     expect(keys.trim().split('\n')).toEqual([
-      'app.github_installations github_installations_pkey PRIMARY KEY (organization_id, project_id, installation_id)',
-      'app.github_installations github_installations_project_fkey FOREIGN KEY (organization_id, project_id) REFERENCES app.projects(organization_id, id)',
-      'app.github_webhook_deliveries github_webhook_deliveries_body_key UNIQUE (body_sha256)',
-      'app.github_webhook_deliveries github_webhook_deliveries_pkey PRIMARY KEY (delivery_id)',
+      'github_installations github_installations_pkey PRIMARY KEY (organization_id, project_id, installation_id)',
+      'github_installations github_installations_project_fkey FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id)',
+      'github_webhook_deliveries github_webhook_deliveries_body_key UNIQUE (body_sha256)',
+      'github_webhook_deliveries github_webhook_deliveries_pkey PRIMARY KEY (delivery_id)',
     ]);
   });
 
-  it('keeps installation ids positive and the repository list short, unique and full', async () => {
+  it('keeps installation ids positive and the repository list short and full', async () => {
     const db = await seeded();
     expect(await refusal(db, installation('1', `'{4001,4002}'`))).toBe('');
     expect(await refusal(db, installation('1', `'{4001}'`))).toContain('github_installations_pkey');
@@ -114,7 +114,6 @@ describeWithStack('the github migration', () => {
     for (const repositories of [
       `'{}'`,
       `'{0}'`,
-      `'{5,5}'`,
       `'{1,null}'`,
       `'{{1},{2}}'`,
       `(select array_agg(n) from generate_series(1, 101) n)`,

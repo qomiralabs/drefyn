@@ -112,6 +112,11 @@ export const GLOBAL_TABLES: readonly AllowEntry[] = [
     name: 'app.scheduled_jobs',
     reason: 'times of recurring jobs that span every organization; holds no tenant data',
   },
+  {
+    name: 'app.github_webhook_deliveries',
+    reason:
+      'GitHub delivery ids and body digests, taken before any tenant is known; holds no tenant data',
+  },
   { name: 'app.totp_credentials', reason: SECOND_FACTOR },
   { name: 'app.recovery_codes', reason: SECOND_FACTOR },
   { name: 'app.factor_challenges', reason: SECOND_FACTOR },
@@ -371,6 +376,15 @@ export const USER_POLICIES: readonly PolicyEntry[] = [
     withCheck: LIMITER_CONTEXT,
     reason:
       'failed key checks are counted before any key, and so any organization, is proved; only the empty context withApiKeyLimiter sets reaches the rows',
+  },
+  {
+    name: 'app.github_webhook_deliveries.webhook_access',
+    command: 'all',
+    roles: ['drefyn_app'],
+    using: LIMITER_CONTEXT,
+    withCheck: LIMITER_CONTEXT,
+    reason:
+      'GitHub deliveries are taken before any tenant is known; only the empty context withWebhookLedger sets reaches the rows, and they hold no tenant data',
   },
   {
     name: 'app.memberships.self_read',
@@ -673,5 +687,7 @@ export type UserTableName =
 export type PersonalTableName =
   | Exclude<AuthTableName | UserTableName, 'users' | MemberTableName>
   | 'api_key_failures'
+  // Webhook deliveries arrive before any tenant is known; tenant work never names them.
+  | 'github_webhook_deliveries'
   // Organization work holds no grant on sign in state.
   | 'sso_states';

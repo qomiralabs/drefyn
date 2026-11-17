@@ -100,6 +100,7 @@ describe('package shape', () => {
         'withPublishedReader',
         'withTenant',
         'withUser',
+        'withWebhookLedger',
       ].sort(),
     );
   });

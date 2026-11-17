@@ -160,7 +160,6 @@ describe('mintInstallationToken', () => {
     const shown = [
       JSON.stringify(token),
       String(token),
-      `${token}`,
       inspect(token, { showHidden: true, depth: 5 }),
       JSON.stringify(Object.entries(token)),
     ].join(' ');

@@ -100,27 +100,26 @@ function memoryLedger() {
   const ids = new Set<string>();
   const bodies = new Set<string>();
   const claims: DeliveryClaim[] = [];
-  const ledger: DeliveryLedger = {
-    claim: vi.fn((claim: DeliveryClaim) => {
-      claims.push(claim);
-      const body = Buffer.from(claim.bodySha256).toString('hex');
-      if (ids.has(claim.deliveryId) || bodies.has(body)) return Promise.resolve('replayed');
-      ids.add(claim.deliveryId);
-      bodies.add(body);
-      return Promise.resolve('new');
-    }),
-    release: vi.fn((deliveryId: string) => {
-      ids.delete(deliveryId);
-      bodies.clear();
-      return Promise.resolve();
-    }),
-  };
-  return { ledger, claims };
+  const claim = vi.fn((input: DeliveryClaim): Promise<'new' | 'replayed'> => {
+    claims.push(input);
+    const body = Buffer.from(input.bodySha256).toString('hex');
+    if (ids.has(input.deliveryId) || bodies.has(body)) return Promise.resolve('replayed');
+    ids.add(input.deliveryId);
+    bodies.add(body);
+    return Promise.resolve('new');
+  });
+  const release = vi.fn((deliveryId: string) => {
+    ids.delete(deliveryId);
+    bodies.clear();
+    return Promise.resolve();
+  });
+  const ledger: DeliveryLedger = { claim, release };
+  return { ledger, claim, release, claims };
 }
 
 function setup(onDelivery?: (delivery: VerifiedDelivery) => Promise<void>) {
   const logs = captureLogs();
-  const { ledger, claims } = memoryLedger();
+  const { ledger, claim, release, claims } = memoryLedger();
   const delivered: VerifiedDelivery[] = [];
   const receiver = createWebhookReceiver({
     secret,
@@ -133,7 +132,7 @@ function setup(onDelivery?: (delivery: VerifiedDelivery) => Promise<void>) {
         return Promise.resolve();
       }),
   });
-  return { receiver, logs, ledger, claims, delivered };
+  return { receiver, logs, claim, release, claims, delivered };
 }
 
 const request = (overrides: Partial<WebhookRequest> = {}): WebhookRequest => ({
@@ -193,13 +192,13 @@ describe('the webhook receiver', () => {
     ['bad', sign(encode('another body'))],
     ['truncated', sign(pushBody).slice(0, 40)],
   ])('refuses a %s signature, logs ids only and records nothing', async (_name, signature) => {
-    const { receiver, logs, ledger, delivered } = setup();
+    const { receiver, logs, claim, delivered } = setup();
     const req = request({ signature });
     await expect(receiver.receive(req)).resolves.toEqual({
       status: 401,
       code: 'github.signature_invalid',
     });
-    expect(ledger.claim).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
     expect(delivered).toEqual([]);
     expect(logs.lines).toEqual([
       {
@@ -259,12 +258,12 @@ describe('the webhook receiver', () => {
     ['missing', undefined],
     ['not a GUID', 'delivery-1'],
   ])('refuses a signed delivery whose id is %s', async (_name, deliveryId) => {
-    const { receiver, ledger } = setup();
+    const { receiver, claim } = setup();
     await expect(receiver.receive(request({ deliveryId }))).resolves.toEqual({
       status: 400,
       code: 'github.delivery_invalid',
     });
-    expect(ledger.claim).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -284,30 +283,30 @@ describe('the webhook receiver', () => {
     ['an installation id that is not a positive integer', '{"installation":{"id":-3}}'],
     ['a repository id that is a string', '{"repository":{"id":"4001"}}'],
   ])('refuses a signed body that is %s', async (_name, text) => {
-    const { receiver, ledger, logs } = setup();
+    const { receiver, claim, logs } = setup();
     const body = encode(text);
     await expect(receiver.receive(request({ body, signature: sign(body) }))).resolves.toEqual({
       status: 400,
       code: 'github.payload_invalid',
     });
-    expect(ledger.claim).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
     expect(logs.lines[0]?.fields['reason']).toBe('github.payload_invalid');
   });
 
   it('refuses a body over the cap before computing anything', async () => {
-    const { receiver, ledger } = setup();
+    const { receiver, claim } = setup();
     const body = new Uint8Array(WEBHOOK_MAX_BODY_BYTES + 1);
     await expect(receiver.receive(request({ body, signature: sign(body) }))).resolves.toEqual({
       status: 413,
       code: 'github.too_large',
     });
-    expect(ledger.claim).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
     expect(WEBHOOK_MAX_BODY_BYTES).toBe(5 * 1024 * 1024);
   });
 
   it('gives the delivery back when the handler fails, so GitHub can send it again', async () => {
     let fail = true;
-    const { receiver, ledger, logs } = setup(() =>
+    const { receiver, release, logs } = setup(() =>
       fail ? Promise.reject(new Error(`boom ${MARKER}`)) : Promise.resolve(),
     );
     const req = request();
@@ -315,7 +314,7 @@ describe('the webhook receiver', () => {
       status: 503,
       code: 'github.unavailable',
     });
-    expect(ledger.release).toHaveBeenCalledWith(req.deliveryId);
+    expect(release).toHaveBeenCalledWith(req.deliveryId);
     fail = false;
     await expect(receiver.receive(req)).resolves.toMatchObject({ status: 202 });
     expect(logs.text()).not.toContain(MARKER);

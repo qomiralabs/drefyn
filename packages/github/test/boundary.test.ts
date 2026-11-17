@@ -69,7 +69,7 @@ describe('the private key reader', () => {
   it('is imported by the broker alone inside the package', () => {
     const src = join(import.meta.dirname, '..', 'src');
     const importers = readdirSync(src)
-      .filter((file) => /private-key/.test(readFileSync(join(src, file), 'utf8')))
+      .filter((file) => readFileSync(join(src, file), 'utf8').includes('private-key'))
       .filter((file) => file !== 'private-key.ts');
     expect(importers).toEqual(['broker.ts']);
   });

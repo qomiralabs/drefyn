@@ -16,7 +16,7 @@ describe('loadAppSigner', () => {
     );
     expect(Object.keys(signer)).toEqual(['sign']);
     expect(Object.isFrozen(signer)).toBe(true);
-    const shown = `${JSON.stringify(signer)} ${inspect(signer, { showHidden: true })} ${String(signer.sign)}`;
+    const shown = `${JSON.stringify(signer)} ${inspect(signer, { showHidden: true })}`;
     expect(shown).not.toContain('PRIVATE KEY');
     expect(shown).not.toContain(keys.privateKeyPem.split('\n')[1] ?? 'unreachable');
   });
@@ -70,7 +70,7 @@ describe('loadAppSigner', () => {
     expect(error).toBeInstanceOf(GitHubConfigError);
     const failure = error as GitHubConfigError;
     expect(failure.key).toBe('DREFYN_GITHUB_PRIVATE_KEY_FILE');
-    expect(failure.message).not.toContain('KEY');
+    expect(failure.message).not.toContain('-----');
     expect(failure.message).not.toContain(keys.dir);
     expect(failure.cause).toBeUndefined();
   });

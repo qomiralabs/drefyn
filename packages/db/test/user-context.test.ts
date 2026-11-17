@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   databaseOverPool,
   withApiKeyLimiter,
+  withWebhookLedger,
   withAuth,
   withOrganization,
   withPublishedReader,
@@ -349,6 +350,42 @@ describe('an API key limiter transaction', () => {
     expect(
       code(
         await rejected(withApiKeyLimiter(appDb, () => Promise.resolve(1), { timeoutMs: 60_001 })),
+      ),
+    ).toBe('DB_CONFIG_INVALID');
+  });
+});
+
+describe('a webhook ledger transaction', () => {
+  it('runs on the app pool with every setting empty and resets the session', async () => {
+    const { db, clients } = app();
+    await expect(withWebhookLedger(db, () => Promise.resolve('ok'))).resolves.toBe('ok');
+    const sent = clients[0]?.sent ?? [];
+    expect(sent[0]?.text).toBe('begin; set local statement_timeout = 2000');
+    expect(sent.slice(1, 4).map((q) => q.values)).toEqual([[''], [''], ['', '']]);
+    expect(sent[5]?.text).toBe('discard all');
+  });
+
+  it('logs a changed context with its own scope', async () => {
+    const answer: Answer = (text) => {
+      if (text.endsWith('; commit')) throw Object.assign(new Error('changed'), { code: 'DRF01' });
+      return undefined;
+    };
+    const s = scripted('app', answer);
+    await rejected(withWebhookLedger(s.db as Database, () => Promise.resolve(1)));
+    expect(s.warnings).toEqual([
+      ['db_transaction_invalid', { pool: 'app', scope: 'webhook_ledger' }],
+    ]);
+  });
+
+  it('refuses the auth pool and a per call timeout past 60000 ms', async () => {
+    const { db } = auth();
+    expect(
+      code(await rejected(withWebhookLedger(db as unknown as Database, () => Promise.resolve(1)))),
+    ).toBe('DB_CONFIG_INVALID');
+    const { db: appDb } = app();
+    expect(
+      code(
+        await rejected(withWebhookLedger(appDb, () => Promise.resolve(1), { timeoutMs: 60_001 })),
       ),
     ).toBe('DB_CONFIG_INVALID');
   });

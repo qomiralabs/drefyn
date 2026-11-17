@@ -51,7 +51,7 @@ describeWithStack('installation rows under row level security', () => {
               (organization_id, project_id, installation_id, account_id, repository_ids)
             values (${theirs.organizationId}, ${theirs.projectId}, 7002, 1, '{1}')`.execute(tx),
       ),
-    ).rejects.toThrow(/row-level security/);
+    ).rejects.toThrow(/row level security policy refused/);
     expect(
       await admin(
         `select count(*) from app.github_installations where organization_id = '${theirs.organizationId}';`,

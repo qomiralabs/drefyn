@@ -97,13 +97,10 @@ export const egressAllowList = [
     only: [{ global: 'fetch' }],
   },
   {
+    // Whole file: the scoped forms cover node:http only, and the guard needs TLS to talk to it.
     path: 'packages/github/test/support/fake-github.ts',
     reason:
-      'fake GitHub API for the broker tests; it accepts TLS connections on 127.0.0.1 and never opens one, and trusts its throwaway certificate in the test process only',
-    only: [
-      { module: 'node:https', imports: ['createServer'] },
-      { module: 'node:tls', imports: ['getCACertificates', 'setDefaultCACertificates'] },
-    ],
+      'fake GitHub API for the broker tests, never imported by src; it accepts TLS connections on 127.0.0.1 and never opens one, and adds its throwaway certificate to the trusted list of the test process only',
   },
   {
     path: 'apps/dashboard/server.ts',

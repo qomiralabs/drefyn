@@ -18,7 +18,12 @@ import {
 } from 'kysely';
 import pg from 'pg';
 import type { DatabaseConfig } from './config.ts';
-import type { ApiKeyLimiterSchema, AuthSchema, UserSchema } from './contexts.ts';
+import type {
+  ApiKeyLimiterSchema,
+  AuthSchema,
+  UserSchema,
+  WebhookLedgerSchema,
+} from './contexts.ts';
 import { DbError } from './errors.ts';
 import { toDbError } from './pg-errors.ts';
 import { hidePgEnvironment, sslOption } from './pg-session.ts';
@@ -583,7 +588,7 @@ function noteDeadline(state: PoolState, settings: TenantSettings, deadlineMs: nu
 }
 
 // What a transaction without an organization is for, named in the log when it goes wrong.
-type Scope = 'tenant' | 'user' | 'auth' | 'api_key_limiter';
+type Scope = 'tenant' | 'user' | 'auth' | 'api_key_limiter' | 'webhook_ledger';
 
 async function runTransaction<DB, T>(
   state: PoolState,
@@ -869,6 +874,24 @@ export async function withApiKeyLimiter<T>(
   );
   return holdingConnection(() =>
     runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'api_key_limiter'),
+  );
+}
+
+// Taking a GitHub webhook delivery, before the receiver knows any tenant. Runs as drefyn_app
+// with every setting empty; the transaction type names github_webhook_deliveries alone.
+export async function withWebhookLedger<T>(
+  db: Database,
+  work: (tx: Transaction<WebhookLedgerSchema>) => Promise<T>,
+  options?: TransactionOptions,
+): Promise<T> {
+  const state = stateOf('app', db, 'withWebhookLedger');
+  const timeoutMs = transactionTimeout(
+    options?.timeoutMs,
+    state.statementTimeoutMs,
+    APP_TIMEOUT_MAX_MS,
+  );
+  return holdingConnection(() =>
+    runTransaction(state, AUTH_SETTINGS, timeoutMs, work, 'webhook_ledger'),
   );
 }
 
