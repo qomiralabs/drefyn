@@ -29,6 +29,7 @@
     "@drefyn/auth": "workspace:*",
     "@drefyn/db": "workspace:*",
     "@drefyn/email": "workspace:*",
+    "@drefyn/engine": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
     "@drefyn/seal": "workspace:*",

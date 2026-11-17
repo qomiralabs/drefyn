@@ -8,8 +8,12 @@ const config: NextConfig = {
     '@drefyn/db',
     // For ./config only. The mail itself loads through Node: see src/server/email-runtime.ts.
     '@drefyn/email',
+    // Server only: src/server/engine-holder.ts builds it once per process.
+    '@drefyn/engine',
     '@drefyn/entitlements',
     '@drefyn/flags',
+    '@drefyn/mdx',
+    '@drefyn/schema',
     '@drefyn/seal',
     '@drefyn/tenancy',
     '@drefyn/ui',

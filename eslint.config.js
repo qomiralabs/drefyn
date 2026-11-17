@@ -23,6 +23,30 @@ const dynamicMotion = [
   },
 ];
 
+// The engine's gate counts per database handle, so a second handle or store in the dashboard
+// would count alone and never refuse. One module builds them, once per process.
+const holderMessage =
+  'Take handles, the store and the engine from dashboardData() in src/server/engine-holder.ts.';
+const engineBuilders = {
+  name: '@drefyn/engine',
+  importNames: ['databaseStore', 'createEngine'],
+  message: holderMessage,
+};
+const handleBuilders = {
+  name: '@drefyn/db',
+  importNames: ['createDatabase', 'createAuthDatabase'],
+  message: holderMessage,
+};
+const DASHBOARD_HOLDER = 'apps/dashboard/src/server/engine-holder.ts';
+// Pools of their own, built no store or engine: two scheduled jobs with one connection each,
+// so a slow run never takes one from a request, and the test states' stand in for the API,
+// whose key verifier must run on a handle its own copy of the packages opened.
+const DASHBOARD_OWN_POOLS = [
+  'apps/dashboard/src/server/expiry-job.ts',
+  'apps/dashboard/src/server/sso-domain-recheck.ts',
+  'apps/dashboard/src/app/settings-states/whoami/route.ts',
+];
+
 const urlMessage =
   'Next builds request URLs from its own idea of the host. Use appUrl or requestPath from the origin module, which start from DREFYN_APP_ORIGIN.';
 const REQUEST_NAME = '/^(?:req|request|incoming)$/i';
@@ -188,6 +212,31 @@ export default tseslint.config(
     files: ['apps/dashboard/src/**'],
     ignores: ['apps/dashboard/src/server/origin.ts'],
     rules: { 'no-restricted-syntax': ['error', ...requestUrlReads] },
+  },
+  {
+    // Pages and components reach the engine through server modules only.
+    files: ['apps/dashboard/src/**', 'apps/dashboard/server.ts'],
+    ignores: ['apps/dashboard/src/server/**', ...DASHBOARD_OWN_POOLS],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: '@drefyn/engine', message: 'The engine is server only: use src/server/.' },
+            handleBuilders,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/dashboard/src/server/**'],
+    ignores: [DASHBOARD_HOLDER, ...DASHBOARD_OWN_POOLS],
+    rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders, handleBuilders] }] },
+  },
+  {
+    files: DASHBOARD_OWN_POOLS,
+    rules: { 'no-restricted-imports': ['error', { paths: [engineBuilders] }] },
   },
   {
     files: ['packages/auth/src/**'],

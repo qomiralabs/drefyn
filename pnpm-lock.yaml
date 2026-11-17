@@ -99,6 +99,9 @@ importers:
       '@drefyn/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@drefyn/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@drefyn/entitlements':
         specifier: workspace:*
         version: link:../../packages/entitlements
