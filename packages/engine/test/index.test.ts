@@ -7,6 +7,7 @@ import {
   PUBLISH_ERROR_CODES,
   PUBLISH_SCOPES,
   STRICT_WORKFLOW,
+  VISIBILITIES,
 } from '../src/index.ts';
 
 describe('the closed sets', () => {
@@ -26,6 +27,10 @@ describe('the closed sets', () => {
     expect(NODE_LIFECYCLES).toEqual(['draft', 'published', 'archived']);
   });
 
+  it('lists the two visibilities', () => {
+    expect(VISIBILITIES).toEqual(['public', 'protected']);
+  });
+
   it('lists the origins', () => {
     expect(ORIGINS).toEqual(['human', 'ai', 'git', 'import']);
   });
@@ -43,6 +48,7 @@ describe('the closed sets', () => {
       'engine.read_only',
       'engine.too_large',
       'engine.unavailable',
+      'engine.widen_requires_publish',
     ]);
   });
 
@@ -55,6 +61,7 @@ describe('the closed sets', () => {
     ['PUBLISH_ERROR_CODES', PUBLISH_ERROR_CODES],
     ['PUBLISH_SCOPES', PUBLISH_SCOPES],
     ['STRICT_WORKFLOW', STRICT_WORKFLOW],
+    ['VISIBILITIES', VISIBILITIES],
   ])('freezes %s', (_name, list) => {
     expect(Object.isFrozen(list)).toBe(true);
   });

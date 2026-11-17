@@ -7,6 +7,7 @@ export default defineConfig({
       'test/**/*.integration.test.ts',
       'test/integration/**/*.test.ts',
       'test/versions.property.test.ts',
+      'test/visibility.property.test.ts',
     ],
     globalSetup: [watchdogGlobalSetup, 'test/support/global-setup.ts'],
     restoreMocks: true,

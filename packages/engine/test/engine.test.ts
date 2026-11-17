@@ -99,6 +99,7 @@ const replayOf = ({ id, ...row }: Record<string, unknown>) =>
   });
 
 const happy: Responder = (statement) => {
+  if (has(statement, 'as own')) return [{ own: null, before: 'public', after: 'public' }];
   if (has(statement, 'for update')) return [NODE_ROW];
   if (has(statement, WRITE_READ)) return writeRead();
   if (has(statement, 'from "organizations"')) return [{ ...PLAN, nodes: 1 }];

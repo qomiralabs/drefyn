@@ -2,7 +2,7 @@ import type { IdOf, TenantRef, UserId } from '@drefyn/tenancy';
 import type { SystemJob } from './actor.ts';
 import type { NodeContent } from './content.ts';
 import type { StoredFields } from './fields.ts';
-import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
+import type { NodeFamily, NodeLifecycle, Origin, Visibility } from './vocabulary.ts';
 
 export type NodeId = IdOf<'nod'>;
 export type VersionId = IdOf<'ver'>;
@@ -185,6 +185,8 @@ export interface PublishReceipt {
   // What was current before, null on a first publish.
   readonly previousVersionId: VersionId | null;
   readonly renderPolicyVersion: number;
+  // What the published rows say now. Computed in the publish, never taken from the caller.
+  readonly visibility: Visibility;
   readonly publishedAt: Date;
 }
 
@@ -200,4 +202,35 @@ export interface ApprovalReceipt {
   readonly versionId: VersionId;
   readonly approverId: UserId;
   readonly approvedAt: Date;
+}
+
+export interface SetVisibilityInput {
+  readonly tenant: TenantRef;
+  readonly nodeId: NodeId;
+  // Null follows the parent, and a root follows the site default.
+  readonly override: Visibility | null;
+  readonly actor: Actor;
+  readonly idempotencyKey: IdempotencyKey;
+}
+
+export interface SetDefaultVisibilityInput {
+  readonly tenant: TenantRef;
+  // What a node with no override anywhere above it gets.
+  readonly visibility: Visibility;
+  readonly actor: Actor;
+  readonly idempotencyKey: IdempotencyKey;
+}
+
+export interface VisibilityChange {
+  // Null for the site default.
+  readonly nodeId: NodeId | null;
+  // What was set: the node's override, or the site default.
+  readonly override: Visibility | null;
+  // What the node, or a root with no override, now gets.
+  readonly effective: Visibility;
+  // Something that was protected, or could have been, became public.
+  readonly widened: boolean;
+  // Published nodes whose rows flipped.
+  readonly nodesChanged: number;
+  readonly changedAt: Date;
 }

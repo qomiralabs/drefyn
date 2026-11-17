@@ -23,6 +23,8 @@ import {
   readSchema,
   rollbackSchema,
   saveDraftSchema,
+  setDefaultVisibilitySchema,
+  setVisibilitySchema,
 } from './input.ts';
 import { actorFields } from './actor.ts';
 import {
@@ -69,9 +71,13 @@ import type {
   PublishReceipt,
   RollbackInput,
   SaveDraftInput,
+  SetDefaultVisibilityInput,
+  SetVisibilityInput,
   VersionRef,
   VersionSummary,
+  VisibilityChange,
 } from './types.ts';
+import { changeVisibility, type PublishVisibility, type VisibilityRequest } from './visibility.ts';
 import { readerOfStored, verifyContent, type ParsePolicy, type VerifyDeps } from './verify.ts';
 import { appendVersion, lockNode } from './write.ts';
 
@@ -105,6 +111,11 @@ export interface Engine {
   publish(input: PublishInput): Promise<PublishResult<PublishReceipt>>;
   // Records that a person approved one version, which a project that requires review needs.
   approve(input: ApproveInput): Promise<PublishResult<ApprovalReceipt>>;
+  // Sets or clears a node's override, which its subtree follows, and flips the published rows of
+  // every node it reaches. Widening takes a person who may publish.
+  setVisibility(input: SetVisibilityInput): Promise<EngineResult<VisibilityChange>>;
+  // What a node with no override above it gets, under the same rules.
+  setDefaultVisibility(input: SetDefaultVisibilityInput): Promise<EngineResult<VisibilityChange>>;
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
@@ -218,7 +229,7 @@ export function createEngine(deps: EngineDeps): Engine {
     noted(tenant, () => gate.treeWrite(tenant, () => store.tenant(tenant, work, held)));
 
   const read = async (
-    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1',
+    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1' | 'docs.private_access',
     tenant: TenantRef,
   ) => {
     try {
@@ -239,7 +250,7 @@ export function createEngine(deps: EngineDeps): Engine {
   // with no published chunks, and nothing would ever notice. Null refuses the write, and the
   // caller can try again.
   const strictlyOn = async (
-    name: 'engine.chunk_at_write' | 'retrieval.v1',
+    name: 'engine.chunk_at_write' | 'retrieval.v1' | 'docs.private_access',
     tenant: TenantRef,
   ): Promise<boolean | null> => {
     const { value, errorCode } = await read(name, tenant);
@@ -453,6 +464,7 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!input.ok) return input;
       const { tenant, nodeId, parentId, afterId, actor } = input.value;
       if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+      let pinned = false;
       return logged(
         'engine.move',
         {
@@ -463,9 +475,11 @@ export function createEngine(deps: EngineDeps): Engine {
         },
         () =>
           settled(() =>
-            writingTree(tenant, (tx) => moveWithinTree(tx, tenant, { nodeId, parentId, afterId })),
+            writingTree(tenant, async (tx) => {
+              ({ pinned } = await moveWithinTree(tx, tenant, { nodeId, parentId, afterId }));
+            }),
           ),
-        () => ({}),
+        () => (pinned ? { visibility_pinned: true } : {}),
       );
     },
 
@@ -643,6 +657,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const copyChunks = await strictlyOn('retrieval.v1', tenant);
       if (copyChunks === null) return refusePublish('publish.unavailable');
       let copy: ChunkCopy | undefined;
+      let resolved: PublishVisibility | undefined;
       return logged(
         'engine.publish',
         { ...tenantFields(tenant), node_id: nodeId, version_id: versionId, ...actorFields(actor) },
@@ -654,12 +669,17 @@ export function createEngine(deps: EngineDeps): Engine {
                 copied: (counts) => {
                   copy = counts;
                 },
+                resolved: (answer) => {
+                  resolved = answer;
+                },
               }),
             ),
           ),
         (value) => ({
           previous_version_id: value.previousVersionId ?? 'none',
           render_policy_version: value.renderPolicyVersion,
+          visibility: value.visibility,
+          ...(resolved?.held === true ? { visibility_held: true } : {}),
           ...(copy === undefined
             ? {}
             : {
@@ -697,8 +717,56 @@ export function createEngine(deps: EngineDeps): Engine {
         () => ({}),
       );
     },
+
+    async setVisibility(raw) {
+      const input = parsedOrRefused(setVisibilitySchema, raw);
+      if (!input.ok) return input;
+      const { tenant, nodeId, override, actor, idempotencyKey } = input.value;
+      return changing(
+        tenant,
+        { node_id: nodeId, override: override ?? 'inherit', ...actorFields(actor) },
+        { scope: { kind: 'node', nodeId, override }, actor, idempotencyKey },
+      );
+    },
+
+    async setDefaultVisibility(raw) {
+      const input = parsedOrRefused(setDefaultVisibilitySchema, raw);
+      if (!input.ok) return input;
+      const { tenant, visibility, actor, idempotencyKey } = input.value;
+      return changing(
+        tenant,
+        { node_id: 'site', override: visibility, ...actorFields(actor) },
+        { scope: { kind: 'site', visibility }, actor, idempotencyKey },
+      );
+    },
   };
+
+  // Off stops changes and nothing else: what the rows say stays, and publish keeps computing it.
+  async function changing(
+    tenant: TenantRef,
+    fields: LogFields,
+    request: VisibilityRequest,
+  ): Promise<EngineResult<VisibilityChange>> {
+    if (!(await writesOn(tenant))) return refuse('engine.forbidden');
+    const on = await strictlyOn('docs.private_access', tenant);
+    if (on !== true) return FLAG_OFF_OR_UNREAD(on);
+    return logged(
+      'engine.visibility',
+      { ...tenantFields(tenant), ...fields },
+      () => settled(() => writingTree(tenant, (tx) => changeVisibility(tx, tenant, request))),
+      (value) => ({
+        effective: value.effective,
+        widened: value.widened,
+        nodes_changed: value.nodesChanged,
+      }),
+    );
+  }
 }
+
+const FLAG_OFF_OR_UNREAD = (on: boolean | null) =>
+  on === null
+    ? refuse<never>('engine.unavailable', FLAG_UNREAD)
+    : refuse<never>('engine.forbidden');
 
 const publishInvalid = (issues: readonly EngineIssue[]): PublishResult<never> => ({
   ok: false,

@@ -1,10 +1,12 @@
 import type { TenantRef } from '@drefyn/tenancy';
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
+import { z } from 'zod';
 import { Refusal } from './errors.ts';
 import { assertWritable } from './limits.ts';
 import { MAX_ORDER_KEY_CHARS, orderKeyBetween } from './order-key.ts';
 import type { EngineTx } from './store.ts';
 import type { NodeId } from './types.ts';
+import { VISIBILITIES, type Visibility } from './vocabulary.ts';
 import { lockNode } from './write.ts';
 
 // A root is level 1. The same bound the parser puts on a page's own nesting, and far past any
@@ -28,6 +30,73 @@ export async function lockTree(tx: EngineTx, tenant: TenantRef): Promise<void> {
   const name = `engine.tree:${tenant.organizationId}:${tenant.projectId}`;
   await sql`set local lock_timeout = ${sql.raw(String(TREE_LOCK_WAIT_MS))}`.execute(tx);
   await sql`select pg_advisory_xact_lock(hashtextextended(${name}, 0))`.execute(tx);
+}
+
+// A project that never chose is public, as every project was before visibility existed.
+export const siteDefaultSql = (tenant: TenantRef): RawBuilder<Visibility> => sql<Visibility>`
+  coalesce((select s.default_visibility from app.site_access s
+             where s.organization_id = ${tenant.organizationId}::uuid
+               and s.project_id = ${tenant.projectId}::uuid), 'public')`;
+
+// The first override on the way up from a node, itself included, else the site default. A walk
+// that ends short of a root, at the level cap or on a cycle already in the data, cannot know what
+// is above it, so it answers protected. No start, or one that does not exist, is the default.
+export const effectiveVisibilitySql = (
+  tenant: TenantRef,
+  start: RawBuilder<unknown>,
+): RawBuilder<Visibility> => {
+  const { organizationId, projectId } = tenant;
+  return sql<Visibility>`(
+    with recursive up (parent_id, override, level) as (
+      select n.parent_id, n.visibility_override, 1 from app.nodes n
+       where n.organization_id = ${organizationId}::uuid and n.project_id = ${projectId}::uuid
+         and n.id = ${start}
+      union all
+      select n.parent_id, n.visibility_override, up.level + 1 from app.nodes n
+        join up on n.id = up.parent_id
+       where n.organization_id = ${organizationId}::uuid and n.project_id = ${projectId}::uuid
+         and up.override is null and up.level <= ${MAX_TREE_LEVELS}
+    )
+    select case
+      when exists (select 1 from up where override is not null)
+        then (select max(override) from up where override is not null)
+      when not exists (select 1 from up) or exists (select 1 from up where parent_id is null)
+        then ${siteDefaultSql(tenant)}
+      else 'protected'
+    end)`;
+};
+
+const visibilitySchema = z.enum(VISIBILITIES);
+
+// Anything but one of the two names is a broken read, and a publish or move must not guess.
+export function visibilityOf(value: unknown): Visibility {
+  const parsed = visibilitySchema.safeParse(value);
+  if (!parsed.success) throw new Error('visibility unreadable');
+  return parsed.data;
+}
+
+const moveVisibilitySchema = z.strictObject({
+  own: visibilitySchema.nullable(),
+  before: visibilitySchema,
+  after: visibilitySchema,
+});
+
+// A move never makes anything more public. A node that only followed a protected branch keeps
+// following protected after it lands under a public one, as its own override, and everything
+// that followed it follows it still. A person widens it with setVisibility.
+async function pinsProtected(tx: EngineTx, tenant: TenantRef, move: Move): Promise<boolean> {
+  const { organizationId, projectId } = tenant;
+  const { rows } = await sql`
+    select n.visibility_override as own,
+           ${effectiveVisibilitySql(tenant, sql`${move.nodeId}::uuid`)} as before,
+           ${effectiveVisibilitySql(tenant, sql`${move.parentId}::uuid`)} as after
+      from app.nodes n
+     where n.organization_id = ${organizationId}::uuid and n.project_id = ${projectId}::uuid
+       and n.id = ${move.nodeId}::uuid`.execute(tx);
+  const parsed = moveVisibilitySchema.safeParse(rows[0]);
+  if (!parsed.success) throw new Error('visibility unreadable');
+  const { own, before, after } = parsed.data;
+  return own === null && before === 'protected' && after === 'public';
 }
 
 const siblingsOf = (tx: EngineTx, tenant: TenantRef, parentId: NodeId | null) => {
@@ -194,9 +263,14 @@ async function keyForMove(
   return keyBetween('afterId', anchor?.order_key ?? null, next?.order_key ?? null);
 }
 
+export interface Moved {
+  // The node took a protected override so the move could not widen it.
+  readonly pinned: boolean;
+}
+
 // One row, always. Children follow their parent without being touched, and nothing else in the
 // node changes, so the version chain, the head and the filter row stay as they are.
-export async function moveWithinTree(tx: EngineTx, tenant: TenantRef, move: Move): Promise<void> {
+export async function moveWithinTree(tx: EngineTx, tenant: TenantRef, move: Move): Promise<Moved> {
   await lockTree(tx, tenant);
   const node = await lockNode(tx, tenant, move.nodeId);
   const place = await climb(tx, tenant, move.nodeId, move.parentId);
@@ -209,11 +283,18 @@ export async function moveWithinTree(tx: EngineTx, tenant: TenantRef, move: Move
     await assertParentFits(tx, tenant, move.nodeId, move.parentId, place);
   }
   const orderKey = await keyForMove(tx, tenant, move);
+  const pinned = await pinsProtected(tx, tenant, move);
   await tx
     .updateTable('nodes')
-    .set({ parent_id: move.parentId, order_key: orderKey, updated_at: new Date() })
+    .set({
+      parent_id: move.parentId,
+      order_key: orderKey,
+      updated_at: new Date(),
+      ...(pinned ? { visibility_override: 'protected' } : {}),
+    })
     .where('organization_id', '=', tenant.organizationId)
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', move.nodeId)
     .executeTakeFirstOrThrow();
+  return { pinned };
 }

@@ -49,6 +49,7 @@ describe('flag names', () => {
       | 'status.auto_apply_default'
       | 'auth.totp'
       | 'retrieval.v1'
+      | 'docs.private_access'
     >();
   });
 

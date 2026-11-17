@@ -137,6 +137,16 @@ export const flags = defineFlags([
     removeBy: '2027-06-30',
     safeValue: false,
   },
+  {
+    name: 'docs.private_access',
+    kind: 'release',
+    owner: 'Divine572',
+    description:
+      'Visibility can be changed. Off refuses changes; protected pages stay protected either way.',
+    created: '2026-11-17',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
 ]);
 
 export type Flags = typeof flags;

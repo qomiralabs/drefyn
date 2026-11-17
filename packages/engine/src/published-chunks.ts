@@ -2,8 +2,9 @@ import type { TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import type { EngineTx } from './store.ts';
 import { MAX_TREE_LEVELS } from './tree.ts';
+import type { Visibility } from './vocabulary.ts';
 
-export type Visibility = 'public' | 'protected';
+export type { Visibility } from './vocabulary.ts';
 
 // Every published set is 'latest' until named docs versions add their own labels.
 export const LATEST_LABEL = 'latest';
@@ -229,10 +230,25 @@ export async function writePublishedChunks(
        ${target === null ? sql`` : sql`and version_id <> ${target.versionId}::uuid`}`.execute(tx);
   const copied = target === null ? [] : await copyVersion(tx, tenant, nodeId, target);
   const after = publicIds(copied);
-  const change = termChange(before, after);
-  const counts = { chunks: copied.length, publicChunks: after.length };
+  const moved = await moveChunkTerms(tx, tenant, termChange(before, after));
+  return { chunks: copied.length, publicChunks: after.length, ...moved };
+}
+
+export interface TermsMoved {
+  readonly postingsAdded: number;
+  readonly postingsRemoved: number;
+  readonly lexemesChanged: number;
+}
+
+// Takes chunks out of the term tables and puts others in, in the caller's transaction. A
+// visibility flip calls this with the chunks it turned, and publish with its set difference.
+export async function moveChunkTerms(
+  tx: EngineTx,
+  tenant: TenantRef,
+  change: TermChange,
+): Promise<TermsMoved> {
   if (change.gone.length === 0 && change.added.length === 0) {
-    return { ...counts, postingsAdded: 0, postingsRemoved: 0, lexemesChanged: 0 };
+    return { postingsAdded: 0, postingsRemoved: 0, lexemesChanged: 0 };
   }
   // Every publish that moves terms in a project queues here, so statistics see one change at a
   // time and two publishes cannot deadlock on each other's lexemes.
@@ -245,7 +261,6 @@ export async function writePublishedChunks(
     on conflict on constraint published_project_term_totals_pkey do nothing`.execute(tx);
   const moved = await moveTerms(tx, tenant, change);
   return {
-    ...counts,
     postingsAdded: moved.added,
     postingsRemoved: moved.removed,
     lexemesChanged: moved.lexemes,

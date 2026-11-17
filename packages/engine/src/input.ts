@@ -3,7 +3,7 @@ import { MAX_RETIRED_FIELDS } from '@drefyn/schema';
 import { z } from 'zod';
 import type { EngineIssue } from './errors.ts';
 import { isOrderKey } from './order-key.ts';
-import { NODE_FAMILIES, ORIGINS } from './vocabulary.ts';
+import { NODE_FAMILIES, ORIGINS, VISIBILITIES } from './vocabulary.ts';
 import type { Actor, MovingActor } from './types.ts';
 import { CANONICAL_UUID, INSTALLATION_ID, SYSTEM_JOBS } from './actor.ts';
 
@@ -142,6 +142,22 @@ export const approveSchema = z.strictObject({
   nodeId,
   versionId,
   actor: publishingActor,
+});
+
+// The same actor shape as publish: a change is logged under the actor's opaque id.
+export const setVisibilitySchema = z.strictObject({
+  tenant,
+  nodeId,
+  override: z.enum(VISIBILITIES).nullable(),
+  actor: publishingActor,
+  idempotencyKey,
+});
+
+export const setDefaultVisibilitySchema = z.strictObject({
+  tenant,
+  visibility: z.enum(VISIBILITIES),
+  actor: publishingActor,
+  idempotencyKey,
 });
 
 export const readSchema = z.strictObject({ tenant, nodeId });
