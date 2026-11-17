@@ -24,7 +24,7 @@ export interface EngineFlagAnswer {
 
 export interface EngineFlags {
   evaluate(
-    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1',
+    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1' | 'docs.private_access',
     context: FlagContext,
   ): Promise<EngineFlagAnswer>;
 }

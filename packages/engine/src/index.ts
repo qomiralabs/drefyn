@@ -65,10 +65,13 @@ export type {
   PublishReceipt,
   RollbackInput,
   SaveDraftInput,
+  SetDefaultVisibilityInput,
+  SetVisibilityInput,
   SortDirection,
   VersionId,
   VersionRef,
   VersionSummary,
+  VisibilityChange,
 } from './types.ts';
 export {
   ENGINE_ERROR_CODES,
@@ -76,9 +79,11 @@ export {
   NODE_LIFECYCLES,
   ORIGINS,
   PUBLISH_ERROR_CODES,
+  VISIBILITIES,
   type EngineErrorCode,
   type NodeFamily,
   type NodeLifecycle,
   type Origin,
   type PublishErrorCode,
+  type Visibility,
 } from './vocabulary.ts';

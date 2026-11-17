@@ -17,7 +17,13 @@ import type {
   PublishInput,
   PublishReceipt,
 } from './types.ts';
-import type { EngineErrorCode, Origin, PublishErrorCode } from './vocabulary.ts';
+import type { EngineErrorCode, Origin, PublishErrorCode, Visibility } from './vocabulary.ts';
+import {
+  flipNode,
+  publishVisibility,
+  shareVisibility,
+  type PublishVisibility,
+} from './visibility.ts';
 import { lockNode } from './write.ts';
 
 export interface PublishError {
@@ -162,16 +168,36 @@ interface LogRow {
   readonly published_at: Date;
 }
 
-const receiptOf = (row: LogRow): PublishReceipt => ({
+const receiptOf = (row: LogRow, visibility: Visibility): PublishReceipt => ({
   nodeId: idOf('nod', row.node_id),
   versionId: idOf('ver', row.version_id),
   previousVersionId: row.previous_version_id === null ? null : idOf('ver', row.previous_version_id),
   renderPolicyVersion: row.render_policy_version,
+  visibility,
   publishedAt: row.published_at,
 });
 
+// What the version's row says now, which a later visibility change may have moved. A row that
+// is gone or unreadable answers protected: the receipt must never claim more than is true.
+async function visibilityNow(tx: EngineTx, tenant: TenantRef, row: LogRow): Promise<Visibility> {
+  const found = await tx
+    .selectFrom('published_versions')
+    .select('visibility')
+    .where('organization_id', '=', tenant.organizationId)
+    .where('project_id', '=', tenant.projectId)
+    .where('node_id', '=', row.node_id)
+    .where('version_id', '=', row.version_id)
+    .executeTakeFirst();
+  return found?.visibility === 'public' ? 'public' : 'protected';
+}
+
 // The same request again gets the receipt it had, whatever has changed since.
-function replayed(input: PublishInput, row: LogRow): PublishReceipt {
+async function replayed(
+  tx: EngineTx,
+  tenant: TenantRef,
+  input: PublishInput,
+  row: LogRow,
+): Promise<PublishReceipt> {
   const actor = idAndKind(input.actor);
   const same =
     row.node_id === input.nodeId &&
@@ -180,12 +206,8 @@ function replayed(input: PublishInput, row: LogRow): PublishReceipt {
     row.actor_kind === actor.kind &&
     row.actor_id === actor.id;
   if (!same) throw new PublishRefusal('publish.idempotency_conflict');
-  return receiptOf(row);
+  return receiptOf(row, await visibilityNow(tx, tenant, row));
 }
-
-// TODO(#383): write the node's effective visibility once publish computes it. Nothing can
-// mark a node protected yet, so every published row is public, as every row was before.
-const PUBLISHED_VISIBILITY = 'public';
 
 // Every column, so a value the version dropped cannot stay behind in its slot.
 async function writeFilterRow(
@@ -194,6 +216,7 @@ async function writeFilterRow(
   typeId: string,
   input: PublishInput,
   facts: Facts,
+  visibility: Visibility,
 ): Promise<void> {
   const row = slotRowOf(parseSlotMap(facts.filter_slots), facts.fields as StoredFields);
   const values = SLOT_COLUMNS.map((column) => {
@@ -211,7 +234,7 @@ async function writeFilterRow(
     insert into app.published_filter_rows
       (organization_id, project_id, type_id, node_id, visibility, ${sql.join(columns)})
     values (${tenant.organizationId}::uuid, ${tenant.projectId}::uuid, ${typeId}::uuid,
-            ${input.nodeId}::uuid, ${PUBLISHED_VISIBILITY}, ${sql.join(values)})
+            ${input.nodeId}::uuid, ${visibility}, ${sql.join(values)})
     on conflict on constraint published_filter_rows_pkey do update
       set visibility = excluded.visibility, ${sql.join(assignments)}`.execute(tx);
 }
@@ -223,6 +246,7 @@ async function writeVersion(
   typeId: string,
   input: PublishInput,
   renderPolicyVersion: number,
+  visibility: Visibility,
 ): Promise<void> {
   await tx
     .updateTable('published_versions')
@@ -237,7 +261,7 @@ async function writeVersion(
     insert into app.published_versions (organization_id, project_id, node_id, version_id,
         type_id, content, fields, is_current, render_policy_version, visibility)
     select v.organization_id, v.project_id, v.node_id, v.id, ${typeId}::uuid, v.content,
-        v.fields, true, ${renderPolicyVersion}::integer, ${PUBLISHED_VISIBILITY}
+        v.fields, true, ${renderPolicyVersion}::integer, ${visibility}
       from app.node_versions v
      where v.organization_id = ${tenant.organizationId}::uuid
        and v.project_id = ${tenant.projectId}::uuid
@@ -253,10 +277,13 @@ export interface ChunkCopyOptions {
   readonly copyChunks: boolean;
   // Told the counts once the copy is written, for the log line.
   readonly copied?: (copy: ChunkCopy) => void;
+  // Told what the rows were given, for the log line.
+  readonly resolved?: (visibility: PublishVisibility) => void;
 }
 
 // The whole publish, in the caller's transaction. Checks run before any write: the key, then
-// the gate, then the head. A refusal at any point leaves nothing behind.
+// the gate, then the head, then visibility. A refusal or a failed read at any point leaves
+// nothing behind.
 export async function publishVersion(
   tx: EngineTx,
   tenant: TenantRef,
@@ -264,6 +291,7 @@ export async function publishVersion(
   renderPolicyVersion: number,
   chunks: ChunkCopyOptions = { copyChunks: false },
 ): Promise<PublishReceipt> {
+  await shareVisibility(tx, tenant);
   const node = await lockNode(tx, tenant, input.nodeId);
   const prior = await tx
     .selectFrom('publish_log')
@@ -281,7 +309,7 @@ export async function publishVersion(
     .where('project_id', '=', tenant.projectId)
     .where('idempotency_key', '=', input.idempotencyKey)
     .executeTakeFirst();
-  if (prior !== undefined) return replayed(input, prior);
+  if (prior !== undefined) return replayed(tx, tenant, input, prior);
 
   const facts = await readFacts(tx, tenant, input, node.typeId);
   if (facts === undefined) throw new PublishRefusal('publish.not_found');
@@ -297,6 +325,8 @@ export async function publishVersion(
     throw new PublishRefusal('publish.version_conflict');
   }
   await assertWritable(tx, tenant, node.family);
+  const resolved = await publishVisibility(tx, tenant, input.nodeId);
+  const { visibility } = resolved;
 
   const actor = idAndKind(input.actor);
   // The same key can race on another node, which holds a different lock. That request had
@@ -331,16 +361,20 @@ export async function publishVersion(
     .executeTakeFirst();
   if (logged === undefined) throw new PublishRefusal('publish.idempotency_conflict');
 
-  await writeVersion(tx, tenant, node.typeId, input, renderPolicyVersion);
-  await writeFilterRow(tx, tenant, node.typeId, input, facts);
+  // Rows the node already has follow first, chunks included, whether or not this publish copies
+  // chunks: a row left from before must not stay more public than the page.
+  await flipNode(tx, tenant, input.nodeId, visibility);
+  await writeVersion(tx, tenant, node.typeId, input, renderPolicyVersion, visibility);
+  await writeFilterRow(tx, tenant, node.typeId, input, facts, visibility);
   if (chunks.copyChunks) {
     // The same visibility as the version row, so a chunk is never more public than its page.
     const copy = await writePublishedChunks(tx, tenant, input.nodeId, {
       versionId: input.versionId,
-      visibility: PUBLISHED_VISIBILITY,
+      visibility,
     });
     chunks.copied?.(copy);
   }
+  chunks.resolved?.(resolved);
   await tx
     .updateTable('nodes')
     .set({ lifecycle: 'published', published_version_id: input.versionId, updated_at: new Date() })
@@ -348,7 +382,7 @@ export async function publishVersion(
     .where('project_id', '=', tenant.projectId)
     .where('id', '=', input.nodeId)
     .executeTakeFirstOrThrow();
-  return receiptOf(logged);
+  return receiptOf(logged, visibility);
 }
 
 // The caller has checked the actor. Approving twice keeps the first approval's time.

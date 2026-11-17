@@ -27,6 +27,8 @@ public.
 - `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
   queued. A job calls this; the work resumes from the table.
 - `engine.publish(input)`, `engine.approve(input)`: the publish gate, below.
+- `engine.setVisibility(input)`, `engine.setDefaultVisibility(input)`, `Visibility`,
+  `VISIBILITIES`: who can read a published page, below.
 - `PUBLISH_ERROR_CODES`, `PUBLISH_ROLES`, `APPROVE_ROLES`, `PUBLISH_SCOPES`, `STRICT_WORKFLOW`:
   what the gate answers and checks.
 - `chunkNode(reader, options)`: splits the reader text the parse host gave for a page into unit
@@ -329,6 +331,44 @@ that move public chunks in one project queue on a transaction lock, then apply t
 statement, upserts in lexeme order. A chunk that stays public and current keeps its postings.
 The log line carries chunk, posting and lexeme counts, never text or lexemes.
 
+## Visibility
+
+Every published row is `public` or `protected`, and the public reader sees only `public` rows.
+Publish computes the value in its own transaction and never takes it from the caller: the node's
+`visibility_override`, else the nearest override on the way up, else the site default in
+`app.site_access` (`public` when a project has no row). A walk that cannot reach a root, past
+the level cap or on a cycle, answers `protected`. A failed read fails the publish.
+
+`engine.setVisibility({ tenant, nodeId, override, actor, idempotencyKey })` sets or clears
+(`null`) a node's override; `engine.setDefaultVisibility({ tenant, visibility, actor,
+idempotencyKey })` sets the site default. Either flips, in one transaction, every published row
+of every node it reaches (versions, filter rows and chunks, current or not) and moves the flipped
+current chunks out of or into the term tables. A subtree over 50,000 rows, or deeper than it can
+read, is refused as `engine.too_large` rather than left half open.
+
+Widening is publishing. A change that turns anything protected public, and any override of
+`public`, takes a `user` actor with a publish role, or answers `engine.widen_requires_publish`.
+Tightening takes the same right to publish from any actor but a job: a person with a publish role,
+a key the project allows with the family's scope, or a push the project allows.
+
+Nothing else widens:
+
+| Path               | Why it cannot open a page                                                           |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Move               | A node that followed a protected branch keeps `protected` as its own override       |
+| Publish, a restore | Rows already protected stay protected, whatever the tree says now                   |
+| AI draft           | Its actor is a job, and jobs can do neither                                         |
+| Plan change        | Nothing reads the plan; a read only project refuses changes with `engine.read_only` |
+
+A move into a protected branch takes effect at the page's next publish or visibility change.
+
+`docs.private_access` off refuses both calls with `engine.forbidden` and changes nothing else:
+rows stay as they are and publish keeps computing visibility. Changes queue on the tree lock and
+hold a project lock alone; publishes share that lock, so a publish never reads a tree a change is
+halfway through. `app.visibility_log` is append only for the application role and keeps one row
+per key; the same key with the same input answers the first result, and other input answers
+`engine.idempotency_conflict`. Log lines carry ids, codes and counts, never a title or a path.
+
 ## Configuration
 
 | Key                                       | Default | Meaning                                               |
@@ -360,7 +400,7 @@ COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench -- publish
 `tree`, `published`, `publish`).
 
 Integration files end in `.integration.test.ts` and need a stack from `scripts/selfhost.sh up`.
-`test/versions.property.test.ts` is one too. They start a real parse host, skip with the reason
+`test/versions.property.test.ts` and `test/visibility.property.test.ts` are too. They start a real parse host, skip with the reason
 on a machine without a stack, and fail in CI.
 
 `bench/chunk.ts` needs no stack: a 100 KB page, p99 under 30 ms. `bench/save.ts` times a whole

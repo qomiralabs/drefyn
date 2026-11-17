@@ -576,6 +576,14 @@ export interface SessionsTable {
   sso_organization_id: string | null;
 }
 
+// app.site_access
+export interface SiteAccessTable {
+  organization_id: string;
+  project_id: string;
+  default_visibility: string;
+  updated_at: Generated<Date>;
+}
+
 // app.sso_connections
 export interface SsoConnectionsTable {
   id: Generated<string>;
@@ -666,6 +674,22 @@ export interface UsersTable {
   updated_at: Generated<Date>;
 }
 
+// app.visibility_log
+export interface VisibilityLogTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string | null;
+  override: string | null;
+  effective: string;
+  widened: boolean;
+  nodes_changed: number;
+  actor_kind: string;
+  actor_id: string;
+  idempotency_key: string;
+  changed_at: Generated<Date>;
+}
+
 // Tables in schema app, keyed by name, as the search_path finds them.
 export interface Schema {
   api_key_failures: ApiKeyFailuresTable;
@@ -711,10 +735,12 @@ export interface Schema {
   recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;
   sessions: SessionsTable;
+  site_access: SiteAccessTable;
   sso_connections: SsoConnectionsTable;
   sso_domains: SsoDomainsTable;
   sso_identities: SsoIdentitiesTable;
   sso_states: SsoStatesTable;
   totp_credentials: TotpCredentialsTable;
   users: UsersTable;
+  visibility_log: VisibilityLogTable;
 }

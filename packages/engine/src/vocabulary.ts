@@ -36,6 +36,8 @@ export const ENGINE_ERROR_CODES = Object.freeze([
   'engine.too_large',
   // Nothing is wrong with the request: the database or parse host is down or full. Try again.
   'engine.unavailable',
+  // Making something more public is publishing it, so only a person who may publish does it.
+  'engine.widen_requires_publish',
 ] as const);
 export type EngineErrorCode = (typeof ENGINE_ERROR_CODES)[number];
 
@@ -57,3 +59,8 @@ export const PUBLISH_ERROR_CODES = Object.freeze([
   'publish.unavailable',
 ] as const);
 export type PublishErrorCode = (typeof PUBLISH_ERROR_CODES)[number];
+
+// Who can read a published row. Anything else is not a value: a row the database cannot name
+// public is hidden from the public reader.
+export const VISIBILITIES = Object.freeze(['public', 'protected'] as const);
+export type Visibility = (typeof VISIBILITIES)[number];
