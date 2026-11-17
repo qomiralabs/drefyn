@@ -128,6 +128,15 @@ export const flags = defineFlags([
     safeValue: false,
   },
   {
+    name: 'docs.site',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'Customer docs sites are served by host from the docs site app.',
+    created: '2026-11-16',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
+  {
     name: 'retrieval.v1',
     kind: 'release',
     owner: 'Divine572',

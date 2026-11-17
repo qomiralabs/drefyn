@@ -263,8 +263,9 @@ async function shipped(init: InitMode, name: FlagName, f?: Failure) {
 }
 
 describe('the shipped release flags', () => {
-  it('include auth.team_sso', () => {
+  it('include auth.team_sso and docs.site', () => {
     expect(shippedRelease).toContain('auth.team_sso');
+    expect(shippedRelease).toContain('docs.site');
   });
 
   it.each(shippedRelease)('%s is off when the flag source has no entry for it', async (name) => {

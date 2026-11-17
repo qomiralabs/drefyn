@@ -103,6 +103,12 @@ export const egressAllowList = [
       'fake GitHub API for the broker tests, never imported by src; it accepts TLS connections on 127.0.0.1 and never opens one, and adds its throwaway certificate to the trusted list of the test process only',
   },
   {
+    path: 'apps/docs-site/test/start.test.ts',
+    reason:
+      'calls a docs site server the same test started on 127.0.0.1, through localhost, to prove forged forwarded headers are ignored; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
     path: 'apps/dashboard/server.ts',
     reason:
       'inbound server in front of the Next handler; it accepts connections and never opens one',

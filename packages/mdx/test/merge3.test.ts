@@ -358,6 +358,28 @@ describe('merge3 scenarios', () => {
     }
   });
 
+  // With First gone, the head of the split reads as a new block above First's slot, and only the
+  // tail pairs with Second. Taking the tail along to the top would put it above its own head.
+  it('move vs a split whose head became a new block: a conflict', () => {
+    const moved = 'Second paragraph with several other words here.';
+    const ours = page(
+      '# Title',
+      'Second paragraph with',
+      'several other words here.',
+      'Third paragraph about something else entirely now.',
+      'Fourth paragraph that closes the page off nicely.',
+    );
+    const theirs = `${moved}\n\n${replaced(`${moved}\n\n`, '')}`;
+    for (const [a, c] of [
+      [ours, theirs],
+      [theirs, ours],
+    ] as const) {
+      expect(conflicts(outcomeOf(BASE, a, c)).map(({ reason }) => reason)).toContain(
+        'move_vs_edit',
+      );
+    }
+  });
+
   it('move vs edit, with an insert beside the moved block: a conflict', () => {
     const moved = 'Second paragraph with several other words here.';
     const ours = replaced(`${moved}\n\n`, '').replace('nicely.', `nicely.\n\n${moved}`);
