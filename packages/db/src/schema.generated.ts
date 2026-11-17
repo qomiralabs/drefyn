@@ -167,6 +167,63 @@ export interface FilterBackfillsTable {
   created_at: Generated<Date>;
 }
 
+// app.git_bindings
+export interface GitBindingsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  installation_id: number;
+  repository_id: number;
+  owner: string;
+  name: string;
+  branch: string;
+  folder: string;
+  last_synced_commit: string | null;
+  state: Generated<string>;
+  state_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.git_deliveries
+export interface GitDeliveriesTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  delivery_id: string;
+  head_sha: string | null;
+  received_at: Generated<Date>;
+  state: Generated<string>;
+  finished_at: Date | null;
+}
+
+// app.git_files
+export interface GitFilesTable {
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  path: string;
+  node_id: string;
+  blob_sha: string;
+  synced_version_id: string;
+  updated_at: Generated<Date>;
+}
+
+// app.git_outbound
+export interface GitOutboundTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  change_set_id: string;
+  binding_id: string;
+  state: Generated<string>;
+  commit_sha: string | null;
+  attempts: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 // app.identities
 export interface IdentitiesTable {
   id: Generated<string>;
@@ -285,6 +342,7 @@ export interface NodesTable {
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   head_fields: Generated<JsonValue>;
+  visibility_override: string | null;
 }
 
 // app.oauth_states
@@ -417,6 +475,7 @@ export interface PublishedFilterRowsTable {
   i5: number | null;
   d1: Date | null;
   d2: Date | null;
+  visibility: string;
 }
 
 // app.published_versions
@@ -432,6 +491,7 @@ export interface PublishedVersionsTable {
   is_current: boolean;
   render_policy_version: number;
   published_at: Generated<Date>;
+  visibility: string;
 }
 
 // app.recovery_codes
@@ -570,6 +630,10 @@ export interface Schema {
   engine_outbox: EngineOutboxTable;
   factor_challenges: FactorChallengesTable;
   filter_backfills: FilterBackfillsTable;
+  git_bindings: GitBindingsTable;
+  git_deliveries: GitDeliveriesTable;
+  git_files: GitFilesTable;
+  git_outbound: GitOutboundTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;

@@ -1,0 +1,23 @@
+from flask import Flask
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def index():
+    return "ok"
+
+
+@app.route("/users", methods=["GET", "POST"])
+def users():
+    return "users"
+
+
+@app.delete("/users/<int:user_id>")
+def remove(user_id):
+    return ""
+
+
+@app.route(PREFIX + "/x")
+def dynamic():
+    return ""

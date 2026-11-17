@@ -1,0 +1,19 @@
+from fastapi import APIRouter, FastAPI
+
+app = FastAPI()
+router = APIRouter()
+
+
+@app.get("/items/{item_id}")
+async def read_item(item_id: int):
+    return {}
+
+
+@router.put("/items/{item_id}")
+def update_item(item_id: int):
+    return {}
+
+
+@functools.cache
+def not_a_route():
+    pass

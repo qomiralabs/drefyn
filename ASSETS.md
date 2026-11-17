@@ -65,9 +65,10 @@ fill, stroke and text colours, kept in `auth.css` as named values on that button
 Images the repository pulls by digest and never ships. Each digest is the multi arch index
 (amd64 and arm64).
 
-| Image                     | Used by                                                                      | Source                               | Licence |
-| ------------------------- | ---------------------------------------------------------------------------- | ------------------------------------ | ------- |
-| `axllent/mailpit:v1.32.0` | `deploy/compose.yaml` test profile, `scripts/email-integration` (tests only) | `https://github.com/axllent/mailpit` | MIT     |
+| Image                      | Used by                                                                              | Source                                   | Licence                                       |
+| -------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------- | --------------------------------------------- |
+| `axllent/mailpit:v1.32.0`  | `deploy/compose.yaml` test profile, `scripts/email-integration` (tests only)         | `https://github.com/axllent/mailpit`     | MIT                                           |
+| `typesense/typesense:30.2` | `deploy/compose.yaml` search profile, pulled by the self hoster, never shipped by us | `https://github.com/typesense/typesense` | GPL-3.0, a separate process reached over HTTP |
 
 ## MDX test corpus
 

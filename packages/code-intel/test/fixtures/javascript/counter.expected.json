@@ -1,0 +1,77 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "add",
+      "kind": "function",
+      "exported": true,
+      "signature": "function add(a, b = 1)",
+      "doc": "Adds two numbers.",
+      "startLine": 6
+    },
+    {
+      "name": "Counter",
+      "kind": "class",
+      "exported": true,
+      "signature": "class Counter",
+      "doc": null,
+      "startLine": 10
+    },
+    {
+      "name": "Counter.constructor",
+      "kind": "method",
+      "exported": true,
+      "signature": "constructor()",
+      "doc": "Starts at zero.",
+      "startLine": 12
+    },
+    {
+      "name": "Counter.increment",
+      "kind": "method",
+      "exported": true,
+      "signature": "increment(by = 1)",
+      "doc": null,
+      "startLine": 16
+    },
+    {
+      "name": "Counter.#reset",
+      "kind": "method",
+      "exported": false,
+      "signature": "#reset()",
+      "doc": null,
+      "startLine": 20
+    },
+    {
+      "name": "Counter.current",
+      "kind": "method",
+      "exported": true,
+      "signature": "get current()",
+      "doc": null,
+      "startLine": 24
+    },
+    {
+      "name": "VERSION",
+      "kind": "const",
+      "exported": true,
+      "signature": "const VERSION",
+      "doc": null,
+      "startLine": 29
+    },
+    {
+      "name": "app",
+      "kind": "const",
+      "exported": false,
+      "signature": "const app",
+      "doc": null,
+      "startLine": 33
+    },
+    {
+      "name": "double",
+      "kind": "function",
+      "exported": true,
+      "signature": "const double = (n) =>",
+      "doc": "Doubles.",
+      "startLine": 36
+    }
+  ]
+}

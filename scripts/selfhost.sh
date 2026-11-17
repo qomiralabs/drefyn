@@ -3,7 +3,7 @@
 #   up       create deploy/.env with random passwords if it is missing, then start and wait
 #   down     stop and remove the containers, keep the data volume
 #   restart  recreate the containers from deploy/.env and wait until healthy again
-#   upgrade  add what an older volume lacks (today the drefyn_auth role), then wait
+#   upgrade  add what an older volume lacks (roles added since it was made), then wait
 #   reset    remove the containers and the data volume (needs --yes)
 # COMPOSE_PROFILES=parse, in the shell or in deploy/.env, adds the parse host to every command.
 set -euo pipefail
@@ -38,7 +38,8 @@ random_key() {
 # DREFYN_AUTH_SECRET: blocks are stored as an HMAC under it, so a new one lifts them all.
 # The second factor keyring is a list of <id>:<key>, so it starts as one entry. Its id only
 # has to differ from the ids an operator adds later, and random hex does.
-KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS'
+# The search admin key is Typesense's own and has the same shape as the auth keys.
+KEY_NAMES='DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_AUTH_TOTP_KEYS|DREFYN_SEARCH_ADMIN_KEY'
 
 # The app tier sends the token and the parse host keeps only its hash, so a taken host holds
 # nothing a stranger could use. Both go in deploy/.env; compose hands the host the hash alone.
@@ -114,10 +115,10 @@ ensure_env() {
     fi
   done <"$example"
   if ! grep -q '^DREFYN_STACK_ID=.' "$env_tmp" ||
-    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 5 ] ||
-    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 4 ] ||
+    [ "$(grep -c '^DREFYN_[A-Z_]*_PASSWORD=.' "$env_tmp" || true)" -ne 6 ] ||
+    [ "$(grep -cE "^($KEY_NAMES)=." "$env_tmp" || true)" -ne 5 ] ||
     ! grep -q "^$PARSE_TOKEN=." "$env_tmp" || ! grep -q "^$PARSE_HASH=." "$env_tmp"; then
-    say <<<"selfhost: $example does not list the stack ID, the five passwords, the four auth keys and the parse host token and hash; nothing was written."
+    say <<<"selfhost: $example does not list the stack ID, the six passwords, the five generated keys and the parse host token and hash; nothing was written."
     exit 1
   fi
   # A hard link never replaces an existing file, so when two first ups race, the first one's
@@ -299,7 +300,7 @@ case "$1" in
     warn_env_mode
     "${compose[@]}" pull --quiet --ignore-buildable
     # Recreating copies the new secrets into the container. It cannot be healthy yet, because
-    # the healthcheck logs in as the role the upgrade adds, so this waits for TCP only.
+    # the healthcheck logs in as the roles the upgrade adds, so this waits for TCP only.
     "${compose[@]}" up --detach --force-recreate
     wait_tcp
     if ! "${compose[@]}" exec -T postgres sh /etc/drefyn/upgrade/run.sh; then

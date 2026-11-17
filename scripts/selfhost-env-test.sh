@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Proves the installer generates the auth keys and the parse host token once, in the right
-# shape, with the token's hash beside it, and never prints a value, and that upgrade adds a
-# missing second factor keyring but never replaces one. Needs
+# Proves the installer generates the auth and search keys and the parse host token once, in the
+# right shape, with the token's hash beside it, and never prints a value, and that upgrade adds
+# a missing second factor keyring but never replaces one. Needs
 # no Docker: a fake docker on PATH fails every call, so up and upgrade stop at the project
 # guard, right after they wrote deploy/.env. Runs in a scratch copy of the checkout, so the
 # real deploy/.env is never read or written.
@@ -18,7 +18,7 @@ env_file="$root/deploy/.env"
 printf '#!/bin/sh\necho "fake docker: not available in this test" >&2\nexit 1\n' >"$scratch/bin/docker"
 chmod +x "$scratch/bin/docker"
 
-KEYS="DREFYN_AUTH_SECRET DREFYN_AUTH_INVITATION_BLOCK_KEY DREFYN_API_RATE_LIMIT_KEY"
+KEYS="DREFYN_AUTH_SECRET DREFYN_AUTH_INVITATION_BLOCK_KEY DREFYN_API_RATE_LIMIT_KEY DREFYN_SEARCH_ADMIN_KEY"
 TOTP=DREFYN_AUTH_TOTP_KEYS
 TOKEN=DREFYN_PARSE_HOST_TOKEN
 HASH=DREFYN_PARSE_TOKEN_SHA256
@@ -60,7 +60,7 @@ is_keyring() {
 # Any generated value in any output fails, whole or as its first 12 characters.
 no_value_in() {
   local file="$1" key v leaked=""
-  for key in $KEYS $TOTP $TOKEN DREFYN_AUTH_PASSWORD; do
+  for key in $KEYS $TOTP $TOKEN DREFYN_AUTH_PASSWORD DREFYN_PROTECTED_READER_PASSWORD; do
     v="$(value_of "$key")"
     # The keyring's id is not secret; its key starts after the colon.
     v="${v#*:}"
@@ -100,10 +100,10 @@ distinct="$(
   for key in $KEYS; do value_of "$key"; done
   value_of "$TOTP" | sed 's/^[^:]*://'
 )"
-if [ "$(sort -u <<<"$distinct" | grep -c . || true)" = 4 ]; then
-  pass "the four keys differ from one another"
+if [ "$(sort -u <<<"$distinct" | grep -c . || true)" = 5 ]; then
+  pass "the five keys differ from one another"
 else
-  fail "the four keys differ from one another"
+  fail "the five keys differ from one another"
 fi
 
 # hash_matches: the hash in the file is the SHA-256 of the token in the file, each written once.
@@ -135,7 +135,7 @@ fi
 
 # A deploy/.env from before these keys existed: up appends them and changes nothing else.
 old="$scratch/old.env"
-grep -vE "^(DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|$TOTP)=" \
+grep -vE "^(DREFYN_AUTH_SECRET|DREFYN_AUTH_INVITATION_BLOCK_KEY|DREFYN_API_RATE_LIMIT_KEY|DREFYN_SEARCH_ADMIN_KEY|$TOTP)=" \
   "$env_file" >"$old"
 cp "$old" "$env_file"
 chmod 600 "$env_file"
@@ -151,10 +151,10 @@ for key in $KEYS; do
   if is_key "$(value_of "$key")"; then added=$((added + 1)); fi
 done
 if is_keyring "$(value_of "$TOTP")"; then added=$((added + 1)); fi
-if [ "$added" = 4 ] && grep -q "added a generated" "$out3"; then
-  pass "an older deploy/.env gets the four keys appended, named in the output"
+if [ "$added" = 5 ] && grep -q "added a generated" "$out3"; then
+  pass "an older deploy/.env gets the five keys appended, named in the output"
 else
-  fail "an older deploy/.env gets the four keys appended, named in the output" "$(cat "$out3")"
+  fail "an older deploy/.env gets the five keys appended, named in the output" "$(cat "$out3")"
 fi
 if leaked="$(no_value_in "$out3")"; then
   pass "appending keys prints no value"

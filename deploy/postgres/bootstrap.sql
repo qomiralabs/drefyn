@@ -6,7 +6,7 @@
 -- Passwords are read from the environment so they never live in a SQL file or in psql's
 -- command line:
 --   DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD,
---   DREFYN_AUTH_PASSWORD
+--   DREFYN_AUTH_PASSWORD, DREFYN_PROTECTED_READER_PASSWORD
 --
 --   psql --no-psqlrc --dbname drefyn --file bootstrap.sql
 
@@ -19,17 +19,18 @@
 \getenv app_password DREFYN_APP_PASSWORD
 \getenv reader_password DREFYN_PUBLIC_READER_PASSWORD
 \getenv auth_password DREFYN_AUTH_PASSWORD
+\getenv protected_password DREFYN_PROTECTED_READER_PASSWORD
 
 select :{?owner_password} and :{?app_password} and :{?reader_password} and :{?auth_password}
-  as have_passwords \gset
+  and :{?protected_password} as have_passwords \gset
 \if :have_passwords
 \else
-  do $$ begin raise exception 'set DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD and DREFYN_AUTH_PASSWORD'; end $$;
+  do $$ begin raise exception 'set DREFYN_OWNER_PASSWORD, DREFYN_APP_PASSWORD, DREFYN_PUBLIC_READER_PASSWORD, DREFYN_AUTH_PASSWORD and DREFYN_PROTECTED_READER_PASSWORD'; end $$;
 \endif
 
 -- An empty password would leave a role that cannot log in, and a short one is a guess away.
 select least(length(:'owner_password'), length(:'app_password'), length(:'reader_password'),
-    length(:'auth_password')) >= 16 as long_enough \gset
+    length(:'auth_password'), length(:'protected_password')) >= 16 as long_enough \gset
 \if :long_enough
 \else
   do $$ begin raise exception 'each role password must be at least 16 characters'; end $$;
@@ -39,7 +40,7 @@ select least(length(:'owner_password'), length(:'app_password'), length(:'reader
 -- reaches a statement that carries a password.
 select exists (
     select from pg_roles where rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader',
-      'drefyn_auth')
+      'drefyn_auth', 'drefyn_protected_reader')
   ) or exists (select from pg_namespace where nspname in ('app', 'extensions'))
   as already_run \gset
 \if :already_run
@@ -63,6 +64,11 @@ create role drefyn_public_reader login nosuperuser nobypassrls nocreaterole nocr
 -- databases; keep the two in step.
 create role drefyn_auth login nosuperuser nobypassrls nocreaterole nocreatedb noinherit
   password :'auth_password';
+-- Reads published rows a signed in reader may see, protected ones included. Its own role so
+-- the public reader can never be handed them by a misconfigured URL.
+-- upgrade/0002-protected-reader-role.sql creates it the same way on older databases.
+create role drefyn_protected_reader login nosuperuser nobypassrls nocreaterole nocreatedb noinherit
+  password :'protected_password';
 
 create schema app authorization drefyn_owner;
 
@@ -75,7 +81,8 @@ create schema app authorization drefyn_owner;
 -- bootstrap rather than be left where it is.
 create schema extensions;
 revoke all on schema extensions from public;
-grant usage on schema extensions to drefyn_owner, drefyn_app, drefyn_public_reader;
+grant usage on schema extensions to drefyn_owner, drefyn_app, drefyn_public_reader,
+  drefyn_protected_reader;
 create extension vector schema extensions;
 
 -- Set on the database rather than on each role, so any role setting at all is drift that a
@@ -89,7 +96,8 @@ revoke all on schema public from public;
 -- connect without a grant, and temp tables are a place to stage data outside row level
 -- security.
 revoke all on database :"dbname" from public;
-grant connect on database :"dbname" to drefyn_owner, drefyn_app, drefyn_public_reader, drefyn_auth;
+grant connect on database :"dbname" to drefyn_owner, drefyn_app, drefyn_public_reader, drefyn_auth,
+  drefyn_protected_reader;
 
 -- Every cluster also has postgres and template1, open to PUBLIC the same way. New databases
 -- do not copy these rights from template1. On a managed database the master user may not own
@@ -117,3 +125,4 @@ commit;
 \unset app_password
 \unset reader_password
 \unset auth_password
+\unset protected_password

@@ -1,0 +1,18 @@
+import type { ReactNode } from 'react';
+
+/** Props for a badge. */
+export interface BadgeProps {
+  readonly tone: 'good' | 'bad';
+  readonly children?: ReactNode;
+}
+
+/** Shows a short status. */
+export function Badge({ tone, children }: BadgeProps): ReactNode {
+  return <span data-tone={tone}>{children}</span>;
+}
+
+export const Dot = ({ tone }: Pick<BadgeProps, 'tone'>) => <i data-tone={tone} />;
+
+const Inner = function Inner<T,>(props: { item: T }) {
+  return <b>{String(props.item)}</b>;
+};

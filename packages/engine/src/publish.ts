@@ -182,6 +182,10 @@ function replayed(input: PublishInput, row: LogRow): PublishReceipt {
   return receiptOf(row);
 }
 
+// TODO(#383): write the node's effective visibility once publish computes it. Nothing can
+// mark a node protected yet, so every published row is public, as every row was before.
+const PUBLISHED_VISIBILITY = 'public';
+
 // Every column, so a value the version dropped cannot stay behind in its slot.
 async function writeFilterRow(
   tx: EngineTx,
@@ -204,12 +208,11 @@ async function writeFilterRow(
   );
   await sql`
     insert into app.published_filter_rows
-      (organization_id, project_id, type_id, node_id, ${sql.join(columns)})
+      (organization_id, project_id, type_id, node_id, visibility, ${sql.join(columns)})
     values (${tenant.organizationId}::uuid, ${tenant.projectId}::uuid, ${typeId}::uuid,
-            ${input.nodeId}::uuid, ${sql.join(values)})
-    on conflict on constraint published_filter_rows_pkey do update set ${sql.join(assignments)}`.execute(
-    tx,
-  );
+            ${input.nodeId}::uuid, ${PUBLISHED_VISIBILITY}, ${sql.join(values)})
+    on conflict on constraint published_filter_rows_pkey do update
+      set visibility = excluded.visibility, ${sql.join(assignments)}`.execute(tx);
 }
 
 // The copy is made in the database, so the content never travels through this process.
@@ -231,9 +234,9 @@ async function writeVersion(
   // A version published before comes back as current, under the policy it renders with now.
   await sql`
     insert into app.published_versions (organization_id, project_id, node_id, version_id,
-        type_id, content, fields, is_current, render_policy_version)
+        type_id, content, fields, is_current, render_policy_version, visibility)
     select v.organization_id, v.project_id, v.node_id, v.id, ${typeId}::uuid, v.content,
-        v.fields, true, ${renderPolicyVersion}::integer
+        v.fields, true, ${renderPolicyVersion}::integer, ${PUBLISHED_VISIBILITY}
       from app.node_versions v
      where v.organization_id = ${tenant.organizationId}::uuid
        and v.project_id = ${tenant.projectId}::uuid
@@ -241,7 +244,7 @@ async function writeVersion(
        and v.id = ${input.versionId}::uuid
     on conflict on constraint published_versions_version_key do update
       set is_current = true, render_policy_version = excluded.render_policy_version,
-          published_at = now()`.execute(tx);
+          visibility = excluded.visibility, published_at = now()`.execute(tx);
 }
 
 // The whole publish, in the caller's transaction. Checks run before any write: the key, then

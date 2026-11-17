@@ -65,6 +65,15 @@ export const flags = defineFlags([
     safeValue: false,
   },
   {
+    name: 'docs.git_sync',
+    kind: 'release',
+    owner: 'Divine572',
+    description: 'Docs projects bind a GitHub folder, take pushes as drafts and reconcile hourly.',
+    created: '2026-11-16',
+    removeBy: '2027-06-30',
+    safeValue: false,
+  },
+  {
     name: 'auth.team_sso',
     kind: 'release',
     owner: 'Divine572',

@@ -1,0 +1,53 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "public",
+      "kind": "function",
+      "exported": true,
+      "signature": "def public(a, b=2, *args, **kwargs)",
+      "doc": "One line.",
+      "startLine": 1
+    },
+    {
+      "name": "_private",
+      "kind": "function",
+      "exported": false,
+      "signature": "def _private()",
+      "doc": null,
+      "startLine": 5
+    },
+    {
+      "name": "Thing",
+      "kind": "class",
+      "exported": true,
+      "signature": "class Thing",
+      "doc": null,
+      "startLine": 9
+    },
+    {
+      "name": "Thing.method",
+      "kind": "method",
+      "exported": true,
+      "signature": "def method(self)",
+      "doc": null,
+      "startLine": 10
+    },
+    {
+      "name": "Thing._helper",
+      "kind": "method",
+      "exported": false,
+      "signature": "def _helper(self)",
+      "doc": null,
+      "startLine": 13
+    },
+    {
+      "name": "Thing.__eq__",
+      "kind": "method",
+      "exported": true,
+      "signature": "def __eq__(self, other)",
+      "doc": null,
+      "startLine": 16
+    }
+  ]
+}
