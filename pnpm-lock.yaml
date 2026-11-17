@@ -179,6 +179,34 @@ importers:
         specifier: 6.2.3
         version: 6.2.3
 
+  apps/docs-site:
+    dependencies:
+      '@drefyn/flags':
+        specifier: workspace:*
+        version: link:../../packages/flags
+      '@drefyn/tenancy':
+        specifier: workspace:*
+        version: link:../../packages/tenancy
+      '@hono/node-server':
+        specifier: 2.1.6
+        version: 2.1.6(hono@4.13.17)
+      hono:
+        specifier: 4.13.17
+        version: 4.13.17
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      eslint:
+        specifier: 10.12.0
+        version: 10.12.0(jiti@2.7.0)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/address:
     devDependencies:
       fast-check:
