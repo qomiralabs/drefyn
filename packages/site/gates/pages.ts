@@ -29,6 +29,12 @@ export const BREACH_ENV = 'DREFYN_SITE_GATE_BREACH';
 // change that grows it past the target fails the first response gate.
 export const LARGEST_INCIDENT_UPDATES = 72;
 
+// Lighthouse times LCP on a simulated slow 4G link from the bytes each request moved, not
+// from how long the runner took, so the status-lcp breach is sized in bytes: its hero alone
+// takes several budgets to arrive at this throughput, on any runner.
+export const SIMULATED_THROUGHPUT_KBPS = 1_638.4;
+export const LCP_HERO = { width: 640, height: 480 } as const;
+
 export interface Asset {
   readonly type: string;
   readonly body: Buffer;
@@ -244,11 +250,16 @@ function drafts(breach: Breach | undefined): Draft[] {
       case 'status-lighthouse':
         return statusHomeDraft({ extra: hidden }, STATUS_CSS + faint);
       case 'status-lcp': {
+        // Lighthouse leaves low priority images out of its LCP estimate as likely offscreen.
+        // Chrome starts an image low and raises it at layout, and on loopback the hero could
+        // finish before that, so it was timed at about 830 ms instead of 1650. Asking for high
+        // priority up front takes the race away.
         const hero = createElement('img', {
           src: '/hero.png',
           alt: 'Map of the five check regions',
-          width: 640,
-          height: 80,
+          width: LCP_HERO.width,
+          height: LCP_HERO.height,
+          fetchPriority: 'high',
           className: 'hero',
         });
         return statusHomeDraft(
@@ -285,7 +296,7 @@ export function buildGateSet(breach: Breach | undefined): GateSet {
     assets.set(`/fonts/${file}`, { type: 'font/woff2', body: readFileSync(join(fontsDir, file)) });
   }
   if (breach === 'status-lcp') {
-    assets.set('/hero.png', { type: 'image/png', body: noisePng(640, 80) });
+    assets.set('/hero.png', { type: 'image/png', body: noisePng(LCP_HERO.width, LCP_HERO.height) });
   }
   const pages = drafts(breach).map((draft): GatePage => {
     if (draft.script !== undefined) {

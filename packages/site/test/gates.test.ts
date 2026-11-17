@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
+import { defaultSettings } from 'lighthouse/core/config/constants.js';
 import { gzipSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   firstResponseVerdict,
   jsProblem,
   lighthouseProblems,
+  STATUS_LCP_MS,
   type Scores,
 } from '../gates/budgets.ts';
 import { CONTROLS, judge, measured, outcomes } from '../gates/controls.ts';
@@ -15,6 +17,7 @@ import {
   buildGateSet,
   incidentUpdatesFrom,
   LARGEST_INCIDENT_UPDATES,
+  SIMULATED_THROUGHPUT_KBPS,
 } from '../gates/pages.ts';
 import { IMAGE } from '../gates/image.ts';
 import { noisePng } from '../gates/png.ts';
@@ -134,6 +137,19 @@ describe('the gate set', () => {
 
   it('refuses the incident past the hard limit at render', () => {
     expect(() => buildGateSet('first-response-fail')).toThrow(/"budget":"first_response"/);
+  });
+
+  it('sizes the status-lcp hero to take several budgets to arrive on simulated slow 4G', () => {
+    const set = buildGateSet('status-lcp');
+    const hero = set.assets.get('/hero.png')?.body ?? Buffer.alloc(0);
+    // The throughput the gate's default Lighthouse config simulates, read from Lighthouse so
+    // an upgrade that changes it shows up here.
+    expect(defaultSettings.throttling.throughputKbps).toBe(SIMULATED_THROUGHPUT_KBPS);
+    const ms = (hero.length * 8) / SIMULATED_THROUGHPUT_KBPS;
+    expect(ms).toBeGreaterThan(4 * STATUS_LCP_MS);
+    const html = set.pages.find((p) => p.id === 'status-home')?.html ?? '';
+    expect(html).toMatch(/<img[^>]*fetchpriority="high"/i);
+    expect(html).toMatch(/<img[^>]*height="480"/);
   });
 
   it('serves scripts over budget while declaring them under it', () => {
