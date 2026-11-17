@@ -20,6 +20,7 @@
     "@drefyn/db": "workspace:*",
     "@drefyn/entitlements": "workspace:*",
     "@drefyn/flags": "workspace:*",
+    "@drefyn/github": "workspace:*",
     "@drefyn/tenancy": "workspace:*",
     "@hono/node-server": "2.1.6",
     "hono": "4.13.17",

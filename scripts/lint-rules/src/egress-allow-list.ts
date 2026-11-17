@@ -91,6 +91,21 @@ export const egressAllowList = [
     only: [{ global: 'fetch' }],
   },
   {
+    path: 'apps/api/test/github-webhook.test.ts',
+    reason:
+      'posts to an API server the same test started on 127.0.0.1 to prove the webhook route is mounted only with its secret; never customer input',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'packages/github/test/support/fake-github.ts',
+    reason:
+      'fake GitHub API for the broker tests; it accepts TLS connections on 127.0.0.1 and never opens one, and trusts its throwaway certificate in the test process only',
+    only: [
+      { module: 'node:https', imports: ['createServer'] },
+      { module: 'node:tls', imports: ['getCACertificates', 'setDefaultCACertificates'] },
+    ],
+  },
+  {
     path: 'apps/dashboard/server.ts',
     reason:
       'inbound server in front of the Next handler; it accepts connections and never opens one',

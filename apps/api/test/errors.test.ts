@@ -42,6 +42,12 @@ describe('error mapping', () => {
       'api.limit_reached': 429,
       'api.unavailable': 503,
       'api.internal': 500,
+      'github.signature_invalid': 401,
+      'github.delivery_invalid': 400,
+      'github.payload_invalid': 400,
+      'github.delivery_replayed': 409,
+      'github.too_large': 413,
+      'github.unavailable': 503,
     });
   });
 

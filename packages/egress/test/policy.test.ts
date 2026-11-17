@@ -15,6 +15,7 @@ describe('policyFor', () => {
       'spec_fetch',
       'try_it',
       'media_import',
+      'github',
     ]);
   });
 
@@ -26,6 +27,7 @@ describe('policyFor', () => {
     ['spec_fetch', ['https'], [443], 3, 30_000, 20 * MIB],
     ['media_import', ['https'], [443], 3, 30_000, 20 * MIB],
     ['try_it', ['https', 'http'], 'any', 0, 15_000, 5 * MIB],
+    ['github', ['https'], [443], 0, 15_000, 8 * MIB],
   ] as const)('gives %s its defaults', (purpose, schemes, ports, redirects, total, bytes) => {
     const policy = policyFor(purpose);
     expect(policy).toEqual({
