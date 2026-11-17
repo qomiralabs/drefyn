@@ -267,6 +267,57 @@ describe('guard', () => {
     expect(result.status).toBe(200);
   });
 
+  describe('plan feature', () => {
+    it('answers 403 api.not_entitled when the plan lacks the feature, without counting it', async () => {
+      const { deps, reserve } = fakeDeps();
+      const seen: unknown[] = [];
+      const result = await call(deps, {
+        key: GOOD,
+        options: {
+          scope: 'studio:content.read',
+          entitled: (tenant) => {
+            seen.push(tenant);
+            return Promise.resolve(false);
+          },
+        },
+      });
+      expect(result.status).toBe(403);
+      expect(result.code).toBe('api.not_entitled');
+      expect(seen).toEqual([
+        { organizationId: ORG, projectId: PROJECT, keyId: KEY_ID, scopes: ['studio:content.read'] },
+      ]);
+      // A plan refusal says nothing an attacker could walk, so it is not a failed check.
+      expect(reserve).not.toHaveBeenCalled();
+    });
+
+    it('serves the route when the plan has the feature', async () => {
+      const { deps } = fakeDeps();
+      const result = await call(deps, {
+        key: GOOD,
+        options: { scope: 'studio:content.read', entitled: () => Promise.resolve(true) },
+      });
+      expect(result.status).toBe(200);
+    });
+
+    it('fails closed with 503 when the plan cannot be read, and logs no detail', async () => {
+      const { deps, logs } = fakeDeps();
+      const result = await call(deps, {
+        key: GOOD,
+        options: {
+          scope: 'studio:content.read',
+          entitled: () => Promise.reject(new Error('connection to 10.0.0.5 refused')),
+        },
+      });
+      expect(result.status).toBe(503);
+      expect(result.code).toBe('api.unavailable');
+      expect(logs).toContainEqual({
+        level: 'warn',
+        event: 'api.entitlement_failed',
+        fields: { organizationId: toPublicId('org', ORG), projectId: PROJECT_PUBLIC },
+      });
+    });
+  });
+
   it('runs the checks in the fixed order', async () => {
     const order: string[] = [];
     const base = fakeDeps();
@@ -294,6 +345,10 @@ describe('guard', () => {
       guard(deps, {
         scope: 'studio:content.read',
         flag: 'product.studio',
+        entitled: () => {
+          order.push('plan');
+          return Promise.resolve(true);
+        },
         limit: () => {
           order.push('limit');
           return Promise.resolve({ ok: true });
@@ -309,7 +364,7 @@ describe('guard', () => {
       { headers: { authorization: GOOD } },
       socketEnv(),
     );
-    expect(order).toEqual(['key', 'project looked up: 1', 'flag', 'limit', 'handler']);
+    expect(order).toEqual(['key', 'project looked up: 1', 'flag', 'plan', 'limit', 'handler']);
   });
 
   it('fails a handler that reads a tenant without a guard, as 500', async () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AuthError } from '@drefyn/auth';
 import { DbError, type Database, type PublishedDatabase } from '@drefyn/db';
 import { FlagError, loadFlagConfig, type FlagClient } from '@drefyn/flags';
+import { RetrievalConfigError } from '@drefyn/retrieval';
 import { organizationId } from '@drefyn/tenancy';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiConfigError } from '../src/config.ts';
@@ -107,6 +108,24 @@ describe('startApi', () => {
       startApi({ ...ENV, DREFYN_FLAGS_SOURCE: 'remote' }, options),
     ).rejects.toBeInstanceOf(FlagError);
     expect(opened).toEqual([]);
+  });
+
+  it('refuses a bad retrieval setting before opening any pool', async () => {
+    const { options, opened } = seams();
+    await expect(
+      startApi({ ...ENV, DREFYN_RETRIEVAL_TIMEOUT_MS: '0' }, options),
+    ).rejects.toMatchObject({ code: 'config.invalid', key: 'DREFYN_RETRIEVAL_TIMEOUT_MS' });
+    expect(opened).toEqual([]);
+  });
+
+  // Mounted, the route runs the key check; unmounted, it would be a plain 404.
+  it('mounts the retrieval route behind the key check', async () => {
+    const { options } = seams();
+    const api = await start(ENV, options);
+    const response = await fetch(url(api, '/v1/projects/prj_x/retrieve?query=a'));
+    const body = (await response.json()) as { error: { code: string } };
+    expect(response.status).not.toBe(404);
+    expect(body.error.code).toMatch(/^auth\./);
   });
 
   it('serves health on the chosen port and says where it listens', async () => {
@@ -223,6 +242,14 @@ describe('describeStartFailure', () => {
     expect(
       describeStartFailure(new FlagError('FLAG_CONFIG_INVALID', { key: 'DREFYN_FLAGS_SOURCE' })),
     ).toEqual({ error: 'FlagError', code: 'FLAG_CONFIG_INVALID', key: 'DREFYN_FLAGS_SOURCE' });
+    expect(
+      describeStartFailure(new RetrievalConfigError('DREFYN_RETRIEVAL_TIMEOUT_MS', 'must be 1')),
+    ).toEqual({
+      error: 'RetrievalConfigError',
+      code: 'config.invalid',
+      key: 'DREFYN_RETRIEVAL_TIMEOUT_MS',
+      reason: 'DREFYN_RETRIEVAL_TIMEOUT_MS must be 1',
+    });
     expect(describeStartFailure(new FlagError('FLAG_DEFINITION_INVALID'))).toEqual({
       error: 'FlagError',
       code: 'FLAG_DEFINITION_INVALID',
