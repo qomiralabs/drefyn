@@ -168,6 +168,27 @@ describe('the faults found in the stock printer', () => {
     expect(print(`${quoted}\n`)).toBe(quoted);
   });
 
+  it('decides spread once per item, however deep the items nest', () => {
+    const paragraph = (value: string) => ({
+      type: 'paragraph',
+      children: [{ type: 'text', value }],
+    });
+    let inner: unknown = paragraph('end');
+    for (let depth = 0; depth < 40; depth += 1) {
+      const item = {
+        type: 'listItem',
+        spread: false,
+        children: [paragraph('a'), inner, paragraph('b')],
+      };
+      inner = { type: 'list', ordered: false, spread: false, children: [item] };
+    }
+    const started = performance.now();
+    const once = printCanonical(inner as MdastBlock, 'md');
+    expect(performance.now() - started).toBeLessThan(5_000);
+    // Deeper than a page may parse, so this checks the shape and not a reparse.
+    expect(once.startsWith('- a\n\n  - a\n\n    - a\n\n')).toBe(true);
+  });
+
   it('does not put a blank line between jsx children in a tight list', () => {
     const source = '- <A>\n    <B />\n    <C />\n  </A>\n- d\n';
     expect(print(source, 'mdx')).toBe(source.trimEnd());

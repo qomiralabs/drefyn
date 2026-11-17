@@ -182,6 +182,35 @@ function blankCode(child: Prepared): Prepared {
   return { ...child, value: (child.value as string).replace(/^[ \t]+$/gm, '') };
 }
 
+// What the stock printer is asked between two blocks. Only the setup it was built with is read.
+type Join = (left: Prepared, right: Prepared, parent: Prepared, state: Joins) => unknown;
+
+interface Joins {
+  readonly join: readonly Join[];
+}
+
+// The same walk the stock printer does, newest join first: a number is that many blank lines,
+// anything else that decides is one blank line, and no answer at all is one too.
+function blankBetween(left: Prepared, right: Prepared, parent: Prepared, joins: Joins): boolean {
+  for (let index = joins.join.length - 1; index >= 0; index -= 1) {
+    const result = joins.join[index]?.(left, right, parent, joins);
+    if (typeof result === 'number') return result !== 0;
+    if (typeof result === 'boolean') return true;
+  }
+  return true;
+}
+
+// A tight item still gets a blank line where its text would otherwise run into the next block,
+// say a nested list and then html or a paragraph. That line makes it spread on reparse. A quote
+// hides its own blank lines from the item, but a footnote does not.
+function blankInside(parent: Prepared, children: readonly Prepared[], joins: Joins): boolean {
+  return children.some((child, index) => {
+    const next = children[index + 1];
+    if (next !== undefined && blankBetween(child, next, parent, joins)) return true;
+    return child.type === 'footnoteDefinition' && blankInside(child, child.children ?? [], joins);
+  });
+}
+
 function settleChildren(type: string, children: Prepared[]): Prepared[] {
   if (type === 'heading') return spaceBeforeHtml(children);
   return type === 'footnoteDefinition' ? children.map(blankCode) : children;
@@ -189,22 +218,35 @@ function settleChildren(type: string, children: Prepared[]): Prepared[] {
 
 // A private copy: values lose their CRLF, which the printer would otherwise double, and the
 // marks below go on this and not on the caller's tree.
-function prepare(node: Prepared, dialect: Dialect, tight: boolean, top: boolean): Prepared {
+function prepare(
+  node: Prepared,
+  dialect: Dialect,
+  tight: boolean,
+  top: boolean,
+  joins: Joins,
+): Prepared {
   if (!PRINTABLE[dialect].has(node.type)) throw new MdxPrintError();
   // Only the first block of a file is frontmatter. Anywhere else its fences mean nothing.
   if (node.type === 'yaml' && !top) throw new MdxPrintError();
   checkNames(node);
-  const inTight = isTightInside(node, tight);
+  let inTight = isTightInside(node, tight);
   const copy: Prepared = { ...node };
   // Marks live here, so nothing a caller put on a node can pose as one.
   delete copy.data;
+  // Printed spread, so what is inside has to print as it will read back: not tight. The joins
+  // only look at kinds, how html opens and where a list starts, which preparing leaves alone, so
+  // this reads the children as given and each one is prepared once.
+  if (node.type === 'listItem' && inTight && blankInside(copy, node.children ?? [], joins)) {
+    copy.spread = true;
+    inTight = false;
+  }
   if (typeof node.value === 'string') {
     // Left in, a line ending in a code span lets the next line start a block on reparse.
     copy.value = node.type === 'inlineCode' ? spanValue(node.value) : foldLineEndings(node.value);
   }
   if (node.attributes !== undefined) copy.attributes = node.attributes.map(foldAttribute);
   if (node.children !== undefined) {
-    const children = node.children.map((child) => prepare(child, dialect, inTight, false));
+    const children = node.children.map((child) => prepare(child, dialect, inTight, false, joins));
     copy.children = settleChildren(node.type, children);
   }
   if (node.type === 'mdxJsxFlowElement' && inTight) copy.data = { tight: true };
@@ -329,9 +371,23 @@ const ESM_LOOKALIKES = [
   { atBreak: true, character: 'e', after: 'xport ' },
 ];
 
-const stringifier = (dialect: Dialect, overrides: Options) => {
+// A node that only exists to hand back the printer's joins, read once per printer.
+// Stryker disable next-line StringLiteral: any type no parser makes
+const JOINS_PROBE = 'joinsProbe';
+
+const stringifier = (dialect: Dialect, overrides: Options, onJoins: (joins: Joins) => void) => {
   const markdown = unified().use(remarkFrontmatter).use(remarkGfm);
-  const handlers = { table, mdxFlowExpression: flowExpression, mdxjsEsm: esm, [JOINT]: tightJoint };
+  const probe = (_node: unknown, _parent: unknown, state: Joins) => {
+    onJoins(state);
+    return '';
+  };
+  const handlers = {
+    table,
+    mdxFlowExpression: flowExpression,
+    mdxjsEsm: esm,
+    [JOINT]: tightJoint,
+    [JOINS_PROBE]: probe,
+  };
   const options = { ...CANONICAL, ...overrides, handlers } as unknown as Options;
   if (dialect === 'md') return markdown.use(remarkStringify, options).freeze();
   const unsafe = [...ALWAYS_UNSAFE, ...ESM_LOOKALIKES];
@@ -341,16 +397,33 @@ const stringifier = (dialect: Dialect, overrides: Options) => {
     .freeze();
 };
 
-type Stringifier = ReturnType<typeof stringifier>;
+interface Printer {
+  readonly stringify: ReturnType<typeof stringifier>['stringify'];
+  readonly joins: Joins;
+}
 
 // The few settings a block may print under when its neighbours rule out the canonical one.
 export type Override = Pick<Options, 'bullet' | 'bulletOrdered' | 'rule'>;
 
-const printers = new Map<string, Stringifier>();
+const printers = new Map<string, Printer>();
 
-function printerFor(dialect: Dialect, overrides: Override): Stringifier {
+function buildPrinter(dialect: Dialect, overrides: Override): Printer {
+  let joins: Joins = { join: [] };
+  // The joins read only the options, which belong to the printer and not to one run, so the
+  // state of a run that printed nothing answers for every later one.
+  const processor = stringifier(dialect, overrides, (state) => {
+    joins = state;
+  });
+  processor.stringify({
+    type: 'root',
+    children: [{ type: JOINS_PROBE } as unknown as RootContent],
+  });
+  return { stringify: (tree) => processor.stringify(tree), joins };
+}
+
+function printerFor(dialect: Dialect, overrides: Override): Printer {
   const key = `${dialect}${JSON.stringify(overrides)}`;
-  const printer = printers.get(key) ?? stringifier(dialect, overrides);
+  const printer = printers.get(key) ?? buildPrinter(dialect, overrides);
   // Stryker disable next-line all: a cache, so losing an entry only builds the printer again
   printers.set(key, printer);
   return printer;
@@ -360,13 +433,14 @@ const CLOSING_FENCE = /^---[ \t]*$/m;
 
 export function printWith(block: MdastBlock, dialect: Dialect, overrides: Override): string {
   try {
-    const copy = prepare(block as unknown as Prepared, dialect, false, true);
+    const printer = printerFor(dialect, overrides);
+    const copy = prepare(block as unknown as Prepared, dialect, false, true, printer.joins);
     if (copy.type === 'yaml' && CLOSING_FENCE.test(copy.value as string)) {
       throw new MdxPrintError();
     }
     const mark = pickMark(block);
     setMarks(copy, mark, 0);
-    const text = printerFor(dialect, overrides).stringify({
+    const text = printer.stringify({
       type: 'root',
       children: [copy as unknown as RootContent],
     });
