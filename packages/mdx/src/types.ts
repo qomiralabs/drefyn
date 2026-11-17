@@ -55,7 +55,8 @@ export type MdxIssueCode =
   | 'mdx.project_limit'
   | 'mdx.parse_unavailable'
   | 'mdx.block_not_printable'
-  | 'mdx.print_changed_meaning';
+  | 'mdx.print_changed_meaning'
+  | 'mdx.merge_limit';
 
 // Codes and places only: an issue can reach a log, and customer text must not.
 export interface MdxIssue {
@@ -86,6 +87,16 @@ export interface RenderPolicy {
   readonly limits: MdxLimits;
 }
 
+// A top level element of the rendered page, as the text a reader sees. A heading starts a section.
+export interface ReaderUnit {
+  readonly heading?: { readonly depth: number; readonly text: string };
+  readonly text: string;
+}
+
+export type ReaderPage =
+  | { readonly state: 'ok'; readonly units: readonly ReaderUnit[] }
+  | { readonly state: 'not_renderable' };
+
 // Milliseconds a print spent in each step, read off the thread. Beside the tree and never in it,
 // so a stored version stays the same bytes however long it took.
 export interface PrintTiming {
@@ -106,11 +117,42 @@ export type PrintResult = Result<
     readonly ast: MdxRoot;
     readonly issues: readonly MdxIssue[];
     readonly timing?: PrintTiming;
+    readonly reader?: ReaderPage;
   },
   readonly MdxIssue[]
 >;
 
 export type ParseResult = Result<
-  { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[] },
+  { readonly ast: MdxRoot; readonly issues: readonly MdxIssue[]; readonly reader?: ReaderPage },
+  readonly MdxIssue[]
+>;
+
+export type BlockConflictReason =
+  'both_changed' | 'delete_vs_edit' | 'both_inserted' | 'move_vs_edit' | 'unexplained_change';
+
+// One place a person has to decide. A side that holds no block here deleted it.
+export interface BlockConflict {
+  // The slot in the base, or null for what sits above its first block.
+  readonly baseIndex: number | null;
+  readonly ours: MdxBlock | null;
+  readonly theirs: MdxBlock | null;
+  readonly reason: BlockConflictReason;
+}
+
+// partial is for showing a person and is never a version: it can hold both sides of a conflict.
+export type MergeOutcome =
+  | { readonly kind: 'clean'; readonly merged: MdxRoot }
+  | {
+      readonly kind: 'conflict';
+      readonly partial: MdxRoot;
+      readonly conflicts: readonly BlockConflict[];
+      // Tokens the whole page count could not account for. A number, as a token may be a secret.
+      readonly unexplained?: number;
+    };
+
+export type MergeResult = Result<MergeOutcome, readonly MdxIssue[]>;
+
+export type MergeAnswer = Result<
+  { readonly outcome: MergeOutcome; readonly issues: readonly MdxIssue[] },
   readonly MdxIssue[]
 >;

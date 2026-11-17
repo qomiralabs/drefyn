@@ -48,6 +48,7 @@ const PUBLIC_PAGES: ReadonlySet<string> = new Set([
   'src/app/invite/block/page.tsx',
   'src/app/invite/page.tsx',
   'src/app/sign-in/cli/page.tsx',
+  'src/app/sign-in/factor/page.tsx',
   'src/app/sign-in/link/page.tsx',
   'src/app/sign-in/page.tsx',
   'src/app/sign-in/password/page.tsx',
@@ -62,8 +63,10 @@ const ACCOUNT_PATH = 'src/app/account/';
 // Signed out GET handlers, such as an OAuth callback. Each new one is a reviewed line too.
 const PUBLIC_GET_ROUTES: ReadonlySet<string> = new Set<string>([
   'src/app/auth/oauth/[provider]/callback/route.ts',
+  'src/app/auth/factor-style/route.ts',
   'src/app/auth/oauth/[provider]/start/route.ts',
   'src/app/auth/pre/route.ts',
+  'src/app/settings-states/factor/[state]/route.ts',
   'src/app/settings-states/whoami/route.ts',
 ]);
 

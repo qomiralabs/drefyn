@@ -135,7 +135,10 @@ const api = parseApiAuthConfig(process.env); // API service
   associated data of a version label, the user id and the key id, joined by
   `lengthPrefixed`. `open(row, { userId })` takes any listed key. An unknown key id, a wrong
   length, a changed byte, another user id or another key id all throw `AUTH_UNAVAILABLE`,
-  with nothing from the row on the error. Key material lives in closures.
+  with nothing from the row on the error. Key material lives in closures. The crypto lives
+  in `@drefyn/seal`; this wraps it with the second factor labels (`drefyn.auth.totp.v1`,
+  `drefyn/auth/v1/totp`, `drefyn.totp_secret.v1`) and the user id as the one bound value,
+  so rows sealed before the move open unchanged.
 - `lengthPrefixed(parts)` gives every part a 4 byte big endian length, so
   `("ab", "c")` and `("a", "bc")` never collide.
 - `constantTimeEqual(a, b)` and `sha256(data)`.

@@ -156,17 +156,12 @@ export function parseMigrationConfig(env: Env): MigrationConfig {
   return config;
 }
 
-// Reads DREFYN_PUBLIC_READER_DATABASE_URL with the same pool and SSL keys as the app pool and
-// a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL: a missing reader
-// URL must not become a reader pool with the app role's grants on drafts.
-export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
+// Both readers serve pages, so a slow query there is a fault, and both share the pool and SSL
+// keys. The URL key is the only thing they read differently, and neither falls back to another.
+function readerConfig(env: Env, urlKey: string): DatabaseConfig {
   const c = new Collector();
   const config: DatabaseConfig = {
-    url: c.take(
-      'DREFYN_PUBLIC_READER_DATABASE_URL',
-      checkUrl(env['DREFYN_PUBLIC_READER_DATABASE_URL']),
-      '',
-    ),
+    url: c.take(urlKey, checkUrl(env[urlKey]), ''),
     poolMax: c.take(
       'DREFYN_DATABASE_POOL_MAX',
       checkPositiveInteger(env['DREFYN_DATABASE_POOL_MAX'], 10),
@@ -182,6 +177,20 @@ export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
   };
   c.throwIfAny();
   return config;
+}
+
+// Reads DREFYN_PUBLIC_READER_DATABASE_URL with the same pool and SSL keys as the app pool and
+// a 2000 ms statement timeout. It never falls back to DREFYN_DATABASE_URL: a missing reader
+// URL must not become a reader pool with the app role's grants on drafts.
+export function parsePublishedReaderConfig(env: Env): DatabaseConfig {
+  return readerConfig(env, 'DREFYN_PUBLIC_READER_DATABASE_URL');
+}
+
+// Reads DREFYN_PROTECTED_READER_DATABASE_URL the same way. It never falls back to another URL
+// either: the public reader would quietly serve none of the protected pages, and the app role
+// would see drafts.
+export function parseProtectedReaderConfig(env: Env): DatabaseConfig {
+  return readerConfig(env, 'DREFYN_PROTECTED_READER_DATABASE_URL');
 }
 
 // Sign in work should take milliseconds; a slow query on this path is a fault, and a pool of

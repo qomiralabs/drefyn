@@ -79,6 +79,9 @@ export interface VersionRef {
   readonly versionId: VersionId;
   readonly seq: number;
   readonly contentSha256: string;
+  // Set when chunks are on, a replay included. not_renderable means the render refused the page,
+  // so it has no chunks, and an editor should say so.
+  readonly readerState?: 'ok' | 'not_renderable';
 }
 
 export interface NodeHead {
@@ -163,4 +166,38 @@ export type BackfillState =
 export interface Page<T> {
   readonly items: readonly T[];
   readonly nextBefore: number | null;
+}
+
+export interface PublishInput {
+  readonly tenant: TenantRef;
+  readonly nodeId: NodeId;
+  // Any version of the node, not only its head, so a reviewed version can go out while
+  // someone keeps writing.
+  readonly versionId: VersionId;
+  readonly expectedHeadVersionId: VersionId;
+  readonly actor: Actor;
+  readonly idempotencyKey: IdempotencyKey;
+}
+
+export interface PublishReceipt {
+  readonly nodeId: NodeId;
+  readonly versionId: VersionId;
+  // What was current before, null on a first publish.
+  readonly previousVersionId: VersionId | null;
+  readonly renderPolicyVersion: number;
+  readonly publishedAt: Date;
+}
+
+export interface ApproveInput {
+  readonly tenant: TenantRef;
+  readonly nodeId: NodeId;
+  readonly versionId: VersionId;
+  readonly actor: Actor;
+}
+
+export interface ApprovalReceipt {
+  readonly nodeId: NodeId;
+  readonly versionId: VersionId;
+  readonly approverId: UserId;
+  readonly approvedAt: Date;
 }

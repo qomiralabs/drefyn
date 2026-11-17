@@ -81,6 +81,7 @@ export interface ChunksTable {
   body: string;
   body_sha256: Buffer;
   created_at: Generated<Date>;
+  render_policy_version: number | null;
 }
 
 // app.cli_sign_in_links
@@ -164,6 +165,63 @@ export interface FilterBackfillsTable {
   started_at: Date | null;
   done_at: Date | null;
   created_at: Generated<Date>;
+}
+
+// app.git_bindings
+export interface GitBindingsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  installation_id: number;
+  repository_id: number;
+  owner: string;
+  name: string;
+  branch: string;
+  folder: string;
+  last_synced_commit: string | null;
+  state: Generated<string>;
+  state_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// app.git_deliveries
+export interface GitDeliveriesTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  delivery_id: string;
+  head_sha: string | null;
+  received_at: Generated<Date>;
+  state: Generated<string>;
+  finished_at: Date | null;
+}
+
+// app.git_files
+export interface GitFilesTable {
+  organization_id: string;
+  project_id: string;
+  binding_id: string;
+  path: string;
+  node_id: string;
+  blob_sha: string;
+  synced_version_id: string;
+  updated_at: Generated<Date>;
+}
+
+// app.git_outbound
+export interface GitOutboundTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  change_set_id: string;
+  binding_id: string;
+  state: Generated<string>;
+  commit_sha: string | null;
+  attempts: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // app.identities
@@ -284,6 +342,7 @@ export interface NodesTable {
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   head_fields: Generated<JsonValue>;
+  visibility_override: string | null;
 }
 
 // app.oauth_states
@@ -356,6 +415,73 @@ export interface ProjectsTable {
   updated_at: Generated<Date>;
 }
 
+// app.publish_approvals
+export interface PublishApprovalsTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  approver_id: string;
+  approved_at: Generated<Date>;
+}
+
+// app.publish_log
+export interface PublishLogTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  expected_head_version_id: string;
+  previous_version_id: string | null;
+  actor_kind: string;
+  actor_id: string;
+  idempotency_key: string;
+  render_policy_version: number;
+  published_at: Generated<Date>;
+}
+
+// app.publish_workflows
+export interface PublishWorkflowsTable {
+  organization_id: string;
+  project_id: string;
+  approval_required: Generated<boolean>;
+  api_keys_publish: Generated<boolean>;
+  git_publish: Generated<boolean>;
+  updated_at: Generated<Date>;
+}
+
+// app.published_chunk_terms
+export interface PublishedChunkTermsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  lexeme: string;
+  chunk_id: string;
+  visibility: string;
+  tf: number;
+  chunk_length: number;
+}
+
+// app.published_chunks
+export interface PublishedChunksTable {
+  id: Generated<string>;
+  organization_id: string;
+  project_id: string;
+  node_id: string;
+  version_id: string;
+  ord: number;
+  page_path: string;
+  title: string;
+  heading_path: string[];
+  body: string;
+  body_sha256: Buffer;
+  visibility: string;
+  is_current: boolean;
+  search: Generated<string | null>;
+}
+
 // app.published_filter_rows
 export interface PublishedFilterRowsTable {
   organization_id: string;
@@ -379,6 +505,27 @@ export interface PublishedFilterRowsTable {
   i5: number | null;
   d1: Date | null;
   d2: Date | null;
+  visibility: string;
+}
+
+// app.published_project_term_totals
+export interface PublishedProjectTermTotalsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  visibility: string;
+  chunk_count: number;
+  total_length: number;
+}
+
+// app.published_term_stats
+export interface PublishedTermStatsTable {
+  organization_id: string;
+  project_id: string;
+  version_label: Generated<string>;
+  lexeme: string;
+  visibility: string;
+  df: number;
 }
 
 // app.published_versions
@@ -394,6 +541,7 @@ export interface PublishedVersionsTable {
   is_current: boolean;
   render_policy_version: number;
   published_at: Generated<Date>;
+  visibility: string;
 }
 
 // app.recovery_codes
@@ -532,6 +680,10 @@ export interface Schema {
   engine_outbox: EngineOutboxTable;
   factor_challenges: FactorChallengesTable;
   filter_backfills: FilterBackfillsTable;
+  git_bindings: GitBindingsTable;
+  git_deliveries: GitDeliveriesTable;
+  git_files: GitFilesTable;
+  git_outbound: GitOutboundTable;
   identities: IdentitiesTable;
   invitation_blocks: InvitationBlocksTable;
   invitations: InvitationsTable;
@@ -547,7 +699,14 @@ export interface Schema {
   password_credentials: PasswordCredentialsTable;
   project_roles: ProjectRolesTable;
   projects: ProjectsTable;
+  publish_approvals: PublishApprovalsTable;
+  publish_log: PublishLogTable;
+  publish_workflows: PublishWorkflowsTable;
+  published_chunk_terms: PublishedChunkTermsTable;
+  published_chunks: PublishedChunksTable;
   published_filter_rows: PublishedFilterRowsTable;
+  published_project_term_totals: PublishedProjectTermTotalsTable;
+  published_term_stats: PublishedTermStatsTable;
   published_versions: PublishedVersionsTable;
   recovery_codes: RecoveryCodesTable;
   scheduled_jobs: ScheduledJobsTable;

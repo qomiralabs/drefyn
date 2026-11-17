@@ -17,7 +17,6 @@ const code = (sql: string) =>
 
 const upgradeDir = join(postgres, 'upgrade');
 const upgradeFiles = readdirSync(upgradeDir).filter((f) => f.endsWith('.sql'));
-const upgrade = code(read(upgradeDir, '0001-auth-role.sql'));
 const quiet = code(read(postgres, 'quiet-log.sql'));
 const bootstrap = code(read(postgres, 'bootstrap.sql'));
 
@@ -35,36 +34,59 @@ function createRole(sql: string, role: string): string {
   return (match?.[1] ?? '').replace(/\s+/g, ' ').trim();
 }
 
+// Each role added after the first bootstrap, with the psql variable its script reads.
+const SCRIPTS = [
+  {
+    file: '0001-auth-role.sql',
+    role: 'drefyn_auth',
+    variable: 'auth_password',
+    env: 'DREFYN_AUTH_PASSWORD',
+  },
+  {
+    file: '0002-protected-reader-role.sql',
+    role: 'drefyn_protected_reader',
+    variable: 'protected_password',
+    env: 'DREFYN_PROTECTED_READER_PASSWORD',
+  },
+] as const;
+
 describe('the upgrade scripts', () => {
   it('ship one numbered file per upgrade role', () => {
-    expect(upgradeFiles).toEqual(['0001-auth-role.sql']);
+    expect(upgradeFiles).toEqual(SCRIPTS.map((s) => s.file));
+    expect(UPGRADE_ROLES.map((r) => r.role)).toEqual(SCRIPTS.map((s) => s.role));
     for (const { script } of UPGRADE_ROLES) {
       expect(read(repoRoot, script).length).toBeGreaterThan(0);
     }
   });
 
-  it.each([
-    ['the upgrade script', upgrade],
-    ['the shared quiet log include', quiet],
-  ])('%s has no DO block and no dollar quoting', (_name, sql) => {
-    expect(sql).not.toMatch(DO_BLOCK);
-    expect(sql).not.toMatch(DOLLAR_QUOTE);
+  it('has no DO block and no dollar quoting in the shared quiet log include', () => {
+    expect(quiet).not.toMatch(DO_BLOCK);
+    expect(quiet).not.toMatch(DOLLAR_QUOTE);
   });
 
   it.each([
-    ['the upgrade script', upgrade],
     ['the shared quiet log include', quiet],
     ['the bootstrap', bootstrap],
   ])('%s sets nothing on a role', (_name, sql) => {
     expect(sql).not.toMatch(ROLE_SETTING);
+  });
+});
+
+describe.each(SCRIPTS)('upgrade script $file', ({ file, role, variable, env }) => {
+  const upgrade = code(read(upgradeDir, file));
+
+  it('has no DO block, no dollar quoting and sets nothing on a role', () => {
+    expect(upgrade).not.toMatch(DO_BLOCK);
+    expect(upgrade).not.toMatch(DOLLAR_QUOTE);
+    expect(upgrade).not.toMatch(ROLE_SETTING);
   });
 
   it('stops on the first error and runs the quiet include before it reads the password', () => {
     const stop = upgrade.indexOf('\\set ON_ERROR_STOP on');
     const include = upgrade.indexOf('\\ir ../quiet-log.sql');
     const sentinel = upgrade.indexOf(':{?drefyn_log_quiet}');
-    const getenv = upgrade.indexOf('\\getenv auth_password DREFYN_AUTH_PASSWORD');
-    const create = upgrade.search(/create role drefyn_auth/i);
+    const getenv = upgrade.indexOf(`\\getenv ${variable} ${env}`);
+    const create = upgrade.search(new RegExp(`create role ${role}`, 'i'));
     expect(stop).toBeGreaterThanOrEqual(0);
     expect(stop).toBeLessThan(include);
     expect(include).toBeLessThan(sentinel);
@@ -74,18 +96,20 @@ describe('the upgrade scripts', () => {
 
   it('checks for the role with gset and if, then runs a plain create role', () => {
     expect(upgrade).toMatch(
-      /select not exists \(\s*select from pg_catalog\.pg_roles where rolname = 'drefyn_auth'\s*\) as need \\gset/,
+      new RegExp(
+        `select not exists \\(\\s*select from pg_catalog\\.pg_roles where rolname = '${role}'\\s*\\) as need \\\\gset`,
+      ),
     );
     expect(upgrade).toMatch(/\\if :need\b/);
-    expect(createRole(upgrade, 'drefyn_auth')).toBe(`${ATTRIBUTES} password :'auth_password'`);
-    expect(upgrade).toMatch(/grant connect on database :"dbname" to drefyn_auth;/);
+    expect(createRole(upgrade, role)).toBe(`${ATTRIBUTES} password :'${variable}'`);
+    expect(upgrade).toContain(`grant connect on database :"dbname" to ${role};`);
   });
 
   it('only ever uses the password as a quoted psql variable', () => {
-    const uses = upgrade.match(/:'?"?auth_password'?"?/g) ?? [];
+    const uses = upgrade.match(new RegExp(`:'?"?${variable}'?"?`, 'g')) ?? [];
     expect(uses.length).toBeGreaterThan(0);
-    for (const use of uses) expect(use).toBe(":'auth_password'");
-    expect(upgrade).toMatch(/\\unset auth_password/);
+    for (const use of uses) expect(use).toBe(`:'${variable}'`);
+    expect(upgrade).toContain(`\\unset ${variable}`);
   });
 
   it('checks every attribute of an existing role instead of skipping it', () => {
@@ -104,13 +128,26 @@ describe('the upgrade scripts', () => {
       expect(upgrade, column).toContain(column);
     }
     expect(upgrade).toMatch(
-      /from pg_catalog\.pg_roles r where rolname = 'drefyn_auth'\s+\) found \\gset/,
+      new RegExp(`from pg_catalog\\.pg_roles r where rolname = '${role}'\\s+\\) found \\\\gset`),
     );
 
     expect(upgrade).toMatch(/\\if :attributes_ok/);
     // One rule: the verdict is derived from the list it prints, so the two cannot drift.
     expect(upgrade).toMatch(/differences = '' as attributes_ok/);
     expect(upgrade.match(/\bnot rolinherit\b/g) ?? []).toEqual([]);
+  });
+
+  it('is created by the bootstrap exactly as the upgrade creates it', () => {
+    expect(createRole(bootstrap, role)).toBe(`${ATTRIBUTES} password :'${variable}'`);
+    expect(bootstrap).toMatch(
+      new RegExp(`grant connect on database :"dbname" to [^;]*\\b${role}\\b`),
+    );
+  });
+
+  it('is passed its secret by the upgrade runner', () => {
+    const runner = read(upgradeDir, 'run.sh');
+    expect(runner).toContain(`${role}_password`);
+    expect(runner).toMatch(new RegExp(`export [^\\n]*\\b${env}\\b`));
   });
 });
 
@@ -147,11 +184,6 @@ describe('the shared quiet log include', () => {
 
 describe('the role lists', () => {
   const roles = ['drefyn_owner', ...Object.values(POOL_ROLES)].sort();
-
-  it('the bootstrap creates drefyn_auth exactly as the upgrade does', () => {
-    expect(createRole(bootstrap, 'drefyn_auth')).toBe(`${ATTRIBUTES} password :'auth_password'`);
-    expect(bootstrap).toMatch(/grant connect on database :"dbname" to [^;]*\bdrefyn_auth\b/);
-  });
 
   it('the bootstrap refuses to run again when any of the roles exists', () => {
     const check = /select exists \(\s*select from pg_roles where rolname in \(([^)]*)\)/.exec(

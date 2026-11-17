@@ -10,8 +10,8 @@ import { refused } from './result.ts';
 import type { JobResult } from './result.ts';
 import { RECYCLE_AFTER_JOBS, startParseThread } from './thread.ts';
 import type { IsolatedPolicy, ParseThread, ThreadAnswer, ThreadJob } from './thread.ts';
-import type { Dialect, MdxIssueCode, ParseResult, PrintResult } from './types.ts';
-import { maxTreeBytes } from './wire.ts';
+import type { Dialect, MdxIssueCode, MergeAnswer, ParseResult, PrintResult } from './types.ts';
+import { maxMergeTreesBytes, maxTreeBytes } from './wire.ts';
 
 // Interactive for a save a person is waiting on. It orders pages inside an organization and is
 // ranked on interactive time alone, so a sync never pushes a save back, and marking bombs
@@ -26,6 +26,7 @@ export interface ParseRequest {
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
   readonly priority?: ParsePriority;
+  readonly reader?: boolean;
 }
 
 export interface PrintRequest {
@@ -34,6 +35,17 @@ export interface PrintRequest {
   readonly path: string;
   // A stored tree as JSON text.
   readonly tree: string;
+  readonly policy: IsolatedPolicy;
+  readonly priority?: ParsePriority;
+  readonly reader?: boolean;
+}
+
+export interface MergeRequest {
+  readonly tenant: TenantRef;
+  // Logged, so it never holds page text.
+  readonly path: string;
+  // { base, ours, theirs } as JSON text.
+  readonly trees: string;
   readonly policy: IsolatedPolicy;
   readonly priority?: ParsePriority;
 }
@@ -70,6 +82,7 @@ export interface ParsePool {
   parse(request: ParseRequest): Promise<ParseResult>;
   // The same queues, budgets and kill, as a printer has no bound of its own either.
   print(request: PrintRequest): Promise<PrintResult>;
+  merge(request: MergeRequest): Promise<MergeAnswer>;
   stats(): ParsePoolStats;
   close(): Promise<void>;
 }
@@ -135,6 +148,9 @@ function withHostTimes(result: JobResult, waitedMs: number, threadMs: number): J
   if (!checked.success) return { ...result, value };
   return { ...result, value: { ...value, timing: { ...checked.data, waitedMs, threadMs } } };
 }
+
+// Only a request that asks pays for a render.
+const readerOf = ({ reader }: { readonly reader?: boolean }) => (reader === true ? { reader } : {});
 
 export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): ParsePool {
   const settings = poolConfigSchema.parse(config);
@@ -465,8 +481,8 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     const base = { organizationId, projectId, path, bytes };
     // Before the queue, so its length also bounds the bytes it can hold.
     if (bytes > policy.limits.maxBytes) return instant('mdx.too_large', base);
-    const job = { source, dialect, policy };
-    return await enqueue(job, source, tenant, base, request.priority);
+    const job = { source, dialect, policy, ...readerOf(request) };
+    return (await enqueue(job, source, tenant, base, request.priority)) as ParseResult;
   };
 
   const print = async (request: PrintRequest): Promise<PrintResult> => {
@@ -477,7 +493,28 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
     const bytes = Buffer.byteLength(tree, 'utf8');
     const base = { organizationId, projectId, path, bytes };
     if (bytes > maxTreeBytes(policy.limits.maxBytes)) return instant('mdx.too_large', base);
-    return (await enqueue({ tree, policy }, tree, tenant, base, request.priority)) as PrintResult;
+    const job = { tree, policy, ...readerOf(request) };
+    return (await enqueue(job, tree, tenant, base, request.priority)) as PrintResult;
+  };
+
+  const merge = async (request: MergeRequest): Promise<MergeAnswer> => {
+    const { tenant } = requestSchema.parse(request);
+    parseInputSchema.shape.policy.parse(request.policy);
+    const { trees, path, policy } = request;
+    const { organizationId, projectId } = tenant;
+    const bytes = Buffer.byteLength(trees, 'utf8');
+    const base = { organizationId, projectId, path, bytes };
+    if (bytes > maxMergeTreesBytes(policy.limits.maxBytes)) return instant('mdx.too_large', base);
+    const job = { trees, policy, maxBlocks: settings.maxMergeBlocks };
+    const answer = (await enqueue(job, trees, tenant, base, request.priority)) as MergeAnswer;
+    if (answer.ok && answer.value.outcome.kind === 'conflict') {
+      const { unexplained } = answer.value.outcome;
+      // A count and never a token, which may be a secret. A rising rate here is a merge bug.
+      if (unexplained !== undefined) {
+        log('warn', 'mdx.merge_unexplained', { ...base, tokens: unexplained });
+      }
+    }
+    return answer;
   };
 
   const allProjects = () =>
@@ -486,6 +523,7 @@ export function createParsePool(config: ParsePoolConfig, deps: ParsePoolDeps): P
   return {
     parse,
     print,
+    merge,
     stats: () => ({
       threads: idle.length + busy,
       busy,

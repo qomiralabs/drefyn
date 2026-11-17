@@ -36,11 +36,18 @@ is public.
     The caller computes how much is left to expire; the ledger keeps no dates or lots.
   - `reverse(ref, { idempotencyKey, entryId })` returns a whole spend, once. Use it when a
     model call fails before producing output.
+  - `settle(ref, { idempotencyKey, entryId, amount })` returns part of a spend, once, after
+    the real cost is known: the spend was the hold and the settlement gives back the unused
+    part. `amount` must be at least 1 and less than the spend (returning all of it is a
+    reversal), otherwise `CREDIT_AMOUNT_INVALID` and nothing is written. A spend closes
+    once: a second settlement, a settlement after a reversal and a reversal after a
+    settlement each throw `CREDIT_NOT_REVERSIBLE`. It never needs balance, so it is never
+    refused for one. If the real cost is the whole hold or more, write nothing.
 - `CreditEntry` is one frozen ledger row: `id`, `organizationId`, `kind`, `amount`,
-  `idempotencyKey`, plus `reason` on a spend and `reverses` on a reversal. Entries never
-  carry a project id because the pool belongs to the organization.
+  `idempotencyKey`, plus `reason` on a spend, `reverses` on a reversal and `settles` on a
+  settlement. Entries never carry a project id because the pool belongs to the organization.
 - `CreditOutcome` is `applied` with the entry, or `insufficient`.
-- `ENTRY_KINDS` (`grant`, `spend`, `reversal`, `expiry`) and `SPEND_REASONS`
+- `ENTRY_KINDS` (`grant`, `spend`, `reversal`, `expiry`, `settlement`) and `SPEND_REASONS`
   (`generation`, `translation_draft`, `incident_draft`, `stale_draft`, `reader_answer`)
   are frozen lists.
 - `AiBudget`, `AI_OPERATIONS`, `unmeteredBudget()` and `createLedgerBudget()`: see below.
@@ -49,8 +56,8 @@ is public.
 
 ## AI budget
 
-`AiBudget` meters the AI work whose worth is known only after the run: stale page drafts
-and reader answers (`AI_OPERATIONS`: `stale_draft`, `reader_answer`). It charges first and
+`AiBudget` meters the AI work whose worth is known only after the run (`AI_OPERATIONS`:
+`stale_draft`, `reader_answer`, `translation_draft`, `incident_draft`, `generation`). It charges first and
 refunds when the run produced nothing, so an unanswered question costs nothing and a burst
 cannot spend credits the pool does not have.
 
@@ -93,6 +100,51 @@ turn is charged at most once and refunded at most once. `make` returns
 `{ budget, ledger, tenant, creditsFor }` with a pool that starts empty for `tenant`. The
 entry needs `vitest` and `fast-check` in the consumer; production code never imports it.
 
+## Rates
+
+Each model burns credits at its own per token rate, read from one rate table that whoever
+runs the pool supplies. This
+package holds the table type, a strict parser and the integer math; it holds no rates, no
+model names and no figures.
+
+- `parseRateTable(value)` checks a table (usually parsed JSON) and returns a frozen
+  `RateTable` holding only the known fields, so it serializes back to an equal table. A
+  table has a `version`, `models`, `defaults` (one model per AI operation), a
+  `checkModel` and `reference` usage profiles. Each `ModelRate` has a `modelId`, a
+  `premium` flag and one or more `RateBand`s. A band has `upToPromptTokens` and a rate for
+  each token class (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`) as
+  `Millicredits` per million tokens: a millicredit is a thousandth of a credit.
+- Rules: model ids are unique and match `^[a-z0-9][a-z0-9.-]{0,62}$`; band bounds are
+  strictly ascending and only the last band, which must be there, has a null bound;
+  defaults name non premium models in the table; the check model is in the table; at most
+  one reference profile per operation, each with at least one call; every number is a
+  non negative safe integer; unknown fields are refused. At most 256 models, 16 bands per
+  model and 64 calls per profile or operation.
+- `estimateCredits(table, plannedCalls)` is the hold for one operation, an upper bound:
+  each prompt token at the dearest prompt rate of every band up to the one the largest
+  prompt lands in, each output token at the dearest output rate there, summed over the
+  calls (the check included) and rounded up. At least 1.
+- `creditsForUsage(table, calls)` is the charge once usage is known: every call of the
+  operation summed in millicredits and rounded once, half up. At least 1. The band is
+  picked per call from its whole prompt, cache tokens included, so 100,000 tokens stay
+  in a band that ends at 100,000 and 100,001 move to the next. Within the plan it never
+  exceeds the estimate.
+- `estimateMonthlyRuns(table, monthly, operation, modelId)` is "about N runs a month":
+  `monthly` over the charge of the operation's reference profile (main calls on
+  `modelId`, check calls on the check model), rounded down. `undefined` when the table
+  has no profile for the operation.
+- `RateTableError` has a `code`, a `path` such as `models[2].bands[0].output` or
+  `calls[1].modelId`, and a fixed message per code ending in that path. It never
+  carries a value from the table or the usage.
+
+| Code                 | Meaning                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `RATE_TABLE_INVALID` | The table breaks a rule above.                                          |
+| `RATE_MODEL_UNKNOWN` | A call names a model that is not in the table.                          |
+| `RATE_USAGE_INVALID` | A call, token count or operation is malformed, or the result is unsafe. |
+
+All arithmetic is in `BigInt`; no floating point touches a rate or a charge.
+
 ## Idempotency
 
 Every write carries an `idempotencyKey` of 1 to 200 Unicode code points, well formed and
@@ -101,7 +153,7 @@ without NUL, compared exactly and scoped per organization.
 - A key admits at most one applied entry per organization.
 - Repeating an applied request with the same key returns the original outcome and changes
   nothing, even if the balance could no longer cover it.
-- Reusing a key with a different request (another kind, amount, reason or reversal target)
+- Reusing a key with a different request (another kind, amount, reason or target entry)
   throws `CREDIT_IDEMPOTENCY_CONFLICT` and changes nothing. The conflict check runs before
   the balance and overflow checks.
 - A refused or invalid request records nothing, so the same key may be retried, for
@@ -111,17 +163,18 @@ without NUL, compared exactly and scoped per organization.
 
 | Code                          | Meaning                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `CREDIT_AMOUNT_INVALID`       | Not a non negative safe integer, or zero on an entry.                                      |
+| `CREDIT_AMOUNT_INVALID`       | Not a non negative safe integer, zero on an entry, or a settlement not below its spend.    |
 | `CREDIT_KEY_INVALID`          | Key missing, not an own string, empty, over 200 code points, ill formed or containing NUL. |
 | `CREDIT_REASON_INVALID`       | Spend reason is not one of `SPEND_REASONS`.                                                |
 | `CREDIT_ORGANIZATION_INVALID` | Ref is not an object with an own canonical organization id.                                |
 | `CREDIT_IDEMPOTENCY_CONFLICT` | Key already used in this organization with a different request.                            |
-| `CREDIT_ENTRY_NOT_FOUND`      | Reversal target is unknown, malformed or another organization's.                           |
-| `CREDIT_NOT_REVERSIBLE`       | Reversal target is not a spend, or was already reversed.                                   |
-| `CREDIT_BALANCE_OVERFLOW`     | A grant or reversal would push the balance past `2^53 - 1`.                                |
+| `CREDIT_ENTRY_NOT_FOUND`      | Reversal or settlement target is unknown, malformed or another organization's.             |
+| `CREDIT_NOT_REVERSIBLE`       | Reversal or settlement target is not a spend, or was already reversed or settled.          |
+| `CREDIT_BALANCE_OVERFLOW`     | A grant, reversal or settlement would push the balance past `2^53 - 1`.                    |
 
 Checks run in this order: organization ref, key, then the body (amount or entry id, then
-reason). Only own properties are read, each once.
+reason). A settlement checks its amount, then its target, then whether the target is still
+open, then the amount against the spend. Only own properties are read, each once.
 
 ## Testing
 

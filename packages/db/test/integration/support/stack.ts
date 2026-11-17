@@ -52,12 +52,13 @@ export function stack(): Stack {
   return cached;
 }
 
-export type Role = 'owner' | 'app' | 'reader' | 'auth';
+export type Role = 'owner' | 'app' | 'reader' | 'auth' | 'protected';
 const ROLE_NAMES: Record<Role, string> = {
   owner: 'drefyn_owner',
   app: 'drefyn_app',
   reader: 'drefyn_public_reader',
   auth: 'drefyn_auth',
+  protected: 'drefyn_protected_reader',
 };
 
 // Read on demand, so files that never open the auth pool still run against a deploy/.env
@@ -68,15 +69,26 @@ export function authPassword(): string {
   return value;
 }
 
+// Read on demand for the same reason.
+export function protectedPassword(): string {
+  const value = envFile()['DREFYN_PROTECTED_READER_PASSWORD'] ?? '';
+  if (value === '') throw new Error('deploy/.env has no DREFYN_PROTECTED_READER_PASSWORD');
+  return value;
+}
+
+function passwordOf(role: Role): string {
+  if (role === 'auth') return authPassword();
+  if (role === 'protected') return protectedPassword();
+  return stack().passwords[role];
+}
+
 export function roleName(role: Role): string {
   return ROLE_NAMES[role];
 }
 
 export function urlFor(role: Role, database: string, password?: string): string {
   const s = stack();
-  const secret = encodeURIComponent(
-    password ?? (role === 'auth' ? authPassword() : s.passwords[role]),
-  );
+  const secret = encodeURIComponent(password ?? passwordOf(role));
   return `postgres://${ROLE_NAMES[role]}:${secret}@127.0.0.1:${s.port}/${database}`;
 }
 
@@ -135,4 +147,22 @@ export async function schemaDump(
     .split('\n')
     .filter((line) => !/^\\(un)?restrict /.test(line))
     .join('\n');
+}
+
+// Dumps one database into another, schema and data, inside the container: a plain dump read
+// back by psql, as a self host backup is restored.
+export async function dumpInto(source: string, target: string): Promise<void> {
+  for (const name of [source, target]) {
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) throw new Error(`unsafe database name ${name}`);
+  }
+  const result = await compose([
+    'exec',
+    '-T',
+    'postgres',
+    'sh',
+    '-c',
+    `pg_dump -U postgres -d ${source} | psql --no-psqlrc -q -v ON_ERROR_STOP=1 -U postgres -d ${target}`,
+  ]);
+  if (result.code !== 0)
+    throw new Error(`dump of ${source} into ${target} failed: ${result.stderr}`);
 }

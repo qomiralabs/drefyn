@@ -1,0 +1,12 @@
+import express from 'express';
+
+const app = express();
+const router = express.Router();
+
+app.get('/health', (_req, res) => res.send('ok'));
+app.post('/users', createUser);
+router.delete(`/users/:id`, removeUser);
+app.all('/proxy/*', proxy);
+app.get(BASE + '/dynamic', dynamic);
+cache.get('not-a-route');
+app.use('/api', router);

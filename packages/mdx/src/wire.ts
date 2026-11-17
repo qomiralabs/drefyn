@@ -15,6 +15,7 @@ const policy = z.object({
 
 // Bulk unless a caller says a person is waiting: a frame that says nothing earns nothing.
 const priority = z.enum(['interactive', 'bulk']).default('bulk');
+const reader = z.boolean().default(false);
 
 export const wireRequestSchema = z.object({
   tenant,
@@ -23,6 +24,7 @@ export const wireRequestSchema = z.object({
   dialect: z.enum(['mdx', 'md']),
   policy,
   priority,
+  reader,
 });
 
 export const wirePrintSchema = z.object({
@@ -31,10 +33,20 @@ export const wirePrintSchema = z.object({
   tree: z.string(),
   policy,
   priority,
+  reader,
+});
+
+export const wireMergeSchema = z.object({
+  tenant,
+  path: z.string(),
+  trees: z.string(),
+  policy,
+  priority,
 });
 
 export type WireRequest = z.infer<typeof wireRequestSchema>;
 export type WirePrint = z.infer<typeof wirePrintSchema>;
+export type WireMerge = z.infer<typeof wireMergeSchema>;
 
 // Every escape in JSON is at most six bytes for one, and the frame around it is small.
 export const maxBodyBytes = (maxBytes: number) => maxBytes * 6 + 65_536;
@@ -45,6 +57,12 @@ export const maxTreeBytes = (maxBytes: number) => maxBytes * 8;
 
 // The tree crosses as a JSON string, where only a quote or a backslash grows, and by double.
 export const maxPrintBodyBytes = (treeBytes: number) => treeBytes * 2 + 65_536;
+
+// Base, ours and theirs, and each can be the largest tree there is.
+export const maxMergeTreesBytes = (maxBytes: number) => maxTreeBytes(maxBytes) * 3;
+
+export const maxMergeBodyBytes = (maxBytes: number) =>
+  maxPrintBodyBytes(maxMergeTreesBytes(maxBytes));
 
 // The organization has to be known before the body, which may be refused unread.
 export const ORGANIZATION_HEADER = 'x-drefyn-organization';

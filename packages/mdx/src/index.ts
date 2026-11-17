@@ -4,6 +4,8 @@ export { validateTree } from './tree-check.ts';
 export type { TreeProblem, TreeProblemCode } from './tree-check.ts';
 export { AST_VERSION } from './types.ts';
 export type {
+  BlockConflict,
+  BlockConflictReason,
   BlockSource,
   ComponentRegistry,
   Dialect,
@@ -13,9 +15,14 @@ export type {
   MdxIssueCode,
   MdxLimits,
   MdxRoot,
+  MergeAnswer,
+  MergeOutcome,
+  MergeResult,
   ParseResult,
   PrintResult,
   PrintTiming,
+  ReaderPage,
+  ReaderUnit,
   RenderPolicy,
   Result,
 } from './types.ts';

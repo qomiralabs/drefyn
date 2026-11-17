@@ -18,6 +18,7 @@ import {
   key,
   newNode,
   openDatabase,
+  readerText,
   save,
   seed,
   tree,
@@ -108,12 +109,13 @@ describeWithStack('chunks in the save transaction', () => {
     if (!saved.ok) throw new Error(saved.error.code);
     const version = saved.value.versionId;
 
-    const expected = chunkNode(input.content, chunkOptions);
+    const expected = chunkNode(await readerText(built.parse, home, PAGE), chunkOptions);
     const rows = JSON.parse(
       await admin(`
 select coalesce(json_agg(json_build_object(
          'ord', ord, 'blockPath', block_path, 'headingPath', heading_path, 'body', body,
          'hashed', body_sha256 = sha256(convert_to(body, 'UTF8')),
+         'policy', render_policy_version,
          'organization', organization_id, 'project', project_id, 'node', node_id)
        order by ord), '[]')
   from app.chunks where version_id = '${version}';`),
@@ -124,6 +126,7 @@ select coalesce(json_agg(json_build_object(
       expect(row).toMatchObject({
         ...expected[at],
         hashed: true,
+        policy: 1,
         organization: home.organization,
         project: home.project,
         node,
@@ -135,6 +138,16 @@ select organization_id || ' ' || project_id || ' ' || node_id || ' ' || kind || 
        (done_at is null)::text
   from app.engine_outbox where version_id = '${version}';`);
     expect(outbox).toBe(`${home.organization} ${home.project} ${node} embed_chunks true`);
+  });
+
+  it('saves a page the render refuses with no chunks, and says so', async () => {
+    const node = await newNode(built.engine, home);
+    const refused = `${'Ref[^a]. '.repeat(2_001)}\n\n[^a]: note\n`;
+    const saved = await built.engine.saveDraft(await saveInput(home, node, null, refused));
+    if (!saved.ok) throw new Error(saved.error.code);
+    expect(saved.value.readerState).toBe('not_renderable');
+    expect(await count('chunks', saved.value.versionId)).toBe(0);
+    expect(await count('engine_outbox', saved.value.versionId)).toBe(0);
   });
 
   it('gives every version its own chunks', async () => {

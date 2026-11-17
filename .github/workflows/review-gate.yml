@@ -34,9 +34,9 @@
 # What it does not protect: for pull_request and pull_request_review, GitHub runs this
 # file from the PR merge commit. A branch in this repo
 # can edit this file, or add another workflow, and post its own `review-gate` status.
-# The controls for that live outside the workflow: branch protection with code owner
-# review on .github/ and scripts/, and later an org required workflow or a status from a
-# GitHub App that PR branches cannot change.
+# On staging and main the control lives outside this file: an organization ruleset
+# requires review-gate-required.yml from a pinned commit of development, which a PR
+# branch cannot change. On development this status is advisory.
 
 name: Review gate
 

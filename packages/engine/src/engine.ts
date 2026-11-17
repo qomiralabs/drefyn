@@ -1,26 +1,40 @@
 import { DbError } from '@drefyn/db';
+import type { Result } from '@drefyn/mdx';
 import { idOf, type TenantRef } from '@drefyn/tenancy';
 import { sql } from 'kysely';
 import type { z } from 'zod';
-import { chunkNode, type Chunk, type ChunkOptions } from './chunk.ts';
+import { chunkNode, type ChunkOptions } from './chunk.ts';
 import { DEFAULT_ENGINE_CONFIG, type EngineConfig } from './config.ts';
-import type { NodeContent } from './content.ts';
-import { Refusal, engineError, refuse, type EngineResult } from './errors.ts';
+import { Refusal, engineError, refuse, type EngineIssue, type EngineResult } from './errors.ts';
 import type { StoredFields } from './fields.ts';
 import type { NodeFamily, NodeLifecycle, Origin } from './vocabulary.ts';
+import type { ReaderPage } from '@drefyn/mdx';
+import type { NodeContent } from './content.ts';
 import {
+  approveSchema,
   backfillInput,
   createNodeSchema,
   declareSchemaInput,
   issuesOf,
   moveNodeSchema,
   pageSchema,
+  publishSchema,
   querySchema,
   readSchema,
   rollbackSchema,
   saveDraftSchema,
 } from './input.ts';
 import { actorFields } from './actor.ts';
+import {
+  approveVersion,
+  publishSettled,
+  publishVersion,
+  refusePublish,
+  type PublishError,
+  type PublishResult,
+} from './publish.ts';
+import { approverOf } from './publish-rules.ts';
+import type { ChunkCopy } from './published-chunks.ts';
 import { backfillStep } from './backfill.ts';
 import { declareSchema } from './declare.ts';
 import { reserveNode } from './limits.ts';
@@ -37,6 +51,8 @@ import type { EngineStore, EngineTx } from './store.ts';
 import { busyIssue, PoolBusy } from './pool-gate.ts';
 import { assertRoomUnder, lockTree, moveWithinTree, tailKey } from './tree.ts';
 import type {
+  ApprovalReceipt,
+  ApproveInput,
   BackfillState,
   CreateNodeInput,
   DeclaredSchema,
@@ -49,12 +65,14 @@ import type {
   NodeRef,
   Page,
   PageArgs,
+  PublishInput,
+  PublishReceipt,
   RollbackInput,
   SaveDraftInput,
   VersionRef,
   VersionSummary,
 } from './types.ts';
-import { verifyContent, type ParsePolicy, type VerifyDeps } from './verify.ts';
+import { readerOfStored, verifyContent, type ParsePolicy, type VerifyDeps } from './verify.ts';
 import { appendVersion, lockNode } from './write.ts';
 
 export interface EngineDeps {
@@ -82,6 +100,11 @@ export interface Engine {
   declareSchema(input: DeclareSchemaInput): Promise<EngineResult<DeclaredSchema>>;
   // One batch. runFilterBackfill paces these.
   backfillFilters(tenant: TenantRef): Promise<EngineResult<BackfillState>>;
+  // The only writer of the published tables. Role, workflow and actor are checked here and
+  // not in any UI, so no caller can skip them.
+  publish(input: PublishInput): Promise<PublishResult<PublishReceipt>>;
+  // Records that a person approved one version, which a project that requires review needs.
+  approve(input: ApproveInput): Promise<PublishResult<ApprovalReceipt>>;
 }
 
 const FLAG_UNREAD = [{ path: 'flags', code: 'engine.flag_unavailable' }];
@@ -144,6 +167,26 @@ async function assertTypeFits(tx: EngineTx, input: z.output<typeof createNodeSch
   if (parent === undefined) throw new Refusal('engine.not_found');
 }
 
+async function readVersion(tx: EngineTx, tenant: TenantRef, nodeId: NodeId, versionId: string) {
+  const row = await tx
+    .selectFrom('node_versions')
+    .select([
+      sql<string>`content::text`.as('json'),
+      'content_sha256',
+      'ast_version',
+      'schema_version',
+      'origin',
+      'fields',
+    ])
+    .where('organization_id', '=', tenant.organizationId)
+    .where('project_id', '=', tenant.projectId)
+    .where('node_id', '=', nodeId)
+    .where('id', '=', versionId)
+    .executeTakeFirst();
+  if (row === undefined) throw new Refusal('engine.not_found');
+  return row;
+}
+
 export function createEngine(deps: EngineDeps): Engine {
   const { store, flags } = deps;
   const { gate } = store;
@@ -174,7 +217,10 @@ export function createEngine(deps: EngineDeps): Engine {
   const writingTree = <T>(tenant: TenantRef, work: (tx: EngineTx) => Promise<T>) =>
     noted(tenant, () => gate.treeWrite(tenant, () => store.tenant(tenant, work, held)));
 
-  const read = async (name: 'engine.writes' | 'engine.chunk_at_write', tenant: TenantRef) => {
+  const read = async (
+    name: 'engine.writes' | 'engine.chunk_at_write' | 'retrieval.v1',
+    tenant: TenantRef,
+  ) => {
     try {
       return await flags.evaluate(name, {
         organizationId: tenant.organizationId,
@@ -189,10 +235,13 @@ export function createEngine(deps: EngineDeps): Engine {
     const { value, errorCode } = await read('engine.writes', tenant);
     return value && errorCode === undefined;
   };
-  // A failed read must not count as off: the version would commit with no chunks, and nothing
-  // would ever notice. Null refuses the write, and the caller can try again.
-  const chunkingOn = async (tenant: TenantRef): Promise<boolean | null> => {
-    const name = 'engine.chunk_at_write';
+  // A failed read must not count as off: the version would commit with no chunks, or a publish
+  // with no published chunks, and nothing would ever notice. Null refuses the write, and the
+  // caller can try again.
+  const strictlyOn = async (
+    name: 'engine.chunk_at_write' | 'retrieval.v1',
+    tenant: TenantRef,
+  ): Promise<boolean | null> => {
     const { value, errorCode } = await read(name, tenant);
     if (errorCode === undefined) return value;
     logger.warn('engine.flag_read_failed', {
@@ -202,14 +251,15 @@ export function createEngine(deps: EngineDeps): Engine {
     });
     return null;
   };
+  const chunkingOn = (tenant: TenantRef) => strictlyOn('engine.chunk_at_write', tenant);
 
   // Every write leaves one line: what happened, to which ids, and how long it took.
-  const logged = async <T>(
+  const logged = async <T, E extends { readonly code: string }>(
     event: string,
     fields: LogFields,
-    work: () => Promise<EngineResult<T>>,
+    work: () => Promise<Result<T, E>>,
     details: (value: T) => LogFields,
-  ): Promise<EngineResult<T>> => {
+  ): Promise<Result<T, E>> => {
     const started = performance.now();
     const result = await tracer.span(event, fields, work);
     const duration_ms = Math.round(performance.now() - started);
@@ -222,7 +272,27 @@ export function createEngine(deps: EngineDeps): Engine {
     version_id: value.versionId,
     seq: value.seq,
     content_sha256: value.contentSha256,
+    ...(value.readerState === undefined ? {} : { reader_state: value.readerState }),
   });
+  const renderPolicyVersion = deps.parsePolicy.version;
+
+  // Counted when written, so a replay does not report rows it never made. The reader state is
+  // the same on a replay, as the same content renders the same, so a retry answers as the first.
+  const chunkWriter = (reader: ReaderPage | undefined) => {
+    const state = { written: 0 };
+    const chunks = reader === undefined ? [] : chunkNode(reader, chunkOptions);
+    return {
+      chunksOf: () => {
+        state.written = chunks.length;
+        return chunks;
+      },
+      settle: (result: EngineResult<VersionRef>): EngineResult<VersionRef> =>
+        result.ok && reader !== undefined
+          ? { ok: true, value: { ...result.value, readerState: reader.state } }
+          : result,
+      written: () => state.written,
+    };
+  };
 
   return {
     async createNode(raw) {
@@ -281,42 +351,40 @@ export function createEngine(deps: EngineDeps): Engine {
       const chunking = await chunkingOn(tenant);
       if (chunking === null) return refuse('engine.unavailable', FLAG_UNREAD);
       const fields = { ...tenantFields(tenant), node_id: nodeId };
-      // Counted when written, so a replay does not report rows it never made.
       let written = 0;
       return logged(
         'engine.save',
         { ...fields, origin, actor_kind: actor.kind },
         async () => {
           const verified = await tracer.span('engine.save.verify', fields, () =>
-            verifyContent(content, tenant, nodeId, verifyDeps),
+            verifyContent(content, tenant, nodeId, verifyDeps, chunking),
           );
           if (!verified.ok) return verified;
+          const { reader, ...version } = verified.value;
           // Before the transaction, which should hold its connection for writes alone.
-          const chunks: readonly Chunk[] = chunking
-            ? await tracer.span('engine.save.chunk', fields, () =>
-                Promise.resolve(chunkNode(verified.value.tree, chunkOptions)),
-              )
-            : [];
-          return tracer.span('engine.save.write', fields, () =>
+          const writer = await tracer.span('engine.save.chunk', fields, () =>
+            Promise.resolve(chunkWriter(reader)),
+          );
+          const result = await tracer.span('engine.save.write', fields, () =>
             settled(() =>
               writing(tenant, async (tx) => {
                 const node = await lockNode(tx, tenant, nodeId);
                 return appendVersion(tx, tenant, node, {
-                  ...verified.value,
+                  ...version,
                   origin,
                   actor,
                   idempotencyKey: input.value.idempotencyKey,
                   expectedHeadVersionId: input.value.expectedHeadVersionId,
                   rawFields: input.value.fields,
                   maxFieldsBytes: config.maxNodeBytes,
-                  chunksOf: () => {
-                    written = chunks.length;
-                    return chunks;
-                  },
+                  chunksOf: writer.chunksOf,
+                  renderPolicyVersion,
                 });
               }),
             ),
           );
+          written = writer.written();
+          return writer.settle(result);
         },
         (value) => ({ ...versionFields(value), chunks: written }),
       );
@@ -333,50 +401,49 @@ export function createEngine(deps: EngineDeps): Engine {
       return logged(
         'engine.rollback',
         { ...tenantFields(tenant), node_id: nodeId, to_version_id: toVersionId },
-        () =>
-          settled(() =>
+        async () => {
+          // History never changes, so the version read here is the one written under the lock.
+          // Reading it first keeps the host's answer, which can take seconds, out of the lock;
+          // the head is still checked there.
+          const target = await settled(() =>
+            store.tenant(tenant, (tx) => readVersion(tx, tenant, nodeId, toVersionId)),
+          );
+          if (!target.ok) return target;
+          let reader: ReaderPage | undefined;
+          if (chunking) {
+            const answer = await readerOfStored(target.value.json, tenant, nodeId, verifyDeps);
+            if (!answer.ok) return answer;
+            reader = answer.value;
+          }
+          const writer = chunkWriter(reader);
+          const result = await settled(() =>
             writing(tenant, async (tx) => {
               const node = await lockNode(tx, tenant, nodeId);
-              const target = await tx
-                .selectFrom('node_versions')
-                .select([
-                  sql<string>`content::text`.as('json'),
-                  'content_sha256',
-                  'ast_version',
-                  'schema_version',
-                  'origin',
-                  'fields',
-                ])
-                .where('organization_id', '=', tenant.organizationId)
-                .where('project_id', '=', tenant.projectId)
-                .where('node_id', '=', nodeId)
-                .where('id', '=', toVersionId)
-                .executeTakeFirst();
-              if (target === undefined) throw new Refusal('engine.not_found');
+              const { json, content_sha256, ast_version, schema_version, origin, fields } =
+                target.value;
               // The origin travels with the content: a rollback must not turn a model's draft
               // into a person's, as publishing treats the two differently.
               return appendVersion(tx, tenant, node, {
-                json: target.json,
-                sha256: target.content_sha256,
-                astVersion: target.ast_version,
-                schemaVersion: target.schema_version,
-                origin: target.origin as Origin,
+                json,
+                sha256: content_sha256,
+                astVersion: ast_version,
+                schemaVersion: schema_version,
+                origin: origin as Origin,
                 actor,
                 idempotencyKey: input.value.idempotencyKey,
                 expectedHeadVersionId: input.value.expectedHeadVersionId,
-                storedFields: target.fields as StoredFields,
+                storedFields: fields as StoredFields,
                 maxFieldsBytes: config.maxNodeBytes,
                 // Chunked again and not copied: the target may predate chunking, and its rows
                 // belong to its own version.
-                chunksOf: () => {
-                  if (!chunking) return [];
-                  const chunks = chunkNode(JSON.parse(target.json) as NodeContent, chunkOptions);
-                  written = chunks.length;
-                  return chunks;
-                },
+                chunksOf: writer.chunksOf,
+                renderPolicyVersion,
               });
             }),
-          ),
+          );
+          written = writer.written();
+          return writer.settle(result);
+        },
         (value) => ({ ...versionFields(value), chunks: written }),
       );
     },
@@ -567,5 +634,73 @@ export function createEngine(deps: EngineDeps): Engine {
         (state) => ({ state }),
       );
     },
+
+    async publish(raw) {
+      const input = parsedOrRefused(publishSchema, raw);
+      if (!input.ok) return publishInvalid(input.error.issues);
+      const { tenant, nodeId, versionId, actor } = input.value;
+      if (!(await writesOn(tenant))) return refusePublish('publish.forbidden');
+      const copyChunks = await strictlyOn('retrieval.v1', tenant);
+      if (copyChunks === null) return refusePublish('publish.unavailable');
+      let copy: ChunkCopy | undefined;
+      return logged(
+        'engine.publish',
+        { ...tenantFields(tenant), node_id: nodeId, version_id: versionId, ...actorFields(actor) },
+        () =>
+          publishSettled(() =>
+            writing(tenant, (tx) =>
+              publishVersion(tx, tenant, input.value, deps.parsePolicy.version, {
+                copyChunks,
+                copied: (counts) => {
+                  copy = counts;
+                },
+              }),
+            ),
+          ),
+        (value) => ({
+          previous_version_id: value.previousVersionId ?? 'none',
+          render_policy_version: value.renderPolicyVersion,
+          ...(copy === undefined
+            ? {}
+            : {
+                chunks: copy.chunks,
+                public_chunks: copy.publicChunks,
+                postings_added: copy.postingsAdded,
+                postings_removed: copy.postingsRemoved,
+                lexemes_changed: copy.lexemesChanged,
+              }),
+        }),
+      );
+    },
+
+    async approve(raw) {
+      const input = parsedOrRefused(approveSchema, raw);
+      if (!input.ok) return publishInvalid(input.error.issues);
+      const { tenant, nodeId, versionId, actor } = input.value;
+      const fields = {
+        ...tenantFields(tenant),
+        node_id: nodeId,
+        version_id: versionId,
+        ...actorFields(actor),
+      };
+      const approver = approverOf(actor);
+      if (approver.ok && !(await writesOn(tenant))) return refusePublish('publish.forbidden');
+      return logged(
+        'engine.approve',
+        fields,
+        () =>
+          approver.ok
+            ? publishSettled(() =>
+                writing(tenant, (tx) => approveVersion(tx, tenant, input.value, approver.value)),
+              )
+            : Promise.resolve(refusePublish<ApprovalReceipt>(approver.code)),
+        () => ({}),
+      );
+    },
   };
 }
+
+const publishInvalid = (issues: readonly EngineIssue[]): PublishResult<never> => ({
+  ok: false,
+  error: { code: 'publish.validation_failed', retryable: false, issues } satisfies PublishError,
+});

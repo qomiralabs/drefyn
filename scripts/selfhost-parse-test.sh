@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Proves the parse host's boundary from real containers: no way out, no credentials, reachable
-# only from its own network and only with the token, and restarted when it dies. Needs a
-# deploy/.env, so run it after scripts/selfhost.sh up. It removes what it starts.
+# Proves the parse host's boundary and its failure behaviour from real containers: no way out,
+# no credentials, reachable only from its own network and only with the token, restarted when
+# it dies, stopped by the kernel at its memory limit and back after, and inside that limit
+# under a flood at the defaults. Runs as its own Compose project, so a stack that is up keeps
+# its own parse host. Needs a deploy/.env, so run it after scripts/selfhost.sh up. It removes
+# what it starts. Set DREFYN_PARSE_FLOOD_SECONDS to flood for longer than the default 30.
 set -euo pipefail
 
 # shellcheck source=scripts/selfhost-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/selfhost-lib.sh"
+# shellcheck source=scripts/selfhost-parse-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/selfhost-parse-lib.sh"
 
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
@@ -15,95 +20,79 @@ fail() {
   failures=$((failures + 1))
 }
 
-parse=(docker compose -f "$compose_file" --profile parse)
-image=drefyn-parse-host:local
-outside_port=18790
-listener=""
+# Its own name, so two checkouts on one machine can each run it.
+project="${DREFYN_PARSE_TEST_PROJECT:-drefyn-parse-test}"
+parse=(docker compose -p "$project" -f "$compose_file" --profile parse)
+flood_seconds="${DREFYN_PARSE_FLOOD_SECONDS:-30}"
+load_dir="$selfhost_root/packages/mdx/test"
+stand_ins=()
 
 token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
 DREFYN_PARSE_TOKEN_SHA256="$(printf '%s' "$token" | shasum -a 256 | cut -d' ' -f1)"
 export DREFYN_PARSE_TOKEN_SHA256
+# Whatever the stack's deploy/.env says, this project runs at the defaults until it asks for
+# the small profile. A value in the shell wins over the file.
+export DREFYN_PARSE_HOST_MEMORY_MB=2048 DREFYN_PARSE_WORKER_MEMORY_MB=512
+export DREFYN_PARSE_MAX_HELD_BYTES=268435456
 
 cleanup() {
-  if [ -n "$listener" ]; then kill "$listener" 2>/dev/null || true; fi
-  "${parse[@]}" rm --stop --force parse-host >/dev/null 2>&1 || true
-  if [ -n "${network:-}" ]; then docker network rm "$network" >/dev/null 2>&1 || true; fi
+  local name
+  for name in ${stand_ins[@]+"${stand_ins[@]}"}; do
+    docker rm --force "$name" >/dev/null 2>&1 || true
+  done
+  "${parse[@]}" down --volumes --timeout 15 >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
+# The project must start empty, or a leftover from a killed run would be what gets measured.
+cleanup
+
 "${parse[@]}" up --detach --build --wait --wait-timeout 180 parse-host
 id="$("${parse[@]}" ps -q parse-host)"
-network="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$id")"
-network="${network% }"
+network="$(parse_network_of "$id")"
 
-# Runs a connect from inside a container: exit 0 means it reached something.
-connect='
-const [host, port] = process.argv.slice(1);
-const socket = require("node:net").connect({ host, port: Number(port), timeout: 3000 });
-socket.on("connect", () => process.exit(0));
-socket.on("timeout", () => process.exit(1));
-socket.on("error", () => process.exit(1));
-'
-reaches_from_inside() { docker exec "$id" node -e "$connect" "$1" "$2" >/dev/null 2>&1; }
-reaches_from_bridge() {
-  docker run --rm --network bridge --entrypoint node "$image" -e "$connect" "$1" "$2" >/dev/null 2>&1
+parse_boundary_checks "$id" "$token" 2048
+
+# Runs the load driver from the host image on the parse network, as the app tier would.
+load() {
+  docker run --rm --name "$1" --network "$network" -e DREFYN_PARSE_HOST_TOKEN="$token" \
+    -v "$load_dir:/app/packages/mdx/test:ro" --entrypoint node "$parse_image" \
+    packages/mdx/test/container-load.ts "${@:2}"
 }
+# memory_event <name>: a counter from the container's own memory controller.
+memory_event() { docker exec "$id" sh -c "grep '^$1 ' /sys/fs/cgroup/memory.events | cut -d' ' -f2"; }
+oom_kills() { memory_event oom_kill; }
+peak_mb() { echo $(($(docker exec "$id" cat /sys/fs/cgroup/memory.peak) / 1048576)); }
+answers_app() { parse_app_reaches "$network" parse-host "$token"; }
 
-if [[ "$network" != *" "* ]] && [ -n "$network" ]; then
-  pass "the parse host sits on one network"
+# The neighbour scan only means something if it finds a neighbour listening where the host can
+# reach it. One stand in listens on every interface, the mistake the app tier must not make.
+# The other joins both networks and listens only on the one the host is not on, which is how
+# the app tier has to listen.
+listen_js='
+const address = process.env.BIND ?? Object.values(require("node:os").networkInterfaces())
+  .flat().find((entry) => entry.family === "IPv4" && !entry.internal).address;
+require("node:net").createServer((socket) => socket.end()).listen(8080, address);
+'
+careless="$project-careless"
+careful="$project-careful"
+stand_ins+=("$careless" "$careful")
+docker run --detach --name "$careless" --network "$network" -e BIND=0.0.0.0 --entrypoint node \
+  "$parse_image" -e "$listen_js" >/dev/null
+docker run --detach --name "$careful" --network bridge --entrypoint node "$parse_image" \
+  -e "$listen_js" >/dev/null
+sleep 2
+docker network connect "$network" "$careful"
+careless_ip="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$careless")"
+open="$(parse_open_neighbour_ports "$id" "$network" || true)"
+if [ "$open" = "$careless_ip:8080" ]; then
+  pass "control: the scan finds a neighbour on every interface, and not one listening elsewhere"
 else
-  fail "the parse host sits on one network" "networks: $network"
+  fail "control: the scan finds a neighbour on every interface, and not one listening elsewhere" \
+    "answered: ${open:-nothing}, want $careless_ip:8080"
 fi
-if [ "$(docker network inspect --format '{{.Internal}}' "$network")" = true ]; then
-  pass "that network is internal"
-else
-  fail "that network is internal"
-fi
-if [ -z "$(docker port "$id")" ]; then
-  pass "the parse host publishes no port"
-else
-  fail "the parse host publishes no port" "$(docker port "$id")"
-fi
-limit="$(docker inspect --format '{{.HostConfig.Memory}}' "$id")"
-if [ "$limit" = "$((2048 * 1024 * 1024))" ]; then
-  pass "the parse host has its memory limit"
-else
-  fail "the parse host has its memory limit" "limit is $limit"
-fi
-
-# A control first: a blocked connect proves nothing unless the same target answers from a
-# container that is not on the closed network.
-if ! reaches_from_bridge 1.1.1.1 443; then
-  fail "control: the internet answers from the default bridge"
-elif reaches_from_inside 1.1.1.1 443; then
-  fail "no connect to the internet from inside"
-else
-  pass "no connect to the internet from inside"
-fi
-if docker exec "$id" node -e 'require("node:dns").lookup("github.com", (e) => process.exit(e ? 1 : 0))' \
-  >/dev/null 2>&1; then
-  fail "no name lookup for the internet from inside"
-else
-  pass "no name lookup for the internet from inside"
-fi
-
-python3 -m http.server --bind 0.0.0.0 "$outside_port" >/dev/null 2>&1 &
-listener=$!
-gateway="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' "$network")"
-bridge_gateway="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' bridge)"
-for _ in $(seq 1 20); do
-  if reaches_from_bridge "$bridge_gateway" "$outside_port"; then break; fi
-  sleep 1
-done
-if ! reaches_from_bridge "$bridge_gateway" "$outside_port"; then
-  fail "control: the host network answers from the default bridge"
-elif reaches_from_inside "$gateway" "$outside_port"; then
-  fail "no connect to the host network from inside" "reached the network's gateway, $gateway"
-elif reaches_from_inside "$bridge_gateway" "$outside_port"; then
-  fail "no connect to the host network from inside" "reached the bridge at $bridge_gateway"
-else
-  pass "no connect to the host network from inside"
-fi
+docker rm --force "$careless" "$careful" >/dev/null
+stand_ins=()
 
 # Reads under exactly the flags the host runs with, from the thread that a page would be in.
 reads='
@@ -133,65 +122,37 @@ else
   fail "a thread under the host flags cannot read outside its code"
 fi
 
-keys="$(docker exec "$id" sh -c 'tr "\0" "\n" </proc/1/environ | cut -d= -f1')"
-extra="$(grep -vE '^(DREFYN_PARSE_[A-Z0-9_]+|HOME|HOSTNAME|NODE_VERSION|PATH|PWD|YARN_VERSION)$' <<<"$keys" || true)"
-if [ -z "$extra" ]; then
-  pass "the parse host environment holds only its own keys"
-else
-  fail "the parse host environment holds only its own keys" "$extra"
-fi
-
 canary="canary-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-if out="$(docker run --rm -e DATABASE_URL="$canary" -e DREFYN_PARSE_TOKEN_SHA256 "$image" 2>&1)"; then
+if out="$(docker run --rm -e DATABASE_URL="$canary" -e DREFYN_PARSE_TOKEN_SHA256 "$parse_image" 2>&1)"; then
   fail "a credential in the environment stops the host"
 elif [[ "$out" == *DATABASE_URL* && "$out" != *"$canary"* ]]; then
   pass "a credential in the environment stops the host, by name and not by value"
 else
   fail "a credential in the environment stops the host, by name and not by value" "$out"
 fi
-if docker run --rm -e DREFYN_PARSE_TOKEN_SHA256= "$image" >/dev/null 2>&1; then
+if docker run --rm -e DREFYN_PARSE_TOKEN_SHA256= "$parse_image" >/dev/null 2>&1; then
   fail "no token hash stops the host"
 else
   pass "no token hash stops the host"
 fi
 
-# The app tier's side, from a container on the network and one that is not.
-# shellcheck disable=SC2016
-probe='
-const url = "http://parse-host:8787/parse";
-const organizationId = "00000000-0000-4000-a000-000000000001";
-const projectId = "00000000-0000-4000-9000-000000000001";
-const limits = { maxBytes: 1048576, maxDepth: 64, maxNodes: 100000 };
-const policy = {
-  version: 1,
-  components: [],
-  rawHtml: "sanitize",
-  remoteImages: "proxy",
-  linkProtocols: ["https"],
-  limits,
-};
-const source = "# One\n";
-const frame = { tenant: { organizationId, projectId }, path: "a.md", source, dialect: "md", policy };
-const body = JSON.stringify(frame);
-const headers = { "x-drefyn-organization": organizationId };
-const post = (extra) => fetch(url, { method: "POST", body, headers: { ...headers, ...extra } });
-const refused = await post({});
-const answered = await post({ authorization: `Bearer ${process.env.TOKEN}` });
-const result = await answered.json();
-process.exit(refused.status === 401 && answered.status === 200 && result.ok === true ? 0 : 1);
-'
-if docker run --rm --network "$network" -e TOKEN="$token" --entrypoint node "$image" \
-  --input-type=module -e "$probe"; then
-  pass "the app tier reaches the host, and only with the token"
+# The memory floor counts threads at their cap and every held byte three times, so a flood at
+# the defaults has to stay under the limit. A miss is a restart, not a loss, but it means the
+# floor is wrong.
+stand_ins+=("$project-flood")
+if summary="$(load "$project-flood" flood "http://parse-host:8787" "$flood_seconds")" &&
+  [[ "$summary" == *'"ok":'* ]]; then
+  if [ "$(oom_kills)" = 0 ]; then
+    pass "a ${flood_seconds}s flood at the defaults stays inside 2048 MB (peak $(peak_mb) MB)"
+  else
+    fail "a ${flood_seconds}s flood at the defaults stays inside 2048 MB" \
+      "oom kills $(oom_kills), peak $(peak_mb) MB"
+  fi
 else
-  fail "the app tier reaches the host, and only with the token"
+  fail "a ${flood_seconds}s flood at the defaults stays inside 2048 MB" "the flood itself failed"
 fi
-address="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$id")"
-if reaches_from_bridge "$address" 8787; then
-  fail "nothing off the network reaches the host"
-else
-  pass "nothing off the network reaches the host"
-fi
+printf '      %s\n' "${summary:-no summary}"
+stand_ins=()
 
 # Kills the host process inside the container: the supervisor has to bring it back, and logs
 # why, with no restart of the container.
@@ -203,17 +164,18 @@ if [[ "$args" == *"--permission --allow-fs-read=/app --allow-worker"* && "$args"
 else
   fail "the host runs with no way to start a process" "$args"
 fi
+listening="$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_listening || true)"
 docker exec "$id" sh -c "kill -9 $pid"
 for _ in $(seq 1 60); do
-  if [ "$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_listening || true)" -ge 2 ] &&
-    docker exec "$id" node -e 'fetch("http://127.0.0.1:8787/health").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))' \
-      >/dev/null 2>&1; then
+  if [ "$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_listening || true)" -gt "$listening" ] &&
+    answers_app; then
     break
   fi
   sleep 1
 done
 crashes="$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_crashed || true)"
-if [ "$crashes" -ge 1 ] && [ "$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_listening || true)" -ge 2 ]; then
+if [ "$crashes" -ge 1 ] &&
+  [ "$(docker logs "$id" 2>/dev/null | grep -c mdx.parse_host_listening || true)" -gt "$listening" ]; then
   pass "a killed host comes back behind a backoff"
 else
   fail "a killed host comes back behind a backoff" "$(docker logs --tail 20 "$id" 2>&1)"
@@ -222,6 +184,87 @@ if [ "$(docker inspect --format '{{.RestartCount}}' "$id")" = "$restarts" ]; the
   pass "the supervisor did that, not the container restart"
 else
   fail "the supervisor did that, not the container restart"
+fi
+
+# Native memory passes the heap cap, and only the kernel bounds it. A limit far under what the
+# host was told it has stands in for that: the flood then has to end in a kill at the limit,
+# not a host that grows past it, and the host has to answer again once the flood stops.
+low_mb=384
+docker update --memory "${low_mb}m" --memory-swap "${low_mb}m" "$id" >/dev/null
+kills_before="$(oom_kills)"
+hits_before="$(memory_event max)"
+stand_ins+=("$project-fault")
+load "$project-fault" flood "http://parse-host:8787" 120 >/dev/null 2>&1 &
+flooding=$!
+killed=false
+for _ in $(seq 1 120); do
+  if [ "$(oom_kills)" -gt "$kills_before" ]; then
+    killed=true
+    break
+  fi
+  sleep 1
+done
+docker rm --force "$project-fault" >/dev/null 2>&1 || true
+wait "$flooding" 2>/dev/null || true
+stand_ins=()
+# memory.max is the limit the kernel enforced, and the max counter rises only when the
+# container reached it, so the kill came from this limit and not from a machine out of memory.
+enforced="$(docker exec "$id" cat /sys/fs/cgroup/memory.max)"
+if [ "$killed" = true ] && [ "$enforced" = "$((low_mb * 1048576))" ] &&
+  [ "$(memory_event max)" -gt "$hits_before" ]; then
+  pass "a host past its memory limit is killed by the kernel at that limit ($low_mb MB)"
+else
+  fail "a host past its memory limit is killed by the kernel at that limit ($low_mb MB)" \
+    "oom kills $(oom_kills), was $kills_before; enforced $enforced; limit reached $(memory_event max) times, was $hits_before"
+fi
+back=false
+# A crash loop cools off for a minute before the next start, so this allows for one.
+for _ in $(seq 1 120); do
+  if answers_app; then
+    back=true
+    break
+  fi
+  sleep 1
+done
+if [ "$back" = true ]; then
+  pass "after the kill, the host answers the app tier again"
+else
+  fail "after the kill, the host answers the app tier again" "$(docker logs --tail 20 "$id" 2>&1)"
+fi
+
+# The small profile for a machine with little memory: two threads at 256 MB and 64 MiB held
+# fit under 1024. A page at the size limit has to parse and print inside it, or the profile
+# would refuse honest pages. This is about memory, so the kill is long: how long a full page
+# takes is proved on the thread, and depends on the machine. run takes the service as it is,
+# limits and network included, with only those two keys added.
+export DREFYN_PARSE_HOST_MEMORY_MB=1024 DREFYN_PARSE_WORKER_MEMORY_MB=256
+export DREFYN_PARSE_MAX_HELD_BYTES=67108864
+"${parse[@]}" rm --stop --force parse-host >/dev/null
+small="$project-small"
+stand_ins+=("$small")
+id="$("${parse[@]}" run --detach --name "$small" -e DREFYN_PARSE_TIMEOUT_MS=20000 \
+  -e DREFYN_PARSE_PRINT_TIMEOUT_MS=20000 parse-host)"
+for _ in $(seq 1 60); do
+  if parse_app_reaches "$network" "$small" "$token"; then break; fi
+  sleep 1
+done
+limit="$(docker inspect --format '{{.HostConfig.Memory}}' "$id")"
+if [ "$limit" = "$((1024 * 1024 * 1024))" ]; then
+  pass "the small profile sets a 1024 MB limit"
+else
+  fail "the small profile sets a 1024 MB limit" "limit is $limit"
+fi
+stand_ins+=("$project-print")
+if summary="$(load "$project-print" print "http://$small:8787")"; then
+  pass "the small profile parses and prints an honest page at the size limit, in both dialects"
+else
+  fail "the small profile parses and prints an honest page at the size limit, in both dialects"
+fi
+printf '      %s\n' "${summary:-no summary}"
+if [ "$(oom_kills)" = 0 ]; then
+  pass "the small profile was never killed for memory (peak $(peak_mb) MB)"
+else
+  fail "the small profile was never killed for memory" "peak $(peak_mb) MB"
 fi
 
 if [ "$failures" -gt 0 ]; then

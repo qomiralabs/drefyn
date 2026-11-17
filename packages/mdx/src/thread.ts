@@ -22,6 +22,8 @@ export interface ParseJob {
   readonly source: string;
   readonly dialect: Dialect;
   readonly policy: IsolatedPolicy;
+  // Only a save with chunks on pays for a render.
+  readonly reader?: boolean;
 }
 
 export interface PrintJob {
@@ -29,9 +31,18 @@ export interface PrintJob {
   // a structured clone or a walk on the host's own thread.
   readonly tree: string;
   readonly policy: IsolatedPolicy;
+  readonly reader?: boolean;
 }
 
-export type ThreadJob = ParseJob | PrintJob;
+export interface MergeJob {
+  // Text for the same reason as a print, holding { base, ours, theirs }.
+  readonly trees: string;
+  readonly policy: IsolatedPolicy;
+  // The thread has no environment, so its limit comes with the job.
+  readonly maxBlocks: number;
+}
+
+export type ThreadJob = ParseJob | PrintJob | MergeJob;
 
 export interface ThreadAnswer {
   readonly result: JobResult;
@@ -140,7 +151,7 @@ export function startParseThread(script: URL, limits: ThreadLimits): ParseThread
     const began = performance.now();
     worker.postMessage({ id, job });
     const limit = deadline(
-      'tree' in job ? (limits.printTimeoutMs ?? limits.timeoutMs) : limits.timeoutMs,
+      'source' in job ? limits.timeoutMs : (limits.printTimeoutMs ?? limits.timeoutMs),
     );
     const settled = await Promise.race([death, answer, limit.expired]);
     limit.clear();

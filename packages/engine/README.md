@@ -26,8 +26,11 @@ public.
 - `parseEngineConfig(env)`: reads the caps below.
 - `runFilterBackfill(engine, tenant)`: fills or clears slots at the paced rate, until none are
   queued. A job calls this; the work resumes from the table.
-- `chunkNode(content, options)`: splits a tree into block aligned chunks. Pure: the same content
-  and options give the same chunks in the same order.
+- `engine.publish(input)`, `engine.approve(input)`: the publish gate, below.
+- `PUBLISH_ERROR_CODES`, `PUBLISH_ROLES`, `APPROVE_ROLES`, `PUBLISH_SCOPES`, `STRICT_WORKFLOW`:
+  what the gate answers and checks.
+- `chunkNode(reader, options)`: splits the reader text the parse host gave for a page into unit
+  aligned chunks. Pure: the same reader text and options give the same chunks in the same order.
 
 The database refuses a `family`, `lifecycle` or `origin` outside these lists, and a test here
 compares each list with the migration, so the two cannot drift.
@@ -156,16 +159,22 @@ page with no text gets no outbox row. Chunks belong to a version and are not rep
 A failed read of that flag refuses the write with `engine.unavailable` and logs
 `engine.flag_read_failed`, as counting it as off would commit a version with no chunks.
 
-A chunk is made of whole blocks and starts again at every heading, so a word edited in one section
-cannot move text in another. It closes before it passes the target. A block over the target splits
-at line ends, and a line over the cap is cut at the cap. `chunkNode` runs before the transaction
-on a save, and under the lock on a rollback, where a replay must not pay for it.
+Chunk text is the text a reader gets. With chunks on, the save asks the parse host for it beside
+the print (`reader: true`), and the host takes it from the sanitized tree of the render itself, so
+frontmatter, comments, raw HTML the render drops, unknown components, orphan footnotes, attributes,
+alt text and link targets stay out by construction. Nothing in the engine decides what is visible.
+A page the render refuses, `render.too_complex` for one, saves with no chunks and no outbox row,
+and the result says `readerState: 'not_renderable'` so an editor can say so. It cannot publish
+either. A rollback asks the host for the stored tree's reader text before it takes the row lock;
+a busy host refuses it as `engine.unavailable`, and a tree the host can no longer print rolls back
+with no chunks. Each chunk row records `render_policy_version`, the policy its text was made under.
 
-Chunk text is read off the tree through a closed list of node types, so frontmatter, comments,
-imports, expressions, link targets and component props stay out. This is a stopgap, and it is not
-yet what a reader sees: text between split raw HTML tags, children of unknown components and orphan
-footnotes still reach a chunk. Keep `engine.chunk_at_write` off until #416 takes chunk text from
-the render. Heading text is capped at 200 characters and heading paths share a budget of 262,144
+A chunk is made of whole units, the top level elements of the rendered page, and starts again at
+every heading, so a word edited in one section cannot move text in another. An element with no
+text keeps its unit number, so a word added to it renumbers nothing. A chunk closes before it
+passes the target. A unit over the target splits at line ends, and a line over the cap is cut at
+the cap. `chunkNode` is linear in the reader text and runs before the transaction, on a save and on
+a rollback alike. Heading text is capped at 200 characters and heading paths share a budget of 262,144
 characters a page, split evenly across its headings. Past its share a chunk has an empty path, so
 one save cannot grow by repeating a long path on every row. An edit inside a section leaves the
 paths of the others alone, but adding or removing a heading changes every section's share, so it
@@ -260,8 +269,62 @@ yet. The reader has no grant on `content_types`, so the host passes `types`, usu
 `cachedTypes(types)` so a list is one reader transaction: 1,000 entries, 10 seconds, keyed by
 organization, project and type.
 
-Publish is the only writer of the two tables. Until it lands, `test/support/published.ts` writes
-them as the superuser for tests.
+Publish is the only writer of the two tables. `test/support/published.ts` still writes them as
+the superuser for the reader's own tests, which need rows publish would refuse to make.
+
+## Publishing
+
+`engine.publish(input)` is the one way content goes public, and the check lives here, not in a UI.
+It answers a `PublishResult`, whose codes are `PUBLISH_ERROR_CODES`, separate from the engine's.
+
+In one transaction, under the node's lock, it reads the idempotency key, then checks the actor,
+then the head, then the plan. Only then does it add a `publish_log` row, mark the previous
+`published_versions` row not current, copy the version in as current (inside the database, so the
+content never passes through this process), write the version's slot values to
+`published_filter_rows` and set the node's lifecycle. A crash at any point keeps none of it.
+
+| Actor     | Publishes when                                                                  |
+| --------- | ------------------------------------------------------------------------------- |
+| `user`    | It holds `admin` or `editor`; where review is required, the version is approved |
+| `api_key` | The project allows keys and the key holds the family's scope                    |
+| `git`     | The project allows pushes                                                       |
+| `system`  | Never                                                                           |
+
+Before any of that, content a model wrote (`origin: 'ai'`) and any version in a project that
+requires review answer `publish.human_required` for every actor that is not a person.
+
+A project's choices are a `publish_workflows` row. With no row, review is off and keys and
+pushes cannot publish. `engine.approve(input)` records an approval of one version; only a person
+with `admin` gives one, so an editor cannot approve their own work. The same person approving
+twice is one approval.
+
+The same key with the same input returns the first receipt; with other input it answers
+`publish.idempotency_conflict` and changes nothing. `publish_log` and `publish_approvals` are
+append only for the application role. A log row names its actor by kind and opaque id, never an
+address.
+
+A filter backfill also fills the published slot of items already live, from the fields they were
+published with, so a slot turning `ready` covers them.
+
+### Published chunks
+
+With `retrieval.v1` on, off in production, publish also copies the version's chunks into
+`app.published_chunks` in the same transaction, with the page path (the slug chain from the root,
+a node id where a node has no slug), the title (the version's `title` field, else its first
+heading, else the slug) and the visibility resolved then. Older versions keep their rows with
+`is_current` off, so a pin can still name them; republishing one turns its rows back on. A failed
+flag read refuses the publish as `publish.unavailable` rather than skipping the copy.
+
+The same transaction keeps three ranking tables equal to the public current chunks:
+`published_project_term_totals` (chunk count and total length), `published_term_stats` (document
+frequency per lexeme) and `published_chunk_terms` (term frequency per lexeme and chunk). Only
+public current chunks have rows there, so tightening a page removes its postings in the
+transaction that flips it, and a word on a protected page never shows up in a count. Each of the
+three has a `visibility` column the database holds to `'public'`, so it carries the same public
+guard as every published table. Publishes
+that move public chunks in one project queue on a transaction lock, then apply the change in one
+statement, upserts in lexeme order. A chunk that stays public and current keeps its postings.
+The log line carries chunk, posting and lexeme counts, never text or lexemes.
 
 ## Configuration
 
@@ -287,7 +350,11 @@ alone allows far larger rows. Both limits answer `engine.too_large`.
 pnpm --filter @drefyn/engine test
 COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine test:integration
 COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench
+COMPOSE_PROJECT_NAME=<stack> pnpm --filter @drefyn/engine bench -- publish
 ```
+
+`bench` runs every bench in turn; names after `--` run only those (`chunk`, `save`, `query`,
+`tree`, `published`, `publish`).
 
 Integration files end in `.integration.test.ts` and need a stack from `scripts/selfhost.sh up`.
 `test/versions.property.test.ts` is one too. They start a real parse host, skip with the reason

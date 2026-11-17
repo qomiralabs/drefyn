@@ -130,6 +130,25 @@ export const PUBLISHED_TABLES: readonly AllowEntry[] = [
     reason:
       'filter slots of the current published version only, so a public list never reads node_filter_rows',
   },
+  {
+    name: 'app.published_chunks',
+    reason: 'chunk copies of published versions, written by the publish transaction',
+  },
+  {
+    name: 'app.published_project_term_totals',
+    reason:
+      'chunk count and total length of public current chunks per project, for ranking; written by publish',
+  },
+  {
+    name: 'app.published_term_stats',
+    reason:
+      'document frequency of lexemes in public current chunks only, for ranking; written by publish',
+  },
+  {
+    name: 'app.published_chunk_terms',
+    reason:
+      'term frequency postings of public current chunks only, for ranking; written by publish',
+  },
 ];
 
 export const READER_FUNCTIONS: readonly AllowEntry[] = [
@@ -158,6 +177,11 @@ export const APP_FUNCTIONS: readonly AllowEntry[] = [
   {
     name: 'app.install_tier()',
     reason: 'the insert guard on organizations compares the new tier with the install tier',
+  },
+  {
+    name: 'app.heading_text(text[])',
+    reason:
+      'the generated search column on published_chunks calls it, so the role that inserts the row runs it',
   },
 ];
 

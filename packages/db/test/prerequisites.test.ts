@@ -137,6 +137,7 @@ describe('the missing vector message', () => {
 
 const UPGRADE_COMPOSE = 'bash scripts/selfhost.sh upgrade';
 const UPGRADE_FILE = 'deploy/postgres/upgrade/0001-auth-role.sql';
+const PROTECTED_UPGRADE_FILE = 'deploy/postgres/upgrade/0002-protected-reader-role.sql';
 
 function roleFailure(result: ReturnType<typeof evaluateRoles>) {
   if (result.ok) throw new Error('expected the role check to fail');
@@ -153,12 +154,46 @@ describe('evaluateRoles', () => {
     ...overrides,
   });
 
-  it('lists drefyn_auth with its upgrade script', () => {
-    expect(UPGRADE_ROLES).toEqual([{ role: 'drefyn_auth', script: UPGRADE_FILE }]);
+  const protectedReader = (overrides: Partial<RoleAccess> = {}): RoleAccess => ({
+    role: 'drefyn_protected_reader',
+    exists: true,
+    canConnect: true,
+    ...overrides,
+  });
+
+  it('lists each later role with its upgrade script and password key', () => {
+    expect(UPGRADE_ROLES).toEqual([
+      { role: 'drefyn_auth', script: UPGRADE_FILE, password: 'DREFYN_AUTH_PASSWORD' },
+      {
+        role: 'drefyn_protected_reader',
+        script: PROTECTED_UPGRADE_FILE,
+        password: 'DREFYN_PROTECTED_READER_PASSWORD',
+      },
+    ]);
   });
 
   it('passes when every role exists and may connect', () => {
-    expect(evaluateRoles([auth()])).toEqual({ ok: true });
+    expect(evaluateRoles([auth(), protectedReader()])).toEqual({ ok: true });
+  });
+
+  // The published visibility migration grants to it, so it must exist before migrate starts.
+  it('names a missing protected reader with its own script and password key', () => {
+    const result = roleFailure(
+      evaluateRoles([auth(), protectedReader({ exists: false, canConnect: false })]),
+    );
+    expect(result.problem).toBe('role_missing');
+    expect(result.message).toContain('drefyn_protected_reader');
+    expect(result.message).toContain(
+      `psql --no-psqlrc --dbname drefyn --file ${PROTECTED_UPGRADE_FILE}`,
+    );
+    expect(result.message).toContain('DREFYN_PROTECTED_READER_PASSWORD');
+    expect(result.message).not.toContain('DREFYN_AUTH_PASSWORD');
+  });
+
+  it('names a protected reader that cannot connect', () => {
+    const result = roleFailure(evaluateRoles([auth(), protectedReader({ canConnect: false })]));
+    expect(result.problem).toBe('role_cannot_connect');
+    expect(result.message).toContain('drefyn_protected_reader');
   });
 
   it('names a missing role, the compose command and the managed command', () => {

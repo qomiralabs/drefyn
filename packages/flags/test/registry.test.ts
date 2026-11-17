@@ -42,6 +42,17 @@ describe('the registry', () => {
     });
   });
 
+  it('holds the status rule flags, every one off unless someone turns it on', () => {
+    const status = registry.filter((flag) => flag.name.startsWith('status.'));
+    expect(status.map((flag) => [flag.name, flag.kind])).toEqual([
+      ['status.auto_state_changes', 'kill_switch'],
+      ['status.control_checks', 'release'],
+      ['status.majority_default', 'release'],
+      ['status.auto_apply_default', 'release'],
+    ]);
+    for (const flag of status) expect(flag).toMatchObject({ safeValue: false });
+  });
+
   it('gives every flag an owner, a description and a removal date after it was created', () => {
     for (const flag of flags) {
       expect(flag.owner.trim(), flag.name).not.toBe('');

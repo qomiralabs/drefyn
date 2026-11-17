@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { DEFAULT_MERGE_MAX_BLOCKS } from './policy.ts';
 
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_THREADS = 64;
 const MAX_QUEUE = 4_096;
 const MAX_WINDOW_MS = 86_400_000;
+const MAX_MERGE_BLOCKS = 1_000_000;
 
 // A print is a print plus a whole parse. The largest honest page took up to 3.6 s of thread time
 // on a CI runner, so it would die at the parse limit on a machine of that size.
@@ -26,6 +28,7 @@ const poolShape = z.object({
   projectBudgetMs: budget,
   windowMs: budget,
   killGraceMs: z.int().min(1).max(MAX_TIMEOUT_MS),
+  maxMergeBlocks: z.int().min(1).max(MAX_MERGE_BLOCKS),
 });
 
 export type ParsePoolConfig = z.infer<typeof poolShape>;
@@ -84,6 +87,7 @@ const envShape = {
   DREFYN_PARSE_PROJECT_BUDGET_MS: number(20_000),
   DREFYN_PARSE_WINDOW_MS: number(60_000),
   DREFYN_PARSE_KILL_GRACE_MS: number(2_000),
+  DREFYN_MDX_MERGE_MAX_BLOCKS: number(DEFAULT_MERGE_MAX_BLOCKS),
 };
 
 export const POOL_ENV_KEYS = Object.keys(envShape);
@@ -102,6 +106,7 @@ export const envSchema = z.object(envShape).transform((env) => ({
   projectBudgetMs: env.DREFYN_PARSE_PROJECT_BUDGET_MS,
   windowMs: env.DREFYN_PARSE_WINDOW_MS,
   killGraceMs: env.DREFYN_PARSE_KILL_GRACE_MS,
+  maxMergeBlocks: env.DREFYN_MDX_MERGE_MAX_BLOCKS,
 }));
 
 export function parsePoolConfig(
