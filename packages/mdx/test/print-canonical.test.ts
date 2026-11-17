@@ -120,6 +120,44 @@ describe('the faults found in the stock printer', () => {
     expect(print(`${nested}\n`)).toBe(nested);
   });
 
+  it('settles a tight item whose nested list is followed by html', () => {
+    const once = print('1. one\n    - nested\n    </div>\n');
+    expect(once).toBe('1. one\n\n   - nested\n\n    </div>');
+    expect(print(`${once}\n`)).toBe(once);
+  });
+
+  it('settles a tight item whose nested list is followed by a paragraph', () => {
+    const paragraph = (value: string) => ({
+      type: 'paragraph',
+      children: [{ type: 'text', value }],
+    });
+    const block = {
+      type: 'list',
+      ordered: true,
+      start: 1,
+      spread: false,
+      children: [
+        {
+          type: 'listItem',
+          spread: false,
+          children: [
+            paragraph('one'),
+            {
+              type: 'list',
+              ordered: false,
+              spread: false,
+              children: [{ type: 'listItem', spread: false, children: [paragraph('nested')] }],
+            },
+            paragraph('after'),
+          ],
+        },
+      ],
+    } as unknown as MdastBlock;
+    const once = printCanonical(block, 'md');
+    expect(once).toBe('1. one\n\n   - nested\n\n   after');
+    expect(print(`${once}\n`)).toBe(once);
+  });
+
   it('does not put a blank line between jsx children in a tight list', () => {
     const source = '- <A>\n    <B />\n    <C />\n  </A>\n- d\n';
     expect(print(source, 'mdx')).toBe(source.trimEnd());

@@ -37,21 +37,30 @@ function expectBlockIdempotent(block: MdxBlock, root: MdxRoot) {
   expect(printCanonical(only, dialect)).toBe(first);
 }
 
+const idempotent = fc.property(documentArbitrary, dialectArbitrary, (source, dialect) => {
+  const ast = reparse(source, dialect);
+  if (ast === undefined) return;
+  for (const block of ast.children) expectBlockIdempotent(block, ast);
+});
+
 describe('printCanonical', () => {
   it(
     'is idempotent on every block of every generated document',
     () => {
-      fc.assert(
-        fc.property(documentArbitrary, dialectArbitrary, (source, dialect) => {
-          const ast = reparse(source, dialect);
-          if (ast === undefined) return;
-          for (const block of ast.children) expectBlockIdempotent(block, ast);
-        }),
-        { numRuns: RUNS },
-      );
+      fc.assert(idempotent, { numRuns: RUNS });
     },
     TIMEOUT_MS,
   );
+
+  // Found by the gate on a fresh seed. A tight item printed a blank line before the html and
+  // read back spread.
+  it('is idempotent on a nested list followed by indented html in an ordered item', () => {
+    fc.assert(idempotent, { seed: 397597600, path: '1201:15:17', endOnFailure: true });
+    const source = '1. one\n    - nested\n    </div>\n';
+    const ast = reparse(source, 'md');
+    if (ast === undefined) throw new Error('the counterexample does not parse');
+    for (const block of ast.children) expectBlockIdempotent(block, ast);
+  });
 
   it(
     'is idempotent on every block of the pinned corpus',
