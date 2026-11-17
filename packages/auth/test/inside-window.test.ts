@@ -7,10 +7,10 @@ const WORK_MS = 60_000;
 const WINDOW_SECONDS = 900;
 const BUDGET_SECONDS = 60;
 
-const waited = async (left: number) => {
+const waited = async (left: number, windowSeconds = WINDOW_SECONDS, budget = BUDGET_SECONDS) => {
   const h = { sql: () => Promise.resolve(String(left)) } as unknown as Harness;
   const started = Date.now();
-  const done = insideWindow(h, WINDOW_SECONDS, BUDGET_SECONDS);
+  const done = insideWindow(h, windowSeconds, budget);
   await vi.runAllTimersAsync();
   await done;
   return Date.now() - started;
@@ -38,5 +38,17 @@ it('leaves a test its full time for work after the longest wait, at every second
   for (let left = 1; left <= WINDOW_SECONDS; left += 1) {
     const ms = await waited(left);
     expect(ms + WORK_MS).toBeLessThanOrEqual(insideWindowTimeout(BUDGET_SECONDS));
+  }
+});
+
+// The 200 parallel TOTP attempts count against a 5 minute window with a short budget.
+it('leaves the burst test its full time for work in a 5 minute window, at every second', async () => {
+  const windowSeconds = 300;
+  const budget = 15;
+  expect(await waited(budget + 1, windowSeconds, budget)).toBe(0);
+  for (let left = 1; left <= windowSeconds; left += 1) {
+    const ms = await waited(left, windowSeconds, budget);
+    expect(ms).toBe(left > budget ? 0 : (left + 1) * 1000);
+    expect(ms + WORK_MS).toBeLessThanOrEqual(insideWindowTimeout(budget));
   }
 });

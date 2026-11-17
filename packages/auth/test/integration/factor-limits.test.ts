@@ -2,13 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { UserId } from '@drefyn/tenancy';
 import { beforeAll, expect, it } from 'vitest';
 import type { AuthConfig } from '../../src/index.ts';
-import {
-  flowFor,
-  insideOneWindow,
-  newBrowser,
-  requestCode,
-  type Browser,
-} from './support/email.ts';
+import { flowFor, newBrowser, requestCode, type Browser } from './support/email.ts';
 import {
   challengesFor,
   challengesOf,
@@ -21,6 +15,7 @@ import {
   wrongTotp,
 } from './support/factor.ts';
 import { describeWithStack, harness, type Harness } from './support/harness.ts';
+import { insideWindow, insideWindowTimeout } from './support/passwords.ts';
 
 const fresh = harness();
 let h: Harness;
@@ -47,6 +42,9 @@ const post = (config: AuthConfig, b: Browser, kind: 'totp' | 'recovery_code', co
   return { context: b.context(), body };
 };
 
+// The 200 parallel attempts take about a second; this is ample and keeps the wait short.
+const BURST_BUDGET_SECONDS = 15;
+
 const failedOf = async (userId: UserId) =>
   Number(
     await h.sql(`select failed_attempts from app.totp_credentials where user_id = '${userId}';`),
@@ -57,22 +55,27 @@ describeWithStack('second factor limits and races', () => {
     h = await fresh();
   });
 
-  it('200 parallel attempts never pass the limit', async () => {
-    await insideOneWindow(h, 60);
-    const config = factorConfig({ DREFYN_AUTH_RATE_TOTP_VERIFY: '5/5m,20/1h,50/1d' });
-    const c = await challenged(config);
-    const challenges = challengesFor(h, config);
-    const wrong = wrongTotp(await currentCode(h));
-    const tries = Array.from({ length: 200 }, () => {
-      const { context, body } = post(config, c.b, 'totp', wrong);
-      return challenges.completeChallenge(context, body);
-    });
-    const codes = (await Promise.all(tries)).map((r) => (r.ok ? 'ok' : r.error.code));
-    const counted = codes.filter((code) => code !== 'AUTH_RATE_LIMITED');
-    expect(counted.length).toBeLessThanOrEqual(5);
-    expect(codes.filter((code) => code === 'AUTH_FACTOR_INVALID').length).toBeLessThanOrEqual(5);
-    expect(await sessionsOf(h, c.userId)).toBe(0);
-  });
+  it(
+    '200 parallel attempts never pass the limit',
+    async () => {
+      // One 5 minute window holds the whole burst, and so one hour and one day window too.
+      await insideWindow(h, 300, BURST_BUDGET_SECONDS);
+      const config = factorConfig({ DREFYN_AUTH_RATE_TOTP_VERIFY: '5/5m,20/1h,50/1d' });
+      const c = await challenged(config);
+      const challenges = challengesFor(h, config);
+      const wrong = wrongTotp(await currentCode(h));
+      const tries = Array.from({ length: 200 }, () => {
+        const { context, body } = post(config, c.b, 'totp', wrong);
+        return challenges.completeChallenge(context, body);
+      });
+      const codes = (await Promise.all(tries)).map((r) => (r.ok ? 'ok' : r.error.code));
+      const counted = codes.filter((code) => code !== 'AUTH_RATE_LIMITED');
+      expect(counted.length).toBeLessThanOrEqual(5);
+      expect(codes.filter((code) => code === 'AUTH_FACTOR_INVALID').length).toBeLessThanOrEqual(5);
+      expect(await sessionsOf(h, c.userId)).toBe(0);
+    },
+    insideWindowTimeout(BURST_BUDGET_SECONDS),
+  );
 
   it('the challenge passes at most 5 of 200 parallel attempts', async () => {
     const config = factorConfig();
@@ -190,8 +193,10 @@ describeWithStack('second factor limits and races', () => {
     expect(await sessionsOf(h, c.userId)).toBe(2);
   });
 
-  it('an attacker across 4 /64 prefixes never stops the owner’s recovery code', async () => {
-    await insideOneWindow(h, 120);
+  // No wait for a window: each prefix makes 40 attempts against 10 an hour, so however a
+  // window edge splits them, one side still holds 20 and is refused. The next test puts an
+  // edge in the middle of every prefix to show it.
+  const attack = async (edge: boolean) => {
     const config = factorConfig({
       DREFYN_AUTH_RATE_RECOVERY_CODE_VERIFY: '10/1h',
       DREFYN_AUTH_RATE_RECOVERY_CODE_VERIFY_IP: '30/1h',
@@ -203,6 +208,8 @@ describeWithStack('second factor limits and races', () => {
       // The attacker holds the first factor, so each sign in earns a challenge of five tries,
       // and keeps going until this network is refused.
       for (let round = 0; round < 8; round += 1) {
+        // What a window edge does: every count starts again from nothing.
+        if (edge && round === 4) await h.sql('delete from app.auth_rate_limits;');
         const b = await signInAgain(c.flow, c.email, newBrowser(`${prefix}::${String(round + 1)}`));
         for (let i = 0; i < 5; i += 1) {
           const { context, body } = post(config, b, 'recovery_code', '0'.repeat(24));
@@ -217,5 +224,13 @@ describeWithStack('second factor limits and races', () => {
     const done = await challenges.completeChallenge(context, body);
     if (!done.ok) throw done.error;
     expect(await challengesOf(h, c.userId)).toBe(0);
+  };
+
+  it('an attacker across 4 /64 prefixes never stops the owner’s recovery code', async () => {
+    await attack(false);
+  });
+
+  it('a window edge in the middle of each prefix still refuses all 4, and the owner gets in', async () => {
+    await attack(true);
   });
 });
