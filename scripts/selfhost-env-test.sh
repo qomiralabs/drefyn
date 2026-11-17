@@ -60,7 +60,7 @@ is_keyring() {
 # Any generated value in any output fails, whole or as its first 12 characters.
 no_value_in() {
   local file="$1" key v leaked=""
-  for key in $KEYS $TOTP $TOKEN DREFYN_AUTH_PASSWORD; do
+  for key in $KEYS $TOTP $TOKEN DREFYN_AUTH_PASSWORD DREFYN_PROTECTED_READER_PASSWORD; do
     v="$(value_of "$key")"
     # The keyring's id is not secret; its key starts after the colon.
     v="${v#*:}"

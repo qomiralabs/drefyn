@@ -29,12 +29,16 @@ const reader = (overrides: Partial<RoleFacts> = {}) =>
 const auth = (overrides: Partial<RoleFacts> = {}) =>
   facts({ currentUser: 'drefyn_auth', ...overrides });
 
+const protectedReader = (overrides: Partial<RoleFacts> = {}) =>
+  facts({ currentUser: 'drefyn_protected_reader', ...overrides });
+
 describe('POOL_ROLES', () => {
-  it('names one role per pool, the pre sign in role included', () => {
+  it('names one role per pool, the pre sign in and protected reader roles included', () => {
     expect(POOL_ROLES).toEqual({
       app: 'drefyn_app',
       reader: 'drefyn_public_reader',
       auth: 'drefyn_auth',
+      protected: 'drefyn_protected_reader',
     });
   });
 });
@@ -47,6 +51,10 @@ describe('roleProblems', () => {
 
   it('passes drefyn_auth on the auth pool', () => {
     expect(roleProblems(auth(), 'auth')).toEqual([]);
+  });
+
+  it('passes drefyn_protected_reader on the protected pool', () => {
+    expect(roleProblems(protectedReader(), 'protected')).toEqual([]);
   });
 
   it.each<[string, RoleFacts, PoolKind, RegExp]>([
@@ -74,6 +82,37 @@ describe('roleProblems', () => {
     ['the auth role on the app pool', auth(), 'app', /drefyn_app.*drefyn_auth/],
     ['the app role on the auth pool', facts(), 'auth', /drefyn_auth.*drefyn_app/],
     ['the reader on the auth pool', reader(), 'auth', /drefyn_auth.*drefyn_public_reader/],
+    // The public reader must never serve protected pages, nor the protected one public paths.
+    [
+      'the public reader on the protected pool',
+      reader(),
+      'protected',
+      /drefyn_protected_reader.*drefyn_public_reader/,
+    ],
+    [
+      'the protected reader on the public pool',
+      protectedReader(),
+      'reader',
+      /drefyn_public_reader.*drefyn_protected_reader/,
+    ],
+    [
+      'the app role on the protected pool',
+      facts(),
+      'protected',
+      /drefyn_protected_reader.*drefyn_app/,
+    ],
+    [
+      'a protected reader with BYPASSRLS',
+      protectedReader({ bypassRls: true }),
+      'protected',
+      /bypassrls/i,
+    ],
+    [
+      'a protected reader that is a member of drefyn_app',
+      protectedReader({ memberOf: ['drefyn_app'] }),
+      'protected',
+      /member.*drefyn_app/i,
+    ],
     ['an auth role with BYPASSRLS', auth({ bypassRls: true }), 'auth', /bypassrls/i],
     ['an auth role that is a superuser', auth({ superuser: true }), 'auth', /superuser/i],
     [

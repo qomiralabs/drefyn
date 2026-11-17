@@ -204,6 +204,87 @@ create policy published_read on app.bad_published_read for select to drefyn_publ
     up: () => `alter policy published_read on app.fixture_published
   using (organization_id = app.current_org());`,
   },
+  // The public guard on a published table, in its one exact form. Removing it would hand the
+  // public reader every protected row.
+  'a published table without its public guard': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['published_public_only', 'protected'],
+    up: () => 'drop policy published_public_only on app.fixture_published;',
+  },
+  'a public guard made permissive': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['permissive'],
+    up: () => `drop policy published_public_only on app.fixture_published;
+create policy published_public_only on app.fixture_published for select to drefyn_public_reader
+  using (visibility = 'public');`,
+  },
+  'a public guard that lets protected rows through': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['USING'],
+    up: () => `alter policy published_public_only on app.fixture_published
+  using (visibility in ('public', 'protected'));`,
+  },
+  'a public guard on the protected reader too': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['drefyn_protected_reader'],
+    up: () => `alter policy published_public_only on app.fixture_published
+  to drefyn_public_reader, drefyn_protected_reader;`,
+  },
+  'a public guard for every command': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    up: () => `drop policy published_public_only on app.fixture_published;
+create policy published_public_only on app.fixture_published as restrictive
+  to drefyn_public_reader using (visibility = 'public');`,
+  },
+  'a visibility column with a default': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['default'],
+    up: () => "alter table app.fixture_published alter column visibility set default 'public';",
+  },
+  'a nullable visibility column': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['text not null'],
+    up: () => 'alter table app.fixture_published alter column visibility drop not null;',
+  },
+  'a published table with no visibility column': {
+    rule: 'published_visibility',
+    object: 'app.fixture_published',
+    mentions: ['no visibility column'],
+    up: () => 'alter table app.fixture_published drop column visibility cascade;',
+  },
+  'a public guard on a table off the published list': {
+    rule: 'restrictive_policy',
+    object: 'app.bad_public_guard',
+    up: () => `${projectTable('bad_public_guard', ['visibility text not null'])}
+create policy published_public_only on app.bad_public_guard as restrictive
+  for select to drefyn_public_reader using (visibility = 'public');`,
+  },
+  'a published table without protected_read': {
+    rule: 'policy',
+    object: 'app.fixture_published',
+    mentions: ['protected_read', 'drefyn_protected_reader'],
+    up: () => 'drop policy protected_read on app.fixture_published;',
+  },
+  'a protected_read without the project clause': {
+    rule: 'policy',
+    object: 'app.fixture_published',
+    up: () => `alter policy protected_read on app.fixture_published
+  using (organization_id = app.current_org());`,
+  },
+  'a protected_read on a table off the published list': {
+    rule: 'policy',
+    object: 'app.bad_protected_read',
+    up: () => `${projectTable('bad_protected_read')}
+create policy protected_read on app.bad_protected_read for select to drefyn_protected_reader
+  using (organization_id = app.current_org() and project_id = app.current_project());`,
+  },
   'a project table with the project clause dropped': {
     rule: 'policy',
     object: 'app.bad_project_clause',
@@ -475,6 +556,57 @@ grant execute on function app.bad_reader_fn() to drefyn_public_reader;`,
     object: 'app.bad_public_fn()',
     up: () => `create function app.bad_public_fn() returns int language sql as $$ select 1 $$;
 grant execute on function app.bad_public_fn() to public;`,
+  },
+  // The protected reader reaches published copies only, read only, and passes nothing on.
+  'a protected reader grant on a draft table': {
+    rule: 'protected_grant',
+    object: 'app.fixture_drafts',
+    mentions: ['drefyn_protected_reader', 'SELECT'],
+    up: () => 'grant select on app.fixture_drafts to drefyn_protected_reader;',
+  },
+  'a protected reader column grant on a draft table': {
+    rule: 'protected_grant',
+    object: 'app.fixture_drafts',
+    mentions: ['drefyn_protected_reader', 'body'],
+    up: () => 'grant select (body) on app.fixture_drafts to drefyn_protected_reader;',
+  },
+  'a write grant to the protected reader on a published table': {
+    rule: 'protected_grant',
+    object: 'app.fixture_published',
+    mentions: ['drefyn_protected_reader', 'UPDATE'],
+    up: () => 'grant update on app.fixture_published to drefyn_protected_reader;',
+  },
+  'a protected reader select it can pass on': {
+    rule: 'protected_grant',
+    object: 'app.fixture_published',
+    mentions: ['grant option'],
+    up: () => 'grant select on app.fixture_published to drefyn_protected_reader with grant option;',
+  },
+  'a protected reader grant on a sequence': {
+    rule: 'protected_grant',
+    object: 'app.bad_protected_seq',
+    up: () => `create sequence app.bad_protected_seq;
+grant usage on sequence app.bad_protected_seq to drefyn_protected_reader;`,
+  },
+  'a protected reader grant on a function': {
+    rule: 'protected_grant',
+    object: 'app.bad_protected_fn()',
+    mentions: ['drefyn_protected_reader'],
+    up: () => `create function app.bad_protected_fn() returns int language sql as $$ select 1 $$;
+revoke execute on function app.bad_protected_fn() from public;
+grant execute on function app.bad_protected_fn() to drefyn_protected_reader;`,
+  },
+  'create on schema app for the protected reader': {
+    rule: 'protected_grant',
+    object: 'app',
+    mentions: ['CREATE'],
+    up: () => 'grant create on schema app to drefyn_protected_reader;',
+  },
+  'default privileges for the protected reader': {
+    rule: 'default_privileges',
+    object: 'drefyn_protected_reader',
+    up: () =>
+      'alter default privileges for role drefyn_owner in schema app grant select on tables to drefyn_protected_reader;',
   },
   'default privileges for the reader': {
     rule: 'default_privileges',
@@ -1226,6 +1358,19 @@ describeWithStack('catalog check fails on one bad migration per rule', () => {
     for (const word of bad.mentions ?? []) expect(hit?.message, word).toContain(word);
   });
 
+  // The shipped tables, not a fixture: a later migration that drops the guard fails the check.
+  it.each(['app.published_versions', 'app.published_filter_rows'])(
+    'exits 1 through check:catalog when %s loses its public guard',
+    async (table) => {
+      const db = await dbs.fresh('migrated');
+      await query(db.owner, `drop policy published_public_only on ${table}`);
+      const result = await checkCatalogCli(db.owner);
+      expect(result.code, describeFailure(result)).toBe(1);
+      expect(result.stderr).toContain(table);
+      expect(result.stderr).toContain('published_public_only');
+    },
+  );
+
   it('exits 1 through check:catalog, one line per problem naming the object', async () => {
     const db = await dbs.fresh('migrated');
     await query(db.owner, 'grant select on app.pgmigrations to drefyn_app');
@@ -1331,6 +1476,8 @@ describe('catalog case list', () => {
       'public_policy',
       'restrictive_policy',
       'organization_table',
+      'protected_grant',
+      'published_visibility',
     ] as const) {
       expect(rules.has(rule), rule).toBe(true);
     }

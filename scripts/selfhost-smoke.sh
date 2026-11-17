@@ -212,12 +212,12 @@ SQL
 expect_rows "pgvector 0.8.7 is installed in schema extensions, both owned by the superuser" \
   "extensions|0.8.7|postgres|postgres" "$vector"
 
-# Exactly these entries: the three roles may use the schema, nobody but the superuser may
+# Exactly these entries: the owner and both readers may use the schema, nobody but the superuser may
 # create in it, and PUBLIC has nothing.
 extension_acl="$(superuser_sql <<<"select nspacl from pg_namespace where nspname = 'extensions';")"
 # drefyn_auth reads identity tables only and never needs pgvector, so it gets no entry here.
-expect_rows "only owner, app and reader may use schema extensions, and only the superuser may create in it" \
-  "{postgres=UC/postgres,drefyn_owner=U/postgres,drefyn_app=U/postgres,drefyn_public_reader=U/postgres}" \
+expect_rows "only owner, app and the readers may use schema extensions, and only the superuser may create in it" \
+  "{postgres=UC/postgres,drefyn_owner=U/postgres,drefyn_app=U/postgres,drefyn_public_reader=U/postgres,drefyn_protected_reader=U/postgres}" \
   "$extension_acl"
 
 # The search path is a database setting, so a role can only drift from it by changing its
@@ -236,7 +236,8 @@ role_settings="$(superuser_sql <<'SQL'
 select r.rolname, r.rolconfig is null,
   (select count(*) from pg_db_role_setting s where s.setrole = r.oid)
 from pg_roles r
-where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader', 'drefyn_auth')
+where r.rolname in ('drefyn_owner', 'drefyn_app', 'drefyn_public_reader', 'drefyn_auth',
+  'drefyn_protected_reader')
 order by r.rolname;
 SQL
 )"
@@ -244,6 +245,7 @@ expect_rows "no role carries its own settings: rolconfig is null and pg_db_role_
   "drefyn_app|t|0
 drefyn_auth|t|0
 drefyn_owner|t|0
+drefyn_protected_reader|t|0
 drefyn_public_reader|t|0" "$role_settings"
 
 # PUBLIC gets nothing on the database: no CONNECT for roles created later, no TEMP for anyone.
@@ -258,8 +260,8 @@ from (
 ) entries;
 SQL
 )"
-expect_rows "only the four roles may connect, and PUBLIC has no rights on the database" \
-  "drefyn_app:CONNECT,drefyn_auth:CONNECT,drefyn_owner:CONNECT,drefyn_public_reader:CONNECT" \
+expect_rows "only the five roles may connect, and PUBLIC has no rights on the database" \
+  "drefyn_app:CONNECT,drefyn_auth:CONNECT,drefyn_owner:CONNECT,drefyn_protected_reader:CONNECT,drefyn_public_reader:CONNECT" \
   "$database_acl"
 
 # The same for the databases every cluster has, so a role made later has nowhere to go.
@@ -281,6 +283,8 @@ whoami="$(role_sql drefyn_public_reader drefyn_public_reader_password <<<'select
 expect_rows "drefyn_public_reader logs in over TCP with its password" "drefyn_public_reader" "$whoami"
 whoami="$(role_sql drefyn_auth drefyn_auth_password <<<'select current_user;' 2>&1 || true)"
 expect_rows "drefyn_auth logs in over TCP with its password" "drefyn_auth" "$whoami"
+whoami="$(role_sql drefyn_protected_reader drefyn_protected_reader_password <<<'select current_user;' 2>&1 || true)"
+expect_rows "drefyn_protected_reader logs in over TCP with its password" "drefyn_protected_reader" "$whoami"
 
 wrong="$("${compose[@]}" exec -T -e PGPASSWORD=not-the-password postgres \
   psql --no-psqlrc -qtA --host 127.0.0.1 --username drefyn_app --dbname drefyn -c 'select 1' 2>&1 || true)"
@@ -335,7 +339,7 @@ expect_denied() {
   fi
 }
 for pair in "drefyn_app drefyn_app_password" "drefyn_public_reader drefyn_public_reader_password" \
-  "drefyn_auth drefyn_auth_password"; do
+  "drefyn_auth drefyn_auth_password" "drefyn_protected_reader drefyn_protected_reader_password"; do
   read -r role secret <<<"$pair"
   expect_denied "$role" "$secret" "create table app.smoke (id int);" "permission denied for schema app"
   expect_denied "$role" "$secret" "create table public.smoke (id int);" "permission denied for schema public"
@@ -386,7 +390,8 @@ done
 canary="smokecanary$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 rerun="$("${compose[@]}" exec -T -e PGOPTIONS='-c log_statement=all' \
   -e DREFYN_OWNER_PASSWORD="$canary" -e DREFYN_APP_PASSWORD="$canary" \
-  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" -e DREFYN_AUTH_PASSWORD="$canary" postgres \
+  -e DREFYN_PUBLIC_READER_PASSWORD="$canary" -e DREFYN_AUTH_PASSWORD="$canary" \
+  -e DREFYN_PROTECTED_READER_PASSWORD="$canary" postgres \
   psql --no-psqlrc --username postgres --dbname drefyn --file /etc/drefyn/bootstrap.sql 2>&1 || true)"
 if [[ "$rerun" == *"the bootstrap has already run"* ]]; then
   pass "a second bootstrap stops before creating anything"

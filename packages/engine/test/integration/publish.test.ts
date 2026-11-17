@@ -135,6 +135,21 @@ select (p.content = v.content and p.fields = v.fields and p.type_id = n.type_id)
     expect(log).toBe(`user ${ACTOR.kind === 'user' ? ACTOR.userId : ''}`);
   });
 
+  it('marks the copy and the filter row public, also when an earlier version comes back', async () => {
+    const { nodeId, versionId: first } = await draft(home);
+    await built.engine.publish(publishInput(home, nodeId, first));
+    const second = await save(built, home, nodeId, first, '# Page\n\nOther words.\n');
+    await built.engine.publish(publishInput(home, nodeId, second.versionId));
+    await built.engine.publish(
+      publishInput(home, nodeId, first, { expectedHeadVersionId: second.versionId }),
+    );
+    const seen = await admin(`
+select (select string_agg(distinct visibility, ',') from app.published_versions
+         where node_id = '${nodeId}')
+       || ' ' || (select visibility from app.published_filter_rows where node_id = '${nodeId}');`);
+    expect(seen).toBe('public public');
+  });
+
   it('moves the current row to the new version, and back to an earlier one', async () => {
     const { nodeId, versionId: first } = await draft(home);
     await built.engine.publish(publishInput(home, nodeId, first));

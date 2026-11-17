@@ -331,11 +331,15 @@ describe('session queries', () => {
   it('reads each upgrade role by name, passing the names as a parameter', async () => {
     const { client, sent } = fakeClient((text, values) => {
       if (!text.includes('pg_roles') || text.includes('current_user')) return undefined;
-      expect(values).toEqual([['drefyn_auth']]);
-      return [{ role: 'drefyn_auth', exists: true, can_connect: false }];
+      expect(values).toEqual([['drefyn_auth', 'drefyn_protected_reader']]);
+      return [
+        { role: 'drefyn_auth', exists: true, can_connect: false },
+        { role: 'drefyn_protected_reader', exists: false, can_connect: false },
+      ];
     });
     expect(await sessionFor(client).requiredRoles()).toEqual([
       { role: 'drefyn_auth', exists: true, canConnect: false },
+      { role: 'drefyn_protected_reader', exists: false, canConnect: false },
     ]);
     // A missing role must not reach has_database_privilege by name, which would raise.
     const text = sent.find((s) => s.includes('has_database_privilege')) ?? '';
