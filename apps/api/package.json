@@ -14,7 +14,8 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:contract": "vitest run test/contract"
+    "test:contract": "vitest run test/contract",
+    "openapi": "node scripts/write-openapi.ts && prettier --write openapi/v1.json"
   },
   "dependencies": {
     "@drefyn/auth": "workspace:*",

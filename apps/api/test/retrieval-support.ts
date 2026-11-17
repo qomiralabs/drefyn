@@ -1,5 +1,5 @@
 import type { Retrieval, RetrieveInput, RetrieveResult } from '@drefyn/retrieval';
-import type { TenantRef } from '@drefyn/tenancy';
+import { idOf, type TenantRef } from '@drefyn/tenancy';
 import { vi } from 'vitest';
 import { createApp, type ApiDeps } from '../src/app.ts';
 import { mountRetrieval } from '../src/retrieve.ts';
@@ -16,8 +16,8 @@ export const RESULT: RetrieveResult = Object.freeze({
   hits: [
     {
       chunkId: '01a14984-4476-77ce-9335-2c3c3a59ab01',
-      nodeId: '01a14984-4476-77ce-9335-2c3c3a59ab02',
-      versionId: '01a14984-4476-77ce-9335-2c3c3a59ab03',
+      nodeId: idOf('nod', '01a14984-4476-77ce-9335-2c3c3a59ab02'),
+      versionId: idOf('ver', '01a14984-4476-77ce-9335-2c3c3a59ab03'),
       path: '/guides/install',
       title: 'Install',
       headingPath: ['Install', 'With Docker'],
@@ -25,7 +25,7 @@ export const RESULT: RetrieveResult = Object.freeze({
       rank: 1,
     },
   ],
-} as RetrieveResult);
+});
 
 export interface Recorded {
   readonly tenant: TenantRef;

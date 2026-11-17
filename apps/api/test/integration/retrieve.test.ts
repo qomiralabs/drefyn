@@ -81,7 +81,7 @@ describeWithStack('/v1 retrieval against Postgres with real keys', () => {
     studioA = await h.project(orgA, 'studio');
     docsB = await h.project(orgB, 'docs');
 
-    seededA = await seedDocs(h.sql, h.db, orgA, docsA, [
+    seededA = await seedDocs((text) => h.sql(text), h.db, orgA, docsA, [
       {
         slug: 'install',
         versions: [
@@ -103,10 +103,10 @@ describeWithStack('/v1 retrieval against Postgres with real keys', () => {
         ],
       },
     ]);
-    await seedDocs(h.sql, h.db, orgA, docsA2, [
+    await seedDocs((text) => h.sql(text), h.db, orgA, docsA2, [
       { slug: 'sibling', versions: [{ state: 'current', bodies: [`${SHARED} sibling text`] }] },
     ]);
-    seededB = await seedDocs(h.sql, h.db, orgB, docsB, [
+    seededB = await seedDocs((text) => h.sql(text), h.db, orgB, docsB, [
       { slug: 'theirs', versions: [{ state: 'current', bodies: [`${SHARED} their text`] }] },
     ]);
 
@@ -114,14 +114,16 @@ describeWithStack('/v1 retrieval against Postgres with real keys', () => {
     publishOnlyA = await h.key(orgA, ['docs:pages.publish']);
     studioReadA = await h.key(orgA, ['studio:content.read']);
     listedA = await h.key(orgA, ['docs:pages.read'], [docsA2]);
+    // Key ids are uuidv7, so the newest row is the key just made.
+    const newest = `(select id from app.api_keys order by id desc limit 1)`;
     revokedA = await h.key(orgA, ['docs:pages.read']);
+    await h.sql(`update app.api_keys set revoked_at = now() where id = ${newest};`);
     expiredA = await h.key(orgA, ['docs:pages.read']);
-    readB = await h.key(orgB, ['docs:pages.read']);
     await h.sql(
-      `update app.api_keys set revoked_at = now() where display_suffix = '${revokedA.slice(-4)}';
-       update app.api_keys set expires_at = now() - interval '1 minute'
-        where display_suffix = '${expiredA.slice(-4)}';`,
+      `update app.api_keys set created_at = now() - interval '2 hours',
+         expires_at = now() - interval '1 minute' where id = ${newest};`,
     );
+    readB = await h.key(orgB, ['docs:pages.read']);
 
     const env = h.env;
     const logger = createJsonLogger((line) => lines.push(line));
@@ -155,7 +157,7 @@ describeWithStack('/v1 retrieval against Postgres with real keys', () => {
   });
 
   it('answers with ranked public text from the key project, pinned to latest', async () => {
-    const result = await retrieve(docsA, q(`${SHARED} install`), readA);
+    const result = await retrieve(docsA, q(SHARED), readA);
     expect(result.status).toBe(200);
     expect(result.response.headers.get('content-type')).toMatch(/^application\/json/);
     expect(result.body.pin?.version).toBe('latest');

@@ -76,11 +76,12 @@ const path = (query: string, project = DOCS_PUBLIC) => `/v1/projects/${project}/
 async function get(
   app: ReturnType<typeof retrievalApp>['app'],
   url: string,
-  key: string | undefined = DOCS_KEY,
+  // Null sends no key at all.
+  key: string | null = DOCS_KEY,
 ) {
   const response = await app.request(
     url,
-    { headers: key === undefined ? {} : { authorization: key } },
+    { headers: key === null ? {} : { authorization: key } },
     socketEnv(),
   );
   const body = (await response.json()) as { error?: { code: string } } & Record<string, unknown>;
@@ -258,7 +259,7 @@ describe('GET /v1/projects/:projectId/retrieve', () => {
 
   it('refuses a missing or bad key with 401', async () => {
     const { app } = retrievalApp();
-    expect((await get(app, path('?query=a'), undefined)).code).toBe('auth.api_key_invalid');
+    expect((await get(app, path('?query=a'), null)).code).toBe('auth.api_key_invalid');
     expect((await get(app, path('?query=a'), 'Bearer nope')).code).toBe('auth.api_key_invalid');
   });
 
@@ -271,7 +272,7 @@ describe('GET /v1/projects/:projectId/retrieve', () => {
     }
     expect(retrieve).not.toHaveBeenCalled();
     // Without a key, the parameters are never looked at.
-    expect((await get(app, path(''), undefined)).status).toBe(401);
+    expect((await get(app, path(''), null)).status).toBe(401);
   });
 
   it('answers a library refusal with its own status and code', async () => {

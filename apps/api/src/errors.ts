@@ -11,9 +11,15 @@ export type ApiErrorCode =
   | 'api.too_large'
   | 'api.limit_reached'
   | 'api.unavailable'
-  | 'api.internal';
+  | 'api.internal'
+  | 'api.not_entitled'
+  // Retrieval keeps the library's own codes, the same ones MCP tools answer with.
+  | 'retrieval.bad_input'
+  | 'retrieval.version_not_found'
+  | 'retrieval.busy'
+  | 'retrieval.unavailable';
 
-export type ApiErrorStatus = 401 | 403 | 404 | 413 | 429 | 500 | 503;
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 413 | 429 | 500 | 503;
 
 interface CodeInfo {
   readonly status: ApiErrorStatus;
@@ -31,6 +37,11 @@ const CODES: Readonly<Record<ApiErrorCode, CodeInfo>> = {
   'api.limit_reached': { status: 429, message: 'The plan limit for this request is reached.' },
   'api.unavailable': { status: 503, message: 'The service is unavailable. Try again.' },
   'api.internal': { status: 500, message: 'Something went wrong on our side.' },
+  'api.not_entitled': { status: 403, message: 'The plan does not include this feature.' },
+  'retrieval.bad_input': { status: 400, message: 'The request parameters are not valid.' },
+  'retrieval.version_not_found': { status: 404, message: 'No such published version.' },
+  'retrieval.busy': { status: 503, message: 'Retrieval is busy. Try again.' },
+  'retrieval.unavailable': { status: 503, message: 'Retrieval is unavailable. Try again.' },
 };
 
 export const API_ERROR_CODES: readonly ApiErrorCode[] = Object.freeze(

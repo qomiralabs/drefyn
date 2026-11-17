@@ -24,11 +24,18 @@ import {
   type FlagClient,
   type FlagConfig,
 } from '@drefyn/flags';
+import {
+  createRetrieval,
+  parseRetrievalConfig,
+  publishedReader,
+  RetrievalConfigError,
+} from '@drefyn/retrieval';
 import { createAdaptorServer } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp, type ApiDeps, type ApiEnv } from './app.ts';
 import { ApiConfigError, parseApiConfig, type Env } from './config.ts';
 import { createJsonLogger, type ApiLogger, type LogFields } from './log.ts';
+import { mountRetrieval } from './retrieve.ts';
 
 // Inside compose's default 10 s stop grace, so requests finish before the kill.
 export const DRAIN_MS = 8000;
@@ -104,6 +111,7 @@ export async function startApi(env: Env, options: StartOptions = {}): Promise<Ru
   // Refuses the auth database URL and every auth secret before anything connects.
   const authConfig = parseApiAuthConfig(env);
   const flagConfig = loadFlagConfig(env);
+  const retrievalConfig = parseRetrievalConfig(env);
 
   const db = await (options.openDatabase ?? openApp)(env, logger);
   let published: PublishedDatabase;
@@ -130,6 +138,14 @@ export async function startApi(env: Env, options: StartOptions = {}): Promise<Ru
     },
   };
   const app = createApp(deps);
+  // One per process: the per organization in flight gate lives in it.
+  const retrieval = createRetrieval({
+    reader: publishedReader(published),
+    config: retrievalConfig,
+    flags,
+    logger,
+  });
+  mountRetrieval(app, deps, retrieval);
   options.mount?.(app, deps);
 
   // Global Request and Response stay Node's own, so nothing else in the process sees a swap.
@@ -200,6 +216,9 @@ export function describeStartFailure(error: unknown): LogFields {
       code: error.code,
       ...(error.key === undefined ? {} : { key: error.key }),
     };
+  }
+  if (error instanceof RetrievalConfigError) {
+    return { error: error.name, code: error.code, key: error.key, reason: error.message };
   }
   if (error instanceof DbError)
     return { error: error.name, code: error.code, reason: error.message };

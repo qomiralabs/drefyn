@@ -2,7 +2,7 @@ import type * as DbModule from '@drefyn/db';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RetrievalErrorCode, RetrieveResult } from '@drefyn/retrieval';
-import { toPublicId, type OrganizationId, type ProjectId } from '@drefyn/tenancy';
+import { idOf, toPublicId, type OrganizationId, type ProjectId } from '@drefyn/tenancy';
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -75,7 +75,7 @@ const url = (query: string) => `/v1/projects/${toPublicId('prj', DOCS_PROJECT)}/
 
 async function get(app: ReturnType<typeof retrievalApp>['app'], query: string, key = DOCS_KEY) {
   const response = await app.request(url(query), { headers: { authorization: key } }, socketEnv());
-  return { status: response.status, body: (await response.json()) as unknown };
+  return { status: response.status, body: await response.json() };
 }
 
 const uuid = fc.uuid({ version: 7 });
@@ -98,8 +98,8 @@ const results: fc.Arbitrary<RetrieveResult> = fc.record({
     .array(
       fc.record({
         chunkId: uuid,
-        nodeId: uuid,
-        versionId: uuid,
+        nodeId: uuid.map((id) => idOf('nod', id)),
+        versionId: uuid.map((id) => idOf('ver', id)),
         path: words.map((w) => `/${w}`),
         title: words,
         headingPath: fc.array(words, { maxLength: 4 }),
@@ -108,7 +108,7 @@ const results: fc.Arbitrary<RetrieveResult> = fc.record({
       { maxLength: 20 },
     )
     .map((hits) => hits.map((hit, at) => ({ ...hit, rank: at + 1 }))),
-}) as fc.Arbitrary<RetrieveResult>;
+});
 
 describe('the published OpenAPI document', () => {
   it('is what the code describes, so a route change cannot skip the document', () => {

@@ -30,6 +30,9 @@ export interface GuardOptions {
   readonly scope: ApiScope;
   // Off reads as a route that does not exist, so an unreleased feature says nothing about itself.
   readonly flag?: ReleaseFlagName;
+  // Whether the organization's plan includes the route's feature. False is 403; a throw fails
+  // closed as 503, since a plan that cannot be read says nothing either way.
+  readonly entitled?: (tenant: ProvedTenant) => Promise<boolean>;
   // The plan limit for this request, read from entitlements by the route.
   readonly limit?: (tenant: ProvedTenant) => Promise<LimitDecision>;
 }
@@ -85,8 +88,9 @@ async function flagOn(deps: ApiDeps, name: ReleaseFlagName, tenant: ProvedTenant
 }
 
 // The fixed order every /v1 project route runs: client address, key, scope, project, flag,
-// plan limit, then the handler. Each refusal after the key is proved is counted against the
-// client, so walking project ids with a good key is limited like guessing keys.
+// plan feature, plan limit, then the handler. Each refusal of the scope or the project is
+// counted against the client, so walking project ids with a good key is limited like guessing
+// keys.
 export function guard(
   deps: ApiDeps,
   options: GuardOptions,
@@ -142,6 +146,19 @@ export function guard(
 
     if (options.flag !== undefined && !(await flagOn(deps, options.flag, tenant))) {
       throw new ApiError('api.not_found');
+    }
+
+    if (options.entitled !== undefined) {
+      let allowed: boolean;
+      try {
+        allowed = await options.entitled(tenant);
+      } catch {
+        const { organizationId, projectId } = c.get('proved');
+        deps.logger.warn('api.entitlement_failed', { organizationId, projectId });
+        throw new ApiError('api.unavailable');
+      }
+      // Not counted as a failed check: the answer is the same for every project the key reaches.
+      if (!allowed) throw new ApiError('api.not_entitled');
     }
 
     if (options.limit !== undefined) {
