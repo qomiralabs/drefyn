@@ -44,7 +44,7 @@ describe('the scheduler', () => {
               run: (job) =>
                 new Promise((resolve) => {
                   running.push({
-                    key: 'source' in job ? job.source : job.tree,
+                    key: 'source' in job ? job.source : 'tree' in job ? job.tree : job.trees,
                     resolve: (answer) => {
                       if (answer.end === 'killed') live.delete(thread);
                       resolve(answer);
@@ -182,7 +182,10 @@ describe('thread time under a colluding group', () => {
             stop: () => Promise.resolve(),
             run: (job) =>
               new Promise((resolve) => {
-                running.push({ source: 'source' in job ? job.source : job.tree, resolve });
+                running.push({
+                  source: 'source' in job ? job.source : 'tree' in job ? job.tree : job.trees,
+                  resolve,
+                });
               }),
           }),
         });

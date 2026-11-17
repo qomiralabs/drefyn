@@ -10,6 +10,7 @@ describe('preTarget', () => {
     '/sign-in/reset',
     '/sign-in/link',
     '/sign-in/cli',
+    '/sign-in/factor',
     '/invite',
     '/invite/block',
   ])('takes %s', (path) => {

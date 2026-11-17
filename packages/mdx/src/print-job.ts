@@ -8,7 +8,11 @@ import type { MdxRoot, PrintResult } from './types.ts';
 
 const elapsed = (from: number, to: number) => Math.round((to - from) * 10) / 10;
 
-function printAndReparse(root: MdxRoot, policy: PrintJob['policy'], decodeMs: number): PrintResult {
+export function printAndReparse(
+  root: MdxRoot,
+  policy: PrintJob['policy'],
+  decodeMs: number,
+): PrintResult {
   const started = performance.now();
   const text = serialize(root, policy.limits);
   const printed = performance.now();

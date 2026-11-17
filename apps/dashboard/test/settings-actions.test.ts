@@ -23,6 +23,7 @@ const auth = {
     startStepUpCode: vi.fn(),
     verifyStepUpCode: vi.fn(),
   },
+  secondFactors: { status: vi.fn(), stepUpWithFactor: vi.fn(), removeFactor: vi.fn() },
   invitations: { invite: vi.fn() },
   members: { withdrawInvitation: vi.fn(), setDefaultProjectRole: vi.fn() },
   roles: { changeRole: vi.fn(), removeMember: vi.fn(), setProjectRole: vi.fn() },
@@ -132,10 +133,13 @@ describe('mail and cookies', () => {
 });
 
 describe('step up', () => {
+  const NOT_ENROLLED = { available: true, enrolled: false, recoveryCodesLeft: 0 };
+
   it('offers what the person has, and never reads a hash', async () => {
     auth.account.readAccount.mockResolvedValue(
       yes({ passwordSetAt: AT, identities: [{ provider: 'google' }] }),
     );
+    auth.secondFactors.status.mockResolvedValue(yes(NOT_ENROLLED));
     expect(await actions.stepUpChoices()).toEqual(
       yes({
         address: 'maya@acme.dev',
@@ -144,8 +148,70 @@ describe('step up', () => {
         email: true,
         google: true,
         github: false,
+        factor: false,
       }),
     );
+  });
+
+  it('says when the factor is the only way left', async () => {
+    auth.account.readAccount.mockResolvedValue(yes({ passwordSetAt: AT, identities: [] }));
+    auth.secondFactors.status.mockResolvedValue(yes({ ...NOT_ENROLLED, enrolled: true }));
+    const answer = await actions.stepUpChoices();
+    expect(answer.ok && answer.value.factor).toBe(true);
+  });
+
+  // The dialog still opens, and a refusal from the method it offers switches it over.
+  it('offers the other ways when the factor cannot be read', async () => {
+    auth.account.readAccount.mockResolvedValue(yes({ passwordSetAt: AT, identities: [] }));
+    auth.secondFactors.status.mockResolvedValue(no('AUTH_UNAVAILABLE'));
+    const answer = await actions.stepUpChoices();
+    expect(answer.ok && answer.value.factor).toBe(false);
+  });
+
+  it('steps up with a factor code of either kind, and never returns the code', async () => {
+    auth.secondFactors.stepUpWithFactor.mockResolvedValue(yes({}));
+    expect(await actions.stepUpWithFactor({ kind: 'recovery_code', code: 'abc' })).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(auth.secondFactors.stepUpWithFactor).toHaveBeenCalledWith(BROWSER, SESSION, {
+      kind: 'recovery_code',
+      code: 'abc',
+    });
+  });
+
+  // A client can send anything; an unknown kind is a TOTP code, which then fails its shape.
+  it('reads any other kind as a TOTP code', async () => {
+    auth.secondFactors.stepUpWithFactor.mockResolvedValue(no('AUTH_FACTOR_INVALID'));
+    const answer = await actions.stepUpWithFactor({ kind: 'sms' as 'totp', code: '123456' });
+    expect(answer).toEqual({
+      ok: false,
+      problem: { kind: 'refused', code: 'AUTH_FACTOR_INVALID' },
+    });
+    expect(auth.secondFactors.stepUpWithFactor).toHaveBeenCalledWith(BROWSER, SESSION, {
+      kind: 'totp',
+      code: '123456',
+    });
+  });
+
+  it('turns the factor off with a code and mails after the response', async () => {
+    auth.secondFactors.removeFactor.mockResolvedValue(yes({ send }));
+    expect(await actions.removeSecondFactor({ kind: 'totp', code: '123456' })).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(after).toHaveBeenCalledWith(send);
+  });
+
+  it('keeps the refusal of a wrong code closed', async () => {
+    auth.secondFactors.removeFactor.mockResolvedValue(
+      no('AUTH_RATE_LIMITED', { retryAfterSeconds: 300 }),
+    );
+    expect(await actions.removeSecondFactor({ kind: 'totp', code: '123456' })).toEqual({
+      ok: false,
+      problem: { kind: 'limited', minutes: 5 },
+    });
+    expect(after).not.toHaveBeenCalled();
   });
 
   it('returns the challenge and mails after the response', async () => {

@@ -6,8 +6,10 @@ import {
   stepUpChoices,
   stepUpSendCode,
   stepUpWithCode,
+  stepUpWithFactor,
   stepUpWithPassword,
 } from '../server/settings-actions.ts';
+import { FACTOR_PAUSED, FACTOR_WRONG } from './factor-words.ts';
 import { stepUpWays, type StepUpWay } from './models.ts';
 import { problemWords, settle, type StepUpChoices } from './results.ts';
 
@@ -28,19 +30,26 @@ type Step =
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed'; readonly words: string }
   | { readonly kind: 'password'; readonly choices: StepUpChoices }
-  | { readonly kind: 'code'; readonly choices: StepUpChoices; readonly challenge: string | null };
+  | { readonly kind: 'code'; readonly choices: StepUpChoices; readonly challenge: string | null }
+  | {
+      readonly kind: 'factor';
+      readonly choices: StepUpChoices;
+      readonly code: 'totp' | 'recovery_code';
+    };
 
 const FORM_ID = 'step-up-form';
 
 interface Props {
   // Finishes "... needs a sign in from the last 15 minutes."
   readonly what: string;
+  // The step asks every time, so the age of the last sign in is beside the point.
+  readonly always?: boolean;
   readonly onClose: (confirmed: boolean) => void;
 }
 
 // The common case first: the current password in the dialog, the other ways as plain links
 // under it, and the code replaces the password field in place.
-export function StepUpDialog({ what, onClose }: Props): ReactNode {
+export function StepUpDialog({ what, always = false, onClose }: Props): ReactNode {
   const pathname = usePathname();
   const [step, setStep] = useState<Step>({ kind: 'loading' });
   const [error, setError] = useState<string | undefined>();
@@ -67,7 +76,8 @@ export function StepUpDialog({ what, onClose }: Props): ReactNode {
         return;
       }
       const ways = stepUpWays(read.value);
-      if (ways.includes('password')) setStep({ kind: 'password', choices: read.value });
+      if (ways.includes('factor')) setStep({ kind: 'factor', choices: read.value, code: 'totp' });
+      else if (ways.includes('password')) setStep({ kind: 'password', choices: read.value });
       else if (ways.includes('email')) await requestCode(read.value);
       else setStep({ kind: 'code', choices: read.value, challenge: null });
     })();
@@ -78,19 +88,39 @@ export function StepUpDialog({ what, onClose }: Props): ReactNode {
 
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (step.kind !== 'password' && step.kind !== 'code') return;
+    if (step.kind === 'loading' || step.kind === 'failed') return;
     const typed = new FormData(event.currentTarget).get('secret');
     setBusy(true);
     setError(undefined);
     setWrong(false);
     const secret = typeof typed === 'string' ? typed : '';
-    const proved =
-      step.kind === 'password'
-        ? settle(await stepUpWithPassword(secret))
-        : settle(await stepUpWithCode(step.challenge ?? '', secret));
+    let proved;
+    if (step.kind === 'factor') {
+      proved = settle(await stepUpWithFactor({ kind: step.code, code: secret }));
+    } else if (step.kind === 'password') {
+      proved = settle(await stepUpWithPassword(secret));
+    } else {
+      proved = settle(await stepUpWithCode(step.challenge ?? '', secret));
+    }
     setBusy(false);
     if (proved.ok) {
       onClose(true);
+      return;
+    }
+    const refusal = proved.problem.kind === 'refused' ? proved.problem.code : null;
+    // The factor was turned on since the dialog opened: only it is accepted now.
+    if (refusal === 'AUTH_FACTOR_REQUIRED') {
+      setStep({ kind: 'factor', choices: step.choices, code: 'totp' });
+      return;
+    }
+    if (step.kind === 'factor') {
+      if (refusal === 'AUTH_FACTOR_INVALID') setWrong(true);
+      else if (refusal === 'AUTH_FACTOR_DISABLED') {
+        setStep({ ...step, code: 'recovery_code' });
+        setError(FACTOR_PAUSED);
+      } else if (proved.problem.kind === 'limited' && step.code === 'totp') {
+        setError(`${problemWords(proved.problem)} A recovery code still works.`);
+      } else setError(problemWords(proved.problem));
       return;
     }
     if (
@@ -104,11 +134,15 @@ export function StepUpDialog({ what, onClose }: Props): ReactNode {
     setError(problemWords(proved.problem));
   }
 
-  const choices = step.kind === 'password' || step.kind === 'code' ? step.choices : null;
+  const choices =
+    step.kind === 'password' || step.kind === 'code' || step.kind === 'factor'
+      ? step.choices
+      : null;
   const ways: readonly StepUpWay[] = choices === null ? [] : stepUpWays(choices);
   const back = `next=${encodeURIComponent(pathname)}`;
-  const description =
-    choices === null
+  const description = always
+    ? `${what} asks you to confirm it is you each time, however recent your last sign in.`
+    : choices === null
       ? `${what} needs a sign in from the last 15 minutes.`
       : `${what} needs a sign in from the last 15 minutes. Your last one was ${ageWords(
           choices.lastSignIn,
@@ -159,7 +193,22 @@ export function StepUpDialog({ what, onClose }: Props): ReactNode {
             readOnly
             hidden
           />
-          {step.kind === 'password' ? (
+          {step.kind === 'factor' ? (
+            <TextField
+              key={step.code}
+              id="step-up-factor"
+              name="secret"
+              label={
+                step.code === 'totp' ? '6 digit code from your app' : 'One of your recovery codes'
+              }
+              inputMode={step.code === 'totp' ? 'numeric' : 'text'}
+              autoComplete="one-time-code"
+              spellCheck={false}
+              maxLength={step.code === 'totp' ? 7 : 40}
+              required
+              {...(wrong ? { error: FACTOR_WRONG } : {})}
+            />
+          ) : step.kind === 'password' ? (
             <TextField
               key="password"
               id="step-up-password"
@@ -186,6 +235,19 @@ export function StepUpDialog({ what, onClose }: Props): ReactNode {
             />
           )}
           <p className="flex flex-wrap gap-x-16 gap-y-4">
+            {step.kind === 'factor' ? (
+              <Button
+                variant="quiet"
+                size="sm"
+                onClick={() => {
+                  setWrong(false);
+                  setError(undefined);
+                  setStep({ ...step, code: step.code === 'totp' ? 'recovery_code' : 'totp' });
+                }}
+              >
+                {step.code === 'totp' ? 'Use a recovery code instead' : 'Use my app instead'}
+              </Button>
+            ) : null}
             {step.kind === 'password' && ways.includes('email') ? (
               <Button variant="quiet" size="sm" onClick={() => void requestCode(choices)}>
                 Email me a code instead

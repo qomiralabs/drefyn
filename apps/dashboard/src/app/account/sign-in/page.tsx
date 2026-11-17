@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import { dashboardAuth } from '../../../server/auth.ts';
+import { factorFacts } from '../../../server/factor-status.ts';
 import { guardAccountHome } from '../../../server/guard.ts';
 import { identityRows } from '../../../server/settings-views.ts';
 import { failureReference } from '../../../server/sign-in-support.ts';
 import { browserName } from '../../../settings/browser-name.ts';
+import { factorNoticeFrom } from '../../../settings/factor-words.ts';
 import { MethodsScreen } from '../../../settings/methods.tsx';
 import { LoadProblem } from '../../../settings/parts.tsx';
 
@@ -31,12 +33,15 @@ export default async function MethodsPage({ searchParams }: Props) {
     );
   }
   const sessions = await auth.sessions.listSessions(session).catch(() => []);
+  const factor = await factorFacts(session);
   const { value } = read;
-  const { error } = await searchParams;
+  const query = await searchParams;
   return (
     <MethodsScreen
-      providerFailed={error === 'provider'}
+      providerFailed={query['error'] === 'provider'}
+      factorNotice={factorNoticeFrom(query)}
       facts={{
+        factor,
         email: value.email,
         emailOn: auth.methods.email,
         passwordsOn: auth.methods.password,

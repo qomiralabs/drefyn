@@ -3,6 +3,7 @@ import { organizationId, projectId } from '@drefyn/tenancy';
 import { describe, expect, it } from 'vitest';
 import { createParseClient } from '../src/client.ts';
 import { runJob } from '../src/jobs.ts';
+import { mergePage } from '../src/merge-job.ts';
 import type { MdxRoot, ReaderPage } from '../src/index.ts';
 import { CLIENT, isolatedPolicy, parsed } from './helpers.ts';
 
@@ -46,6 +47,16 @@ describe('a job that asks for reader text', () => {
 
   it('has no reader text when the print is refused', () => {
     expect(runJob({ tree: '{', policy, reader: true })).toMatchObject({ ok: false });
+  });
+
+  it('hands a merge to the merge and adds no reader text', () => {
+    const base = parsed('# Guide\n\nOne.\n', 'md');
+    const ours = parsed('# Guide\n\nOne, ours.\n', 'md');
+    const job = { trees: JSON.stringify({ base, ours, theirs: base }), policy, maxBlocks: 100 };
+    const result = runJob(job);
+    expect(result).toEqual(mergePage(job));
+    expect(result).toMatchObject({ ok: true, value: { outcome: { kind: 'clean' } } });
+    expect(readerOf(result)).toBeUndefined();
   });
 });
 

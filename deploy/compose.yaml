@@ -186,7 +186,53 @@ services:
     stop_grace_period: 12s
     restart: unless-stopped
 
+  # Public docs search. Off by default until the app tier joins the stack; start it with the stack
+  # by adding search to COMPOSE_PROFILES for scripts/selfhost.sh up. The server is GPL-3.0 and runs
+  # as its own process, reached only over HTTP; nothing links it. Readers never reach it: the app
+  # tier searches through its proxy with short lived scoped keys.
+  typesense:
+    profiles: [search]
+    image: typesense/typesense:30.2@sha256:610f2d34b1f93d00762869da2c67736775e5798d19a2c8b91b014b8a0cc1e110
+    # The image has no non root user and the volume starts owned by root, so it runs as root with
+    # every capability dropped. Compose copies the secret into the container before start, so the
+    # root filesystem cannot be read only, as with postgres.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Typesense sizes several thread pools by core count. The request pool is fixed below; the rest
+    # came to about 150 threads on 11 cores, so this leaves room for a large host.
+    pids_limit: 1024
+    # The index lives in memory, so this bounds how many pages one stack can hold.
+    mem_limit: ${DREFYN_TYPESENSE_MEMORY_LIMIT:-1g}
+    # The admin key arrives as a secret file and is read into the server's own environment at
+    # start, so it never shows in docker inspect or on the command line.
+    entrypoint:
+      - /usr/bin/sh
+      - -c
+      - 'TYPESENSE_API_KEY="$$(cat /run/secrets/drefyn_search_admin_key)" exec /opt/typesense-server --data-dir /data --api-port 8108 --enable-cors=false --thread-pool-size 32'
+    secrets:
+      - drefyn_search_admin_key
+    volumes:
+      - searchdata:/data
+    ports:
+      - 127.0.0.1:${DREFYN_TYPESENSE_PORT:-58108}:8108
+    # No curl in the image, so bash asks /health over its own TCP device.
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8108 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && grep -q "\"ok\":true" <&3'
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
+    stop_grace_period: 15s
+    restart: unless-stopped
+
 secrets:
+  drefyn_search_admin_key:
+    environment: DREFYN_SEARCH_ADMIN_KEY
   postgres_password:
     environment: DREFYN_POSTGRES_PASSWORD
   drefyn_owner_password:
@@ -218,5 +264,10 @@ volumes:
     # left under the same project name. It comes from deploy/.env, so plain docker compose and
     # the scripts always write the same label; newer Compose offers to recreate a volume whose
     # labels changed, which would delete the data.
+    labels:
+      com.drefyn.selfhost.stack-id: ${DREFYN_STACK_ID:?add DREFYN_STACK_ID with any random value to deploy/.env; scripts/selfhost.sh up writes it in a new file}
+  # The search index: copies of published pages only. Labelled like pgdata, so the same guard
+  # covers it.
+  searchdata:
     labels:
       com.drefyn.selfhost.stack-id: ${DREFYN_STACK_ID:?add DREFYN_STACK_ID with any random value to deploy/.env; scripts/selfhost.sh up writes it in a new file}

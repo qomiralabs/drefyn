@@ -956,6 +956,7 @@ describeWithStack('the engine tables', () => {
       );
       expect(found.trim().split('\n')).toEqual([
         'content_types|content_types_tenant_stats|{d,f}',
+        'git_bindings|git_bindings_tenant_stats|{d,f}',
         'node_versions|node_versions_tenant_stats|{d,f}',
         'nodes|nodes_tenant_stats|{d,f}',
         // Postings are not a foreign key target: their candidate reads plan on these.

@@ -117,6 +117,19 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: var(--dr-space-16);
 }
+/* An authenticator code is 6 digits; a recovery code is free text with no slots. */
+.auth-code[data-slots='6'] {
+  width: calc(var(--pitch) * 6 + var(--dr-space-16));
+  background-size: calc(var(--pitch) * 6) var(--dr-stroke-hairline);
+}
+.auth-code[data-slots='none'] {
+  width: 100%;
+  height: var(--dr-size-control-lg);
+  padding: 0 var(--dr-space-12);
+  background-image: none;
+  font: var(--dr-type-code);
+  letter-spacing: normal;
+}
 .auth-code:focus-visible {
   outline: var(--dr-stroke-focus) solid var(--dr-focus-ring);
   outline-offset: var(--dr-stroke-focus-offset);

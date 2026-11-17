@@ -55,6 +55,18 @@ export const egressAllowList = [
       'loopback test server that counts connections from a sealed parse thread; it binds 127.0.0.1 and never opens a connection',
   },
   {
+    path: 'packages/search/src/client.ts',
+    reason:
+      'calls Typesense on the private network; the origin is deployment config, never customer input, and paths are built from validated ids, with a deadline, no redirects and a size cap on the answer',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'packages/search/test/integration/route.e2e.test.ts',
+    reason:
+      'stands up a loopback site host on 127.0.0.1 and calls it to prove the search route over HTTP; never customer input',
+    only: [{ module: 'node:http', imports: ['createServer'] }, { global: 'fetch' }],
+  },
+  {
     path: 'packages/auth/src/oauth/fetch.ts',
     reason:
       'OAuth token, user and JWKS calls to four provider hosts fixed in code; https only, no redirects, 5 s and 1 MiB caps; no customer input reaches the URL',
@@ -107,5 +119,29 @@ export const egressAllowList = [
     reason:
       'test preload that narrows the global fetch of the e2e dashboard servers: provider hosts go to the loopback fake and everything else is refused; it widens nothing and no build loads it',
     only: [{ global: 'fetch', reads: true }],
+  },
+  {
+    path: 'packages/billing-contract/src/client.ts',
+    reason:
+      'calls the billing provider on the private network; the URL is DREFYN_BILLING_URL from deployment config, never customer input, with a timeout, no redirects and a size cap on the answer',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'packages/billing-contract/src/contract-suite.ts',
+    reason:
+      'contract checks a test run points at a provider it names, the loopback fake here or a test deployment in the hosted repo; never customer input, each call under a timeout',
+    only: [{ global: 'fetch' }],
+  },
+  {
+    path: 'packages/billing-contract/src/fake.ts',
+    reason:
+      'in memory billing provider for tests and e2e; it accepts connections on 127.0.0.1 and never opens one',
+    only: [{ module: 'node:http', imports: ['createServer'] }],
+  },
+  {
+    path: 'packages/billing-contract/test/fake.test.ts',
+    reason:
+      'sends hand made requests to a fake provider the same test started on 127.0.0.1, to reach refusals the client never sends; never customer input',
+    only: [{ global: 'fetch' }],
   },
 ] as const satisfies readonly EgressAllowEntry[];

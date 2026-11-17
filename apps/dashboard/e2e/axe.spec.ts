@@ -2,6 +2,7 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { expect } from '@playwright/test';
 import { authStatePaths, SELF_HOSTED } from './auth-states.ts';
 import {
+  FACTOR_PAGES,
   inbox,
   MOBILE,
   ROUTES,
@@ -34,6 +35,23 @@ for (const [state, path] of Object.entries(ROUTES)) {
               `${v.id} (${v.nodes.length}): ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`,
           ),
         ).toEqual([]);
+      });
+    }
+  }
+}
+
+for (const state of FACTOR_PAGES) {
+  for (const theme of THEMES) {
+    for (const width of WIDTHS) {
+      test(`the factor ${state} page has no axe violations in ${theme} at ${width}`, async ({
+        page,
+      }) => {
+        if (width === '390') await page.setViewportSize(MOBILE);
+        await page.emulateMedia({ colorScheme: theme });
+        await page.goto(`/settings-states/factor/${state}`);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+        expect(violations.map((v) => v.id)).toEqual([]);
       });
     }
   }
