@@ -20,6 +20,20 @@ const DEBUG_PORT = 9334;
 const REPORTS = fileURLToPath(new URL('../test-results/lighthouse/', import.meta.url));
 const gzip = (body: Buffer | string) => gzipSync(body, { level: 9 }).length;
 
+// Which element Lighthouse timed and the priority each image loaded at, so a page that meets
+// the LCP budget by timing something else says so in the log.
+function lcpElement(lhr: { audits: Record<string, { details?: unknown }> }): string {
+  const breakdown = lhr.audits['lcp-breakdown-insight']?.details as
+    { items?: { type?: string; selector?: string }[] } | undefined;
+  const node = breakdown?.items?.find((item) => item.type === 'node');
+  const requests = lhr.audits['network-requests']?.details as
+    { items?: { url?: string; resourceType?: string; priority?: string }[] } | undefined;
+  const images = (requests?.items ?? [])
+    .filter((r) => r.resourceType === 'Image')
+    .map((r) => `${new URL(r.url ?? '', 'http://x').pathname} ${r.priority ?? 'unknown'}`);
+  return `${node?.selector ?? 'an unknown element'}${images.length > 0 ? `, images ${images.join(', ')}` : ''}`;
+}
+
 // The project runs one test at a time, since a score is noise when a neighbour shares the
 // CPU. Not serial: one page over budget must not hide the pages after it.
 test.describe.configure({ mode: 'default' });
@@ -67,7 +81,7 @@ test.describe('Lighthouse mobile', () => {
         .filter((audit) => audit.score !== null && audit.score < 1)
         .map((audit) => audit.id);
       console.log(
-        `lighthouse ${target.id}: ${LIGHTHOUSE_CATEGORIES.map((c) => `${c} ${String(scores[c])}`).join(', ')}, LCP ${String(Math.round(lcp))} ms`,
+        `lighthouse ${target.id}: ${LIGHTHOUSE_CATEGORIES.map((c) => `${c} ${String(scores[c])}`).join(', ')}, LCP ${String(Math.round(lcp))} ms on ${lcpElement(lhr)}`,
       );
       expect(
         lighthouseProblems(target.surface, scores, lcp),

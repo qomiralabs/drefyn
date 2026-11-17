@@ -116,7 +116,11 @@ interface JsonSpec {
   tests: {
     status: string;
     annotations?: { type: string }[];
-    results: { error?: { message?: string }; annotations?: { type: string }[] }[];
+    results: {
+      error?: { message?: string };
+      annotations?: { type: string }[];
+      stdout?: { text?: string }[];
+    }[];
   }[];
 }
 interface JsonSuite {
@@ -147,6 +151,28 @@ export function outcomes(report: { suites?: JsonSuite[] }): Outcome[] {
   };
   for (const suite of report.suites ?? []) walk(suite);
   return found;
+}
+
+// The Lighthouse lines a run printed, so a missed control shows what was measured and not
+// only that the run passed.
+export function measured(report: { suites?: JsonSuite[] }): string[] {
+  const lines: string[] = [];
+  const walk = (suite: JsonSuite) => {
+    for (const spec of suite.specs ?? []) {
+      for (const t of spec.tests) {
+        for (const r of t.results) {
+          for (const out of r.stdout ?? []) {
+            for (const line of (out.text ?? '').split('\n')) {
+              if (line.startsWith('lighthouse ')) lines.push(line.trim());
+            }
+          }
+        }
+      }
+    }
+    for (const child of suite.suites ?? []) walk(child);
+  };
+  for (const suite of report.suites ?? []) walk(suite);
+  return lines;
 }
 
 // Empty when the run did what the control expects; otherwise what went wrong.
@@ -217,6 +243,7 @@ function run(control: Control): string[] {
     }
     const errors = (parsed.errors ?? []).map((e) => e.message ?? '').join('\n');
     const results = outcomes(parsed);
+    for (const line of measured(parsed)) console.log(`  ${line}`);
     for (const r of results) {
       console.log(`  ${r.status.padEnd(10)} ${r.title}${r.warned ? ' (warning)' : ''}`);
       if (r.status !== 'unexpected') continue;
