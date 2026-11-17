@@ -15,6 +15,7 @@
         "docker/",
         ".changeset/",
         "packages/egress/",
+        "packages/ai/",
         "packages/flags/",
         "packages/address/",
         "packages/seal/",
