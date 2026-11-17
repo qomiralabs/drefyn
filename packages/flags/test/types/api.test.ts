@@ -41,6 +41,7 @@ describe('flag names', () => {
       | 'email.smtp_delivery'
       | 'engine.writes'
       | 'engine.chunk_at_write'
+      | 'docs.git_sync'
       | 'auth.team_sso'
       | 'status.auto_state_changes'
       | 'status.control_checks'

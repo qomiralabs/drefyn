@@ -1,0 +1,85 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "DEFAULT_TIMEOUT",
+      "kind": "const",
+      "exported": true,
+      "signature": "DEFAULT_TIMEOUT: float",
+      "doc": null,
+      "startLine": 7
+    },
+    {
+      "name": "RETRIES",
+      "kind": "const",
+      "exported": false,
+      "signature": "RETRIES",
+      "doc": null,
+      "startLine": 8
+    },
+    {
+      "name": "connect",
+      "kind": "function",
+      "exported": true,
+      "signature": "def connect(url: str, *, timeout: float = DEFAULT_TIMEOUT) -> \"Client\"",
+      "doc": "Opens a client.\n\nThe url must be https.",
+      "startLine": 12
+    },
+    {
+      "name": "stream",
+      "kind": "function",
+      "exported": false,
+      "signature": "async def stream(n: int) -> Iterator[int]",
+      "doc": null,
+      "startLine": 24
+    },
+    {
+      "name": "Client",
+      "kind": "class",
+      "exported": true,
+      "signature": "class Client(object)",
+      "doc": "Talks to the API.",
+      "startLine": 28
+    },
+    {
+      "name": "Client.__init__",
+      "kind": "method",
+      "exported": true,
+      "signature": "def __init__(self, url: str) -> None",
+      "doc": null,
+      "startLine": 31
+    },
+    {
+      "name": "Client.base",
+      "kind": "method",
+      "exported": true,
+      "signature": "def base(self) -> str",
+      "doc": "The base url.",
+      "startLine": 35
+    },
+    {
+      "name": "Client._sign",
+      "kind": "method",
+      "exported": false,
+      "signature": "def _sign(self, body: bytes) -> bytes",
+      "doc": null,
+      "startLine": 39
+    },
+    {
+      "name": "Client.version",
+      "kind": "method",
+      "exported": true,
+      "signature": "def version() -> str",
+      "doc": null,
+      "startLine": 43
+    },
+    {
+      "name": "_Hidden",
+      "kind": "class",
+      "exported": false,
+      "signature": "class _Hidden",
+      "doc": null,
+      "startLine": 47
+    }
+  ]
+}

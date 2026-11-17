@@ -1,0 +1,5 @@
+const fastify = require('fastify')();
+
+fastify.get('/items', async () => []);
+fastify.route({ method: 'PUT', url: '/items/:id', handler: update });
+fastify.route({ method: ['GET', 'HEAD'], url: '/items/:id/raw', handler: raw });

@@ -1,0 +1,88 @@
+import { EventEmitter } from 'node:events';
+
+/**
+ * Options for a client.
+ *
+ * Every field is optional.
+ */
+export interface ClientOptions<T = unknown> extends Base {
+  readonly baseUrl?: string;
+  readonly extra?: T;
+}
+
+/** A user id. */
+export type UserId = string & { readonly brand: 'UserId' };
+
+export const DEFAULT_TIMEOUT_MS: number = 5_000;
+
+const internalRetries = 3,
+  internalDelay = 10;
+
+/**
+ * Creates a client.
+ * @param options - how to connect
+ */
+export function createClient(
+  options: ClientOptions,
+  retries = internalRetries,
+): Client {
+  return new Client(options, retries);
+}
+
+export async function* pages<T>(fetchPage: (n: number) => Promise<T[]>): AsyncGenerator<T> {
+  yield* await fetchPage(0);
+}
+
+/** Talks to the API. */
+export class Client extends EventEmitter {
+  #secret = '';
+
+  constructor(
+    private readonly options: ClientOptions,
+    readonly retries: number,
+  ) {
+    super();
+  }
+
+  /** Lists users. */
+  async listUsers(limit?: number): Promise<UserId[]> {
+    return [];
+  }
+
+  private sign(body: string): string {
+    return body + this.#secret;
+  }
+
+  protected guard(): void {}
+
+  static create(): Client {
+    return new Client({}, 0);
+  }
+}
+
+export abstract class Store {
+  abstract get(key: string): Promise<string | undefined>;
+}
+
+export enum Role {
+  Admin = 'admin',
+  Member = 'member',
+}
+
+export const toId = (value: string): UserId => value as UserId;
+
+function helper(): void {}
+
+export { helper };
+
+export function overloaded(value: string): string;
+export function overloaded(value: number): number;
+export function overloaded(value: string | number): string | number {
+  return value;
+}
+
+export default function main(): void {}
+
+declare function ambient(name: string): void;
+
+let notConst = 1;

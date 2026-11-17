@@ -1,0 +1,75 @@
+//! The Acme client.
+
+use std::fmt;
+
+/// How long a call waits.
+pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
+
+pub(crate) static INTERNAL: &str = "x";
+
+/// Talks to the API.
+///
+/// Cheap to clone.
+#[derive(Clone, Debug)]
+pub struct Client {
+    base: String,
+}
+
+pub struct Pair(pub u8, pub u8);
+
+/// What went wrong.
+pub enum Error {
+    Timeout,
+    Status(u16),
+}
+
+/** Sends requests. */
+pub trait Transport: Send + Sync {
+    /// Sends one request.
+    fn send(&self, body: &[u8]) -> std::result::Result<Vec<u8>, Error>;
+
+    fn name(&self) -> &str {
+        "transport"
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+impl Client {
+    /// Builds a client.
+    pub fn new(base: impl Into<String>) -> Self {
+        Self { base: base.into() }
+    }
+
+    fn sign(&self) -> u8 {
+        0
+    }
+
+    pub async fn list<T>(&self, limit: usize) -> Result<Vec<T>>
+    where
+        T: fmt::Debug,
+    {
+        Ok(Vec::new())
+    }
+}
+
+impl fmt::Display for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.base)
+    }
+}
+
+pub mod auth {
+    /// A bearer token.
+    pub fn token() -> String {
+        String::new()
+    }
+
+    fn secret() {}
+}
+
+mod private {
+    pub fn hidden() {}
+}
+
+fn helper() {}

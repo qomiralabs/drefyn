@@ -1,0 +1,48 @@
+"""Client for the Acme API."""
+
+from typing import Iterator
+
+__all__ = ["Client", "connect", "DEFAULT_TIMEOUT"]
+
+DEFAULT_TIMEOUT: float = 5.0
+RETRIES = 3
+_cache = {}
+
+
+def connect(
+    url: str,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> "Client":
+    """Opens a client.
+
+    The url must be https.
+    """
+    return Client(url)
+
+
+async def stream(n: int) -> Iterator[int]:
+    yield n
+
+
+class Client(object):
+    '''Talks to the API.'''
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @property
+    def base(self) -> str:
+        """The base url."""
+        return self.url
+
+    def _sign(self, body: bytes) -> bytes:
+        return body
+
+    @staticmethod
+    def version() -> str:
+        return "1"
+
+
+class _Hidden:
+    pass

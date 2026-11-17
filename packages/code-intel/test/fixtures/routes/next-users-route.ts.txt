@@ -1,0 +1,7 @@
+export async function GET(request: Request): Promise<Response> {
+  return new Response(request.url);
+}
+
+export const DELETE = async (): Promise<Response> => new Response(null);
+
+export function helper(): void {}

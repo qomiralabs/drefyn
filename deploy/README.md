@@ -3,9 +3,10 @@
 Docker Compose files for running Drefyn yourself. Today the stack is Postgres with pgvector;
 other services join it as they are built.
 
-The parse host and the API service do not start with the stack. They are off behind the
-`parse` and `api` compose profiles until the app tier joins it; `COMPOSE_PROFILES=api,parse`
-turns both on. See [The API service](#the-api-service) and [The parse host](#the-parse-host).
+The parse host, the API service and search do not start with the stack. They are off behind
+the `parse`, `api` and `search` compose profiles until the app tier joins it;
+`COMPOSE_PROFILES=api,parse,search` turns all three on. See
+[The API service](#the-api-service), [Search](#search) and [The parse host](#the-parse-host).
 
 ## Requirements
 
@@ -562,6 +563,38 @@ On `SIGTERM` it stops taking connections, lets requests in flight finish for up 
 then closes its pools and exits 0. Behind a proxy, set `DREFYN_TRUSTED_PROXY_HOPS` as for the
 dashboard (see [Behind a reverse proxy](#behind-a-reverse-proxy)), or every client shares the
 proxy's failure limit.
+
+## Search
+
+Public docs search runs on Typesense, in the stack, with nothing paid and nothing outside this
+machine. One command starts it:
+
+```sh
+COMPOSE_PROFILES=search bash scripts/selfhost.sh up
+COMPOSE_PROFILES=search bash scripts/selfhost-smoke.sh   # adds the search checks
+```
+
+Keep `COMPOSE_PROFILES=search` (or `api,search`) on every later command, `down` and `reset`
+included, so they reach the Typesense container and its volume too.
+
+| Setting   | Value                                                                  |
+| --------- | ---------------------------------------------------------------------- |
+| Image     | `typesense/typesense:30.2`, pinned by digest (amd64 and arm64)         |
+| Host port | `127.0.0.1:58108` (`DREFYN_TYPESENSE_PORT`), never on other interfaces |
+| Limits    | 1024 processes, 1 GB memory (`DREFYN_TYPESENSE_MEMORY_LIMIT`)          |
+| Data      | volume `searchdata`: copies of published pages only                    |
+| Admin key | `DREFYN_SEARCH_ADMIN_KEY` in `deploy/.env`, generated once by `up`     |
+
+The admin key reaches the container as a secret file and goes into the server's own environment
+at start, so `docker inspect` and the command line show none of it. Only the indexer holds it.
+Readers never reach Typesense: the site host searches through the `@drefyn/search` proxy, which
+hands Typesense a scoped key per search, valid for 60 seconds and pinned to one site, version and
+language. The image has no non root user, so the server runs as root inside the container with
+every capability dropped.
+
+The index is held in memory, so the memory limit bounds how many pages one stack can search;
+raise `DREFYN_TYPESENSE_MEMORY_LIMIT` for a large site. The Typesense server is GPL-3.0 and runs
+as its own process, reached over HTTP; no Drefyn code links it.
 
 ## The parse host
 

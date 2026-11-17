@@ -1,0 +1,133 @@
+{
+  "partial": false,
+  "symbols": [
+    {
+      "name": "DEFAULT_TIMEOUT_MS",
+      "kind": "const",
+      "exported": true,
+      "signature": "pub const DEFAULT_TIMEOUT_MS: u64",
+      "doc": "How long a call waits.",
+      "startLine": 6
+    },
+    {
+      "name": "INTERNAL",
+      "kind": "const",
+      "exported": false,
+      "signature": "pub(crate) static INTERNAL: &str",
+      "doc": null,
+      "startLine": 8
+    },
+    {
+      "name": "Client",
+      "kind": "struct",
+      "exported": true,
+      "signature": "pub struct Client",
+      "doc": "Talks to the API.\n\nCheap to clone.",
+      "startLine": 14
+    },
+    {
+      "name": "Pair",
+      "kind": "struct",
+      "exported": true,
+      "signature": "pub struct Pair(pub u8, pub u8)",
+      "doc": null,
+      "startLine": 18
+    },
+    {
+      "name": "Error",
+      "kind": "enum",
+      "exported": true,
+      "signature": "pub enum Error",
+      "doc": "What went wrong.",
+      "startLine": 21
+    },
+    {
+      "name": "Transport",
+      "kind": "trait",
+      "exported": true,
+      "signature": "pub trait Transport: Send + Sync",
+      "doc": "Sends requests.",
+      "startLine": 27
+    },
+    {
+      "name": "Transport.send",
+      "kind": "method",
+      "exported": true,
+      "signature": "fn send(&self, body: &[u8]) -> std::result::Result<Vec<u8>, Error>",
+      "doc": "Sends one request.",
+      "startLine": 29
+    },
+    {
+      "name": "Transport.name",
+      "kind": "method",
+      "exported": true,
+      "signature": "fn name(&self) -> &str",
+      "doc": null,
+      "startLine": 31
+    },
+    {
+      "name": "Result",
+      "kind": "type",
+      "exported": true,
+      "signature": "pub type Result<T> = std::result::Result<T, Error>",
+      "doc": null,
+      "startLine": 36
+    },
+    {
+      "name": "Client.new",
+      "kind": "method",
+      "exported": true,
+      "signature": "pub fn new(base: impl Into<String>) -> Self",
+      "doc": "Builds a client.",
+      "startLine": 40
+    },
+    {
+      "name": "Client.sign",
+      "kind": "method",
+      "exported": false,
+      "signature": "fn sign(&self) -> u8",
+      "doc": null,
+      "startLine": 44
+    },
+    {
+      "name": "Client.list",
+      "kind": "method",
+      "exported": true,
+      "signature": "pub async fn list<T>(&self, limit: usize) -> Result<Vec<T>> where T: fmt::Debug",
+      "doc": null,
+      "startLine": 48
+    },
+    {
+      "name": "auth.token",
+      "kind": "function",
+      "exported": true,
+      "signature": "pub fn token() -> String",
+      "doc": "A bearer token.",
+      "startLine": 64
+    },
+    {
+      "name": "auth.secret",
+      "kind": "function",
+      "exported": false,
+      "signature": "fn secret()",
+      "doc": null,
+      "startLine": 68
+    },
+    {
+      "name": "private.hidden",
+      "kind": "function",
+      "exported": false,
+      "signature": "pub fn hidden()",
+      "doc": null,
+      "startLine": 72
+    },
+    {
+      "name": "helper",
+      "kind": "function",
+      "exported": false,
+      "signature": "fn helper()",
+      "doc": null,
+      "startLine": 75
+    }
+  ]
+}
